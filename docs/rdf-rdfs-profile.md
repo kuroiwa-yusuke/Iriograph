@@ -1,0 +1,331 @@
+# RDF/RDFSベースプロファイル仕様
+
+## 1. 位置づけ
+
+この文書は、Iriograph v1がTurtleから表示Sceneを導出するための規範仕様です。実装の現状ではなく、core、catalog、mockが到達すべき契約を定めます。
+
+本文の「MUST」「MUST NOT」「SHOULD」「MAY」は、それぞれ必須、禁止、推奨、任意を表します。
+
+ベースプロファイルの識別子は`urn:iriograph:profile:rdf-rdfs:1`、標準catalogの参照は`urn:iriograph:catalog:rdf-rdfs@1`とします。
+
+## 2. 設計原則
+
+Iriograph documentは次の三層を分離します。
+
+| 層 | 正本 | 責務 |
+|---|---|---|
+| Semantic | `semantic.source`のTurtle | resourceのidentity、型、関係、順序、包含、label |
+| Projection | profileとcatalog | RDF/RDFS構造をScene primitiveと既定appearanceへ写す規則 |
+| Presentation | `views[].overlay` | ユーザーが固定したgeometry、routing、template/icon override |
+
+ベースプロファイルは次を必須方針とします。
+
+- Turtle内の構造表現にはRDF/RDFSの標準語彙を使い、Iriograph固有の業務語彙を要求しません。
+- IriographはRDF/RDFS語彙を再定義しません。決定的な作図に必要な追加制約だけをapplication profileとして定めます。
+- Turtleは任意のdomain IRIをclass、predicate、resourceとして利用できます。ベースプロファイルに未登録のIRI-object tripleも拒否しません。
+- 自然言語labelをclass判定、構造判定、rule matchingに使ってはなりません。
+- 座標、色、shape、icon、viewport、edge waypointをTurtleへ入れてはなりません。
+- rendererへRDF/RDFS IRIまたは業務IRIごとの分岐を直書きしてはなりません。profile/catalogが標準IRIを汎用projection operatorへbindします。
+
+## 3. ベース語彙
+
+### 3.1 表示構造を駆動する語彙
+
+| 語彙 | Turtle上の役割 | ベースSceneへの投影 |
+|---|---|---|
+| `rdf:type` | resourceの分類 | template ruleと構造ruleの照合に使い、edgeとしては表示しない |
+| `rdfs:label` | 人向け表示名 | node、container、edgeのlabel候補 |
+| `rdfs:comment` | 説明 | metadataとして保持し、v1のScene elementは生成しない |
+| `rdf:Bag` | 順不同の包含領域 | `container`として表示する |
+| `rdfs:member` | containerからmemberへの所属 | `rdf:Bag`のparent-child関係として消費する |
+| `rdf:Seq` | 順序付きresource列 | resource自体は既定で非表示とし、連続member間に有向edgeを導出する |
+| `rdf:Alt` | 選択肢の集合 | 選択nodeと各選択肢へのbranch edgeを導出する |
+| `rdf:_1`、`rdf:_2`、… | `rdf:Seq`または`rdf:Alt`の順序付きmember | ordinal membershipとして消費する |
+| `rdfs:seeAlso` | 追加情報への参照 | dashed reference edgeとして表示する |
+| `rdfs:isDefinedBy` | 定義元resourceへの参照 | definition reference edgeとして表示する |
+
+`rdfs:member`の向きはcontainerをsubject、memberをobjectとします。
+
+`rdf:Seq`、`rdf:Bag`、`rdf:Alt`はRDF Schema上ではcontainerです。順序、選択、既定選択といった標準上の慣例を作図に利用し、後述の連番制約をIriograph profileとして追加します。
+
+### 3.2 ontology記述に使える語彙
+
+| 語彙 | 役割 | ベースSceneへの投影 |
+|---|---|---|
+| `rdfs:Class` | class resourceの分類 | class templateを選ぶ |
+| `rdf:Property` | property resourceの分類 | property templateを選ぶ |
+| `rdfs:subClassOf` | classの上位・下位関係 | specialization edgeとして表示する |
+| `rdfs:subPropertyOf` | propertyの上位・下位関係 | specialization edgeとして表示する |
+| `rdfs:domain` | propertyのsubject側class | domain edgeとして表示する |
+| `rdfs:range` | propertyのobject/value側class | range edgeとして表示する |
+
+これらは業務フローで必須ではありません。ontology自体を同じ意味グラフで扱う場合にも独自語彙を増やさないため、ベースcatalogが表示形式を提供します。view filterを導入した後は、instance中心のviewからontology resourceを除外しても構いません。
+
+### 3.3 自由なdomain語彙
+
+上表以外のclassとpredicateも利用できます。IRIをobjectに持つ未登録predicateは、subjectからobjectへの通常矢印として表示します。edge labelはpredicateの`rdfs:label`を優先し、なければcompact IRIを使います。
+
+literalをobjectに持つ未登録predicateは意味グラフには保持しますが、annotation投影が未確定のv1ではScene elementを生成しません。
+
+`rdf:Seq`と`rdf:Alt`は簡潔な順序・分岐の表現であり、任意のgraph topologyをこれだけで記述する義務はありません。domain predicateで直接resourceを結んだ場合も通常矢印になるため、複雑なnetworkやdomain固有relationを失わず扱えます。
+
+## 4. 構造制約
+
+### 4.1 共通制約
+
+1. `semantic.source`は妥当なTurtleでなければなりません。
+2. node、container、edge endpoint、sequence、alternativeなどview identityを持つresourceはnamed IRIでなければなりません。
+3. blank nodeは非表示metadataには利用できますが、v1の表示構造を駆動してはなりません。
+4. 一つのresourceを`rdf:Bag`、`rdf:Seq`、`rdf:Alt`の複数の具体的構造型として宣言してはなりません。
+5. labelは構造を決定しません。たとえば`rdfs:label "承認"`からgatewayやbranchを推定してはなりません。
+
+### 4.2 Bagと包含
+
+- `rdf:Bag`は0個以上の`rdfs:member`を持てます。
+- 可視memberは、一つのviewで高々一つの可視container parentを持てます。複数parentは投影errorです。
+- 可視containerの包含関係にcycleがあってはなりません。
+- `rdf:Bag`のmember順は表示意味を持ちません。配置順はlayoutまたはoverlayが決めます。
+
+RDF container自体はopenな構造ですが、Iriographは表示parentを一意にするため上記制約を追加します。これはRDFの意味を変更するものではなく、当該viewがベースプロファイルへ適合するための条件です。
+
+### 4.3 Seqと順序
+
+- `rdf:Seq`は`rdf:_1`から始まる1個以上のordinal memberを持たなければなりません。
+- ordinalは正の10進整数で、先頭0を持たず、欠番なく連続しなければなりません。
+- 同じordinal predicateは一つのobjectだけを持たなければなりません。
+- member resourceの重複は許可します。これにより同じresourceへの再訪を表現できます。
+- `rdf:_n`はsequence resourceをsubject、memberをobjectとします。
+
+`rdf:Seq`のmemberが`m1, m2, …, mn`の場合、`m1 -> m2`から`m(n-1) -> mn`までのderived edgeを生成します。sequence resource自体は既定ではnodeにしません。
+
+### 4.4 Altと分岐
+
+- `rdf:Alt`は`rdf:_1`から始まる2個以上のordinal memberを持たなければなりません。
+- ordinalの形式、一意性、連続性は`rdf:Seq`と同じです。
+- `rdf:_1`を既定選択肢として扱います。
+- `rdf:Alt` resourceは選択nodeとして表示します。
+- memberが通常resourceなら、選択nodeからそのresourceへbranch edgeを生成します。
+- memberが`rdf:Seq`なら、選択nodeからそのsequenceの先頭memberへbranch edgeを生成し、その後はsequence規則を適用します。このbranch edgeのlabelにはsequenceの`rdfs:label`を使えます。
+
+`rdf:Alt`の用途をBPMN gatewayだけに限定しません。選択という共通構造をcatalog templateでdiamond等へ表示し、domain固有の詳細は追加catalogで上書きします。
+
+### 4.5 可視resourceとfallback
+
+ベースプロファイルは次のnamed resourceを表示候補にします。
+
+- `rdf:Bag` resource
+- `rdf:Alt` resource
+- Bag、Seq、Altのmember
+- suppressされていないIRI-object tripleのsubjectとobject
+- `rdf:type`、`rdfs:label`等のmetadataだけを持つnamed subject
+
+`rdf:Seq` resourceは構造として消費するため既定では候補から除外します。ただし同じresourceがsuppressされていない別tripleのendpointでもある場合は、catalogが明示的にresource表示を選べます。
+
+`rdf:type`のobjectは、type objectであることだけを理由に表示候補へ追加しません。これによりdomain classを分類に使うだけでclass nodeが毎回混入することを避けます。class自体を図示する場合は、classを主語にした宣言またはontology relationを同じviewへ含めます。
+
+直接tripleは、predicate ruleが`direct-edge`を選び、かつsubject/objectの両方が可視候補である場合にedgeになります。`suppress`されたpredicateからfallback edgeを生成してはなりません。
+
+## 5. Label選択
+
+表示labelは次の順で一つ選びます。
+
+1. view localeとlanguage tagが完全一致する`rdfs:label`
+2. view localeのprimary languageと一致する`rdfs:label`
+3. language tagのない`rdfs:label`
+4. language tagとliteral valueを正規化してsortした先頭の`rdfs:label`
+5. compact IRI
+
+同順位のlabelが複数ある場合もsource記述順には依存せず、language tagとliteral valueの辞書順で決定します。v1 documentにview localeがない場合、host localeを保存時にdocumentへ固定するまで、3、4、5の順だけを使います。
+
+比較時はlanguage tagをASCII lowercase、literal valueをUnicode NFCへ正規化し、Unicode code point順でsortします。
+
+## 6. Projection catalog契約
+
+### 6.1 責務
+
+profileはTurtleの利用制約を定義し、catalogはsemantic patternをSceneへの投影へ結びます。coreが実装するのは次の汎用operatorだけです。
+
+| Operator | 入力 | 出力 |
+|---|---|---|
+| `resource` | named resource | `node`または`container` |
+| `direct-edge` | IRI-object triple | `edge` |
+| `membership-container` | container typeとmembership predicate | `container`とparent-child |
+| `ordinal-sequence` | container typeとordinal predicate pattern | member間のderived `edge` |
+| `alternative` | container typeとordinal predicate pattern | choice `node`とbranch `edge` |
+| `suppress` | typeまたはpredicate | Scene生成を抑止しmetadataとして消費 |
+
+RDF/RDFS IRIはoperatorの実装へ埋め込まず、標準catalogのrule dataとして渡します。
+
+### 6.2 v1 rule形式
+
+catalogのprojection部分は、現行prototypeの`nodeRules`、`relationRules`、`containmentRules`を次の正規化された`rules`へ移行します。
+
+```json
+{
+  "catalogId": "urn:iriograph:catalog:rdf-rdfs",
+  "catalogVersion": "1",
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+  "rules": [
+    {
+      "ruleId": "rdf-bag-container",
+      "priority": 100,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+        "entailment": "rdfs-subclass"
+      },
+      "project": {
+        "operator": "membership-container",
+        "membershipPredicate": "http://www.w3.org/2000/01/rdf-schema#member"
+      },
+      "templateRef": "urn:iriograph:template:region:1"
+    }
+  ],
+  "templates": {},
+  "assets": {}
+}
+```
+
+`match.kind`は`type`、`predicate`、`any-iri-object`のいずれか、`match.entailment`は`exact`、`rdfs-subclass`、`rdfs-subproperty`のいずれかとします。`project.operator`に必要なparameterはoperatorごとにschemaで固定します。
+
+| Operator | 必須parameter | 規則 |
+|---|---|---|
+| `resource` | `structuralKind` | `node`または`container` |
+| `direct-edge` | なし | subjectからobjectへ接続する |
+| `membership-container` | `membershipPredicate` | ruleが一致したresourceをparent、predicate objectをmemberにする |
+| `ordinal-sequence` | `ordinalPredicatePrefix` | prefix直後の正の10進整数をordinalとして読む |
+| `alternative` | `ordinalPredicatePrefix`、`defaultOrdinal` | ordinal memberへbranchを生成する |
+| `suppress` | なし | 一致tripleを消費してScene elementを生成しない |
+
+標準catalogでは`ordinalPredicatePrefix`を`http://www.w3.org/1999/02/22-rdf-syntax-ns#_`、`defaultOrdinal`を`1`とします。任意の正規表現やscriptをcatalogへ入れてはなりません。
+
+### 6.3 標準catalogのbinding
+
+標準catalogは少なくとも次をbindします。
+
+| Match | Operator | 既定appearance |
+|---|---|---|
+| type `rdf:Bag` | `membership-container` | region/container |
+| type `rdf:Seq` | `ordinal-sequence` | sequence自体はhidden、derived edgeはsolid arrow |
+| type `rdf:Alt` | `alternative` | choice nodeとbranch arrow |
+| predicate `rdfs:seeAlso` | `direct-edge` | dashed reference arrow |
+| predicate `rdfs:isDefinedBy` | `direct-edge` | dashed definition arrow |
+| predicate `rdfs:subClassOf` | `direct-edge` | specialization arrow |
+| predicate `rdfs:subPropertyOf` | `direct-edge` | specialization arrow |
+| predicate `rdfs:domain` | `direct-edge` | domain relation arrow |
+| predicate `rdfs:range` | `direct-edge` | range relation arrow |
+| predicate `rdf:type`、`rdfs:label`、`rdfs:comment`、`rdfs:member` | `suppress` | 直接edgeを生成しない |
+| `any-iri-object` | `direct-edge` | generic arrow |
+
+`rdfs:Class`、`rdf:Property`および追加domain classはtype appearance ruleとしてnode templateを選べます。type appearance ruleがないresourceはgeneric nodeになります。
+
+`rdf:_n` tripleは一致した`ordinal-sequence`または`alternative` operatorが消費し、fallback対象にしません。対応する構造型を持たないresource上の`rdf:_n`はprofile validation errorです。
+
+### 6.4 Rule解決
+
+同じprojection対象に複数ruleが一致した場合は、次の順に一つを選びます。
+
+1. `priority`が高いrule
+2. exact match
+3. RDFS closure上で対象IRIまでの距離が短いrule
+4. wildcard `any-iri-object`
+
+ここまで同じ候補が複数ある場合はcatalog validation errorです。catalogのimport順、JSON配列順、Turtleの記述順をtie-breakに使ってはなりません。
+
+ベースプロファイルが利用するentailmentは次の閉包だけです。
+
+- 明示された`rdfs:subClassOf`の推移閉包を、明示された`rdf:type`のtype rule照合に使う
+- 明示された`rdfs:subPropertyOf`の推移閉包をpredicate rule照合に使う
+
+`rdfs:domain`や`rdfs:range`からのtype推論、OWL entailment、完全なRDFS entailmentはv1のrule matchingに含めません。必要な場合は別validatorまたは将来のprofileで扱います。
+
+## 7. Scene identityとoverlay
+
+- named resourceから生成するnode/containerの`semanticRef`はresource IRIです。
+- 直接tripleのedge identityはsubject IRI、predicate IRI、object IRIから決定的に生成します。
+- sequence derived edgeのidentityはsequence IRIと隣接するordinalの組から生成します。
+- alternative branch edgeのidentityはalternative IRIとordinalから生成します。
+- Turtleの行番号、prefix表記、記述順、labelをidentityに含めてはなりません。
+
+sequenceの順序を変えた場合、変更されたordinal transitionは意味変更なので、該当edgeのmanual routingが失われても構いません。resource IRIが存続するnode/containerのoverlayは維持します。
+
+overlayにlabelを複製しません。既定template、shape、色、iconもcatalogから再生成できる限り複製しません。ユーザーが明示的に変更した場合だけappearance overrideを保持します。
+
+## 8. Workflow例
+
+次のTurtleは、domain固有のworkflow classや`from`/`to` predicateなしに、lane、順序、分岐、参照を表します。
+
+```turtle
+@prefix : <urn:example:purchase:> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+:requesterLane a rdf:Bag ;
+  rdfs:label "申請者"@ja ;
+  rdfs:member :start, :submit .
+
+:operationsLane a rdf:Bag ;
+  rdfs:label "業務オペレーション"@ja ;
+  rdfs:member :review, :decision, :register, :rework, :end .
+
+:mainFlow a rdf:Seq ;
+  rdfs:label "購入申請フロー"@ja ;
+  rdf:_1 :start ;
+  rdf:_2 :submit ;
+  rdf:_3 :review ;
+  rdf:_4 :decision .
+
+:decision a rdf:Alt ;
+  rdfs:label "承認判断"@ja ;
+  rdf:_1 :approvedPath ;
+  rdf:_2 :reworkPath .
+
+:approvedPath a rdf:Seq ;
+  rdfs:label "承認"@ja ;
+  rdf:_1 :register ;
+  rdf:_2 :end .
+
+:reworkPath a rdf:Seq ;
+  rdfs:label "差し戻し"@ja ;
+  rdf:_1 :rework ;
+  rdf:_2 :review .
+
+:start rdfs:label "開始"@ja .
+:submit rdfs:label "申請を提出"@ja .
+:review rdfs:label "内容を審査"@ja ;
+  rdfs:seeAlso :approvalPolicy .
+:register rdfs:label "承認結果を登録"@ja .
+:rework rdfs:label "内容を修正"@ja .
+:end rdfs:label "完了"@ja .
+:approvalPolicy rdfs:label "承認ポリシー"@ja .
+```
+
+開始event、user task、service task、終了eventの見た目はこのTurtleだけからは区別しません。標準またはdomain ontologyのtypeがあれば追加catalogでtemplate/iconへ結び、なければgeneric nodeを使います。Turtleにない業務意味をlabel文字列から推測して補ってはなりません。
+
+## 9. Extension方針
+
+1. domain標準語彙で表せる意味は、そのIRIをTurtleで使い、独立catalogで表示へ結びます。
+2. domain固有語彙が必要なら、利用側namespaceで定義し、`rdfs:Class`、`rdf:Property`、`rdfs:subClassOf`、`rdfs:subPropertyOf`、`rdfs:label`等で自己記述することを推奨します。
+3. 新しいclassやpredicateの追加だけでcore operatorを増やしてはなりません。既存operatorとtemplateのcatalog ruleを追加します。
+4. 新しい空間文法が必要な場合だけoperatorまたはScene primitiveを追加し、domain IRIとは分離します。
+5. OWL、PROV-O、SKOS、SHACL等は任意のimport/profileとして追加できます。ベースプロファイルの利用条件にはしません。
+6. LLMへはcatalogやoverlayではなくTurtleを主入力として渡します。LLMが返したTurtleは本プロファイルの構造検証を通した後にだけ採用します。
+
+## 10. v1で扱わない事項
+
+- `rdf:List`の`rdf:first`/`rdf:rest`を使った特別投影
+- `rdf:Statement`によるreificationまたはRDF-star statementへの特別投影
+- blank nodeを表示identityにすること
+- literal propertyをannotationへ自動投影すること
+- label文言からのnode種別・分岐・包含の推定
+- `rdfs:domain`/`rdfs:range`による暗黙type生成
+- OWL entailmentと完全なRDFS entailment
+- domain業務規則の妥当性検証
+
+`rdf:List`を含むTurtle自体は受理できますが、v1では通常metadataとして保持し、特別な順序edgeは生成しません。domain業務規則は将来のSHACL等のvalidation portで扱います。
+
+## 11. 参照仕様
+
+- [RDF 1.1 Concepts and Abstract Syntax](https://www.w3.org/TR/rdf11-concepts/)
+- [RDF Schema 1.1](https://www.w3.org/TR/rdf-schema/)
+- [RDF 1.1 Turtle](https://www.w3.org/TR/turtle/)

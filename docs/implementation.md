@@ -11,10 +11,10 @@
 ## 投影処理
 
 1. `semantic.source`をN3でparseする
-2. `rdf:type`からrelation resourceを識別する
-3. node ruleを照合し、resourceをnodeまたはcontainerへ投影する
-4. containment ruleからparent-childを解決する
-5. relation ruleからsource/target edgeを生成する
+2. RDF/RDFSベースプロファイルの構造制約を検証する
+3. 明示された`rdfs:subClassOf`と`rdfs:subPropertyOf`からrule matching用の限定的なclosureを作る
+4. catalog ruleをpriorityとspecificityで一意に解決する
+5. `membership-container`、`ordinal-sequence`、`alternative`等の汎用operatorでScene構造を導出する
 6. 消費されていないIRI-object tripleをfallback edgeへ投影する
 7. view overlayをsemanticRefで照合し、geometry、appearance、routingを適用する
 8. asset resolverでicon IRIを表示URLへ解決する
@@ -34,3 +34,5 @@ Turtle textareaは未適用draftを持ちます。「検証して適用」また
 editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、zoom、Turtle編集、document/catalog参照を提供します。mock hostはCtrl/Cmd+S、localStorage、`.iriograph`取込・書出を提供します。
 
 現在のfallback layoutは決定的な単純配置です。graph topologyとcontainer制約を使う正式layout engineはバックログで管理します。
+
+現在のmockは`urn:iriograph:demo:`内の`Lane`、`SequenceFlow`、`from`、`to`等を使う初期prototypeです。これは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に適合しておらず、標準catalogと汎用operatorの縦切りを実装した時点でRDF/RDFS表現へ移行します。仕様固定と実装済み範囲を混同しないため、移行完了まではこの差を明示します。

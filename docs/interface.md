@@ -11,18 +11,19 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
   "documentId": "purchase-approval",
   "semantic": {
     "format": "text/turtle",
-    "baseIri": "urn:example:workflow:",
-    "source": "@prefix wf: <urn:example:workflow:> .\n..."
+    "baseIri": "urn:example:purchase:",
+    "source": "@prefix : <urn:example:purchase:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n:lane a rdf:Bag ; rdfs:label \"申請者\"@ja ; rdfs:member :submit ."
   },
   "imports": [
-    { "catalogRef": "urn:example:catalog:workflow@1" }
+    { "catalogRef": "urn:iriograph:catalog:rdf-rdfs@1" }
   ],
   "views": [
     {
       "viewId": "main",
       "kind": "node-link",
-      "profileRef": "urn:iriograph:profile:bpmn-like:1",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
       "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "locale": "ja",
       "overlay": {}
     }
   ]
@@ -30,6 +31,8 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 ```
 
 `semantic.source`は意味の正本です。`views[].overlay`のkeyはview内element ID、各entryの`semanticRef`はIRIまたはstatement identityです。
+
+`views[].locale`はtarget contractの任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。現行TypeScript modelへの追加はP0-01で行います。
 
 overlayには次を保持できます。
 
@@ -40,15 +43,15 @@ overlayには次を保持できます。
 
 ## Catalog
 
-catalogは次の宣言を持ちます。
+v1 target catalogは次の宣言を持ちます。
 
-- `nodeRules`: RDF typeからnode/container templateへの写像
-- `relationRules`: relation resourceのtypeとsource/target pathからedgeへの写像
-- `containmentRules`: predicateのsubject/objectをchild/parentへ写す規則
+- `rules`: type、predicate、fallback patternから汎用projection operatorへの写像
 - `templates`: primitive kind、shape、既定size、style、icon参照
 - `assets`: asset IRIから取得定義への写像
 
-predicateを主語にした関係resourceは、edge自体のlabelやmetadataをtripleとして表現できます。未登録の直接IRI-object tripleはfallback edgeになります。
+標準catalogはRDF/RDFS IRIを`membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
+
+現行TypeScriptの`nodeRules`、`relationRules`、`containmentRules`はprototype contractであり、上記`rules`へ移行するまでstable APIとはしません。
 
 ## Scene
 

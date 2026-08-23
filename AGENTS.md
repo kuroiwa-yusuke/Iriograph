@@ -6,6 +6,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 ## 責務境界
 
 - `semantic.source`は意味情報の正本とする。座標、色、icon、viewportを混ぜない。
+- ベースsemantic profileは`docs/rdf-rdfs-profile.md`を正本とし、包含、順序、選択、参照には定義済みのRDF/RDFS語彙を優先する。
 - Catalogは意味から構造的な表示primitiveへの宣言的な写像を持つ。
 - Sceneの構造名は`node`、`edge`、`container`、`annotation`など表示・編集上の性質で付ける。
 - View overlayはgeometry、pin、manual routeなど、catalogから復元できない表示情報だけを持つ。
@@ -17,7 +18,9 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 ## 拡張規則
 
 - 業務classやpredicateごとの分岐をrendererやprojection処理へ直書きしない。
-- 新しい業務語彙、template、icon、containmentはcatalog正本へ追加する。
+- 標準語彙で表せる意味にIriograph固有のsemantic語彙を追加しない。
+- domain固有語彙が必要な場合は利用domainのnamespaceで自己記述し、template、icon、projection bindingをcatalog正本へ追加する。
+- `rdfs:label`の文字列をclass、構造、rule matchingに使わない。
 - 未登録のIRI-object tripleは、core fallbackで通常矢印として表示できる状態を保つ。
 - Catalog ruleの競合を登録順で解決しない。priorityとspecificityを決定的に検証する。
 - 新しい領域ではなく新しい空間文法が必要な場合だけScene primitiveまたはView kindを拡張する。
@@ -33,6 +36,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 ## 文書
 
 - `docs/theory.md`: 設計思想と判断基準。
+- `docs/rdf-rdfs-profile.md`: semantic base vocabulary、構造制約、catalog bindingの規範仕様。
 - `docs/interface.md`: document、catalog、Sceneの公開契約。
 - `docs/implementation.md`: package境界と投影処理。
 - `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。

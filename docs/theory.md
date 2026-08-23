@@ -24,6 +24,19 @@ rendererへ`if predicate == ...`を増やしません。業務class、predicate�
 
 primitiveを増やす基準は、新しい業務領域ではなく新しい空間文法が必要かどうかです。たとえば「経理タスク」は既存node templateで表現し、「領域による包含」はcontainerという空間文法として追加します。
 
+## RDF/RDFSを基底にする理由
+
+ベースプロファイルは、包含に`rdf:Bag`と`rdfs:member`、順序に`rdf:Seq`と`rdf:_n`、選択に`rdf:Alt`、参照に`rdfs:seeAlso`または`rdfs:isDefinedBy`を使います。Iriograph固有の`Lane`、`SequenceFlow`、`from`、`to`を意味層の必須語彙にはしません。
+
+RDF/RDFSだけでBPMNの全概念を表すのではなく、RDF/RDFSの共通構造だけを制約付きで使う方針です。user taskとservice taskの違いなどdomain固有の意味が必要なら、既存のdomain ontologyまたは利用側が自己記述した語彙を追加catalogへ結びます。標準語彙がないために独自語彙を導入する場合も、Iriograph coreのnamespaceではなく利用domainのnamespaceに置きます。
+
+この方針には二つの境界があります。
+
+- RDF/RDFS標準の意味は変更しない。連番の欠番禁止や一意な表示parentなど、作図の決定性に必要な条件をIriograph application profileとして追加する。
+- `rdfs:label`は表示名であり、分類規則ではない。「承認」「開始」などの文字列から構造やtemplateを推測しない。
+
+具体的な語彙、制約、投影は[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
+
 ## Assetのidentityと取得
 
 iconはIRIで参照します。IRIと取得URLは同一視せず、catalogまたはhostが注入するresolverで実URLへ解決します。これによりcore catalogを小さく保ち、組織固有asset、署名URL、CDN、offline bundleをhost側で選べます。
@@ -42,5 +55,7 @@ LLMに座標調整を求めません。人が調整したoverlayをプロンプ�
 - semantic transactionとpresentation transactionを分ける
 - catalog ruleの競合を登録順で解決しない
 - 同じ入力、catalog version、layout versionから同じSceneを得る
+- 標準語彙で表せる意味にIriograph固有のsemantic語彙を作らない
+- labelをsemantic classや構造ruleの代用にしない
 - host固有の保存、権限、asset取得をcoreへ入れない
 - 保存schemaの変更はversionとmigration testを伴う
