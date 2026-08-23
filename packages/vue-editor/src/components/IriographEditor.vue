@@ -37,6 +37,23 @@ import {
   type DiagramCanvasNavigationApi,
   type IriographEditorNavigationApi,
 } from "../viewport";
+import {
+  alignSelection,
+  distributeSelection,
+  normalizeDiagramSnapSettings,
+  normalizeSceneSelection,
+  resizeGeometryElement,
+  sceneElementIds,
+  selectedGeometryElements,
+  translateSelection,
+  type DiagramAlignment,
+  type DiagramDistribution,
+  type DiagramSelectionRequest,
+  type DiagramSnapSettings,
+  type DiagramSnapSettingsInput,
+  type GeometryChange,
+  type IriographEditorSelectionApi,
+} from "../selection";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneEdge;
@@ -55,6 +72,7 @@ const props = withDefaults(defineProps<{
   hideHeader?: boolean;
   assetAccess?: AssetAccess;
   pickAsset?: AssetPicker;
+  snapSettings?: DiagramSnapSettingsInput;
 }>(), {
   title: "",
   filePath: "",
@@ -67,12 +85,14 @@ const props = withDefaults(defineProps<{
   assetAccess: undefined,
   pickAsset: undefined,
   layoutRegistry: undefined,
+  snapSettings: undefined,
 });
 
 const emit = defineEmits<{
   "update:modelValue": [document: IriographDocument];
   save: [];
   selectionChanged: [elementId: string];
+  selectionSetChanged: [elementIds: string[]];
   validationChanged: [diagnostics: ProjectionDiagnostic[]];
 }>();
 
@@ -80,6 +100,8 @@ const draft = ref<IriographDocument>(clone(props.modelValue));
 const turtleDraft = ref(draft.value.semantic.source);
 const panel = ref<Panel>("diagram");
 const selectedElementId = ref("");
+const selectedElementIds = ref<string[]>([]);
+const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
 const zoom = ref(1);
 const diagramCanvas = ref<DiagramCanvasNavigationApi>();
 const history = ref<IriographDocument[]>([]);
@@ -100,6 +122,7 @@ let pickerRequestToken = 0;
 let pickerAbortController: AbortController | undefined;
 
 const activeView = computed(() => draft.value.views[0]);
+const selectedElementIdsSet = computed(() => new Set(selectedElementIds.value));
 const selectedElement = computed<SelectedElement | undefined>(() => [
   ...scene.value.nodes,
   ...scene.value.containers,
@@ -123,6 +146,12 @@ const warningCount = computed(() => diagnostics.value.filter((item) => item.seve
 const turtlePending = computed(() => turtleDraft.value !== draft.value.semantic.source);
 const canUndo = computed(() => history.value.length > 0);
 const canRedo = computed(() => future.value.length > 0);
+const selectedGeometryCount = computed(() => selectedGeometryElements(
+  scene.value,
+  selectedElementIds.value,
+).length);
+const canAlignSelection = computed(() => !props.readOnly && selectedGeometryCount.value >= 2);
+const canDistributeSelection = computed(() => !props.readOnly && selectedGeometryCount.value >= 3);
 const documentJson = computed(() => JSON.stringify(draft.value, null, 2));
 const catalogJson = computed(() => JSON.stringify(props.catalog, null, 2));
 const overlayJson = computed(() => JSON.stringify(activeView.value?.overlay ?? {}, null, 2));
@@ -168,6 +197,14 @@ watch(
   () => {
     applyDiagnostics.value = [];
     void refreshScene();
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.snapSettings,
+  (value) => {
+    snapSettings.value = normalizeDiagramSnapSettings(value);
   },
   { deep: true },
 );
@@ -269,23 +306,69 @@ function schemaDiagnostic(scope: "document" | "catalog", issue: RuntimeValidatio
 }
 
 function clearMissingSelection(nextScene: DiagramScene): void {
-  if (!selectedElementId.value) return;
-  const exists = [
-    ...nextScene.nodes,
-    ...nextScene.containers,
-    ...nextScene.edges,
-  ].some((element) => element.elementId === selectedElementId.value);
-  if (!exists) selectElement("");
+  const available = normalizeSceneSelection(nextScene, selectedElementIds.value);
+  if (
+    available.length !== selectedElementIds.value.length
+    || available.some((elementId, index) => elementId !== selectedElementIds.value[index])
+  ) setSelection(available);
 }
 
 function selectElement(elementId: string): void {
-  if (elementId !== selectedElementId.value) cancelAssetPicker();
-  selectedElementId.value = elementId;
-  emit("selectionChanged", elementId);
+  setSelection(elementId ? [elementId] : []);
 }
 
-function selectAndReveal(elementId: string): void {
-  void focusElement(elementId);
+function selectElements(elementIds: readonly string[]): void {
+  setSelection(normalizeSceneSelection(scene.value, elementIds));
+}
+
+function clearSelection(): void {
+  setSelection([]);
+}
+
+function selectAll(): void {
+  setSelection(sceneElementIds(scene.value));
+}
+
+function applySelectionRequest(request: DiagramSelectionRequest): void {
+  if (!request.elementId) {
+    if (request.mode === "replace") clearSelection();
+    return;
+  }
+  if (request.mode === "replace") {
+    setSelection([request.elementId]);
+    return;
+  }
+  const current = selectedElementIds.value.filter((elementId) => elementId !== request.elementId);
+  if (request.mode === "toggle" && selectedElementIdsSet.value.has(request.elementId)) {
+    setSelection(current);
+    return;
+  }
+  setSelection([...current, request.elementId]);
+}
+
+function setSelection(elementIds: readonly string[]): void {
+  const next = normalizeSceneSelection(scene.value, elementIds);
+  const primary = next.at(-1) ?? "";
+  if (primary !== selectedElementId.value) cancelAssetPicker();
+  if (
+    primary === selectedElementId.value
+    && next.length === selectedElementIds.value.length
+    && next.every((elementId, index) => elementId === selectedElementIds.value[index])
+  ) return;
+  selectedElementIds.value = next;
+  selectedElementId.value = primary;
+  emit("selectionChanged", primary);
+  emit("selectionSetChanged", [...next]);
+}
+
+function selectAndReveal(elementId: string, event: MouseEvent): void {
+  applySelectionRequest({
+    elementId,
+    mode: event.ctrlKey || event.metaKey ? "toggle" : event.shiftKey ? "add" : "replace",
+  });
+  if (selectedElementIdsSet.value.has(elementId)) {
+    void diagramCanvas.value?.revealElement(elementId);
+  }
 }
 
 function beginGesture(): void {
@@ -317,6 +400,55 @@ function changeGeometry(payload: { elementId: string; geometry: ElementGeometry 
   }, false);
 }
 
+function changeGeometryBatch(changes: readonly GeometryChange[], recordHistory = false): void {
+  if (changes.length === 0) return;
+  mutateDocument((document) => {
+    const view = document.views[0];
+    if (!view) return;
+    for (const change of changes) {
+      const element = geometryElement(change.elementId);
+      if (!element) continue;
+      const current = view.overlay[change.elementId];
+      view.overlay[change.elementId] = {
+        ...(current ?? { semanticRef: element.semanticRef }),
+        geometry: roundGeometry(change.geometry),
+        pinned: true,
+        placement: "user",
+      };
+    }
+  }, recordHistory);
+}
+
+function alignSelected(alignment: DiagramAlignment): void {
+  if (!canAlignSelection.value) return;
+  changeGeometryBatch(
+    alignSelection(scene.value, selectedElementIds.value, alignment),
+    true,
+  );
+}
+
+function distributeSelected(direction: DiagramDistribution): void {
+  if (!canDistributeSelection.value) return;
+  changeGeometryBatch(
+    distributeSelection(scene.value, selectedElementIds.value, direction),
+    true,
+  );
+}
+
+function setSnapSettings(value: DiagramSnapSettingsInput): void {
+  snapSettings.value = normalizeDiagramSnapSettings({
+    grid: { ...snapSettings.value.grid, ...value.grid },
+    targets: { ...snapSettings.value.targets, ...value.targets },
+  });
+}
+
+function updateSnapGridSize(event: Event): void {
+  setSnapSettings({ grid: {
+    ...snapSettings.value.grid,
+    size: Number((event.target as HTMLInputElement).value),
+  } });
+}
+
 function changeRouting(payload: { elementId: string; waypoints: Point[] }): void {
   mutateDocument((document) => {
     const edge = scene.value.edges.find((candidate) => candidate.elementId === payload.elementId);
@@ -339,10 +471,26 @@ function updateGeometryField(field: keyof ElementGeometry, event: Event): void {
   const value = Number((event.target as HTMLInputElement).value);
   const element = selectedElement.value;
   if (!Number.isFinite(value) || !element || !("geometry" in element)) return;
-  mutateDocument((document) => setGeometry(document, element, {
-    ...element.geometry,
-    [field]: value,
-  }));
+  if (field === "x" || field === "y") {
+    changeGeometryBatch(translateSelection(
+      scene.value,
+      [element.elementId],
+      {
+        x: field === "x" ? value - element.geometry.x : 0,
+        y: field === "y" ? value - element.geometry.y : 0,
+      },
+      {
+        grid: { enabled: false, size: snapSettings.value.grid.size },
+        targets: { enabled: false, tolerance: snapSettings.value.targets.tolerance },
+      },
+    ), true);
+    return;
+  }
+  const change = resizeGeometryElement(scene.value, element.elementId, {
+    width: field === "width" ? value : element.geometry.width,
+    height: field === "height" ? value : element.geometry.height,
+  });
+  if (change) changeGeometryBatch([change], true);
 }
 
 function updateTemplate(event: Event): void {
@@ -522,6 +670,7 @@ function revertTurtleDraft(): void {
 }
 
 function undo(): void {
+  if (props.readOnly) return;
   const previous = history.value.at(-1);
   if (!previous) return;
   history.value.pop();
@@ -530,6 +679,7 @@ function undo(): void {
 }
 
 function redo(): void {
+  if (props.readOnly) return;
   const next = future.value.at(-1);
   if (!next) return;
   future.value.pop();
@@ -557,6 +707,16 @@ function handleKeydown(event: KeyboardEvent): void {
     return;
   }
   if (isTextInput(event.target)) return;
+  if (command && event.key.toLowerCase() === "a") {
+    event.preventDefault();
+    selectAll();
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    clearSelection();
+    return;
+  }
   if (command && event.key.toLowerCase() === "z") {
     event.preventDefault();
     event.shiftKey ? redo() : undo();
@@ -576,14 +736,17 @@ function handleKeydown(event: KeyboardEvent): void {
   };
   const movement = movements[event.key];
   if (!movement) return;
-  const element = selectedElement.value;
-  if (!element || !("geometry" in element) || props.readOnly) return;
+  if (selectedGeometryCount.value === 0 || props.readOnly) return;
   event.preventDefault();
-  mutateDocument((document) => setGeometry(document, element, {
-    ...element.geometry,
-    x: element.geometry.x + movement.x,
-    y: element.geometry.y + movement.y,
-  }));
+  changeGeometryBatch(translateSelection(
+    scene.value,
+    selectedElementIds.value,
+    movement,
+    {
+      grid: { enabled: false, size: snapSettings.value.grid.size },
+      targets: { enabled: false, tolerance: snapSettings.value.targets.tolerance },
+    },
+  ), true);
 }
 
 function mutateDocument(
@@ -617,22 +780,6 @@ function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): voi
   lastEmittedJson = JSON.stringify(draft.value);
   emit("update:modelValue", clone(draft.value));
   void refreshScene();
-}
-
-function setGeometry(
-  document: IriographDocument,
-  element: SceneNode | SceneContainer,
-  geometry: ElementGeometry,
-): void {
-  const view = document.views[0];
-  if (!view) return;
-  const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
-  view.overlay[element.elementId] = {
-    ...current,
-    geometry: roundGeometry(geometry),
-    pinned: true,
-    placement: "user",
-  };
 }
 
 function geometryElement(elementId: string): SceneNode | SceneContainer | undefined {
@@ -759,16 +906,19 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-defineExpose<IriographEditorNavigationApi & {
+defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
   flushPendingEdits(): Promise<boolean>;
   undo(): void;
   redo(): void;
-  selectElement(elementId: string): void;
 }>({
   flushPendingEdits,
   undo,
   redo,
   selectElement,
+  selectElements,
+  clearSelection,
+  selectAll,
+  setSnapSettings,
   panBy,
   zoomTo,
   fitToView,
@@ -813,8 +963,8 @@ defineExpose<IriographEditorNavigationApi & {
             v-for="container in scene.containers"
             :key="container.elementId"
             type="button"
-            :class="{ active: selectedElementId === container.elementId }"
-            @click="selectAndReveal(container.elementId)"
+            :class="{ active: selectedElementIdsSet.has(container.elementId) }"
+            @click="selectAndReveal(container.elementId, $event)"
           >
             <i>▣</i><span><b>{{ container.label }}</b><small>container</small></span>
           </button>
@@ -822,8 +972,8 @@ defineExpose<IriographEditorNavigationApi & {
             v-for="node in scene.nodes"
             :key="node.elementId"
             type="button"
-            :class="{ active: selectedElementId === node.elementId }"
-            @click="selectAndReveal(node.elementId)"
+            :class="{ active: selectedElementIdsSet.has(node.elementId) }"
+            @click="selectAndReveal(node.elementId, $event)"
           >
             <i>●</i><span><b>{{ node.label }}</b><small>{{ compactRef(node.templateRef) }}</small></span>
           </button>
@@ -868,6 +1018,45 @@ defineExpose<IriographEditorNavigationApi & {
               <button type="button" aria-label="拡大" @click="zoomTo(zoom + 0.1)">＋</button>
             </div>
           </div>
+          <div class="iriograph-selection-toolbar" aria-label="Selection and geometry tools">
+            <div class="iriograph-selection-actions">
+              <span aria-live="polite">{{ selectedElementIds.length }} selected</span>
+              <button type="button" aria-label="すべて選択" title="Select all (Ctrl/Cmd+A)" @click="selectAll">全選択</button>
+              <button type="button" aria-label="選択を解除" title="Clear selection (Escape)" :disabled="selectedElementIds.length === 0" @click="clearSelection">解除</button>
+            </div>
+            <div class="iriograph-arrange-actions">
+              <button type="button" aria-label="左揃え" :disabled="!canAlignSelection" @click="alignSelected('left')">左</button>
+              <button type="button" aria-label="左右中央揃え" :disabled="!canAlignSelection" @click="alignSelected('center')">↔中</button>
+              <button type="button" aria-label="右揃え" :disabled="!canAlignSelection" @click="alignSelected('right')">右</button>
+              <button type="button" aria-label="上揃え" :disabled="!canAlignSelection" @click="alignSelected('top')">上</button>
+              <button type="button" aria-label="上下中央揃え" :disabled="!canAlignSelection" @click="alignSelected('middle')">↕中</button>
+              <button type="button" aria-label="下揃え" :disabled="!canAlignSelection" @click="alignSelected('bottom')">下</button>
+              <button type="button" aria-label="水平方向に等間隔" :disabled="!canDistributeSelection" @click="distributeSelected('horizontal')">横等間隔</button>
+              <button type="button" aria-label="垂直方向に等間隔" :disabled="!canDistributeSelection" @click="distributeSelected('vertical')">縦等間隔</button>
+            </div>
+            <div class="iriograph-snap-actions" aria-label="Snap settings">
+              <button
+                type="button"
+                aria-label="グリッドsnap"
+                :aria-pressed="snapSettings.grid.enabled"
+                @click="setSnapSettings({ grid: { ...snapSettings.grid, enabled: !snapSettings.grid.enabled } })"
+              >Grid</button>
+              <input
+                type="number"
+                min="1"
+                max="128"
+                :value="snapSettings.grid.size"
+                aria-label="グリッドサイズ"
+                @change="updateSnapGridSize"
+              />
+              <button
+                type="button"
+                aria-label="要素snap"
+                :aria-pressed="snapSettings.targets.enabled"
+                @click="setSnapSettings({ targets: { ...snapSettings.targets, enabled: !snapSettings.targets.enabled } })"
+              >Target</button>
+            </div>
+          </div>
           <div
             v-if="sceneLoading || sceneError"
             class="iriograph-scene-status"
@@ -882,13 +1071,16 @@ defineExpose<IriographEditorNavigationApi & {
             ref="diagramCanvas"
             :scene="scene"
             :selected-element-id="selectedElementId"
+            :selected-element-ids="selectedElementIds"
             :zoom="zoom"
+            :snap="snapSettings"
             :read-only="readOnly || sceneLoading || applyingTurtle"
             @zoom-change="setZoomState"
-            @select="selectElement"
+            @selection-request="applySelectionRequest"
             @gesture-start="beginGesture"
             @gesture-end="endGesture"
-            @geometry-change="changeGeometry"
+            @resize-change="changeGeometry"
+            @geometry-batch-change="changeGeometryBatch"
             @routing-change="changeRouting"
           />
         </section>
@@ -938,7 +1130,7 @@ defineExpose<IriographEditorNavigationApi & {
       <aside class="iriograph-inspector">
         <header>
           <div><small>INSPECTOR</small><strong>{{ selectedElement?.label ?? "No selection" }}</strong></div>
-          <span v-if="selectedElement">{{ selectedElement.structuralKind }}</span>
+          <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length} selected` : selectedElement.structuralKind }}</span>
         </header>
         <template v-if="selectedElement">
           <section>

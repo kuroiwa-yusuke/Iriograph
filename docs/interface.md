@@ -37,7 +37,7 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
 
-`viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
+`viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、選択集合とprimary selection、snap設定、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
 
 overlayには次を保持できます。
 
@@ -203,10 +203,18 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映
 - `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作
 - `revealSelection()` / `focusElement(elementId)`: 現在の選択またはstable Scene element IDをviewportへ表示
+- `selectElement(elementId)` / `selectElements(elementIds)` / `selectAll()` / `clearSelection()`: hostからsession selectionを操作
+- `setSnapSettings(settings)`: grid、対象要素へのsnapをsession内で設定
+- `selectionChanged(primaryElementId)`: 既存のprimary selection通知
+- `selectionSetChanged(elementIds)`: ordered selection集合の通知
 
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
 
 Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
+
+Multi-selectionはplain clickで置換、Ctrl/Cmd clickでtoggle、Shift clickで追加、blank clickまたはEscapeでclear、Ctrl/Cmd+Aで全選択します。選択中のnode/containerをdragすると全選択geometryを共通deltaでpreviewし、pointerup時に一つのbatch presentation transactionとして確定します。選択containerの子孫も同deltaで移動し、ancestorとdescendantを同時選択しても二重移動しません。異なるcontainerの要素を同時に動かす場合は、各要素の親container content boundsから許容deltaの共通部分を求め、membershipは変更しません。整列と等間隔も一commandを一transactionとし、Turtleを変更しません。
+
+標準snapは8 canvas unitのgridと、対象要素のleft/center/right、top/middle/bottom guideを使います。対象候補は距離、座標、element IDの順で決定的に解決し、target snapをgridより優先してからcontainer/Scene境界へclampします。Target toleranceの標準値は画面上6pxでzoom変換し、Altを押したdragでは一時的にsnapを無効化します。Snap設定とguide候補はsession stateで、documentやhistoryには保存しません。`readOnly`でもselectionとsnap設定の参照・変更は可能ですが、drag、keyboard move、resize、routing、整列、等間隔、undo/redoはdocumentを変更しません。
 
 Target rich authoring contractでは、hostが解決済みauthoring profile、vocabulary index、
 active viewのprojection capabilityを`authoringContext`として注入します。Editorはこのcontextから

@@ -22,6 +22,7 @@ import {
   diagramFitZoom,
   type IriographEditorNavigationApi,
 } from "../viewport";
+import type { IriographEditorSelectionApi } from "../selection";
 
 const NS = "urn:test:editor:";
 const initialSource = `
@@ -48,8 +49,8 @@ describe("IriographEditor transaction regression", () => {
     const finalGeometry = offset(node.geometry, 52, 31);
 
     emitCanvas(canvas, "gestureStart");
-    emitCanvas(canvas, "geometryChange", { elementId: node.elementId, geometry: firstGeometry });
-    emitCanvas(canvas, "geometryChange", { elementId: node.elementId, geometry: finalGeometry });
+    emitCanvas(canvas, "geometryBatchChange", [{ elementId: node.elementId, geometry: firstGeometry }]);
+    emitCanvas(canvas, "geometryBatchChange", [{ elementId: node.elementId, geometry: finalGeometry }]);
     emitCanvas(canvas, "gestureEnd");
     await settle();
 
@@ -227,9 +228,151 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.text()).toContain("80%");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
+
+  it("multi-selectionとsnap設定をsession stateに保ち、group dragを一transactionでundoする", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const nodes = canvas.props("scene").nodes;
+    const source = documentFixture().semantic.source;
+    const selection = exposedSelectionApi(wrapper);
+    selection.selectElements(nodes.map((node) => node.elementId));
+    selection.setSnapSettings({ grid: { enabled: false }, targets: { enabled: false } });
+    await nextTick();
+
+    expect(wrapper.emitted("selectionSetChanged")?.at(-1)?.[0]).toEqual(
+      nodes.map((node) => node.elementId),
+    );
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    const changes = nodes.map((node, index) => ({
+      elementId: node.elementId,
+      geometry: offset(node.geometry, 24 + index * 8, 16),
+    }));
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "geometryBatchChange", changes);
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    const moved = latestDocument(wrapper);
+    expect(moved.semantic.source).toBe(source);
+    for (const [index, node] of nodes.entries()) {
+      expect(overlayFor(moved, node.semanticRef)).toMatchObject({
+        geometry: changes[index]!.geometry,
+        pinned: true,
+        placement: "user",
+      });
+    }
+
+    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await settle();
+    const undone = latestDocument(wrapper);
+    expect(undone.semantic.source).toBe(source);
+    expect(nodes.every((node) => overlayFor(undone, node.semanticRef) === undefined)).toBe(true);
+  });
+
+  it("container group dragのgenerated descendantを同じtransactionで永続化する", async () => {
+    const document = containedDocumentFixture();
+    wrapper = await mountEditor({ modelValue: document }, 1);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const container = canvas.props("scene").containers[0]!;
+    const child = canvas.props("scene").nodes[0]!;
+    exposedSelectionApi(wrapper).selectElement(container.elementId);
+    const changes = [container, child].map((element) => ({
+      elementId: element.elementId,
+      geometry: offset(element.geometry, 32, 24),
+    }));
+
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "geometryBatchChange", changes);
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    const moved = latestDocument(wrapper);
+    expect(moved.semantic.source).toBe(document.semantic.source);
+    expect(overlayFor(moved, container.semanticRef)).toMatchObject({
+      geometry: changes[0]!.geometry,
+      placement: "user",
+    });
+    expect(overlayFor(moved, child.semanticRef)).toMatchObject({
+      geometry: changes[1]!.geometry,
+      placement: "user",
+    });
+
+    exposedHistoryApi(wrapper).undo();
+    await settle();
+    const undone = latestDocument(wrapper);
+    expect(overlayFor(undone, container.semanticRef)).toBeUndefined();
+    expect(overlayFor(undone, child.semanticRef)).toBeUndefined();
+  });
+
+  it("toolbarの整列と等間隔を各一つのpresentation history itemにする", async () => {
+    wrapper = await mountEditor({ modelValue: threeNodeDocumentFixture() }, 3);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const nodes = canvas.props("scene").nodes;
+    const initial: ElementGeometry[] = [
+      { x: 120, y: 80, width: nodes[0]!.geometry.width, height: nodes[0]!.geometry.height },
+      { x: 280, y: 170, width: nodes[1]!.geometry.width, height: nodes[1]!.geometry.height },
+      { x: 520, y: 270, width: nodes[2]!.geometry.width, height: nodes[2]!.geometry.height },
+    ];
+    exposedSelectionApi(wrapper).selectElements(nodes.map((node) => node.elementId));
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "geometryBatchChange", nodes.map((node, index) => ({
+      elementId: node.elementId,
+      geometry: initial[index]!,
+    })));
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    await wrapper.get('button[aria-label="左揃え"]').trigger("click");
+    await settle();
+    const aligned = latestDocument(wrapper);
+    expect(nodes.map((node) => overlayFor(aligned, node.semanticRef)?.geometry?.x))
+      .toEqual([120, 120, 120]);
+    expect(aligned.semantic.source).toBe(threeNodeDocumentFixture().semantic.source);
+
+    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await settle();
+    const undone = latestDocument(wrapper);
+    expect(nodes.map((node) => overlayFor(undone, node.semanticRef)?.geometry?.x))
+      .toEqual([120, 280, 520]);
+
+    await wrapper.get('button[aria-label="水平方向に等間隔"]').trigger("click");
+    await settle();
+    const distributed = latestDocument(wrapper);
+    const geometries = nodes.map((node) => overlayFor(distributed, node.semanticRef)!.geometry!);
+    const firstGap = geometries[1]!.x - geometries[0]!.x - geometries[0]!.width;
+    const secondGap = geometries[2]!.x - geometries[1]!.x - geometries[1]!.width;
+    expect(firstGap).toBeCloseTo(secondGap, 0);
+  });
+
+  it("readOnlyではselectionを許可し、undoとgeometry commandを全入口で拒否する", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const node = canvas.props("scene").nodes[0]!;
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "geometryBatchChange", [{
+      elementId: node.elementId,
+      geometry: offset(node.geometry, 24, 16),
+    }]);
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+    const updateCount = wrapper.emitted("update:modelValue")!.length;
+
+    await wrapper.setProps({ readOnly: true });
+    exposedSelectionApi(wrapper).selectAll();
+    await nextTick();
+    expect(wrapper.emitted("selectionSetChanged")?.at(-1)?.[0]).toHaveLength(3);
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="左揃え"]').element.disabled).toBe(true);
+    exposedHistoryApi(wrapper).undo();
+    await nextTick();
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(updateCount);
+  });
 });
 
-async function mountEditor(extraProps: Record<string, unknown> = {}): Promise<VueWrapper> {
+async function mountEditor(
+  extraProps: Record<string, unknown> = {},
+  expectedNodeCount = 2,
+): Promise<VueWrapper> {
   const wrapper = mount(IriographEditor, {
     attachTo: document.body,
     props: {
@@ -239,7 +382,9 @@ async function mountEditor(extraProps: Record<string, unknown> = {}): Promise<Vu
       ...extraProps,
     },
   });
-  await waitUntil(() => wrapper.getComponent(DiagramCanvas).props("scene").nodes.length === 2);
+  await waitUntil(() => (
+    wrapper.getComponent(DiagramCanvas).props("scene").nodes.length === expectedNodeCount
+  ));
   return wrapper;
 }
 
@@ -283,6 +428,14 @@ function buttonWithTitle(wrapper: VueWrapper, title: string) {
 
 function exposedApi(wrapper: VueWrapper): { flushPendingEdits: () => Promise<boolean> } {
   return wrapper.vm as unknown as { flushPendingEdits: () => Promise<boolean> };
+}
+
+function exposedSelectionApi(wrapper: VueWrapper): IriographEditorSelectionApi {
+  return wrapper.vm as unknown as IriographEditorSelectionApi;
+}
+
+function exposedHistoryApi(wrapper: VueWrapper): { undo(): void; redo(): void } {
+  return wrapper.vm as unknown as { undo(): void; redo(): void };
 }
 
 function latestDocument(wrapper: VueWrapper): IriographDocument {
@@ -341,4 +494,24 @@ function documentFixture(): IriographDocumentV1 {
       overlay: {},
     }],
   };
+}
+
+function threeNodeDocumentFixture(): IriographDocumentV1 {
+  const document = documentFixture();
+  document.documentId = "editor-three-node-regression";
+  document.semantic.source = `${initialSource}\n:c rdfs:label "C" .\n`;
+  return document;
+}
+
+function containedDocumentFixture(): IriographDocumentV1 {
+  const document = documentFixture();
+  document.documentId = "editor-contained-regression";
+  document.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:lane a rdf:Bag ; rdfs:label "Lane" ; rdfs:member :a .
+:a rdfs:label "A" .
+`;
+  return document;
 }

@@ -40,6 +40,12 @@ Pickerもhost注入の非同期callbackです。Editorはcancel・stale・不正
 
 drag、resize、waypoint変更、template/icon overrideはpresentation transactionです。選択elementのoverlay entryだけを更新し、Turtleを変更しません。一つのpointer gestureを一つのundo履歴として扱います。
 
+SelectionはVue editor内のordered element ID集合とprimary element IDで表し、portable document、overlay、historyへ保存しません。Canvasはgroup drag中のgeometryをephemeral previewとして描画し、pointerupで`geometryBatchChange`を一度だけ発行します。Editorはbatch内の全geometry overlayを一つのdocument cloneへ適用し、同じgesture snapshotを一つのhistory itemへ積みます。選択containerは子孫を同deltaで移動し、generated childを含む確定participantをuser geometryとして保存するため、Scene再投影後にpreviewから戻りません。Pointer cancelではpreviewを破棄しdocumentを変更しません。
+
+Group translationは選択ancestorをrootとして正規化し、各root subtreeの許容delta intervalを交差します。親が選択されていないnode/nested containerは親containerのheaderを除くcontent bounds、top-level elementはScene insetを境界とします。異なるcontainerを跨ぐ操作でも共通deltaだけを適用し、`parentElementId`やsemantic membershipを変更しません。整列は6方向、等間隔は水平・垂直のbounding-box間gapを対象とし、各toolbar commandを一つのbatch transactionにします。
+
+Snap policyはDOM非依存のgeometry operationとして実装し、標準grid 8 unit、target tolerance 6 screen pxを使います。Target候補はedge/centerの距離、座標、code-point順element identityで決定し、target、grid、bounds clampの順に適用します。設定はEditor sessionだけに置き、単体dragとgroup dragで同じpolicyを使います。
+
 Turtle textareaは未適用draftを持ちます。「検証して適用」または保存前の非同期`flushPendingEdits()`でsemantic transactionを開始します。現行実装はparseとRDF/RDFS構造検証後、全viewをそれぞれのprofile/catalog/layoutで再構成し、一つでもblocking errorがあれば元documentへrollbackします。Parse error時はdraftを残してdocument正本を変更しません。
 
 Target semantic transactionはactorを`human`または`llm`として受け取り、元graphとの差分にauthoring profileを適用します。Rendererのfallback投影はunknown termを許容しますが、LLM transactionはprofile外term、新規semantic term、許可外namespaceを拒否します。
@@ -85,7 +91,7 @@ P1の暫定基準は、500 node / 1,000 edgeを通常規模、2,000 node / 4,000
 
 購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。開始・終了event、user/service task、gateway等のdomain typeは構造を独自述語で再定義せず、domain extension catalogからappearanceへ対応付けます。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
 
-Editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。Turtleの適用、保存、書出は非同期reconciliationの完了を待ちます。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+Editorはdrag、resize、edge waypoint、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。Turtleの適用、保存、書出は非同期reconciliationの完了を待ちます。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
 
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 

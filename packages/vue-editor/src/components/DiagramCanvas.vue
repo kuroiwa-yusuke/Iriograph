@@ -13,9 +13,7 @@ import type {
   DiagramScene,
   ElementGeometry,
   Point,
-  SceneContainer,
   SceneEdge,
-  SceneNode,
 } from "@iriograph/core";
 
 import {
@@ -25,26 +23,41 @@ import {
   type DiagramCanvasNavigationApi,
   type DiagramViewportMetrics,
 } from "../viewport";
-
-type GeometryElement = SceneNode | SceneContainer;
+import {
+  normalizeDiagramSnapSettings,
+  resizeGeometryElement,
+  selectedGeometryElements,
+  translateSelection,
+  type DiagramSelectionRequest,
+  type DiagramSnapSettings,
+  type GeometryChange,
+  type GeometryElement,
+} from "../selection";
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;
   selectedElementId?: string;
+  selectedElementIds?: string[];
   zoom?: number;
   readOnly?: boolean;
+  snap?: DiagramSnapSettings;
 }>(), {
   selectedElementId: "",
+  selectedElementIds: () => [],
   zoom: 1,
   readOnly: false,
+  snap: () => normalizeDiagramSnapSettings(),
 });
 
 const emit = defineEmits<{
   select: [elementId: string];
+  selectionRequest: [request: DiagramSelectionRequest];
   zoomChange: [zoom: number];
   gestureStart: [];
   gestureEnd: [];
   geometryChange: [payload: { elementId: string; geometry: ElementGeometry }];
+  resizeChange: [payload: { elementId: string; geometry: ElementGeometry }];
+  geometryBatchChange: [payload: GeometryChange[]];
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
 
@@ -59,11 +72,18 @@ const viewport = reactive<DiagramViewportMetrics>({
   height: 0,
 });
 const viewportPanning = ref(false);
+const previewGeometries = ref<Record<string, ElementGeometry>>({});
 let resizeObserver: ResizeObserver | undefined;
 let stopViewportTracking: (() => void) | undefined;
 
-const nodesById = computed(() => new Map(props.scene.nodes.map((node) => [node.elementId, node])));
-const containersById = computed(() => new Map(props.scene.containers.map((container) => [container.elementId, container])));
+const nodesById = computed(() => new Map(props.scene.nodes.map((node) => [
+  node.elementId,
+  { ...node, geometry: geometryFor(node) },
+])));
+const selectedElementIdsSet = computed(() => new Set([
+  ...props.selectedElementIds,
+  ...(props.selectedElementId ? [props.selectedElementId] : []),
+]));
 const selectedEdge = computed(() => props.scene.edges.find((edge) => edge.elementId === props.selectedElementId));
 const minimapViewport = computed(() => {
   const offset = stageOffset();
@@ -100,6 +120,13 @@ onBeforeUnmount(() => {
 watch(
   () => [props.scene.width, props.scene.height, props.zoom],
   () => void nextTick(updateViewportMetrics),
+);
+
+watch(
+  () => props.scene,
+  () => {
+    previewGeometries.value = {};
+  },
 );
 
 function pathFor(edge: SceneEdge): string {
@@ -144,21 +171,54 @@ function centerOf(geometry: ElementGeometry): Point {
 }
 
 function startMove(event: PointerEvent, element: GeometryElement): void {
-  if (props.readOnly || event.button !== 0 || resizeHandleTarget(event)) return;
+  if (event.button !== 0 || resizeHandleTarget(event)) return;
   event.preventDefault();
-  emit("select", element.elementId);
+  const modifiedSelection = event.ctrlKey || event.metaKey || event.shiftKey;
+  const alreadySelected = selectedElementIdsSet.value.has(element.elementId);
+  requestSelection(selectionRequest(event, element.elementId, alreadySelected));
+  if (modifiedSelection || props.readOnly) return;
+  const initialScene = snapshotScene(props.scene);
+  const movingElementIds = alreadySelected
+    ? selectedGeometryElements(initialScene, [...selectedElementIdsSet.value])
+      .map((candidate) => candidate.elementId)
+    : [element.elementId];
   emit("gestureStart");
   const origin = { x: event.clientX, y: event.clientY };
-  const initial = { ...element.geometry };
+  let pendingChanges: GeometryChange[] = [];
 
   trackPointer((moveEvent) => {
-    const next = {
-      ...initial,
-      x: initial.x + (moveEvent.clientX - origin.x) / props.zoom,
-      y: initial.y + (moveEvent.clientY - origin.y) / props.zoom,
-    };
-    clampGeometry(next, element);
-    emit("geometryChange", { elementId: element.elementId, geometry: next });
+    pendingChanges = translateSelection(
+      initialScene,
+      movingElementIds,
+      {
+        x: (moveEvent.clientX - origin.x) / props.zoom,
+        y: (moveEvent.clientY - origin.y) / props.zoom,
+      },
+      moveEvent.altKey
+        ? {
+            grid: { ...props.snap.grid, enabled: false },
+            targets: { ...props.snap.targets, enabled: false },
+          }
+        : {
+            ...props.snap,
+            targets: {
+              ...props.snap.targets,
+              tolerance: props.snap.targets.tolerance / props.zoom,
+            },
+          },
+    );
+    previewGeometries.value = Object.fromEntries(
+      pendingChanges.map((change) => [change.elementId, change.geometry]),
+    );
+  }, (cancelled) => {
+    if (cancelled) {
+      previewGeometries.value = {};
+      return;
+    }
+    if (pendingChanges.length > 0) {
+      emit("geometryBatchChange", pendingChanges);
+      for (const change of pendingChanges) emit("geometryChange", change);
+    }
   });
 }
 
@@ -166,25 +226,21 @@ function startResize(event: PointerEvent, element: GeometryElement): void {
   if (props.readOnly || event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
-  emit("select", element.elementId);
+  requestSelection({ elementId: element.elementId, mode: "replace" });
   emit("gestureStart");
   const origin = { x: event.clientX, y: event.clientY };
   const initial = { ...element.geometry };
-  const minimum = element.structuralKind === "container"
-    ? { width: 240, height: 120 }
-    : { width: 44, height: 36 };
 
   trackPointer((moveEvent) => {
-    const width = Math.max(minimum.width, initial.width + (moveEvent.clientX - origin.x) / props.zoom);
-    const height = Math.max(minimum.height, initial.height + (moveEvent.clientY - origin.y) / props.zoom);
-    emit("geometryChange", {
-      elementId: element.elementId,
-      geometry: {
-        ...initial,
-        width: Math.min(width, props.scene.width - initial.x - 8),
-        height: Math.min(height, props.scene.height - initial.y - 8),
-      },
+    const requestedWidth = initial.width + (moveEvent.clientX - origin.x) / props.zoom;
+    const requestedHeight = initial.height + (moveEvent.clientY - origin.y) / props.zoom;
+    const change = resizeGeometryElement(props.scene, element.elementId, {
+      width: requestedWidth,
+      height: requestedHeight,
     });
+    if (!change) return;
+    emit("resizeChange", change);
+    emit("geometryChange", change);
   });
 }
 
@@ -192,7 +248,7 @@ function startWaypointMove(event: PointerEvent, edge: SceneEdge, index: number):
   if (props.readOnly || event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
-  emit("select", edge.elementId);
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
   emit("gestureStart");
   const origin = { x: event.clientX, y: event.clientY };
   const initial = editableWaypoints(edge).map((point) => ({ ...point }));
@@ -222,7 +278,7 @@ function startViewportPan(event: PointerEvent): void {
   const element = scrollElement.value;
   if (!element) return;
   event.preventDefault();
-  if (primaryOnBlank) emit("select", "");
+  if (primaryOnBlank) requestSelection({ elementId: "", mode: "replace" });
   element.focus({ preventScroll: true });
   viewportPanning.value = true;
   const origin = { x: event.clientX, y: event.clientY };
@@ -424,28 +480,20 @@ function isBlankCanvasTarget(target: EventTarget | null): boolean {
   ].join(","));
 }
 
-function trackPointer(onMove: (event: PointerEvent) => void): void {
-  const handleEnd = (): void => {
+function trackPointer(
+  onMove: (event: PointerEvent) => void,
+  onEnd?: (cancelled: boolean) => void,
+): void {
+  const handleEnd = (event: PointerEvent): void => {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", handleEnd);
+    window.removeEventListener("pointercancel", handleEnd);
+    onEnd?.(event.type === "pointercancel");
     emit("gestureEnd");
   };
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", handleEnd, { once: true });
-}
-
-function clampGeometry(geometry: ElementGeometry, element: GeometryElement): void {
-  const parent = element.structuralKind === "node" && element.parentElementId
-    ? containersById.value.get(element.parentElementId)
-    : undefined;
-  if (parent) {
-    const headerInset = parent.headerPosition === "left" ? 72 : 16;
-    geometry.x = clamp(geometry.x, parent.geometry.x + headerInset + 12, parent.geometry.x + parent.geometry.width - geometry.width - 16);
-    geometry.y = clamp(geometry.y, parent.geometry.y + 18, parent.geometry.y + parent.geometry.height - geometry.height - 18);
-    return;
-  }
-  geometry.x = clamp(geometry.x, 8, props.scene.width - geometry.width - 8);
-  geometry.y = clamp(geometry.y, 8, props.scene.height - geometry.height - 8);
+  window.addEventListener("pointercancel", handleEnd, { once: true });
 }
 
 function resizeHandleTarget(event: PointerEvent): boolean {
@@ -454,6 +502,49 @@ function resizeHandleTarget(event: PointerEvent): boolean {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(value, maximum));
+}
+
+function selectionRequest(
+  event: PointerEvent | MouseEvent,
+  elementId: string,
+  alreadySelected: boolean,
+): DiagramSelectionRequest {
+  if (event.ctrlKey || event.metaKey) return { elementId, mode: "toggle" };
+  if (event.shiftKey) return { elementId, mode: "add" };
+  return { elementId, mode: alreadySelected ? "preserve" : "replace" };
+}
+
+function selectEdge(event: MouseEvent, edge: SceneEdge): void {
+  requestSelection(selectionRequest(
+    event,
+    edge.elementId,
+    selectedElementIdsSet.value.has(edge.elementId),
+  ));
+}
+
+function requestSelection(request: DiagramSelectionRequest): void {
+  emit("select", request.elementId);
+  emit("selectionRequest", request);
+}
+
+function geometryFor(element: GeometryElement): ElementGeometry {
+  return previewGeometries.value[element.elementId] ?? element.geometry;
+}
+
+function snapshotScene(scene: DiagramScene): DiagramScene {
+  return {
+    ...scene,
+    nodes: scene.nodes.map((node) => ({ ...node, geometry: { ...node.geometry } })),
+    containers: scene.containers.map((container) => ({
+      ...container,
+      geometry: { ...container.geometry },
+    })),
+    edges: scene.edges.map((edge) => ({
+      ...edge,
+      waypoints: edge.waypoints?.map((point) => ({ ...point })),
+    })),
+    diagnostics: [...scene.diagnostics],
+  };
 }
 
 defineExpose<DiagramCanvasNavigationApi>({
@@ -496,12 +587,15 @@ defineExpose<DiagramCanvasNavigationApi>({
             :key="container.elementId"
             type="button"
             class="iriograph-scene-container"
-            :class="{ selected: selectedElementId === container.elementId }"
+            :data-element-id="container.elementId"
+            :data-parent-element-id="container.parentElementId ?? ''"
+            :data-header-position="container.headerPosition"
+            :class="{ selected: selectedElementIdsSet.has(container.elementId) }"
             :style="{
-              left: `${container.geometry.x}px`,
-              top: `${container.geometry.y}px`,
-              width: `${container.geometry.width}px`,
-              height: `${container.geometry.height}px`,
+              left: `${geometryFor(container).x}px`,
+              top: `${geometryFor(container).y}px`,
+              width: `${geometryFor(container).width}px`,
+              height: `${geometryFor(container).height}px`,
               background: container.style.fill,
               borderColor: container.style.stroke,
               color: container.style.text,
@@ -516,7 +610,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               {{ container.label }}
             </span>
             <span
-              v-if="selectedElementId === container.elementId && !readOnly"
+              v-if="selectedElementIdsSet.size === 1 && selectedElementId === container.elementId && !readOnly"
               class="iriograph-resize-handle"
               title="領域サイズを変更"
               @pointerdown="startResize($event, container)"
@@ -539,8 +633,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               v-for="edge in scene.edges"
               :key="edge.elementId"
               class="iriograph-edge-group"
-              :class="{ selected: selectedElementId === edge.elementId, fallback: edge.fallback }"
-              @click.stop="emit('select', edge.elementId)"
+              :class="{ selected: selectedElementIdsSet.has(edge.elementId), fallback: edge.fallback }"
+              @click.stop="selectEdge($event, edge)"
             >
               <path class="iriograph-edge-hitarea" :d="pathFor(edge)" />
               <path
@@ -579,18 +673,20 @@ defineExpose<DiagramCanvasNavigationApi>({
             :key="node.elementId"
             type="button"
             class="iriograph-scene-node"
+            :data-element-id="node.elementId"
+            :data-parent-element-id="node.parentElementId ?? ''"
             :class="[
               `shape-${node.shape}`,
               {
-                selected: selectedElementId === node.elementId,
+                selected: selectedElementIdsSet.has(node.elementId),
                 'user-placed': node.placement === 'user',
               },
             ]"
             :style="{
-              left: `${node.geometry.x}px`,
-              top: `${node.geometry.y}px`,
-              width: `${node.geometry.width}px`,
-              height: `${node.geometry.height}px`,
+              left: `${geometryFor(node).x}px`,
+              top: `${geometryFor(node).y}px`,
+              width: `${geometryFor(node).width}px`,
+              height: `${geometryFor(node).height}px`,
               background: node.style.fill,
               borderColor: node.style.stroke,
               color: node.style.text,
@@ -606,7 +702,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span v-if="node.shape === 'diamond'" class="iriograph-gateway-mark">×</span>
             <span v-if="node.placement === 'user'" class="iriograph-pin-indicator" title="ユーザー調整済み">●</span>
             <span
-              v-if="selectedElementId === node.elementId && !readOnly"
+              v-if="selectedElementIdsSet.size === 1 && selectedElementId === node.elementId && !readOnly"
               class="iriograph-resize-handle"
               title="nodeサイズを変更"
               @pointerdown="startResize($event, node)"
@@ -630,10 +726,10 @@ defineExpose<DiagramCanvasNavigationApi>({
           v-for="container in scene.containers"
           :key="container.elementId"
           class="iriograph-minimap-container"
-          :x="container.geometry.x"
-          :y="container.geometry.y"
-          :width="container.geometry.width"
-          :height="container.geometry.height"
+          :x="geometryFor(container).x"
+          :y="geometryFor(container).y"
+          :width="geometryFor(container).width"
+          :height="geometryFor(container).height"
         />
         <path
           v-for="edge in scene.edges"
@@ -645,10 +741,10 @@ defineExpose<DiagramCanvasNavigationApi>({
           v-for="node in scene.nodes"
           :key="node.elementId"
           class="iriograph-minimap-node"
-          :x="node.geometry.x"
-          :y="node.geometry.y"
-          :width="node.geometry.width"
-          :height="node.geometry.height"
+          :x="geometryFor(node).x"
+          :y="geometryFor(node).y"
+          :width="geometryFor(node).width"
+          :height="geometryFor(node).height"
         />
         <rect
           class="iriograph-minimap-viewport"

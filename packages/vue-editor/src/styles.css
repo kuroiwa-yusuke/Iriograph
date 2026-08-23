@@ -333,6 +333,61 @@
   background: #fff;
 }
 
+.iriograph-selection-toolbar {
+  min-height: 38px;
+  flex: 0 0 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 13px;
+  overflow-x: auto;
+  border-bottom: 1px solid #d6dfdc;
+  background: #f7faf9;
+}
+
+.iriograph-selection-actions,
+.iriograph-arrange-actions,
+.iriograph-snap-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.iriograph-selection-actions > span {
+  min-width: 58px;
+  color: #526966;
+  font-size: 8px;
+}
+
+.iriograph-selection-toolbar button {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid #cbd7d3;
+  border-radius: 4px;
+  background: #fff;
+  color: #375b58;
+  font-size: 8px;
+}
+
+.iriograph-selection-toolbar button[aria-pressed="true"] {
+  border-color: #a9781c;
+  background: #fff2ce;
+  color: #754f08;
+}
+
+.iriograph-snap-actions input {
+  width: 43px;
+  height: 24px;
+  padding: 0 3px;
+  border: 1px solid #cbd7d3;
+  border-radius: 4px;
+  background: #fff;
+  color: #375b58;
+  font-size: 8px;
+}
+
 .iriograph-scene-status {
   min-height: 34px;
   flex: 0 0 auto;

@@ -34,7 +34,7 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(lastPayload<{ elementId: string; geometry: ElementGeometry }>(wrapper, "geometryChange"))
       .toEqual({
         elementId: "node-a",
-        geometry: { x: 40, y: 50, width: 120, height: 60 },
+        geometry: { x: 40, y: 48, width: 120, height: 60 },
       });
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
     expect(wrapper.emitted("zoomChange")).toBeUndefined();
@@ -182,6 +182,107 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(viewport.element.scrollLeft).toBe(minimapLeft - 64);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
   });
+
+  it("modifier selectionを通知し、group dragをpreview後に一つのbatchで確定する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "node-b",
+        selectedElementIds: ["node-a", "node-b"],
+      },
+    });
+    const nodes = wrapper.findAll(".iriograph-scene-node");
+
+    await nodes[0]!.trigger("pointerdown", { button: 0, clientX: 100, clientY: 80 });
+    dispatchPointer("pointermove", 113, 91);
+    await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
+
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+    expect((nodes[0]!.element as HTMLElement).style.left).toBe("32px");
+    expect((nodes[1]!.element as HTMLElement).style.left).toBe("312px");
+
+    dispatchPointer("pointerup", 113, 91);
+    expect(wrapper.emitted("geometryBatchChange")).toEqual([[[
+      { elementId: "node-a", geometry: { x: 32, y: 48, width: 120, height: 60 } },
+      { elementId: "node-b", geometry: { x: 312, y: 168, width: 120, height: 60 } },
+    ]]]);
+    expect(wrapper.emitted("geometryChange")).toHaveLength(2);
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+
+    await nodes[0]!.trigger("pointerdown", {
+      button: 0,
+      ctrlKey: true,
+      clientX: 100,
+      clientY: 80,
+    });
+    expect(wrapper.emitted("selectionRequest")?.at(-1)?.[0]).toEqual({
+      elementId: "node-a",
+      mode: "toggle",
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+  });
+
+  it("異なるcontainerのgroup dragを共通許容deltaへclampし、readOnlyでも選択できる", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: containedSceneFixture(),
+        selectedElementId: "node-b",
+        selectedElementIds: ["node-a", "node-b"],
+        snap: {
+          grid: { enabled: false, size: 8 },
+          targets: { enabled: false, tolerance: 6 },
+        },
+      },
+    });
+    const nodes = wrapper.findAll(".iriograph-scene-node");
+    await nodes[0]!.trigger("pointerdown", { button: 0, clientX: 100, clientY: 80 });
+    dispatchPointer("pointermove", 200, 80);
+    dispatchPointer("pointerup", 200, 80);
+
+    expect(lastPayload<Array<{ elementId: string; geometry: ElementGeometry }>>(
+      wrapper,
+      "geometryBatchChange",
+    )).toEqual([
+      { elementId: "node-a", geometry: { x: 74, y: 70, width: 40, height: 30 } },
+      { elementId: "node-b", geometry: { x: 544, y: 70, width: 40, height: 30 } },
+    ]);
+
+    await wrapper.setProps({ readOnly: true, selectedElementId: "", selectedElementIds: [] });
+    await nodes[0]!.trigger("pointerdown", { button: 0, clientX: 100, clientY: 80 });
+    expect(wrapper.emitted("selectionRequest")?.at(-1)?.[0]).toEqual({
+      elementId: "node-a",
+      mode: "replace",
+    });
+    expect(wrapper.emitted("geometryBatchChange")).toHaveLength(1);
+  });
+
+  it("target toleranceをscreen pxからzoom済みcanvas unitへ変換する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "node-a",
+        selectedElementIds: ["node-a"],
+        zoom: 2,
+        snap: {
+          grid: { enabled: false, size: 8 },
+          targets: { enabled: true, tolerance: 6 },
+        },
+      },
+    });
+    const node = wrapper.get(".iriograph-scene-node");
+    await node.trigger("pointerdown", { button: 0, clientX: 0, clientY: 0 });
+    dispatchPointer("pointermove", 312, 0);
+    dispatchPointer("pointerup", 312, 0);
+
+    expect(lastPayload<Array<{ elementId: string; geometry: ElementGeometry }>>(
+      wrapper,
+      "geometryBatchChange",
+    )?.[0]?.geometry.x).toBe(176);
+  });
 });
 
 function dispatchPointer(type: "pointermove" | "pointerup", clientX: number, clientY: number): void {
@@ -252,5 +353,55 @@ function sceneFixture(): DiagramScene {
       fallback: true,
       projectionRuleId: "fallback",
     }],
+  };
+}
+
+function containedSceneFixture(): DiagramScene {
+  return {
+    viewId: "main",
+    width: 800,
+    height: 500,
+    diagnostics: [],
+    containers: [
+      {
+        elementId: "container-a",
+        semanticRef: "urn:test:canvas:container-a",
+        structuralKind: "container",
+        label: "Container A",
+        templateRef: "urn:test:template:container",
+        headerPosition: "none",
+        style: { fill: "#fff", stroke: "#000", text: "#000" },
+        geometry: { x: 8, y: 8, width: 280, height: 180 },
+        pinned: false,
+        placement: "generated",
+      },
+      {
+        elementId: "container-b",
+        semanticRef: "urn:test:canvas:container-b",
+        structuralKind: "container",
+        label: "Container B",
+        templateRef: "urn:test:template:container",
+        headerPosition: "none",
+        style: { fill: "#fff", stroke: "#000", text: "#000" },
+        geometry: { x: 300, y: 8, width: 300, height: 180 },
+        pinned: false,
+        placement: "generated",
+      },
+    ],
+    nodes: [
+      {
+        ...sceneFixture().nodes[0]!,
+        elementId: "node-a",
+        geometry: { x: 30, y: 70, width: 40, height: 30 },
+        parentElementId: "container-a",
+      },
+      {
+        ...sceneFixture().nodes[1]!,
+        elementId: "node-b",
+        geometry: { x: 500, y: 70, width: 40, height: 30 },
+        parentElementId: "container-b",
+      },
+    ],
+    edges: [],
   };
 }
