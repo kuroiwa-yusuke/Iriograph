@@ -264,15 +264,21 @@ export type SemanticEditCapability =
       command: "set-membership";
       container: string;
       member: string;
+      containerTypeIri: string;
       predicate: string;
     }
   | {
       command: "set-sequence";
       sequence: string;
+      sequenceTypeIri: string;
+      ordinalPredicatePrefix: string;
     }
   | {
       command: "set-alternatives";
       alternative: string;
+      alternativeTypeIri: string;
+      ordinalPredicatePrefix: string;
+      defaultOrdinal: number;
     };
 
 /** Derived edit information. It is never persisted in an .iriograph file. */

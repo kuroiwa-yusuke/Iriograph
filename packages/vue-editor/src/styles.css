@@ -195,6 +195,229 @@
   padding: 14px 9px 17px;
 }
 
+.iriograph-authoring-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 10px;
+  border-bottom: 1px solid #dbe2df;
+  background: #f3f7f4;
+}
+
+.iriograph-authoring-panel > header,
+.iriograph-authoring-preview > div,
+.iriograph-authoring-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-authoring-panel > header div {
+  display: flex;
+  flex-direction: column;
+}
+
+.iriograph-authoring-panel > header small {
+  color: #7a8d8c;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.iriograph-authoring-panel > header strong {
+  font-family: Georgia, "Yu Mincho", serif;
+  font-size: 13px;
+}
+
+.iriograph-authoring-panel > header > span {
+  color: #718584;
+  font-size: 8px;
+}
+
+.iriograph-authoring-panel > label,
+.iriograph-authoring-position label {
+  display: grid;
+  gap: 3px;
+}
+
+.iriograph-authoring-panel label > span {
+  color: #617473;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.iriograph-authoring-panel input,
+.iriograph-authoring-panel select,
+.iriograph-authoring-panel textarea {
+  width: 100%;
+  min-height: 29px;
+  padding: 5px 7px;
+  border: 1px solid #bdcbc7;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 9px;
+}
+
+.iriograph-authoring-panel textarea {
+  min-height: 54px;
+  resize: vertical;
+}
+
+.iriograph-authoring-position {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.iriograph-authoring-value-row {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid #ccd8d4;
+  border-radius: 4px;
+}
+
+.iriograph-authoring-value-row legend {
+  padding: 0 4px;
+  color: #617473;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.iriograph-authoring-value-row label {
+  display: grid;
+  gap: 3px;
+}
+
+.iriograph-authoring-panel .iriograph-authoring-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.iriograph-authoring-check input {
+  width: auto;
+  min-height: auto;
+  margin-top: 1px;
+}
+
+.iriograph-authoring-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.iriograph-authoring-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #738b88;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 8px;
+}
+
+.iriograph-authoring-actions button.primary {
+  color: #fff;
+  border-color: #285f60;
+  background: #285f60;
+}
+
+.iriograph-authoring-blocked {
+  margin: 0;
+  padding: 6px 7px;
+  border: 1px solid #dcc9a5;
+  border-radius: 4px;
+  color: #765719;
+  background: #fff9e9;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.iriograph-authoring-preview {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid #ccd8d4;
+}
+
+.iriograph-authoring-preview code {
+  overflow: hidden;
+  max-width: 120px;
+  color: #647776;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-authoring-preview ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-authoring-diagnostics {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-authoring-diagnostics li {
+  padding: 4px 5px;
+  border-radius: 3px;
+  background: #eef3f1;
+  font-size: 8px;
+}
+
+.iriograph-authoring-diagnostics li.warning {
+  color: #7c5817;
+  background: #fff7df;
+}
+
+.iriograph-authoring-diagnostics li.error {
+  color: #953c37;
+  background: #fcecea;
+}
+
+.iriograph-authoring-preview li {
+  padding: 4px 5px;
+  border-radius: 3px;
+  background: #eef3f1;
+  font-size: 8px;
+}
+
+.iriograph-authoring-preview li.warning {
+  color: #7c5817;
+  background: #fff7df;
+}
+
+.iriograph-authoring-preview li.error {
+  color: #953c37;
+  background: #fcecea;
+}
+
+.iriograph-authoring-preview summary {
+  cursor: pointer;
+  color: #536a69;
+  font-size: 8px;
+}
+
+.iriograph-authoring-preview pre {
+  max-height: 120px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 6px;
+  border: 1px solid #d6dfdc;
+  background: #fff;
+  font-size: 7px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .iriograph-element-list > small {
   display: flex;
   justify-content: space-between;
@@ -503,6 +726,19 @@
   opacity: .35;
   background-image: radial-gradient(#aebfba .6px, transparent .7px);
   background-size: 18px 18px;
+}
+
+.iriograph-semantic-position-marker {
+  width: 18px;
+  height: 18px;
+  position: absolute;
+  z-index: 7;
+  border: 2px solid #b47a13;
+  border-radius: 50%;
+  background: rgb(255 242 190 / 62%);
+  box-shadow: 0 0 0 5px rgb(180 122 19 / 12%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 
 .iriograph-minimap {

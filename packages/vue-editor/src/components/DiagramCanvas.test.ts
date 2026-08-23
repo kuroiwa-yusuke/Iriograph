@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
+import { defineComponent, h } from "vue";
 
 import type { DiagramScene, ElementGeometry, Point } from "@iriograph/core";
 
@@ -214,6 +215,23 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
     expect(wrapper.find(".iriograph-waypoints").exists()).toBe(false);
     expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBeUndefined();
+  });
+
+  it("Deleteはsemantic graphを直接変更せずauthoring draft seedだけを通知する", async () => {
+    wrapper = mount(DiagramCanvas, { props: { scene: sceneFixture() } });
+
+    await wrapper.get(".iriograph-edge-group").trigger("keydown", { key: "Delete" });
+    await wrapper.get(".iriograph-scene-node").trigger("keydown", { key: "Backspace" });
+
+    expect(wrapper.emitted("semanticEditRequest")).toEqual([
+      ["edge-a-b"],
+      ["node-a"],
+    ]);
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+
+    await wrapper.setProps({ readOnly: true });
+    await wrapper.get(".iriograph-edge-group").trigger("keydown", { key: "Delete" });
+    expect(wrapper.emitted("semanticEditRequest")).toHaveLength(2);
   });
 
   it("labelのないedgeにはlabel位置handleを作らない", () => {
@@ -526,6 +544,61 @@ describe("DiagramCanvas pointer gestures", () => {
       wrapper,
       "geometryBatchChange",
     )?.[0]?.geometry.x).toBe(176);
+  });
+
+  it("Canvas空白clickはposition draftだけをseedしmarkerを表示する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        semanticPositionPicking: true,
+        semanticDraftPosition: { x: 88, y: 64 },
+      },
+    });
+    expect(wrapper.get(".iriograph-semantic-position-marker").attributes("style"))
+      .toContain("left: 88px");
+    const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
+    stage.getBoundingClientRect = () => ({
+      x: 10, y: 20, left: 10, top: 20, right: 810, bottom: 520,
+      width: 800, height: 500, toJSON: () => undefined,
+    });
+    await wrapper.get(".iriograph-canvas-scroll").trigger("pointerdown", {
+      button: 0,
+      clientX: 110,
+      clientY: 120,
+    });
+    dispatchPointer("pointerup", 110, 120);
+    expect(lastPayload(wrapper, "semanticPositionRequest")).toEqual({ x: 100, y: 100 });
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureStart")).toBeUndefined();
+  });
+
+  it("readOnlyではposition picking gestureを通知しない", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), semanticPositionPicking: true, readOnly: true },
+    });
+    await wrapper.get(".iriograph-canvas-scroll").trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 80,
+    });
+    dispatchPointer("pointerup", 100, 80);
+    expect(wrapper.emitted("semanticPositionRequest")).toBeUndefined();
+  });
+
+  it("複数instanceでSVG arrow marker idを衝突させない", () => {
+    const host = mount(defineComponent(() => () => h("div", [
+      h(DiagramCanvas, { scene: sceneFixture() }),
+      h(DiagramCanvas, { scene: sceneFixture() }),
+    ])));
+    const canvases = host.findAllComponents(DiagramCanvas);
+    const ids = canvases.map((canvas) => canvas.get("marker").attributes("id"));
+    expect(new Set(ids).size).toBe(2);
+    canvases.forEach((canvas, index) => {
+      expect(canvas.get(".iriograph-edge-path").attributes("marker-end"))
+        .toBe(`url(#${ids[index]})`);
+    });
   });
 });
 

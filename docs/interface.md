@@ -33,7 +33,7 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `semantic.source`は意味の正本です。`views[].overlay`のkeyはview内element ID、各entryの`semanticRef`はIRIまたはstatement identityです。
 
-`semantic.authoringProfileRef`はv1の必須値で、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。P1-04まではdocument schemaとhost fixtureだけがこの参照を保持し、実際のauthoring policy解決はP2-01で追加します。
+`semantic.authoringProfileRef`はv1の必須値で、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。P1のhostは解決済み`ResolvedAuthoringContext`を注入し、この参照からprofile/vocabularyを取得・検証するresolverはP2-01で追加します。
 
 `views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
 
@@ -134,16 +134,20 @@ Resolved resultはabsolute URL、実media type、実byte lengthとidempotentな`
 
 ## Semantic transaction
 
-現行の`applySemanticSource(document, source, context)`は、TurtleをparseしてからRDF/RDFS構造を検証し、全viewの非同期layoutを含む`Promise<SemanticSourceUpdate>`を返します。現行`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Actor、resolved authoring profile、元revisionを含むsemantic authoring contextはP1-04/P2-01でこの境界へ追加します。
+`applySemanticSource(document, source, context)`は、authoring policyを伴わない互換用semantic source APIです。Controlled writeは`applyAuthoringSource(document, source, resolvedAuthoringContext, { actor, signal })`を使い、Turtleをparseしてactor policy、RDF/RDFS構造、全viewの非同期layoutを検証した`Promise<SemanticSourceUpdate>`を返します。`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Human structured authoringにも、hostが解決済み語彙・policy・元revisionを束ねた`ResolvedAuthoringContext`を注入します。Profile URIからこのcontextを取得するresolverはP2-01の責務です。
 
 - 失敗: `accepted: false`とdiagnosticsを返し、元documentを維持
 - 成功: `accepted: true`とreconcile済みdocumentを返す
 
-Targetの`actor`は少なくとも`human`または`llm`です。LLM transactionではauthoring profile未解決、unknown term追加、term minting、許可外resource namespaceをerrorとして扱います。`DiagramCatalog`を受ける同期`applySemanticSource` overloadは既存host向けの移行用互換contractです。
+`applyAuthoringSource`の`actor`は`human`または`llm`のどちらかを必須とし、不明値や欠落はfail closedにします。LLM transactionではauthoring profile未解決、unknown term追加、term minting、許可外resource namespaceをerrorとして扱います。`DiagramCatalog`を受ける同期`applySemanticSource` overloadは既存host向けの移行用互換contractです。
 
-P1-04で追加する`applySemanticCommands(document, commands, context)`は、一つ以上の人間のstructured commandを一つのatomic graph patchとcandidate sourceへ変換し、同じく`Promise<SemanticSourceUpdate>`を返します。以降は`applySemanticSource`と同じparse、authoring profile、構造、domain validation、投影、非同期layout、reconciliationのパイプラインを使います。Human UIとLLMに別々の検証経路を作りません。
+Human structured authoringは`previewAuthoringCommands(document, commands, context, options)`で開始します。Previewは元documentとresolved contextのfingerprint、正規化済みcommand、追加・削除statement、candidate Turtle、diagnostics、stable confirmation IDを返します。Warningを含むpreviewも明示確認できますが、blocking errorを含むpreviewは適用できません。
 
-Turtle textareaから`applySemanticSource`を実行した場合、妥当な入力sourceは原文のまま保持します。`applySemanticCommands`とactor=`llm`のsource editはcandidate datasetを共通のversioned serializerで決定的なTurtleへ再serializeしてから確定します。再serializeでは有効なprefix/baseを可能な範囲で再利用しますが、comment、空白、改行位置、triple記述順の保持はcontractに含めません。
+`applyAuthoringPreview(document, preview, context, options)`はconfirmation IDを信用してcandidateを直接保存せず、現在のdocumentとcontextからcommandを再compile・再validateします。元source、document revision、context identity、previewした追加・削除statement集合のいずれかが変わっていればstaleとして拒否します。これによりallocator完了待ち、別のpresentation edit、profile更新、preview JSONの改変を跨いだ適用を防ぎます。Apply後は`applySemanticSource`と同じparse、構造検証、全view投影、非同期layout、reconciliationへ合流します。Human UIとLLMに別々のcandidate graph検証経路を作りません。
+
+新規resourceのIRIをcommandで省略した場合だけ、previewはhost注入の`ResourceIriAllocator`を呼びます。Allocator resultはabsolute named IRI、許可namespace、graph内のsubject・predicate・object全termとの衝突をCoreで再検証し、正規化commandへ固定します。Cancel、Abort、stale response、allocator errorではdocumentを変更しません。
+
+Turtle textareaから`applyAuthoringSource(..., { actor: "human" })`を実行した場合、妥当な入力sourceは原文のまま保持します。`previewAuthoringCommands`/`applyAuthoringPreview`と`applyAuthoringSource(..., { actor: "llm" })`はcandidate datasetを共通のversioned serializerで決定的なTurtleへ再serializeしてから確定します。再serializeでは有効なprefix/baseを可能な範囲で再利用しますが、comment、空白、改行位置、triple記述順の保持はcontractに含めません。
 
 semantic transaction成功時は、更新したTurtleとreconcile済みview overlayを一つのdocument revisionとして返します。各viewは個別の`profileRef`、`layoutRef`、locale、解決済みcatalogで再投影します。Reconcileは次を行います。
 
@@ -166,12 +170,22 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 | `connect-resources` | subjectからobjectへの関係を追加 | predicate必須。直接IRI-object tripleまたはcapability定義のgraph patchとし、generic predicateを暗黙生成しない |
 | `set-membership` | containerとmemberの所属を追加・削除 | RDF/RDFS profileでは`rdf:type rdf:Bag`と`rdfs:member`を用い、parent一意性とcycleを検証 |
 | `set-sequence` | 順序付きmemberを再構成 | `rdf:Seq`と`rdf:_n`を一括更新し、連番制約を途中状態に適用しない |
-| `set-alternatives` | 選択肢と既定選択を再構成 | `rdf:Alt`と`rdf:_n`を一括更新し、2件以上の制約を検証 |
+| `set-alternatives` | 選択肢と既定選択を再構成 | `memberIris`を最終ordinal順の正本として`rdf:Alt`と`rdf:_n`を一括更新。2件以上かつ`memberIris[defaultOrdinal - 1] === defaultMemberIri`を要求し、重複IRIを保持 |
 | `delete-resource` | resourceをsubjectとする記述statementとresourceを削除 | 他subjectからresourceへの参照がある場合は既定で拒否。影響statementのpreview付き明示cascadeだけを許可し、Seq/Alt member削除は同じpatchで再採番 |
 
-node作成dialogはIRIと初期type、label、property、既存resourceとの関係の少なくとも1つが確定するまで保存しません。Edge gestureはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属は「containerに含める」という明示操作で`set-membership`を発行します。
+v1のnode作成UIはIRIと初期typeまたはlabelの少なくとも一つが確定するまで保存しません。追加property、既存resourceとのedge、包含は作成後の別の明示transactionとして操作します。Core command batchは必要に応じてそれらをcreate-resourceと同じatomic transactionへ含められます。Edge gestureはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属は「containerに含める」という明示操作で`set-membership`を発行します。
 
 Node、edge、属性、包含、削除のauthoring UIはサイドバーにcommand draftを持ちます。Canvas gestureはsource/target、作成位置、候補container等をdraftへseedできますが、即時commitしません。サイドバーは生成予定の追加・削除triple、構造graph patch、IRI、validationとwarningをpreviewし、ユーザーの明示適用でtransactionを開始します。適用前のghost elementはeditor内部のephemeral stateであり、portable document、Scene正本、overlay、historyへ入りません。
+
+`set-property`はsubjectとpredicateに対応する既存値をすべて置換し、値配列が空なら明示削除します。空文字列literalは削除ではなく有効な一値です。IRI/literalの複数値を保持し、Literalのlanguageとdatatypeは同時指定できません。Property参照の削除は、そのstatementだけを除去し、参照先blank nodeのclosureが孤立しても推測cascadeしません。`rdfs:member`と正規の正整数suffixを持つ`rdf:_n`等の構造predicateはproperty UIから変更せず、membership、sequence、alternative専用commandを使います。`set-alternatives`は上記の最終ordinal順とdefault slotの一致を必須にします。
+
+Capabilityのparameterは`required: false`の場合だけoptionalです。Optional bindingを省略したcommandでは、そのbindingを参照するexact template statementをadd/remove双方からskipし、残りのstatementだけをatomic patchへ含めます。
+
+Allowed resource namespaceはcreate-resourceだけでなく、全structured commandおよびdirect source editで新規導入されるinstance IRIの各出現位置へ適用します。Editorは既存resourceの候補選択と明示createを優先しますが、Coreは特定command専用のnamespace例外を持ちません。
+
+Resource delete previewはresourceがsubject、object、predicateのいずれとして現れるstatementも影響集合へ含めます。既定操作は外部参照が一つでもあれば拒否し、explicit cascadeはpreviewに列挙されたstatement集合だけをconfirmation対象にします。削除後のSeqは1件以上、Altは2件以上を満たし、残るordinalは同じatomic patchで1から再採番します。Authoring contextが既知class/predicateとして定義する語彙resource自体は削除できません。
+
+Canvasで指定した新規resource位置はauthoring draft内のephemeral markerです。Blank canvas clickだけがScene内の座標をseedします。Editorの既知template sizeによる補正は入力補助にすぎず、実際に投影されたtemplate sizeとparent/Scene boundsへ収まるかはCore Previewで検証し、収まらなければ補正commitせずtransactionを拒否します。Preview/Apply前はportable document、Scene、historyを変更せず、semantic作成と位置patchが両方成功した場合だけ一つのrevisionとしてcommitします。
 
 Literal propertyはv1で独立Scene elementを生成しない場合もありますが、inspector等の語彙駆動UIで編集でき、Turtleには失わず保持します。表示primitiveがないことをsemantic属性が存在しないことと同一視しません。
 
@@ -197,6 +211,8 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
     :saving="saving"
     :asset-access="assetAccess"
     :pick-asset="pickWorkspaceAsset"
+    :authoring-context="resolvedAuthoringContext"
+    :resource-iri-allocator="resourceIriAllocator"
     @save="saveToWorkspace"
   />
 </template>
@@ -210,7 +226,9 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `validationChanged`: semantic/project diagnostics
 - `assetAccess`: 非同期resolver、media/size/URL policy、host revision
 - `pickAsset(request)`: workspace pickerを開き、選択時はassetRefだけを返すhost callback
-- `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映
+- `authoringContext`: hostが解決した語彙・capability・policy・projection runtime
+- `resourceIriAllocator`: resource IRI省略時の同期または非同期allocator。返却IRIはCoreが再検証する
+- `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映する。未確認のstructured draftは自動適用せず保存を拒否する
 - `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作
 - `revealSelection()` / `focusElement(elementId)`: 現在の選択またはstable Scene element IDをviewportへ表示
 - `selectElement(elementId)` / `selectElements(elementIds)` / `selectAll()` / `clearSelection()`: hostからsession selectionを操作
@@ -241,16 +259,16 @@ Arrow key、Inspector数値入力でoffsetを編集し、Home/Delete/Backspace�
 Scene内側8 unitへclampします。旧documentから読み込んだ負座標は勝手に正規化せず、そのままでは
 Scene原点外がclipされ得るため、handle編集またはautomatic resetで現行境界へ戻します。`readOnly`は
 edge選択を許可しますが編集handleを表示せず、routing eventを受けてもdocumentを変更しません。
-Edge本体のDelete/BackspaceはP1-04のsemantic commandがない段階では何も削除しません。
+Edge本体のDelete/BackspaceはSceneやTurtleを即時削除せず、provenanceから復元できるexact semantic commandをサイドバーdraftへseedします。直接edgeは元statementだけを削除候補にし、sequence/alternative等で構造全体の入力が必要な場合は不足値をユーザーに要求します。Provenanceがない場合はpredicateや構造を見た目から推測しません。
 
-Target rich authoring contractでは、hostが解決済みauthoring profile、vocabulary index、
+Rich authoring contractでは、hostが解決済みauthoring profile、vocabulary index、
 active viewのprojection capabilityを`authoringContext`として注入します。Editorはこのcontextから
 class、属性predicate、edge predicate、包含・順序・選択操作を提示します。Resource IRIを
 ユーザーに直接入力させないhostは、allowed namespace内で衝突しないIRIを返すallocatorも
 注入できます。Authoring context未解決時はstructured semantic commandを無効化し、
 source参照・presentation編集の許可まで失わせません。
 
-P1のcontractではこれを`ResolvedAuthoringContext`として先に型定義し、authoring profile、vocabulary index、capability、resource policyが解決済みであることを要求します。Resource IRIを自動生成する場合は、host注入の同期または非同期allocatorが完全IRIを返し、Coreがnamespaceと衝突を再検証します。Mockはstatic fixtureのcontextとallocatorを利用します。`authoringProfileRef`やvocabulary URIからcontextを取得するresolver、cache、integrity検証はP2-01の責務であり、P1 editorへ取得処理を入れません。
+`ResolvedAuthoringContext`はauthoring profile identity、vocabulary term index、projection capability、resource namespace、actor policyが解決済みであることを要求します。Predicate termは任意に`objectKinds`、許可datatype、許可language、`minCount`、`maxCount`を持てます。人間が未登録termを使う場合はpolicyに従ってwarningまたはerrorとし、warningはpreview上で完全IRIを確認してからだけ適用します。Resource IRIを自動生成するhostは同期または非同期allocatorを注入します。Mockはstatic fixtureのcontextとallocatorを利用します。`authoringProfileRef`やvocabulary URIからcontextを取得するresolver、cache、integrity検証はP2-01の責務であり、P1 editorへ取得処理を入れません。
 
 Host asset pickerは選択したabsolute asset IRIだけを返し、Editorは`appearance.iconRef`のpresentation transactionとして保存します。URLやbytesをpicker resultへ含めません。Cancel、stale response、不正IRIではdocumentを変更しません。
 

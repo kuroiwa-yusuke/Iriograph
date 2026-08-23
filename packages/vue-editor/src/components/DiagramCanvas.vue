@@ -6,6 +6,7 @@ import {
   onMounted,
   reactive,
   ref,
+  useId,
   watch,
 } from "vue";
 
@@ -53,12 +54,16 @@ const props = withDefaults(defineProps<{
   zoom?: number;
   readOnly?: boolean;
   snap?: DiagramSnapSettings;
+  semanticPositionPicking?: boolean;
+  semanticDraftPosition?: Point;
 }>(), {
   selectedElementId: "",
   selectedElementIds: () => [],
   zoom: 1,
   readOnly: false,
   snap: () => normalizeDiagramSnapSettings(),
+  semanticPositionPicking: false,
+  semanticDraftPosition: undefined,
 });
 
 const emit = defineEmits<{
@@ -71,12 +76,18 @@ const emit = defineEmits<{
   resizeChange: [payload: { elementId: string; geometry: ElementGeometry }];
   geometryBatchChange: [payload: GeometryChange[]];
   routingUpdate: [payload: EdgeRoutingUpdate];
+  /** Seeds a semantic authoring draft; it never mutates the graph directly. */
+  semanticEditRequest: [elementId: string];
+  /** Seeds draft coordinates only; it never mutates the graph or history. */
+  semanticPositionRequest: [position: Point];
   /** @deprecated Use routingUpdate for the complete sparse routing value. */
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
 
 const CANVAS_PADDING = 20;
 const PAN_KEY_STEP = 64;
+const instanceId = useId();
+const arrowMarkerId = `${instanceId}-arrow`;
 const scrollElement = ref<HTMLElement>();
 const stageElement = ref<HTMLElement>();
 const viewport = reactive<DiagramViewportMetrics>({
@@ -406,7 +417,15 @@ function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
   if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
     event.stopPropagation();
+    if (!props.readOnly) emit("semanticEditRequest", edge.elementId);
   }
+}
+
+function handleGeometrySemanticKeydown(event: KeyboardEvent, elementId: string): void {
+  if (event.key !== "Delete" && event.key !== "Backspace") return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (!props.readOnly) emit("semanticEditRequest", elementId);
 }
 
 function emitWaypointRouting(edge: SceneEdge, waypoints: readonly Point[] | undefined): void {
@@ -461,25 +480,46 @@ function startViewportPan(event: PointerEvent): void {
   viewportPanning.value = true;
   const origin = { x: event.clientX, y: event.clientY };
   const initial = { x: element.scrollLeft, y: element.scrollTop };
+  let moved = false;
 
   const handleMove = (moveEvent: PointerEvent): void => {
+    if (Math.hypot(moveEvent.clientX - origin.x, moveEvent.clientY - origin.y) > 4) moved = true;
     setViewportScroll(
       initial.x - (moveEvent.clientX - origin.x),
       initial.y - (moveEvent.clientY - origin.y),
     );
   };
-  const cleanup = (): void => {
+  const cleanup = (upEvent?: PointerEvent): void => {
     window.removeEventListener("pointermove", handleMove);
     window.removeEventListener("pointerup", cleanup);
     window.removeEventListener("pointercancel", cleanup);
     viewportPanning.value = false;
     if (stopViewportTracking === cleanup) stopViewportTracking = undefined;
+    if (
+      upEvent?.type === "pointerup"
+      && primaryOnBlank
+      && !moved
+      && props.semanticPositionPicking
+      && !props.readOnly
+    ) {
+      const position = semanticPositionAt(upEvent);
+      if (position) emit("semanticPositionRequest", position);
+    }
   };
   stopViewportTracking?.();
   stopViewportTracking = cleanup;
   window.addEventListener("pointermove", handleMove);
   window.addEventListener("pointerup", cleanup, { once: true });
   window.addEventListener("pointercancel", cleanup, { once: true });
+}
+
+function semanticPositionAt(event: PointerEvent): Point | undefined {
+  const bounds = stageElement.value?.getBoundingClientRect();
+  if (!bounds) return undefined;
+  return clampPointToScene({
+    x: (event.clientX - bounds.left) / props.zoom,
+    y: (event.clientY - bounds.top) / props.zoom,
+  });
 }
 
 function handleViewportKeydown(event: KeyboardEvent): void {
@@ -759,6 +799,12 @@ defineExpose<DiagramCanvasNavigationApi>({
           }"
         >
           <div class="iriograph-canvas-grid" />
+          <span
+            v-if="semanticDraftPosition"
+            class="iriograph-semantic-position-marker"
+            aria-label="Semantic draft position"
+            :style="{ left: `${semanticDraftPosition.x}px`, top: `${semanticDraftPosition.y}px` }"
+          />
 
           <button
             v-for="container in scene.containers"
@@ -779,6 +825,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               color: container.style.text,
             }"
             @pointerdown="startMove($event, container)"
+            @keydown="handleGeometrySemanticKeydown($event, container.elementId)"
           >
             <span
               class="iriograph-container-header"
@@ -803,7 +850,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             aria-label="関係edge"
           >
             <defs>
-              <marker id="iriograph-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth">
+              <marker :id="arrowMarkerId" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth">
                 <path d="M0,0 L9,4.5 L0,9 z" fill="context-stroke" />
               </marker>
             </defs>
@@ -827,7 +874,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :d="pathFor(edge)"
                 :stroke="edge.style.stroke"
                 :stroke-dasharray="edge.style.dash"
-                marker-end="url(#iriograph-arrow)"
+                :marker-end="`url(#${arrowMarkerId})`"
               />
               <text
                 v-if="edge.label"
@@ -890,6 +937,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             }"
             :aria-label="`${node.label}を選択`"
             @pointerdown="startMove($event, node)"
+            @keydown="handleGeometrySemanticKeydown($event, node.elementId)"
           >
             <span class="iriograph-node-content">
               <img v-if="node.iconUrl" class="iriograph-node-icon" :src="node.iconUrl" alt="" draggable="false" />

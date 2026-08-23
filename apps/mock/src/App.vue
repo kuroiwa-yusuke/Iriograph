@@ -17,6 +17,10 @@ import {
 
 import { mockProjectionCatalog } from "./mock/catalog";
 import {
+  createMockAuthoringContext,
+  mockResourceIriAllocator,
+} from "./mock/authoring";
+import {
   createMockAssetHost,
   workspaceAssetPickResult,
   type MockAssetHost,
@@ -70,6 +74,7 @@ const activeAsset = computed(() => workspace.value?.entries.find(
 ));
 const documentTitle = computed(() => activeFilePath.value.split("/").at(-1)
   ?.replace(/\.iriograph$/, "") ?? document.value.documentId);
+const authoringContext = computed(() => createMockAuthoringContext(document.value));
 
 onMounted(() => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
@@ -410,6 +415,8 @@ function emptyDocument(): IriographDocumentV1 {
           :save-message="saveMessage"
           :asset-access="assetAccess"
           :pick-asset="pickWorkspaceAsset"
+          :authoring-context="authoringContext"
+          :resource-iri-allocator="mockResourceIriAllocator"
           @save="saveDocument"
           @validation-changed="diagnostics = $event"
         />

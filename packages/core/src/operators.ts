@@ -373,7 +373,14 @@ function projectDerivedEdges(
             operator: "ordinal-sequence",
             rule: ruleReference(resolved),
             derivation: "derived",
-            editCapability: { command: "set-sequence", sequence: plan.semanticRef },
+            editCapability: resolved.rule.match.kind === "type" && resolved.matchedIri
+              ? {
+                  command: "set-sequence",
+                  sequence: plan.semanticRef,
+                  sequenceTypeIri: resolved.matchedIri,
+                  ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
+                }
+              : undefined,
           },
           diagnostics,
           resolved.rule.templateRef,
@@ -416,7 +423,15 @@ function projectDerivedEdges(
             operator: "alternative",
             rule: ruleReference(resolved),
             derivation: "derived",
-            editCapability: { command: "set-alternatives", alternative: plan.semanticRef },
+            editCapability: resolved.rule.match.kind === "type" && resolved.matchedIri
+              ? {
+                  command: "set-alternatives",
+                  alternative: plan.semanticRef,
+                  alternativeTypeIri: resolved.matchedIri,
+                  ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
+                  defaultOrdinal: operator.defaultOrdinal,
+                }
+              : undefined,
           },
           diagnostics,
         );
@@ -494,12 +509,15 @@ function applyParentBindings(
       operator: "membership-container",
       rule: ruleReference(binding.rule),
       derivation: "derived",
-      editCapability: {
-        command: "set-membership",
-        container: binding.parentIri,
-        member: childIri,
-        predicate: binding.quad.predicate.value,
-      },
+      editCapability: binding.rule.rule.match.kind === "type" && binding.rule.matchedIri
+        ? {
+            command: "set-membership",
+            container: binding.parentIri,
+            member: childIri,
+            containerTypeIri: binding.rule.matchedIri,
+            predicate: binding.quad.predicate.value,
+          }
+        : undefined,
     };
   }
 }

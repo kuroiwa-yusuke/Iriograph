@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, toRaw, watch } from "vue";
 
 import {
+  applyAuthoringSource,
+  applyAuthoringPreview,
   applySemanticSource,
   buildIriographView,
   createProjectionRuntimeContext,
   createStandardLayoutRegistry,
+  previewAuthoringCommands,
+  seedAuthoringCommandFromProvenance,
   validateIriographDocumentV1,
   validateProjectionCatalogV1,
+  type AuthoringPreview,
+  type AuthoringTripleChange,
   type AssetAccess,
   type AssetMediaType,
   type DiagramScene,
@@ -18,7 +24,10 @@ import {
   type ProjectionCatalogV1,
   type ProjectionDiagnostic,
   type ProjectionRuntimeContext,
+  type ResolvedAuthoringContext,
+  type ResourceIriAllocator,
   type RuntimeValidationIssue,
+  type SemanticEditCapability,
   type SemanticSourceUpdate,
   type SceneContainer,
   type SceneEdge,
@@ -26,7 +35,20 @@ import {
   type ViewElementOverlay,
 } from "@iriograph/core";
 
+import AuthoringPanel from "./AuthoringPanel.vue";
 import DiagramCanvas from "./DiagramCanvas.vue";
+import {
+  authoringDraftHasInput,
+  compileAuthoringDraft,
+  draftFromAuthoringCommand,
+  emptyAuthoringDraft,
+  type AuthoringChoice,
+  type AuthoringCapabilityChoice,
+  type AuthoringPreviewView,
+  type AuthoringStructureChoice,
+  type EditorAuthoringDraft,
+  structureKey,
+} from "../authoring-draft";
 import {
   AssetSceneSession,
   normalizePickedAssetRef,
@@ -79,6 +101,8 @@ const props = withDefaults(defineProps<{
   assetAccess?: AssetAccess;
   pickAsset?: AssetPicker;
   snapSettings?: DiagramSnapSettingsInput;
+  authoringContext?: ResolvedAuthoringContext;
+  resourceIriAllocator?: ResourceIriAllocator;
 }>(), {
   title: "",
   filePath: "",
@@ -92,6 +116,8 @@ const props = withDefaults(defineProps<{
   pickAsset: undefined,
   layoutRegistry: undefined,
   snapSettings: undefined,
+  authoringContext: undefined,
+  resourceIriAllocator: undefined,
 });
 
 const emit = defineEmits<{
@@ -117,6 +143,9 @@ const applyDiagnostics = ref<ProjectionDiagnostic[]>([]);
 const scene = ref<DiagramScene>(emptyScene(draft.value.views[0]?.viewId ?? ""));
 const sceneLoading = ref(true);
 const applyingTurtle = ref(false);
+const authoringDraft = ref<EditorAuthoringDraft>(emptyAuthoringDraft());
+const authoringPreview = ref<AuthoringPreview>();
+const authoringBusy = ref(false);
 const pickingAsset = ref(false);
 const defaultLayoutRegistry = createStandardLayoutRegistry();
 const assetSceneSession = new AssetSceneSession();
@@ -124,6 +153,9 @@ let lastEmittedJson = "";
 let gestureBefore: IriographDocument | undefined;
 let sceneRequestToken = 0;
 let semanticRequestToken = 0;
+let semanticAbortController: AbortController | undefined;
+let authoringRequestToken = 0;
+let authoringAbortController: AbortController | undefined;
 let pickerRequestToken = 0;
 let pickerAbortController: AbortController | undefined;
 
@@ -157,6 +189,216 @@ const sceneError = computed(() => [
 const errorCount = computed(() => diagnostics.value.filter((item) => item.severity === "error").length);
 const warningCount = computed(() => diagnostics.value.filter((item) => item.severity === "warning").length);
 const turtlePending = computed(() => turtleDraft.value !== draft.value.semantic.source);
+const structuredAuthoringPending = computed(() => (
+  authoringDraftHasInput(authoringDraft.value) || Boolean(authoringPreview.value)
+));
+const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
+  if (!props.authoringContext) return undefined;
+  const source = toRaw(props.authoringContext);
+  const runtime = toRaw(source.runtime);
+  return {
+    ...source,
+    runtime: {
+      ...runtime,
+      catalogsByProfile: toRaw(runtime.catalogsByProfile),
+      layouts: toRaw(runtime.layouts),
+      projectionOptions: runtime.projectionOptions
+        ? toRaw(runtime.projectionOptions)
+        : undefined,
+    },
+    allocator: toRaw(props.resourceIriAllocator ?? source.allocator),
+  };
+});
+const authoringBlockedReason = computed(() => {
+  if (props.readOnly) return "読み取り専用のため意味グラフを編集できません。";
+  if (!authoringContext.value) return "Hostからauthoring contextが提供されていません。";
+  if (turtlePending.value) return "未適用のTurtle draftを適用または破棄してください。";
+  return "";
+});
+const authoringEnabled = computed(() => !authoringBlockedReason.value);
+const authoringClassChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
+  .filter((term) => term.kind === "class")
+  .map(({ iri, label }) => ({ iri, label })) ?? []);
+const authoringPropertyChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
+  .filter((term) => term.kind === "property" && !term.structural)
+  .map(({ iri, label }) => ({ iri, label })) ?? []);
+const authoringEdgeChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
+  .filter((term) => (
+    term.kind === "property"
+    && !term.structural
+    && (!term.objectKinds || term.objectKinds.includes("iri"))
+  ))
+  .map(({ iri, label }) => ({ iri, label })) ?? []);
+const authoringCapabilityChoices = computed<AuthoringCapabilityChoice[]>(() => authoringContext.value?.capabilities
+  .map(({ capabilityId, label, parameters }) => ({ iri: capabilityId, label, parameters })) ?? []);
+const authoringResourceChoices = computed<AuthoringChoice[]>(() => {
+  const choices = new Map<string, AuthoringChoice>();
+  const add = (iri: string, label?: string) => {
+    const current = choices.get(iri);
+    if (!current || (!current.label && label)) choices.set(iri, { iri, label });
+  };
+  for (const element of [...scene.value.containers, ...scene.value.nodes]) {
+    add(element.semanticRef, element.label);
+  }
+  const provenances = [
+    ...scene.value.containers.flatMap((element) => [element.provenance, element.parentProvenance]),
+    ...scene.value.nodes.flatMap((element) => [element.provenance, element.parentProvenance]),
+    ...scene.value.edges.map((element) => element.provenance),
+  ];
+  for (const provenance of provenances) {
+    const capability = provenance?.editCapability;
+    if (!capability) continue;
+    for (const iri of capabilityResourceIris(capability)) add(iri);
+  }
+  return [...choices.values()];
+});
+const selectedAuthoringResource = computed<AuthoringChoice | undefined>(() => {
+  const element = selectedElement.value;
+  return element && element.structuralKind !== "edge"
+    ? { iri: element.semanticRef, label: element.label }
+    : undefined;
+});
+
+function capabilityResourceIris(capability: SemanticEditCapability): string[] {
+  switch (capability.command) {
+    case "remove-statement":
+      return [capability.subject, capability.object];
+    case "set-membership":
+      return [capability.container, capability.member];
+    case "set-sequence":
+      return [capability.sequence];
+    case "set-alternatives":
+      return [capability.alternative];
+  }
+}
+
+const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
+  const context = authoringContext.value;
+  const view = activeView.value;
+  const resolved = view ? context?.runtime.catalogsByProfile.get(view.profileRef) : undefined;
+  if (!resolved) return [];
+  const choices = resolved.catalog.rules.flatMap((rule): AuthoringStructureChoice[] => {
+    if (rule.match.kind !== "type") return [];
+    const operator = rule.project;
+    if (operator.operator === "membership-container") {
+      return [{
+        key: structureKey("membership", rule.match.iri, operator.membershipPredicate),
+        kind: "membership",
+        label: `${rule.ruleId} — membership`,
+        typeIri: rule.match.iri,
+        predicateIri: operator.membershipPredicate,
+      }];
+    }
+    if (operator.operator === "ordinal-sequence") {
+      return [{
+        key: structureKey("sequence", rule.match.iri, operator.ordinalPredicatePrefix),
+        kind: "sequence",
+        label: `${rule.ruleId} — sequence`,
+        typeIri: rule.match.iri,
+        ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
+      }];
+    }
+    if (operator.operator === "alternative") {
+      return [{
+        key: structureKey(
+          "alternatives",
+          rule.match.iri,
+          operator.ordinalPredicatePrefix,
+          operator.defaultOrdinal,
+        ),
+        kind: "alternatives",
+        label: `${rule.ruleId} — alternatives (default #${operator.defaultOrdinal})`,
+        typeIri: rule.match.iri,
+        ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
+        defaultOrdinal: operator.defaultOrdinal,
+      }];
+    }
+    return [];
+  });
+  const current = currentDraftStructureChoice(authoringDraft.value);
+  if (current && !choices.some((choice) => choice.key === current.key)) choices.push(current);
+  return choices;
+});
+
+function currentDraftStructureChoice(draft: EditorAuthoringDraft): AuthoringStructureChoice | undefined {
+  if (draft.kind === "set-membership" && draft.containerTypeIri && draft.membershipPredicateIri) {
+    return {
+      key: structureKey("membership", draft.containerTypeIri, draft.membershipPredicateIri),
+      kind: "membership",
+      label: "現在の構成（provenance）",
+      typeIri: draft.containerTypeIri,
+      predicateIri: draft.membershipPredicateIri,
+    };
+  }
+  if (draft.kind === "set-sequence" && draft.sequenceTypeIri && draft.ordinalPredicatePrefix) {
+    return {
+      key: structureKey("sequence", draft.sequenceTypeIri, draft.ordinalPredicatePrefix),
+      kind: "sequence",
+      label: "現在の構成（provenance）",
+      typeIri: draft.sequenceTypeIri,
+      ordinalPredicatePrefix: draft.ordinalPredicatePrefix,
+    };
+  }
+  if (
+    draft.kind === "set-alternatives"
+    && draft.alternativeTypeIri
+    && draft.ordinalPredicatePrefix
+    && Number.isSafeInteger(Number(draft.defaultOrdinal))
+  ) {
+    return {
+      key: structureKey(
+        "alternatives",
+        draft.alternativeTypeIri,
+        draft.ordinalPredicatePrefix,
+        Number(draft.defaultOrdinal),
+      ),
+      kind: "alternatives",
+      label: "現在の構成（provenance）",
+      typeIri: draft.alternativeTypeIri,
+      ordinalPredicatePrefix: draft.ordinalPredicatePrefix,
+      defaultOrdinal: Number(draft.defaultOrdinal),
+    };
+  }
+  return undefined;
+}
+const authoringPreviewView = computed<AuthoringPreviewView | undefined>(() => {
+  const preview = authoringPreview.value;
+  if (!preview) return undefined;
+  return {
+    confirmationId: preview.confirmationId,
+    valid: preview.valid,
+    diagnostics: preview.diagnostics,
+    addedStatements: preview.patch.added.map(formatTripleChange),
+    removedStatements: preview.patch.removed.map(formatTripleChange),
+    candidateSource: preview.candidateSource ?? "",
+  };
+});
+const authoringDraftPosition = computed<Point | undefined>(() => {
+  if (authoringDraft.value.kind !== "create-resource") return undefined;
+  const x = Number(authoringDraft.value.initialX);
+  const y = Number(authoringDraft.value.initialY);
+  return authoringDraft.value.initialX !== ""
+    && authoringDraft.value.initialY !== ""
+    && Number.isFinite(x)
+    && Number.isFinite(y)
+    ? { x, y }
+    : undefined;
+});
+const authoringDraftElementSize = computed(() => {
+  const context = authoringContext.value;
+  const view = activeView.value;
+  const resolved = view ? context?.runtime.catalogsByProfile.get(view.profileRef) : undefined;
+  const catalog = resolved?.catalog ?? props.catalog;
+  const requestedClass = authoringDraft.value.classIri.trim();
+  const rule = catalog.rules.find((candidate) => (
+    candidate.match.kind === "type"
+    && candidate.match.iri === requestedClass
+    && candidate.project.operator === "resource"
+  ));
+  const templateRef = rule?.templateRef ?? catalog.defaults?.nodeTemplateRef;
+  return (templateRef ? catalog.templates[templateRef]?.defaultSize : undefined)
+    ?? { width: 120, height: 60 };
+});
 const canUndo = computed(() => history.value.length > 0);
 const canRedo = computed(() => future.value.length > 0);
 const selectedGeometryCount = computed(() => selectedGeometryElements(
@@ -172,7 +414,7 @@ const heading = computed(() => props.title || props.filePath || draft.value.docu
 const stateLabel = computed(() => {
   if (props.saving) return "保存中";
   if (props.saveMessage) return props.saveMessage;
-  return props.dirty || turtlePending.value ? "未保存" : "保存済み";
+  return props.dirty || turtlePending.value || structuredAuthoringPending.value ? "未保存" : "保存済み";
 });
 const nodeTemplateRefs = computed(() => Object.values(props.catalog.templates)
   .filter((template) => template.structuralKind === selectedElement.value?.structuralKind)
@@ -189,11 +431,13 @@ watch(
       return;
     }
     if (nextJson === JSON.stringify(draft.value)) return;
+    cancelSemanticRequest();
     draft.value = clone(value);
     turtleDraft.value = value.semantic.source;
     history.value = [];
     future.value = [];
     applyDiagnostics.value = [];
+    invalidateAuthoringPreview();
     void refreshScene();
   },
   { deep: true },
@@ -208,8 +452,34 @@ watch(
     () => props.assetAccess?.revision,
   ],
   () => {
+    cancelSemanticRequest();
     applyDiagnostics.value = [];
     void refreshScene();
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.readOnly,
+  (value) => {
+    if (!value) return;
+    cancelSemanticRequest();
+    cancelAuthoringRequest();
+    cancelAssetPicker();
+    if (authoringDraft.value.positionPicking) {
+      authoringDraft.value = { ...authoringDraft.value, positionPicking: false };
+    }
+  },
+);
+
+watch(
+  [
+    () => props.authoringContext,
+    () => props.resourceIriAllocator,
+  ],
+  () => {
+    cancelSemanticRequest();
+    invalidateAuthoringPreview();
   },
   { deep: true },
 );
@@ -232,6 +502,8 @@ void refreshScene();
 
 onBeforeUnmount(() => {
   cancelAssetPicker();
+  cancelSemanticRequest();
+  cancelAuthoringRequest();
   assetSceneSession.dispose();
 });
 
@@ -727,26 +999,276 @@ function clearSelectedOverride(): void {
   });
 }
 
+function updateAuthoringDraft(next: EditorAuthoringDraft): void {
+  if (props.readOnly) return;
+  const changedKind = next.kind !== authoringDraft.value.kind;
+  const selected = selectedElement.value?.structuralKind === "edge"
+    ? undefined
+    : selectedElement.value;
+  if (changedKind && selected) {
+    if (next.kind === "set-property") next.subjectIri = selected.semanticRef;
+    if (next.kind === "connect-resources") next.sourceIri = selected.semanticRef;
+    if (next.kind === "set-membership") {
+      if (selected.structuralKind === "container") next.containerIri = selected.semanticRef;
+      else next.memberIri = selected.semanticRef;
+    }
+    if (next.kind === "set-sequence" || next.kind === "set-alternatives") {
+      next.structureIri = selected.semanticRef;
+    }
+    if (next.kind === "delete-resource") next.resourceIri = selected.semanticRef;
+  }
+  invalidateAuthoringPreview();
+  authoringDraft.value = next;
+  applyDiagnostics.value = [];
+}
+
+async function previewStructuredAuthoring(): Promise<void> {
+  const context = authoringContext.value;
+  if (!context || !authoringEnabled.value || authoringBusy.value) return;
+  cancelAuthoringRequest();
+  const requestToken = ++authoringRequestToken;
+  const controller = new AbortController();
+  authoringAbortController = controller;
+  const sourceDocument = clone(draft.value);
+  const sourceJson = JSON.stringify(sourceDocument);
+  const draftJson = JSON.stringify(authoringDraft.value);
+  authoringBusy.value = true;
+  try {
+    const commands = compileAuthoringDraft(
+      clone(authoringDraft.value),
+      activeView.value?.viewId ?? "",
+    );
+    const preview = await previewAuthoringCommands(sourceDocument, commands, context, {
+      allocator: props.resourceIriAllocator ?? context.allocator,
+      signal: controller.signal,
+    });
+    if (
+      requestToken !== authoringRequestToken
+      || controller.signal.aborted
+      || props.readOnly
+      || JSON.stringify(draft.value) !== sourceJson
+      || JSON.stringify(authoringDraft.value) !== draftJson
+    ) return;
+    authoringPreview.value = preview;
+    applyDiagnostics.value = clone(preview.diagnostics);
+  } catch (cause) {
+    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
+    authoringPreview.value = undefined;
+    applyDiagnostics.value = [authoringFailureDiagnostic("authoring-preview-failed", cause)];
+  } finally {
+    if (requestToken === authoringRequestToken) {
+      authoringAbortController = undefined;
+      authoringBusy.value = false;
+    }
+  }
+}
+
+async function applyStructuredAuthoring(): Promise<void> {
+  const context = authoringContext.value;
+  const preview = authoringPreview.value;
+  if (
+    !context
+    || !preview?.valid
+    || !authoringEnabled.value
+    || authoringBusy.value
+    || props.readOnly
+  ) return;
+  cancelAuthoringRequest();
+  const requestToken = ++authoringRequestToken;
+  const controller = new AbortController();
+  authoringAbortController = controller;
+  const previous = clone(draft.value);
+  const previousJson = JSON.stringify(previous);
+  authoringBusy.value = true;
+  try {
+    const result = await applyAuthoringPreview(previous, preview, context, {
+      confirmationId: preview.confirmationId,
+      signal: controller.signal,
+    });
+    if (
+      requestToken !== authoringRequestToken
+      || controller.signal.aborted
+      || props.readOnly
+      || JSON.stringify(draft.value) !== previousJson
+    ) return;
+    applyDiagnostics.value = clone(result.diagnostics);
+    if (!result.accepted) return;
+    resetAuthoringDraft();
+    publish(result.document, true);
+    turtleDraft.value = result.document.semantic.source;
+  } catch (cause) {
+    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
+    applyDiagnostics.value = [authoringFailureDiagnostic("authoring-apply-failed", cause)];
+  } finally {
+    if (requestToken === authoringRequestToken) {
+      authoringAbortController = undefined;
+      authoringBusy.value = false;
+    }
+  }
+}
+
+function seedSemanticEdit(elementId: string): void {
+  if (props.readOnly || turtlePending.value || authoringBusy.value) return;
+  const element = [
+    ...scene.value.nodes,
+    ...scene.value.containers,
+    ...scene.value.edges,
+  ].find((candidate) => candidate.elementId === elementId);
+  if (!element) return;
+
+  if (element.structuralKind !== "edge") {
+    updateAuthoringDraft({
+      ...emptyAuthoringDraft("delete-resource"),
+      resourceIri: element.semanticRef,
+    });
+    return;
+  }
+
+  seedFromProvenance(element.provenance?.editCapability, "canvas-semantic-command");
+}
+
+function seedParentRemoval(): void {
+  const element = selectedElement.value;
+  if (!element || element.structuralKind === "edge" || props.readOnly) return;
+  seedFromProvenance(element.parentProvenance?.editCapability, "inspector-parent-command");
+}
+
+function seedFromProvenance(
+  capability: SemanticEditCapability | undefined,
+  commandId: string,
+): void {
+  const seeded = seedAuthoringCommandFromProvenance(draft.value, capability, commandId);
+  const next = seeded.command ? draftFromAuthoringCommand(seeded.command) : undefined;
+  if (next) updateAuthoringDraft(next);
+  applyDiagnostics.value = clone(seeded.diagnostics);
+}
+
+function seedSelectedResource(
+  target: "edge-source" | "edge-target" | "membership-container" | "membership-member",
+): void {
+  const selected = selectedAuthoringResource.value;
+  if (!selected || props.readOnly) return;
+  const field = {
+    "edge-source": "sourceIri",
+    "edge-target": "targetIri",
+    "membership-container": "containerIri",
+    "membership-member": "memberIri",
+  }[target] as "sourceIri" | "targetIri" | "containerIri" | "memberIri";
+  updateAuthoringDraft({ ...authoringDraft.value, [field]: selected.iri });
+}
+
+function beginDraftPositionPicking(): void {
+  if (props.readOnly || authoringDraft.value.kind !== "create-resource") return;
+  updateAuthoringDraft({ ...authoringDraft.value, positionPicking: true });
+  panel.value = "diagram";
+}
+
+function seedDraftPosition(position: Point): void {
+  if (
+    props.readOnly
+    || authoringDraft.value.kind !== "create-resource"
+    || !authoringDraft.value.positionPicking
+  ) return;
+  const size = authoringDraftElementSize.value;
+  const bounded = {
+    x: Math.max(8, Math.min(position.x, scene.value.width - size.width - 8)),
+    y: Math.max(8, Math.min(position.y, scene.value.height - size.height - 8)),
+  };
+  updateAuthoringDraft({
+    ...authoringDraft.value,
+    initialX: String(Math.round(bounded.x)),
+    initialY: String(Math.round(bounded.y)),
+    positionPicking: false,
+  });
+}
+
+function cancelAuthoringDraft(): void {
+  if (authoringBusy.value) cancelAuthoringRequest();
+  authoringDraft.value = emptyAuthoringDraft();
+  authoringPreview.value = undefined;
+  applyDiagnostics.value = [];
+}
+
+function resetAuthoringDraft(): void {
+  authoringDraft.value = emptyAuthoringDraft();
+  authoringPreview.value = undefined;
+}
+
+function invalidateAuthoringPreview(): void {
+  cancelAuthoringRequest();
+  authoringPreview.value = undefined;
+}
+
+function cancelAuthoringRequest(): void {
+  authoringRequestToken += 1;
+  authoringAbortController?.abort();
+  authoringAbortController = undefined;
+  authoringBusy.value = false;
+}
+
+function authoringFailureDiagnostic(code: string, cause: unknown): ProjectionDiagnostic {
+  return {
+    severity: "error",
+    code,
+    message: cause instanceof Error ? cause.message : String(cause),
+  };
+}
+
+function formatTripleChange(change: AuthoringTripleChange): string {
+  return `${formatAuthoringGraphTerm(change.subject)} <${change.predicateIri}> ${
+    formatAuthoringGraphTerm(change.object)
+  } . # ${change.statementRef}`;
+}
+
+function formatAuthoringGraphTerm(term: AuthoringTripleChange["object"]): string {
+  if (term.termType === "NamedNode") return `<${term.value}>`;
+  if (term.termType === "BlankNode") return `_:${term.value}`;
+  return `${JSON.stringify(term.value)}${
+    term.language ? `@${term.language}` : `^^<${term.datatypeIri}>`
+  }`;
+}
+
 async function applyTurtleDraft(): Promise<boolean> {
+  if (props.readOnly) return false;
+  if (structuredAuthoringPending.value) {
+    applyDiagnostics.value = [{
+      severity: "error",
+      code: "pending-structured-authoring",
+      message: "Structured authoring draftを適用またはCancelしてからTurtleを適用してください。",
+    }];
+    return false;
+  }
   if (!turtlePending.value) return true;
   if (applyingTurtle.value) return false;
   const requestToken = ++semanticRequestToken;
+  semanticAbortController?.abort();
+  const controller = new AbortController();
+  semanticAbortController = controller;
   const previous = clone(draft.value);
   const previousJson = JSON.stringify(previous);
   const catalog = clone(props.catalog);
   schemaDiagnostics.value = schemaDiagnosticsFor(previous, catalog);
-  if (schemaDiagnostics.value.some((item) => item.severity === "error")) return false;
+  if (schemaDiagnostics.value.some((item) => item.severity === "error")) {
+    cancelSemanticRequest();
+    return false;
+  }
 
   applyingTurtle.value = true;
   let result: SemanticSourceUpdate;
   try {
-    result = await applySemanticSource(
-      previous,
-      turtleDraft.value,
-      projectionContext(catalog),
-    );
+    const context = authoringContext.value;
+    result = context
+      ? await applyAuthoringSource(previous, turtleDraft.value, context, {
+          actor: "human",
+          signal: controller.signal,
+        })
+      : await applySemanticSource(
+          previous,
+          turtleDraft.value,
+          projectionContext(catalog),
+        );
   } catch (cause) {
-    if (requestToken !== semanticRequestToken) return false;
+    if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
     applyDiagnostics.value = [{
       severity: "error",
       code: "semantic-transaction-failed",
@@ -754,9 +1276,12 @@ async function applyTurtleDraft(): Promise<boolean> {
     }];
     return false;
   } finally {
-    if (requestToken === semanticRequestToken) applyingTurtle.value = false;
+    if (requestToken === semanticRequestToken) {
+      applyingTurtle.value = false;
+      semanticAbortController = undefined;
+    }
   }
-  if (requestToken !== semanticRequestToken) return false;
+  if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
   if (JSON.stringify(draft.value) !== previousJson) {
     applyDiagnostics.value = [{
       severity: "error",
@@ -767,9 +1292,17 @@ async function applyTurtleDraft(): Promise<boolean> {
   }
   applyDiagnostics.value = result.diagnostics;
   if (!result.accepted) return false;
+  if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
   publish(result.document, true);
   turtleDraft.value = result.document.semantic.source;
   return true;
+}
+
+function cancelSemanticRequest(): void {
+  semanticRequestToken += 1;
+  semanticAbortController?.abort();
+  semanticAbortController = undefined;
+  applyingTurtle.value = false;
 }
 
 function revertTurtleDraft(): void {
@@ -802,6 +1335,14 @@ async function requestSave(): Promise<void> {
 }
 
 async function flushPendingEdits(): Promise<boolean> {
+  if (structuredAuthoringPending.value) {
+    applyDiagnostics.value = [{
+      severity: "error",
+      code: "pending-structured-authoring",
+      message: "Preview/Applyされていないsemantic draftがあります。明示的に適用するかCancelしてください。",
+    }];
+    return false;
+  }
   if (turtlePending.value) return applyTurtleDraft();
   await refreshScene();
   return !schemaDiagnostics.value.some((item) => item.severity === "error")
@@ -870,6 +1411,7 @@ function mutateDocument(
 }
 
 function publish(next: IriographDocument, recordHistory: boolean): void {
+  invalidateAuthoringPreview();
   if (recordHistory) {
     history.value.push(clone(draft.value));
     trimHistory();
@@ -882,6 +1424,7 @@ function publish(next: IriographDocument, recordHistory: boolean): void {
 }
 
 function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): void {
+  invalidateAuthoringPreview();
   const pendingTurtle = turtleDraft.value;
   draft.value = clone(next);
   turtleDraft.value = preserveTurtleDraft ? pendingTurtle : next.semantic.source;
@@ -1053,7 +1596,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         <span :class="['iriograph-validation-pill', { error: errorCount > 0 }]">
           {{ errorCount > 0 ? `${errorCount} errors` : "Turtle valid" }}
         </span>
-        <button type="button" :disabled="!canSave || saving || applyingTurtle" @click="requestSave">
+        <button type="button" :disabled="!canSave || saving || applyingTurtle || authoringBusy" @click="requestSave">
           {{ saving ? "保存中…" : "保存" }}
         </button>
       </div>
@@ -1071,6 +1614,27 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <span><b>{{ scene.containers.length }}</b> areas</span>
           </div>
         </section>
+        <AuthoringPanel
+          :model-value="authoringDraft"
+          :enabled="authoringEnabled"
+          :blocked-reason="authoringBlockedReason"
+          :busy="authoringBusy"
+          :classes="authoringClassChoices"
+          :properties="authoringPropertyChoices"
+          :edge-predicates="authoringEdgeChoices"
+          :resources="authoringResourceChoices"
+          :capabilities="authoringCapabilityChoices"
+          :structures="authoringStructureChoices"
+          :selected-resource="selectedAuthoringResource"
+          :preview="authoringPreviewView"
+          :diagnostics="applyDiagnostics"
+          @update:model-value="updateAuthoringDraft"
+          @preview="previewStructuredAuthoring"
+          @apply="applyStructuredAuthoring"
+          @cancel="cancelAuthoringDraft"
+          @pick-position="beginDraftPositionPicking"
+          @seed-selection="seedSelectedResource"
+        />
         <nav class="iriograph-element-list" aria-label="Scene elements">
           <small>SCENE ELEMENTS <span>derived</span></small>
           <button
@@ -1188,7 +1752,9 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :selected-element-ids="selectedElementIds"
             :zoom="zoom"
             :snap="snapSettings"
-            :read-only="readOnly || sceneLoading || applyingTurtle"
+            :read-only="readOnly || sceneLoading || applyingTurtle || authoringBusy"
+            :semantic-position-picking="authoringDraft.positionPicking"
+            :semantic-draft-position="authoringDraftPosition"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
             @gesture-start="beginGesture"
@@ -1196,6 +1762,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @resize-change="changeGeometry"
             @geometry-batch-change="changeGeometryBatch"
             @routing-update="changeRouting"
+            @semantic-edit-request="seedSemanticEdit"
+            @semantic-position-request="seedDraftPosition"
           />
         </section>
 
@@ -1214,7 +1782,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <template v-if="panel === 'turtle'">
             <textarea
               v-model="turtleDraft"
-              :readonly="readOnly"
+              :readonly="readOnly || structuredAuthoringPending"
               spellcheck="false"
               aria-label="Turtle source"
             />
@@ -1226,7 +1794,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               </div>
               <div>
                 <button type="button" :disabled="!turtlePending" @click="revertTurtleDraft">元に戻す</button>
-                <button type="button" class="primary" :disabled="!turtlePending || readOnly || applyingTurtle" @click="applyTurtleDraft">
+                <button type="button" class="primary" :disabled="!turtlePending || readOnly || applyingTurtle || structuredAuthoringPending" @click="applyTurtleDraft">
                   {{ applyingTurtle ? "適用中…" : "検証して適用" }}
                 </button>
               </div>
@@ -1250,6 +1818,13 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <section>
             <label>Semantic reference</label>
             <code>{{ selectedElement.semanticRef }}</code>
+            <button
+              v-if="selectedElement.structuralKind !== 'edge' && selectedElement.parentProvenance?.editCapability"
+              type="button"
+              class="iriograph-wide-button"
+              :disabled="readOnly || authoringBusy || turtlePending"
+              @click="seedParentRemoval"
+            >包含から外す</button>
           </section>
           <section>
             <label>Template</label>

@@ -11,6 +11,8 @@ import { catalogRef } from "./standard-catalog";
 export type ResolvedProjectionRule = {
   catalogRef: string;
   rule: ProjectionRule;
+  /** Asserted type/predicate that actually matched the rule (not its ancestor match IRI). */
+  matchedIri?: string;
   specificity: "exact" | "entailed" | "wildcard";
   distance: number;
 };
@@ -44,7 +46,7 @@ export function matchingResourceRuleCandidates(
     for (const assertedType of assertedTypes) {
       const distance = typeDistance(assertedType, rule, closure);
       if (distance === undefined) continue;
-      const candidate = candidateFor(catalog, rule, distance);
+      const candidate = candidateFor(catalog, rule, distance, assertedType);
       if (!best || compareCandidates(candidate, best) < 0) best = candidate;
     }
     if (best) candidates.push(best);
@@ -67,7 +69,7 @@ export function resolveStatementRule(
     if (rule.match.kind !== "predicate") continue;
     const distance = predicateDistance(predicateIri, rule, closure);
     if (distance === undefined) continue;
-    candidates.push(candidateFor(catalog, rule, distance));
+    candidates.push(candidateFor(catalog, rule, distance, predicateIri));
   }
   return resolveCandidates(candidates, semanticRef);
 }
@@ -203,10 +205,12 @@ function candidateFor(
   catalog: ProjectionCatalogV1,
   rule: ProjectionRule,
   distance: number,
+  matchedIri?: string,
 ): ResolvedProjectionRule {
   return {
     catalogRef: catalogRef(catalog),
     rule,
+    matchedIri,
     specificity: rule.match.kind === "any-iri-object"
       ? "wildcard"
       : distance === 0 ? "exact" : "entailed",

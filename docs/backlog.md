@@ -4,7 +4,7 @@
 
 ## 現在の基準点
 
-Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Core/editorは0.1.0の配布contract、tarball consumer検証、editor component回帰testとPlaywright browser smokeを持ち、session-onlyのviewport navigation、multi-selection、境界を守る一括移動、整列、等間隔、grid/target snap、manual edge routing、label位置、parallel edge、self-loopも接続されています。意味編集と表示編集のtransactionは分離されていますが、API安定版ではありません。
+Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Core/editorは0.1.0の配布contract、tarball consumer検証、editor component回帰testとPlaywright browser smokeを持ち、session-onlyのviewport navigation、multi-selection、境界を守る一括移動、整列、等間隔、grid/target snap、manual edge routing、label位置、parallel edge、self-loopも接続されています。Human semantic authoringはresolved contextとallocatorをhostから受け、resource・属性・edge・包含・Seq/Alt・削除をdraft、exact graph patch preview、明示Applyのatomic transactionとして扱います。意味編集と表示編集のtransactionは分離されていますが、API安定版ではありません。
 
 Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq、Alt、seeAlsoを使う購入承認例です。Domain語彙はこれらの標準構造を置き換えずnode等のappearanceを選択し、標準catalogとdefaultsを持たないdomain extension catalogを決定的に結合しています。
 
@@ -19,7 +19,6 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq�
 
 | ID | 項目 | 依存 | 完了条件 |
 |---|---|---|---|
-| P1-04 | human semantic authoring commands | P0-06、P0-08 | actor=`human`でprofile/hostから安全に採番したnamed IRIと初期tripleが必須のnode作成、literal/IRI属性編集、predicate必須の直接edgeまたはcapability graph patch、明示的なcontainment/sequence/alternative、参照時rejectを既定とするresource削除とpreview付きexplicit cascadeをTurtle graph transactionとして編集できる。Seq/Alt削除はatomicに再採番する。操作はサイドバーdraft→triple/graph patch preview・validation→明示適用とし、canvas gestureはdraftをseedするだけにする。Ghost、仮node、暗黙generic predicateを保存せず、dragはmembershipを変更しない。`ResolvedAuthoringContext`/allocator契約とstatic mock fixtureをP1で用意し、URI resolverはP2-01に残す。Unknown term warning、derived edge/所属のprovenanceからの逆編集、Turtle直接編集と共通validation/reconciliation、作成位置を含むatomic undo/rollbackをcomponent/E2E testする |
 | P1-05 | SHACL等のsemantic validation port | P0-01 | syntax errorとdomain constraintを分け、semanticRef付きdiagnosticをSceneとsourceへ対応付ける |
 | P1-06 | named view、localeとview管理 | P0-08 | 同じTurtleに異なるprofile/layout/locale/overlayを持つnamed viewを選択・追加・複製・削除でき、view profileが表示構造を選ぶ。SPARQL/汎用filter editorは導入せず、一時hideはsession stateにだけ保持する |
 | P1-07 | accessibilityとkeyboard編集 | P0-11、P1-01〜03 | focus順、選択、移動、resize、routingの主要操作をkeyboardで完結できる |

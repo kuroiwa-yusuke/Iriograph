@@ -30,9 +30,9 @@ npm run verify
 
 ## Package境界
 
-- `@iriograph/core`: document model、Turtle parse、catalog投影、検証、display reconciliation
-- `@iriograph/vue-editor`: hostの編集領域へ埋め込むVue component
-- `@iriograph/mock`: localStorageを保存先にしたlocal host例
+- `@iriograph/core`: document model、Turtle parse、catalog投影、actor別controlled source write、検証、display reconciliation、semantic command preview/apply
+- `@iriograph/vue-editor`: 表示overlayと意味グラフを分離し、サイドバーのpreview→明示Applyで編集する埋め込みVue component
+- `@iriograph/mock`: localStorage、workspace asset、static authoring context/IRI allocatorを接続したlocal host例
 
 `@iriograph/vue-editor`はworkspace、HTTP、認証、永続化を知りません。hostは`v-model`でdocumentを受け取り、`save` eventを任意の保存APIへ接続します。
 

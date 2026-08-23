@@ -136,7 +136,7 @@ export function collectOrdinalMembers(
 ): OrdinalMember[] {
   return graph.store
     .getQuads(subjectIri, null, null, null)
-    .filter((quad) => quad.predicate.value.startsWith(predicatePrefix))
+    .filter((quad) => parseOrdinal(quad.predicate.value, predicatePrefix) !== undefined)
     .map((quad) => ({
       ordinal: parseOrdinal(quad.predicate.value, predicatePrefix),
       quad,
@@ -372,7 +372,9 @@ function validateOrphanOrdinals(
   diagnostics: ProjectionDiagnostic[],
 ): void {
   for (const quad of graph.quads) {
-    const prefix = [...prefixes].find((candidate) => quad.predicate.value.startsWith(candidate));
+    const prefix = [...prefixes].find((candidate) => (
+      parseOrdinal(quad.predicate.value, candidate) !== undefined
+    ));
     if (!prefix) continue;
     if (isNamedNode(quad.subject)) {
       const operator = plans.get(quad.subject.value)?.resolved?.rule.project;

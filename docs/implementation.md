@@ -4,9 +4,9 @@
 
 | Package | 責務 | 持たない責務 |
 |---|---|---|
-| `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、非同期layout adapter契約と標準軽量layout、asset lease/policy検証。semantic commandのgraph patch変換はP1-04で追加する | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
-| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、inspector。human semantic command UIはP1-04で追加する | 語彙判定、永続化、認証、catalog取得 |
-| `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver例 | 投影規則、editor内部state |
+| `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、human semantic commandのatomic graph patch/preview/apply、非同期layout adapter契約と標準軽量layout、asset lease/policy検証 | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
+| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、inspector、サイドバーのstructured semantic authoring | 語彙判定、永続化、認証、catalog取得 |
+| `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocator例 | 投影規則、editor内部state |
 
 ## 投影処理
 
@@ -62,7 +62,7 @@ Snap policyはDOM非依存のgeometry operationとして実装し、標準grid 8
 
 Turtle textareaは未適用draftを持ちます。「検証して適用」または保存前の非同期`flushPendingEdits()`でsemantic transactionを開始します。現行実装はparseとRDF/RDFS構造検証後、全viewをそれぞれのprofile/catalog/layoutで再構成し、一つでもblocking errorがあれば元documentへrollbackします。Parse error時はdraftを残してdocument正本を変更しません。
 
-Target semantic transactionはactorを`human`または`llm`として受け取り、元graphとの差分にauthoring profileを適用します。Rendererのfallback投影はunknown termを許容しますが、LLM transactionはprofile外term、新規semantic term、許可外namespaceを拒否します。
+Controlled source transactionは`applyAuthoringSource`でactorを`human`または`llm`として必須受領し、元graphとの差分にauthoring profileを適用します。不明actorはfail closedです。Rendererのfallback投影はunknown termを許容しますが、LLM transactionはprofile外term、新規semantic term、許可外namespaceを拒否します。
 
 Rich editorのnode、属性、edge、包含、順序、選択編集は次のパイプラインで実行します。
 
@@ -87,7 +87,15 @@ Canvasからのedge削除やcontainerからの取り出しは、Scene elementを
 
 Resource自体の削除では、そのresourceをsubjectとするtype、label、property等を削除対象に含めます。別のsubjectからresourceをobjectとして参照するstatementまたはstructure membershipが残る場合は既定で拒否します。明示cascadeではそれらの影響statementをサイドバーでpreviewし、承認された集合だけを一つのgraph patchで削除します。Seq/Alt memberを除く場合は残る`rdf:_n`も同じpatchで連番へ再構成し、最終candidateが構造制約を満たさなければ全体をrollbackします。
 
-P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とresource IRI allocatorを受け取ります。Mockではstatic context fixtureを使います。Profile/vocabulary URIの取得、version・cache・integrity解決はP2-01まで実装せず、editor/coreからresolverへ逆依存させません。
+P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とresource IRI allocatorを受け取ります。Editorはcommand draftをportable documentと別のsession stateとして保持し、Coreのpreviewでcandidate dataset、graph patch、diagnostic、confirmation IDを得ます。Applyは同じ元source、document fingerprint、context identity、正規化command、追加・削除statement集合からconfirmation IDを再計算し、preview結果を再compileしてから既存の全view reconciliationへ渡します。
+
+Allocatorはpreview時だけ呼び、返したIRIを正規化commandへ固定します。Coreはallowed namespaceだけでなく、graphのsubject、predicate、objectに同じIRIが既に使われていないことも検査します。Allocatorのcancel、error、古い非同期resultはdocumentへ入りません。Turtle textareaの未適用draftとstructured command draftは同時に有効にせず、どちらかが存在する間はもう一方のwrite入口を無効にします。
+
+Delete cascadeはresourceをsubject、object、predicateに含むexact statement setをpreviewし、その集合をconfirmation IDへ含めます。Seq/Alt member削除では古いordinal削除と残るmemberの連番追加を一つのpatchにし、Seq 1件以上、Alt 2件以上とdefault memberを最終candidateで検証します。Ordinal predicateはcatalog prefixに続く正規の正整数suffixだけを構造として扱い、prefixが似た通常propertyを削除・再採番しません。Scene provenanceがない場合、Editorはpredicateや構造を見た目から推測せず逆編集actionを無効にします。
+
+`set-property`は値集合の完全置換で、空配列だけを削除とします。空文字列literalとIRI/literal複数値を区別し、参照を外したことで孤立するblank-node closureを推測削除しません。Capability optional bindingは参照するtemplate statement単位でadd/remove双方からskipします。`set-alternatives`は`memberIris`を最終ordinal順として重複を保ち、default ordinal slotとの一致を検証します。
+
+Mockではstatic context fixtureを使います。Profile/vocabulary URIの取得、version・cache・integrity解決はP2-01まで実装せず、editor/coreからresolverへ逆依存させません。
 
 ## Named viewとsession表示状態
 
@@ -105,7 +113,7 @@ P1の暫定基準は、500 node / 1,000 edgeを通常規模、2,000 node / 4,000
 
 購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。開始・終了event、user/service task、gateway等のdomain typeは構造を独自述語で再定義せず、domain extension catalogからappearanceへ対応付けます。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
 
-Editorはdrag、resize、edge waypoint追加・削除・移動、edge label位置、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。Turtleの適用、保存、書出は非同期reconciliationの完了を待ちます。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+Editorはdrag、resize、edge waypoint追加・削除・移動、edge label位置、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。加えて、host注入のstatic authoring context/allocatorを使い、resource、属性、直接edge、包含、Seq、Alt、capability patch、resource削除をサイドバーでpreviewして明示適用できます。Turtleの適用、semantic authoring、保存、書出は非同期reconciliationの完了を待ちます。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
 
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 

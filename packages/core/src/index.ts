@@ -16,3 +16,6 @@ export * from "./scene";
 export * from "./reconciliation";
 export * from "./serializer";
 export * from "./assets";
+export * from "./authoring-model";
+export * from "./authoring-validation";
+export * from "./authoring";

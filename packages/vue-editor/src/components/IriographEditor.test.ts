@@ -7,13 +7,23 @@ import {
 import { nextTick } from "vue";
 
 import {
+  catalogRef,
+  createProjectionRuntimeContext,
+  createStandardLayoutRegistry,
   STANDARD_LAYOUT_REFS,
   standardRdfRdfsCatalog,
   type DiagramScene,
   type ElementGeometry,
   type IriographDocument,
   type IriographDocumentV1,
+  type LayoutAdapter,
+  LayoutAdapterRegistry,
   type Point,
+  type ResolvedAuthoringContext,
+  type ResourceIriAllocation,
+  type ResourceIriAllocationRequest,
+  type ResourceIriAllocator,
+  StandardLightweightLayoutAdapter,
 } from "@iriograph/core";
 
 import DiagramCanvas from "./DiagramCanvas.vue";
@@ -25,6 +35,7 @@ import {
 import type { IriographEditorSelectionApi } from "../selection";
 
 const NS = "urn:test:editor:";
+const TASK_CLASS = `${NS}Task`;
 const initialSource = `
 @prefix : <${NS}> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
@@ -440,6 +451,378 @@ describe("IriographEditor transaction regression", () => {
     await nextTick();
     expect(wrapper.emitted("update:modelValue")).toHaveLength(updateCount);
   });
+
+  it("structured draftをPreview後に初期位置ごと一つのsemantic historyへ適用する", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({
+      authoringContext: testAuthoringContext(fixture),
+      resourceIriAllocator: fixedAllocator(`${NS}created`),
+    });
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("Created task");
+    await buttonWithText(wrapper, "Canvasで位置指定").trigger("click");
+    emitCanvas(wrapper.getComponent(DiagramCanvas), "semanticPositionRequest", { x: 320, y: 160 });
+    await nextTick();
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Initial x"]').element.value).toBe("320");
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Initial y"]').element.value).toBe("88");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
+    expect(wrapper.text()).toContain("追加 2 triple");
+    expect(wrapper.text()).toContain("適用可能");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
+    await waitUntil(() => Boolean(
+      (wrapper!.emitted("update:modelValue")?.at(-1)?.[0] as IriographDocument | undefined)
+        ?.semantic.source.includes(`${NS}created`),
+    ));
+    const created = latestDocument(wrapper);
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
+    expect(overlayFor(created, `${NS}created`)).toMatchObject({
+      geometry: { x: 320, y: 88 },
+      pinned: true,
+      placement: "user",
+    });
+
+    exposedHistoryApi(wrapper).undo();
+    await settle();
+    expect(latestDocument(wrapper).semantic.source).not.toContain(`${NS}created`);
+    expect(overlayFor(latestDocument(wrapper), `${NS}created`)).toBeUndefined();
+  });
+
+  it("Turtle draftとstructured draftを排他にし未確認draftを保存flushしない", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({
+      authoringContext: testAuthoringContext(fixture),
+      resourceIriAllocator: fixedAllocator(`${NS}created`),
+    });
+    await openTurtlePanel(wrapper);
+    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    await textarea.setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]').element.disabled)
+      .toBe(true);
+    await buttonWithText(wrapper, "元に戻す").trigger("click");
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("Pending");
+    expect(textarea.element.readOnly).toBe(true);
+    expect(await exposedApi(wrapper).flushPendingEdits()).toBe(false);
+    expect(wrapper.text()).toContain("Preview/Applyされていないsemantic draft");
+    expect(wrapper.emitted("save")).toBeUndefined();
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("Canvas Deleteはdirect edgeのprovenanceをexact remove draftへseedする", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges.find((item) => item.label === "rel")!;
+
+    emitCanvas(canvas, "semanticEditRequest", edge.elementId);
+    await nextTick();
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Statement ref"]').element.value)
+      .toBe(edge.provenance?.sourceStatementRefs[0]);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
+    expect(wrapper.text()).toContain("削除 1 triple");
+    expect(wrapper.text()).toContain("適用可能");
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").edges.length === 0);
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
+  });
+
+  it("async allocatorの結果をdocument/context変更後に採用しない", async () => {
+    const fixture = documentFixture();
+    let allocationRequest: ResourceIriAllocationRequest | undefined;
+    let resolveAllocation: ((value: ResourceIriAllocation) => void) | undefined;
+    const allocator: ResourceIriAllocator = {
+      allocate(request) {
+        allocationRequest = request;
+        return new Promise((resolve) => { resolveAllocation = resolve; });
+      },
+    };
+    wrapper = await mountEditor({
+      authoringContext: testAuthoringContext(fixture),
+      resourceIriAllocator: allocator,
+    });
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => Boolean(allocationRequest));
+
+    const replacement = threeNodeDocumentFixture();
+    await wrapper.setProps({
+      modelValue: replacement,
+      authoringContext: testAuthoringContext(replacement),
+    });
+    resolveAllocation!({
+      iri: `${NS}stale-created`,
+      requestId: allocationRequest!.requestId,
+      baseRevision: allocationRequest!.baseRevision,
+      contextId: allocationRequest!.contextId,
+    });
+    await settle();
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("authoringContext提供時のdirect Turtleへunknown/namespace/role policyを共通適用する", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
+    await openTurtlePanel(wrapper);
+    const source = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    const warned = `${initialSource}\n:c :unknown :a .\n`;
+    await source.setValue(warned);
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).semantic.source === warned);
+    expect(wrapper.text()).toContain("unknown-term-introduced");
+    expect(latestDocument(wrapper).semantic.source).toBe(warned);
+
+    const beforeRejected = wrapper.emitted("update:modelValue")!.length;
+    await source.setValue(`${warned}\n:d :Task :a .\n`);
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("authoring-term-role-invalid"));
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(beforeRejected);
+
+    await source.setValue(`${warned}\n<https://outside.example/resource> rdfs:label "Outside" .\n`);
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("resource-namespace-denied"));
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(beforeRejected);
+  });
+
+  it("readOnly途中切替でasync previewをabortし結果を公開しない", async () => {
+    const fixture = documentFixture();
+    let request: ResourceIriAllocationRequest | undefined;
+    let resolveAllocation: ((value: ResourceIriAllocation) => void) | undefined;
+    const allocator: ResourceIriAllocator = {
+      allocate(value) {
+        request = value;
+        return new Promise((resolve) => { resolveAllocation = resolve; });
+      },
+    };
+    wrapper = await mountEditor({
+      authoringContext: testAuthoringContext(fixture),
+      resourceIriAllocator: allocator,
+    });
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => Boolean(request));
+    await wrapper.setProps({ readOnly: true });
+    resolveAllocation!({
+      iri: `${NS}cancelled-created`,
+      requestId: request!.requestId,
+      baseRevision: request!.baseRevision,
+      contextId: request!.contextId,
+    });
+    await settle();
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("busy中のCancelでasync previewをabortしlate結果を採用しない", async () => {
+    const fixture = documentFixture();
+    let request: ResourceIriAllocationRequest | undefined;
+    let resolveAllocation: ((value: ResourceIriAllocation) => void) | undefined;
+    const allocator: ResourceIriAllocator = {
+      allocate(value) {
+        request = value;
+        return new Promise((resolve) => { resolveAllocation = resolve; });
+      },
+    };
+    wrapper = await mountEditor({
+      authoringContext: testAuthoringContext(fixture),
+      resourceIriAllocator: allocator,
+    });
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => Boolean(request));
+    const cancel = buttonWithText(wrapper, "Cancel");
+    expect(cancel.attributes("disabled")).toBeUndefined();
+    await cancel.trigger("click");
+    resolveAllocation!({
+      iri: `${NS}late-created`,
+      requestId: request!.requestId,
+      baseRevision: request!.baseRevision,
+      contextId: request!.contextId,
+    });
+    await settle();
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').element.value).toBe("");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("readOnly途中切替でasync Turtle applyをabortしpublishしない", async () => {
+    const fixture = documentFixture();
+    const delayed = delayedLayoutRegistry();
+    const context = testAuthoringContext(fixture);
+    context.runtime = { ...context.runtime, layouts: delayed.registry };
+    wrapper = await mountEditor({ authoringContext: context });
+    await openTurtlePanel(wrapper);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+      .setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
+    delayed.arm();
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await delayed.started;
+    await wrapper.setProps({ readOnly: true });
+    delayed.release();
+    await settle();
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("readOnly途中切替でconfirmed structured applyもabortしpublishしない", async () => {
+    const fixture = documentFixture();
+    const delayed = delayedLayoutRegistry();
+    const context = testAuthoringContext(fixture);
+    context.runtime = { ...context.runtime, layouts: delayed.registry };
+    wrapper = await mountEditor({
+      authoringContext: context,
+      resourceIriAllocator: fixedAllocator(`${NS}delayed-created`),
+    });
+    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("適用可能"));
+    delayed.arm();
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
+    await delayed.started;
+    await wrapper.setProps({ readOnly: true });
+    delayed.release();
+    await settle();
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("authoringContext変更中のdirect Turtle結果をstaleとして破棄する", async () => {
+    const fixture = documentFixture();
+    const delayed = delayedLayoutRegistry();
+    const context = testAuthoringContext(fixture);
+    context.runtime = { ...context.runtime, layouts: delayed.registry };
+    wrapper = await mountEditor({ authoringContext: context });
+    await openTurtlePanel(wrapper);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+      .setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
+    delayed.arm();
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await delayed.started;
+    await wrapper.setProps({
+      authoringContext: { ...testAuthoringContext(fixture), contextRevision: "2" },
+    });
+    delayed.release();
+    await settle();
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("parent provenanceから包含解除をexact configでseedしPreviewする", async () => {
+    const fixture = containedDocumentFixture();
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      authoringContext: testAuthoringContext(fixture),
+    }, 1);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const member = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    exposedSelectionApi(wrapper).selectElement(member.elementId);
+    await nextTick();
+    await buttonWithText(wrapper, "包含から外す").trigger("click");
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Membership member"]').element.value)
+      .toBe(`${NS}a`);
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Membership present"]').element.checked)
+      .toBe(false);
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Membership structure config"]').element.value)
+      .not.toBe("");
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("適用可能"));
+    expect(wrapper.text()).toContain("削除 1 triple");
+  });
+
+  it("RDFS subclass Seq provenanceを現在のexact configと全ordinal memberへseedする", async () => {
+    const fixture = sequenceDocumentFixture();
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      authoringContext: testAuthoringContext(fixture),
+    }, 4);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const sequenceEdge = canvas.props("scene").edges.find((edge) => (
+      edge.provenance?.editCapability?.command === "set-sequence"
+    ))!;
+    emitCanvas(canvas, "semanticEditRequest", sequenceEdge.elementId);
+    await nextTick();
+    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]').element.value)
+      .toBe(`${NS}a\n${NS}b\n${NS}a`);
+    expect(datalistValuesFor(wrapper, 'input[aria-label="Structure IRI"]'))
+      .toContain(`${NS}seq`);
+    const config = wrapper.get<HTMLSelectElement>('select[aria-label="Ordinal structure config"]');
+    expect(config.element.value).not.toBe("");
+    expect(config.text()).toContain("現在の構成");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]')
+      .setValue(`${NS}b\n${NS}a\n${NS}a`);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
+    expect(wrapper.text()).toContain("適用可能");
+  });
+
+  it("objectKinds未指定propertyをedge候補に含めliteral-onlyを除外する", async () => {
+    const fixture = documentFixture();
+    const context = testAuthoringContext(fixture);
+    context.terms = [
+      ...context.terms,
+      { iri: `${NS}unconstrained`, kind: "property", label: "Unconstrained" },
+      {
+        iri: `${NS}literalOnly`,
+        kind: "property",
+        label: "Literal only",
+        objectKinds: ["literal"],
+      },
+    ];
+    wrapper = await mountEditor({ authoringContext: context });
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]')
+      .setValue("connect-resources");
+    await nextTick();
+
+    const predicates = datalistValuesFor(wrapper, 'input[aria-label="Edge predicate"]');
+    expect(predicates).toContain(`${NS}unconstrained`);
+    expect(predicates).not.toContain(`${NS}literalOnly`);
+  });
+
+  it("Alt provenanceから重複memberとdefault ordinal slotをlosslessにseedする", async () => {
+    const fixture = alternativeDocumentFixture();
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      authoringContext: testAuthoringContext(fixture),
+    }, 3);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const alternativeEdge = canvas.props("scene").edges.find((edge) => (
+      edge.provenance?.editCapability?.command === "set-alternatives"
+    ))!;
+    emitCanvas(canvas, "semanticEditRequest", alternativeEdge.elementId);
+    await nextTick();
+    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]').element.value)
+      .toBe(`${NS}a\n${NS}b\n${NS}a`);
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Default ordinal"]').element.value)
+      .toBe("1");
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Default member IRI"]').element.value)
+      .toBe(`${NS}a`);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]')
+      .setValue(`${NS}b\n${NS}a\n${NS}a`);
+    expect(wrapper.get<HTMLInputElement>('input[aria-label="Default member IRI"]').element.value)
+      .toBe(`${NS}b`);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
+    expect(wrapper.text()).toContain("適用可能");
+  });
+
+  it("readOnlyではstructured authoringの全write入口を無効化する", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({
+      authoringContext: testAuthoringContext(fixture),
+      readOnly: true,
+    });
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]').element.disabled)
+      .toBe(true);
+    await buttonWithText(wrapper, "差分をPreview").trigger("click");
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
 });
 
 async function mountEditor(
@@ -522,6 +905,14 @@ function overlayFor(document: IriographDocument, semanticRef: string) {
     .find((overlay) => overlay.semanticRef === semanticRef);
 }
 
+function datalistValuesFor(wrapper: VueWrapper, inputSelector: string): string[] {
+  const listId = wrapper.get<HTMLInputElement>(inputSelector).attributes("list");
+  if (!listId) throw new Error(`input ${inputSelector} has no datalist`);
+  const list = document.getElementById(listId);
+  if (!(list instanceof HTMLDataListElement)) throw new Error(`datalist ${listId} was not found`);
+  return [...list.options].map((option) => option.value);
+}
+
 function summaryNodeCount(wrapper: VueWrapper): number {
   return Number(wrapper.get(".iriograph-view-summary b").text());
 }
@@ -587,4 +978,115 @@ function containedDocumentFixture(): IriographDocumentV1 {
 :a rdfs:label "A" .
 `;
   return document;
+}
+
+function sequenceDocumentFixture(): IriographDocumentV1 {
+  const document = documentFixture();
+  document.documentId = "editor-sequence-regression";
+  document.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:Flow rdfs:subClassOf rdf:Seq .
+:seq a :Flow ; rdf:_1 :a ; rdf:_2 :b ; rdf:_3 :a .
+:a rdfs:label "A" .
+:b rdfs:label "B" .
+`;
+  return document;
+}
+
+function alternativeDocumentFixture(): IriographDocumentV1 {
+  const document = documentFixture();
+  document.documentId = "editor-alternative-regression";
+  document.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:alt a rdf:Alt ; rdf:_1 :a ; rdf:_2 :b ; rdf:_3 :a .
+:a rdfs:label "A" .
+:b rdfs:label "B" .
+`;
+  return document;
+}
+
+function testAuthoringContext(document: IriographDocumentV1): ResolvedAuthoringContext {
+  return {
+    contextId: "urn:test:editor:authoring-context",
+    contextRevision: "1",
+    documentRevision: `revision:${document.documentId}:${document.semantic.source.length}`,
+    authoringProfileRef: document.semantic.authoringProfileRef,
+    runtime: createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], createStandardLayoutRegistry()),
+    resourcePolicy: { allowedMintNamespaces: [NS] },
+    termPolicy: {
+      existingUnknown: "preserve",
+      humanUnknown: "warn",
+      llmUnknown: "reject",
+      humanMinting: "deny",
+      llmMinting: "deny",
+    },
+    terms: [
+      { iri: TASK_CLASS, kind: "class", label: "Task" },
+      {
+        iri: "http://www.w3.org/2000/01/rdf-schema#label",
+        kind: "property",
+        label: "Label",
+        objectKinds: ["literal"],
+        maxCount: 1,
+      },
+      { iri: `${NS}rel`, kind: "property", label: "Rel", objectKinds: ["iri"] },
+    ],
+    capabilities: [],
+  };
+}
+
+function fixedAllocator(iri: string): ResourceIriAllocator {
+  return {
+    allocate(request) {
+      return {
+        iri,
+        requestId: request.requestId,
+        baseRevision: request.baseRevision,
+        contextId: request.contextId,
+      };
+    },
+  };
+}
+
+function delayedLayoutRegistry(): {
+  registry: LayoutAdapterRegistry;
+  started: Promise<void>;
+  arm(): void;
+  release(): void;
+} {
+  const delegate = new StandardLightweightLayoutAdapter(
+    STANDARD_LAYOUT_REFS.hierarchicalLr,
+    "LR",
+  );
+  let armed = false;
+  let release!: () => void;
+  let markStarted!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const adapter: LayoutAdapter = {
+    layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+    async layout(request) {
+      const result = await delegate.layout(request);
+      if (armed) {
+        markStarted();
+        await gate;
+      }
+      return result;
+    },
+  };
+  return {
+    registry: new LayoutAdapterRegistry([adapter]),
+    started,
+    arm() { armed = true; },
+    release,
+  };
 }

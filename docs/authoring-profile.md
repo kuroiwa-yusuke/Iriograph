@@ -106,13 +106,17 @@ Rich editorはTurtle文字列の書き換えをUI独自の実装で行わず、a
 
 通常UIは完全IRIを常時入力させる必要はありません。Host注入のIRI allocatorまたは明示入力からnamed IRIを得られますが、どちらも`allowedMintNamespaces`とgraph内衝突を検証します。Allocatorが返したIRIであってもauthoring policyを迂回できません。
 
+`allowedMintNamespaces`はnode作成専用の制約ではありません。Structured commandまたは直接Turtle editで新しく登場するinstance resource IRIは、subject、IRI-object tripleのobject、propertyのIRI value、構造member等のどの位置でも同じnamespace policyを通ります。Predicateやclass等のsemantic termはresource namespaceではなく、vocabulary indexとunknown-term policyで検査します。UIは既存resourceの明示選択を優先しますが、許可namespace内なら各instance位置で新規resourceを参照・作成できます。
+
 Human structured commandは次のpolicyに従います。
 
 - `create-resource`はallowed namespace内のnamed IRIと、当該resourceを含む少なくとも1つの初期statementを同一transactionで作る。Sceneにだけ存在するnodeは作らない
 - literal属性の追加、置換、削除もsemantic transactionとし、predicate、datatype、language tag、domain constraintを検証する
+- 属性編集はsubject/predicateの値集合を完全置換する。空文字列literalは有効な一値であり、削除は空の値集合として明示する。IRI/literalの複数値を順序に依存せず失わず扱う
 - edgeはpredicateまたは明示的なsemantic capabilityの選択を必須にする。選択されたpredicateにcatalog ruleがなくても、policy上許可されたIRI-object tripleならunknown fallbackの通常矢印として表示できる
 - `:relation`等の一般的なpredicateを空欄のfallbackとして生成しない。適切な語彙がなければ、humanUnknown policyに従って警告・拒否し、または語彙整備を促す
 - 包含、順序、選択は、structure profileとprojection capabilityで許可されたgraph patchとして一括適用する。Dragをmembershipと解釈するなど、presentation gestureからsemantic tripleを暗黙生成しない
+- `set-alternatives`では`memberIris`を最終ordinal順の正本とし、重複IRIも並び替えない。`defaultMemberIri`は`memberIris[defaultOrdinal - 1]`と一致しなければならない
 - Resource削除は参照statementが残る場合に既定で拒否する。影響statementをpreviewし人が明示したcascadeだけを許可し、Seq/Alt memberの削除では残るordinalを同じpatchで再採番する
 - `humanUnknown: warn`の操作はdiagnosticと完全IRIを提示し、人が明示確認した場合だけ再実行できる
 
@@ -120,9 +124,11 @@ Structured commandはRDF datasetへのgraph patchに変換した後、Turtle tex
 
 Node、edge、属性、包含、削除の入力はサイドバー上のcommand draftです。Canvas gestureはsource/target、作成位置、候補container等をdraftへseedできますが、それだけではsemantic graphを変更しません。Editorは追加・削除予定のtripleまたは構造graph patch、完全IRI、validation結果をpreviewし、ユーザーの明示適用後にだけtransactionを開始します。適用前のghost elementはephemeral UI stateでありdocumentへ保存しません。
 
+Capability parameterは省略時をrequiredとし、`required: false`だけをoptionalとします。Optional bindingが省略された場合、そのbindingを参照するtemplate statementをadd/removeの双方で一文単位にskipします。値の推測や空文字列への置換は行いません。
+
 P1 editorはhostから取得処理ではなく、解決済みの`ResolvedAuthoringContext`と任意のresource IRI allocatorを受け取ります。Mockはstatic fixtureを注入します。Profile/vocabulary URIからcontextを取得するresolverはP2-01で実装します。
 
-Structured commandとLLM editが成功した場合は、candidate datasetを共通のversioned serializerで決定的なTurtleへ再生成します。Turtle textareaの直接編集は妥当な原文を保持します。Comment、空白、改行、triple記述順は後の再serialize時には保持を保証せず、reviewにはgraph単位のsemantic diffを用います。
+Structured commandとLLM editが成功した場合は、candidate datasetを共通のversioned serializerで決定的なTurtleへ再生成します。LLMを含む直接source editは`applyAuthoringSource`へactorを明示して入力し、`actor: "llm"`はversioned serializerを通します。`actor: "human"`のTurtle textarea直接編集だけは妥当な原文をbyte単位で保持します。Comment、空白、改行、triple記述順は後のstructured commandまたはLLM再serialize時には保持を保証せず、reviewにはgraph単位のsemantic diffを用います。
 
 ## 7. LLMへ渡すcontext
 

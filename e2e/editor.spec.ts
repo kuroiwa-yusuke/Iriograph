@@ -38,7 +38,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
 
   await page.getByRole("button", { name: /Turtle/ }).click();
   const textarea = page.getByLabel("Turtle source");
-  const acceptedSource = `${await textarea.inputValue()}\n<urn:iriograph:e2e:new> <http://www.w3.org/2000/01/rdf-schema#label> "E2E New" .\n`;
+  const acceptedSource = `${await textarea.inputValue()}\n<urn:iriograph:demo:e2e-new> <http://www.w3.org/2000/01/rdf-schema#label> "E2E New" .\n`;
   await textarea.fill(acceptedSource);
   await page.locator(".iriograph-editor-header button").click();
   await expect(page.getByText("browser working copyを保存しました")).toBeVisible();
@@ -50,6 +50,50 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   await page.getByRole("button", { name: /Diagram/ }).click();
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(9);
 
+  expect(consoleErrors).toEqual([]);
+});
+
+test("structured semantic authoringをPreviewして位置とTurtleをatomicに適用・undoする", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.goto("/");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
+  await page.getByLabel("Resource class").fill("urn:iriograph:demo:UserTask");
+  await page.getByLabel("Resource label").fill("E2E semantic task");
+  await page.getByRole("button", { name: "Canvasで位置指定" }).click();
+  const grid = page.locator(".iriograph-canvas-grid");
+  await dispatchPointerClick(
+    page,
+    grid,
+    await requiredBox(grid, "canvas grid"),
+    460,
+    260,
+  );
+  await expect(page.getByLabel("Semantic draft position")).toBeVisible();
+  const initialX = Number(await page.getByLabel("Initial x").inputValue());
+  const initialY = Number(await page.getByLabel("Initial y").inputValue());
+  expect(initialX).toBeGreaterThan(0);
+  expect(initialY).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "差分をPreview" }).click();
+  await expect(page.getByText("追加 2 triple")).toBeVisible();
+  await expect(page.getByText("適用可能", { exact: true })).toBeVisible();
+  await page.locator(".iriograph-authoring-actions .primary").click();
+
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(9);
+  const created = page.locator(".iriograph-scene-node").filter({ hasText: "E2E semantic task" });
+  await expect(created).toHaveCount(1);
+  expect(await numericStyle(created, "left")).toBeCloseTo(initialX, 0);
+  expect(await numericStyle(created, "top")).toBeCloseTo(initialY, 0);
+  await expect.poll(() => readTurtle(page)).toContain("E2E semantic task");
+
+  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
+  await expect.poll(() => readTurtle(page)).not.toContain("E2E semantic task");
   expect(consoleErrors).toEqual([]);
 });
 
@@ -299,6 +343,26 @@ async function dispatchPointerDrag(
     window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX, clientY }));
     window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX, clientY }));
   }, { clientX: x + deltaX, clientY: y + deltaY });
+}
+
+async function dispatchPointerClick(
+  page: Page,
+  target: Locator,
+  box: { x: number; y: number; width: number; height: number },
+  offsetX: number,
+  offsetY: number,
+): Promise<void> {
+  const clientX = box.x + Math.min(offsetX, box.width - 1);
+  const clientY = box.y + Math.min(offsetY, box.height - 1);
+  await target.dispatchEvent("pointerdown", { button: 0, clientX, clientY });
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new PointerEvent("pointerup", {
+      bubbles: true,
+      button: 0,
+      clientX: x,
+      clientY: y,
+    }));
+  }, { x: clientX, y: clientY });
 }
 
 async function numericStyle(locator: Locator, property: string): Promise<number> {

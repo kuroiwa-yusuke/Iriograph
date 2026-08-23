@@ -18,12 +18,22 @@ import "@iriograph/vue-editor/styles.css";
 <IriographEditor
   v-model="document"
   :catalog="catalog"
+  :authoring-context="resolvedAuthoringContext"
+  :resource-iri-allocator="resourceIriAllocator"
   @save="saveToHost"
 />
 ```
 
-`catalog`にはvalidated `ProjectionCatalogV1`を渡します。保存前にTurtle draftを確定する
-場合はcomponent refの`flushPendingEdits()`を`await`してください。Workspace、HTTP、認証、
+`catalog`にはvalidated `ProjectionCatalogV1`を渡します。意味グラフのstructured editを有効に
+する場合は、hostで解決した`ResolvedAuthoringContext`と、必要に応じて
+`ResourceIriAllocator`を渡します。Editorはresource・属性・edge・包含・Seq/Alt・削除を
+サイドバーdraftとして保持し、exact triple差分のPreviewと明示Apply後にだけ`v-model`を更新します。
+Propertyは複数のIRI/literal値を完全置換し、空文字列literalと明示削除を区別します。Seq/Alt等の
+非表示structure resourceもScene provenanceから候補へ戻し、catalogのexact構造設定を保持します。
+Canvasの空白clickで指定する新規resource位置は適用前にはephemeral markerだけを更新し、Core Previewが
+実投影後のboundsを検証してからsemantic作成と一つのundo itemへ確定します。
+保存前にTurtle draftを確定する場合はcomponent refの`flushPendingEdits()`を`await`してください。
+未確認のstructured draftは自動適用されず、flushは`false`を返します。Workspace、HTTP、認証、
 永続化はhostの責務です。
 
 Component refは`panBy()`、`zoomTo()`、`fitToView()`、`revealSelection()`、
@@ -45,3 +55,5 @@ Generated edgeで表示されるbend handleを初めて編集すると、その�
 manual waypointへseedします。
 `IriographDiagramCanvas`は完全なsparse routingを`routingUpdate`で通知します。従来の
 `routingChange({ elementId, waypoints })`もwaypoint操作に限って互換通知されます。
+Edge本体のDelete/Backspaceは即時削除ではなく、Core provenanceからexact semantic commandを
+authoring sidebarへseedします。`readOnly`ではsemantic/presentation write入口を無効にします。

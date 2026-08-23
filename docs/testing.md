@@ -44,5 +44,14 @@ E2Eはmock fixtureのnode drag、multi-select、group drag、grid snap、整列�
 - Routing testではderived routeとmanual waypointを混同せず、nearest segment追加、最後の削除によるautomatic復帰、label arc-length base、empty waypoint非保存、edgeへのgeometry/pinned/placement非混入、parallel/self-loopの個別hit areaを確認する
 - 一つのgesture内で複数のmove eventが発生してもhistory itemは一つであることを維持する
 - Semantic candidateの失敗testでは、sourceだけでなくSceneと最後にacceptされたdocumentが不変であることを確認する
+- Structured authoring testでは、previewしたadded/removed statement、candidate Turtle、confirmation IDが決定的であり、document・context・command・warning承認の改変またはstaleでApplyが拒否されることを確認する
+- Resource作成testではallocatorの成功、cancel、error、許可namespace外、graph全termとの衝突を分け、指定position込みの成功が`update:modelValue`一回、history一件になることを確認する
+- Property testでは完全置換、空配列による削除、IRI/literal、language/datatype相互排他、object kind・datatype・language・cardinality constraint、human unknown warning確認を検証する
+- Property testでは空文字列literalと明示削除を区別し、複数値の往復、IRI参照削除後の孤立blank-node closure保持も検証する
+- Capability testではrequired省略時を必須とし、optional binding省略時は参照statementだけをadd/remove双方でskipすることを検証する
+- Structure/delete testではBag membership、Seq/Altのatomic再構成、Altのfinal member順・重複・default slot一致、参照時の既定reject、exact cascade preview、正規ordinalだけの再採番、prefix類似property保持、Seq/Alt最小件数違反rollback、既知語彙resource削除rejectを検証する
+- Provenance逆編集testではdirect statement、membership、sequence、alternativeのcapabilityからdraftをseedし、provenance欠落時に見た目からpredicateを推測しないことを確認する
+- 未適用Turtle draftとstructured authoring draftが排他的であり、readOnly、async stale、複数viewの一つの失敗でdocument全体が不変であることを確認する
+- Canvas作成位置testではblank clickがephemeral draft markerだけを更新し、bounds clamp後の位置がApply成功時だけsemantic作成と一つのhistory itemへcommitされることを確認する
 - 保存testでは`save` eventだけでなく、その前にpending editがacceptまたはrejectされた結果を確認する
 - Browser smokeのsample件数へ依存するassertionを変更する場合は、workspace fixture変更と同じcommitで更新する

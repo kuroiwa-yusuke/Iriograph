@@ -10,8 +10,11 @@ npm install @iriograph/core
 ```ts
 import {
   buildIriographView,
+  applyAuthoringSource,
   createProjectionRuntimeContext,
   createStandardLayoutRegistry,
+  previewAuthoringCommands,
+  applyAuthoringPreview,
   standardRdfRdfsCatalog,
   validateIriographDocumentV1,
 } from "@iriograph/core";
@@ -31,7 +34,50 @@ const scene = await buildIriographView(
   validation.value.views[0]!.viewId,
   context,
 );
+
+const preview = await previewAuthoringCommands(
+  validation.value,
+  [{
+    type: "connect-resources",
+    commandId: "connect-reviewer",
+    subjectIri: "urn:example:request",
+    predicateIri: "http://www.w3.org/2000/01/rdf-schema#seeAlso",
+    objectIri: "urn:example:policy",
+  }],
+  resolvedAuthoringContext,
+);
+if (preview.valid) {
+  const update = await applyAuthoringPreview(
+    validation.value,
+    preview,
+    resolvedAuthoringContext,
+    { confirmationId: preview.confirmationId },
+  );
+  if (!update.accepted) throw new Error(update.diagnostics[0]?.message);
+}
 ```
+
+Structured authoringは必ずpreviewと明示confirmationを経由します。Apply時にはcommand、
+document/context revision、exact graph patchを再計算し、staleまたは改変されたpreviewを拒否します。
+
+直接Turtleをcontrolled writeとして適用する場合はactorを必須指定します。
+
+```ts
+const humanUpdate = await applyAuthoringSource(
+  validation.value,
+  editedTurtle,
+  resolvedAuthoringContext,
+  { actor: "human" },
+);
+const llmUpdate = await applyAuthoringSource(
+  validation.value,
+  llmEditedTurtle,
+  resolvedAuthoringContext,
+  { actor: "llm" },
+);
+```
+
+Human textarea入力は妥当な原文を保持し、LLM sourceとstructured commandはversioned serializerで決定的に再生成します。どちらも同じ語彙・namespace・構造・全view検証を通り、不明actorは拒否されます。
 
 保存documentの`schemaVersion`とcatalogのversionはpackage versionとは独立した契約です。
 詳細はrepositoryの設計文書を参照してください。
