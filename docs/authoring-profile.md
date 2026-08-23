@@ -100,7 +100,24 @@ Documentに既に存在するunknown termは読み込みを妨げません。既
 
 LLM semantic editを有効にするhostは、authoring profileを解決できなければなりません。未解決時に「すべて許可」へfallbackしてはならず、semantic editを停止してdiagnosticを返します。
 
-## 6. LLMへ渡すcontext
+## 6. Human structured authoring
+
+Rich editorはTurtle文字列の書き換えをUI独自の実装で行わず、authoring profileから解決したclass、predicate、resource namespaceと、view profile/catalogから導出したsemantic capabilityを入力候補に使います。Labelは選択用表示に使えますが、commandは必ずIRIを持ちます。
+
+通常UIは完全IRIを常時入力させる必要はありません。Host注入のIRI allocatorまたは明示入力からnamed IRIを得られますが、どちらも`allowedMintNamespaces`とgraph内衝突を検証します。Allocatorが返したIRIであってもauthoring policyを迂回できません。
+
+Human structured commandは次のpolicyに従います。
+
+- `create-resource`はallowed namespace内のnamed IRIと、当該resourceを含む少なくとも1つの初期statementを同一transactionで作る。Sceneにだけ存在するnodeは作らない
+- literal属性の追加、置換、削除もsemantic transactionとし、predicate、datatype、language tag、domain constraintを検証する
+- edgeはpredicateまたは明示的なsemantic capabilityの選択を必須にする。選択されたpredicateにcatalog ruleがなくても、policy上許可されたIRI-object tripleならunknown fallbackの通常矢印として表示できる
+- `:relation`等の一般的なpredicateを空欄のfallbackとして生成しない。適切な語彙がなければ、humanUnknown policyに従って警告・拒否し、または語彙整備を促す
+- 包含、順序、選択は、structure profileとprojection capabilityで許可されたgraph patchとして一括適用する。Dragをmembershipと解釈するなど、presentation gestureからsemantic tripleを暗黙生成しない
+- `humanUnknown: warn`の操作はdiagnosticと完全IRIを提示し、人が明示確認した場合だけ再実行できる
+
+Structured commandはRDF datasetへのgraph patchに変換した後、Turtle textareaの候補sourceおよびLLMが返した候補sourceと同じパイプラインへ合流します。Actor policyは差分検証時に適用し、その後の構造検証、domain validation、全viewの再投影、display reconciliationはactor間で共通にします。
+
+## 7. LLMへ渡すcontext
 
 LLM semantic adapterは次だけを編集contextとして構成します。
 
@@ -118,7 +135,7 @@ LLMには次の優先順位を明示します。
 2. imported vocabularyの既存termを使用する
 3. 適切なtermがなければ新語を作らず、不足語彙として報告する
 
-## 7. 表示要求からのsemantic rewrite
+## 8. 表示要求からのsemantic rewrite
 
 Userの表示要求は、適用前に次の三種類へ分類します。
 
@@ -130,7 +147,7 @@ Userの表示要求は、適用前に次の三種類へ分類します。
 
 「見栄えを良くする」という理由だけでsemantic type、関係、包含、順序を追加してはなりません。Turtle rewriteはuser requestが意味構造の変更を含む場合、またはuserが提案されたsemantic diffを明示的に承認した場合に限ります。
 
-### 7.1 Projection capability summary
+### 8.1 Projection capability summary
 
 Hostは解決済みview profileとcatalogから、LLM向けに次のderived情報を生成できます。
 
@@ -150,7 +167,7 @@ Capability summaryは保存正本ではありません。利用可能な表示�
 
 たとえば「部署ごとにlane表示して」という要求には`rdf:Bag + rdfs:member` capabilityを提示し、LLMは既存resourceをBagへ所属させるsemantic diffを提案できます。「laneを青くして」という要求にはTurtle rewriteを行わず、catalogまたはoverlayのpresentation transactionを使います。
 
-### 7.2 Rewrite処理
+### 8.2 Rewrite処理
 
 1. User requestをpresentation、semantic structure、domain meaningに分類する
 2. PresentationだけならLLM semantic editを呼び出さない
@@ -163,7 +180,7 @@ Capability summaryは保存正本ではありません。利用可能な表示�
 
 どの段階で失敗しても元documentを維持します。LLMの説明文ではなく、Turtle差分と検証結果を採否の根拠にします。
 
-## 8. Diagnostic
+## 9. Diagnostic
 
 少なくとも次のcodeをtarget contractとします。
 
@@ -176,7 +193,7 @@ Capability summaryは保存正本ではありません。利用可能な表示�
 | `semantic-rewrite-not-required` | info | presentation transactionで処理すべき要求だった |
 | `projection-capability-unsatisfied` | error | rewrite後も要求した構造表示を導出できない |
 
-## 9. 非目標
+## 10. 非目標
 
 - Catalogをsemantic vocabularyのallowlistとして使うこと
 - LLMにcatalog template、CSS、asset URLを自由編集させること

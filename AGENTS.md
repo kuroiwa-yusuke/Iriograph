@@ -32,6 +32,9 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - LLM semantic transactionはresolved authoring profileなしで実行せず、unknown termの新規利用やterm mintingを黙認しない。
 - 表示要求が位置、size、routing、色、icon overrideだけならTurtleを書き換えない。意味構造を伴う場合だけprofile-guided rewriteを行う。
 - Drag、resize、waypoint変更はTurtleを変更しない。
+- Rich editorのnode、edge、属性、包含作成はsemantic transactionとする。表示だけの仮nodeをdocumentへ保存せず、node作成時はnamed IRIと少なくとも1つのtripleを同時に確定する。
+- Edge作成はpredicateまたはprofile由来capabilityを必須にし、空欄を補うgeneric predicateを暗黙生成しない。Containerへのplain dragからmembership tripleを推測しない。
+- Human structured command、Turtle直接編集、LLM返却Turtleはcandidate graph以降のvalidation、全view projection、display reconciliationを共有する。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
 - 保存schema変更にはversion方針とtestを伴わせる。

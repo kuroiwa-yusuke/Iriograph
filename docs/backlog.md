@@ -26,7 +26,7 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 | P0-05 | catalog import・version・integrity解決contract | P0-01、P0-04 | host resolver I/F、重複catalog、version不一致、取得失敗のdiagnosticが決定的になる |
 | P0-06 | stable resource/triple/derived-edge identity | P0-01、P0-02 | Turtle再整形後の直接triple、Seq transition、Alt branchとnamed resourceでoverlay照合testが通る |
 | P0-07 | 決定的layout engine v1 | P0-02、P0-06 | node-link、階層LR/TB、Bag container、pinned nodeを扱い、同一入力から同一座標を得る |
-| P0-08 | 正式display reconciliation | P0-04、P0-06、P0-07 | 追加・削除・type変更・containment・sequence変更で存続user overlayを維持し、新規要素を補完するfixture testが通る |
+| P0-08 | 正式display reconciliation | P0-04、P0-06、P0-07 | 追加・削除・type変更・containment・sequence変更で全viewをそれぞれのprofile/layoutから再投影する。存続user overlayを互換な範囲で維持し、新規geometryにgenerated provenanceを付け、catalog由来appearanceを複製しないfixture testが通る |
 | P0-09 | workspace asset picker、resolver、安全policy contract | P0-01 | documentは安定asset IRIだけを保持し、host注入の選択UIと非同期resolverでworkspace assetを表示できる。未解決fallback、移動・削除diagnostic、media type・容量、許可scheme/origin、Blob URL lifecycleをtestし、mockのtreeにcatalog外assetの縦切りがある |
 | P0-10 | package配布contract | P0-01〜09 | coreとVue editorのexports、CSS、peer dependency、semver方針を定め、別fixture appでbuildできる |
 | P0-11 | editor操作の回帰test基盤 | P0-10 | drag、resize、routing、undo/redo、Turtle適用、保存flushをcomponent/E2E testで検証する |
@@ -38,7 +38,7 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 | P1-01 | pan、fit、minimap、選択への移動 | P0-07、P0-11 | 大きい図をmouse/keyboardで移動でき、選択elementをviewportへ表示できる |
 | P1-02 | multi-select、整列、等間隔、snap | P0-11 | 一括移動を一transactionでundoでき、container境界を破らない |
 | P1-03 | edge routing編集の完成 | P0-07、P0-11 | waypoint追加・削除、label位置、self-loop、parallel edgeを編集・保存できる |
-| P1-04 | human semantic authoring commands | P0-06、P0-08 | actor=`human`でnode/edge/containment/sequence/alternativeをTurtle graph transactionとして編集し、unknown term policyのwarningを扱える |
+| P1-04 | human semantic authoring commands | P0-06、P0-08 | actor=`human`でprofile/hostから安全に採番したnamed IRIと初期tripleが必須のnode作成、literal/IRI属性編集、predicate必須の直接edgeまたはcapability graph patch、明示的なcontainment/sequence/alternativeをTurtle graph transactionとして編集できる。仮nodeと暗黙generic predicateを保存せず、dragはmembershipを変更しない。Unknown term warning、derived edge/所属のprovenanceからの逆編集、Turtle直接編集と共通validation/reconciliation、作成位置を含むatomic undo/rollbackをcomponent/E2E testする |
 | P1-05 | SHACL等のsemantic validation port | P0-01 | syntax errorとdomain constraintを分け、semanticRef付きdiagnosticをSceneとsourceへ対応付ける |
 | P1-06 | 複数view、locale、filterとview管理 | P0-08 | 同じTurtleに異なるprofile/layout/locale/filter/overlayを追加・複製・削除できる |
 | P1-07 | accessibilityとkeyboard編集 | P0-11、P1-01〜03 | focus順、選択、移動、resize、routingの主要操作をkeyboardで完結できる |

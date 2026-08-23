@@ -12,6 +12,19 @@ Iriographは「意味グラフを図として編集・検証・再利用する�
 
 display overlayが保持するのは、geometry、pin、edge routing、明示的なtemplate/icon overrideなど、catalogとlayoutから復元できない、またはユーザーが意図的に固定した情報です。色や既定iconなどの生成可能な情報はcatalogを正本にします。
 
+## 意味を作るリッチ編集
+
+リッチエディタでnode、属性、edge、包含を作る操作は、Sceneへの図形追加ではなくsemantic graphの編集です。Editorは操作をTurtleのgraph delta候補へ変換し、semantic transactionの検証に成功した場合だけ正本とSceneを更新します。Sceneに仮nodeを作り、後から意味を付けて保存する状態をdocumentには許容しません。
+
+- node作成ではnamed IRIを決め、同じtransactionでそのresourceを含む少なくとも1つのtripleを作る。`rdf:type`、`rdfs:label`、domain property、既存resourceとの関係などが初期statementになる。
+- 属性編集はpredicateとIRI/literal valueを持つtripleの追加、置換、削除として行う。
+- edge作成ではpredicateを必須とし、直接IRI-object tripleまたはprojection capabilityが定義するgraph patchを作る。便宜的な`:relation`のような語彙を暗黙に生成しない。
+- 包含編集では`rdf:Bag`resourceと`rdfs:member`等、選択したcapabilityの意味構造を書く。nodeをcontainer内へdragするだけの操作はpresentationであり、意味的所属を暗黙に追加しない。
+
+一つのUI操作が「resourceを作成しこの位置に置く」と見える場合も、resource作成はsemantic transaction、ユーザー指定座標はpresentation transactionです。Editorは両者を一つのundo可能な操作として協調できますが、semantic transactionが失敗した場合はpresentation変更も確定しません。
+
+semantic transaction成功後は、全viewをそれぞれのprofile、catalog、layoutで再投影します。存続するidentityのuser overlayは互換な範囲で維持し、新規要素は決定的layoutからgenerated provenanceの初期geometryを得ます。Catalogから再生成できるtemplate、style、iconはoverlayへ複製しません。このdisplay reconciliationはsemantic変更の結果を表示可能にする後処理であり、任意の見た目変更をsemantic transactionに混ぜることではありません。
+
 ## Mermaid、draw.ioとの違い
 
 Mermaidは軽量な図記述と自動layoutに優れますが、意味のidentity、外部ontologyとの接続、複数view、WYSIWYG調整の永続化を主目的にした形式ではありません。IriographはTurtleを意味層、catalogを表示文法、overlayを人の調整として独立させます。Mermaid風DSLをもう一つの正本として増やさない方針です。
