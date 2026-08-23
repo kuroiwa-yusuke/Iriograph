@@ -58,6 +58,38 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(isInside(result.geometries["step-a"]!, result.geometries.bag!)).toBe(true);
   });
 
+  it("places generated children inside the visual content area of a left-header container", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "child-b", structuralKind: "node", parentElementId: "lane" },
+        {
+          elementId: "lane",
+          structuralKind: "container",
+          contentInsets: { top: 16, right: 16, bottom: 16, left: 78 },
+        },
+        { elementId: "child-a", structuralKind: "node", parentElementId: "lane" },
+      ],
+      edges: [{ elementId: "flow", sourceElementId: "child-a", targetElementId: "child-b" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:left-header", "LR");
+
+    const first = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const second = await adapter.layout({
+      layoutRef: adapter.layoutRef,
+      scene: { elements: [...scene.elements].reverse(), edges: [...scene.edges].reverse() },
+    });
+
+    expect(first.geometries).toEqual(second.geometries);
+    const lane = first.geometries.lane!;
+    for (const childId of ["child-a", "child-b"]) {
+      const child = first.geometries[childId]!;
+      expect(child.x).toBeGreaterThanOrEqual(lane.x + 78);
+      expect(child.y).toBeGreaterThanOrEqual(lane.y + 16);
+      expect(child.x + child.width).toBeLessThanOrEqual(lane.x + lane.width - 16);
+      expect(child.y + child.height).toBeLessThanOrEqual(lane.y + lane.height - 16);
+    }
+  });
+
   it("uses stable identity order and returns identical coordinates for shuffled cyclic input", async () => {
     const scene: LayoutProjectedScene = {
       elements: [
@@ -216,6 +248,72 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(Math.max(...first.routes["loop-a"]!.map((point) => point.x))).toBe(204);
     expect(Math.max(...first.routes["loop-z"]!.map((point) => point.x))).toBe(222);
     expect(first.width).toBeGreaterThanOrEqual(270);
+  });
+
+  it("honors independent boundary anchors for auto, manual, parallel, and self-loop routes", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "a",
+          structuralKind: "node",
+          shape: "rectangle",
+          placement: "user",
+          geometry: { x: 20, y: 30, width: 100, height: 80 },
+        },
+        {
+          elementId: "b",
+          structuralKind: "node",
+          shape: "circle",
+          placement: "user",
+          geometry: { x: 300, y: 30, width: 100, height: 80 },
+        },
+      ],
+      edges: [
+        {
+          elementId: "auto",
+          sourceElementId: "a",
+          targetElementId: "b",
+          sourceAnchor: { position: 0 },
+          targetAnchor: { position: .75 },
+        },
+        {
+          elementId: "manual",
+          sourceElementId: "a",
+          targetElementId: "b",
+          routingPlacement: "user",
+          waypoints: [{ x: 220, y: 160 }],
+          sourceAnchor: { position: .25 },
+          targetAnchor: { position: .5 },
+        },
+        {
+          elementId: "parallel",
+          sourceElementId: "a",
+          targetElementId: "b",
+          sourceAnchor: { position: .5 },
+        },
+        {
+          elementId: "loop",
+          sourceElementId: "a",
+          targetElementId: "a",
+          sourceAnchor: { position: .25 },
+          targetAnchor: { position: .75 },
+        },
+      ],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:anchors", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.auto?.[0]).toEqual({ x: 70, y: 30 });
+    expect(result.routes.auto?.at(-1)).toEqual({ x: 300, y: 70 });
+    expect(result.routes.manual).toEqual([
+      { x: 120, y: 70 },
+      { x: 220, y: 160 },
+      { x: 350, y: 110 },
+    ]);
+    expect(result.routes.parallel?.[0]).toEqual({ x: 70, y: 110 });
+    expect(result.routes.loop?.[0]).toEqual({ x: 120, y: 70 });
+    expect(result.routes.loop?.at(-1)).toEqual({ x: 20, y: 70 });
   });
 
   it("keeps more parallel lanes distinct after attachment offsets reach node bounds", async () => {

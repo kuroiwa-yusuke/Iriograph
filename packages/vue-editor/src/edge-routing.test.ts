@@ -12,6 +12,9 @@ import {
   pointAtPolylineFraction,
   previewEdgeRoute,
   removeEdgeWaypoint,
+  routingWithEndpointAnchor,
+  routingWithLabelOffset,
+  routingWithWaypoints,
 } from "./edge-routing";
 
 describe("edge routing helpers", () => {
@@ -73,6 +76,37 @@ describe("edge routing helpers", () => {
     expect(normalizeEditableRouting({
       waypoints: [{ x: Number.NaN, y: 1 }, { x: 2, y: 3 }],
     })).toEqual({ waypoints: [{ x: 2, y: 3 }] });
+  });
+
+  it("anchor-only routingを保持しwaypoint/label編集でも既存anchorを失わない", () => {
+    expect(normalizeEditableRouting({
+      sourceAnchor: { position: 0 },
+      targetAnchor: { position: .75 },
+    })).toEqual({
+      sourceAnchor: { position: 0 },
+      targetAnchor: { position: .75 },
+    });
+    expect(normalizeEditableRouting({ sourceAnchor: { position: 1 } })).toBeUndefined();
+
+    const edge = edgeFor({
+      waypoints: [{ x: 30, y: 40 }],
+      labelOffset: { x: 4, y: -2 },
+      sourceAnchor: { position: .25 },
+      targetAnchor: { position: .5 },
+    });
+    expect(routingWithWaypoints(edge, [{ x: 50, y: 60 }])).toMatchObject({
+      sourceAnchor: { position: .25 },
+      targetAnchor: { position: .5 },
+    });
+    expect(routingWithLabelOffset(edge, { x: 8, y: 9 })).toMatchObject({
+      sourceAnchor: { position: .25 },
+      targetAnchor: { position: .5 },
+    });
+    expect(routingWithEndpointAnchor(edge, "source", undefined)).toEqual({
+      waypoints: [{ x: 30, y: 40 }],
+      labelOffset: { x: 4, y: -2 },
+      targetAnchor: { position: .5 },
+    });
   });
 
   it("generated共通deltaは全route、片側deltaはendpointと隣接segmentを追随する", () => {

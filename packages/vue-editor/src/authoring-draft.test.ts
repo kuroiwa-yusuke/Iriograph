@@ -36,6 +36,56 @@ describe("authoring draft", () => {
     })]);
   });
 
+  it("create resourceのdirect edgeとcatalog membershipをcreated placeholder付きでatomic compileする", () => {
+    const command = compileAuthoringDraft({
+      ...emptyAuthoringDraft("create-resource"),
+      label: "Review",
+      createEdgeEnabled: true,
+      createEdgeDirection: "incoming",
+      createEdgePredicateIri: "urn:test:assignedTo",
+      createEdgeResourceIri: "urn:test:owner",
+      createMembershipEnabled: true,
+      createMembershipContainerIri: "urn:test:lane",
+      createMembershipStructureConfigKey: "bag-membership",
+      createMembershipContainerTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+      createMembershipPredicateIri: "http://www.w3.org/2000/01/rdf-schema#member",
+    }, "main")[0];
+
+    expect(command).toMatchObject({
+      type: "create-resource",
+      initialStatements: [
+        expect.objectContaining({ predicateIri: expect.stringMatching(/#label$/u) }),
+        {
+          subject: { kind: "iri", iri: "urn:test:owner" },
+          predicateIri: "urn:test:assignedTo",
+          object: { kind: "created-resource" },
+        },
+        {
+          subject: { kind: "iri", iri: "urn:test:lane" },
+          predicateIri: "http://www.w3.org/2000/01/rdf-schema#member",
+          object: { kind: "created-resource" },
+        },
+      ],
+    });
+  });
+
+  it("create compositeの部分入力とtripleなしを明確なcompile errorにする", () => {
+    expect(() => compileAuthoringDraft(emptyAuthoringDraft("create-resource"), "main"))
+      .toThrow(/1 triple/u);
+    expect(() => compileAuthoringDraft({
+      ...emptyAuthoringDraft("create-resource"),
+      label: "Review",
+      createEdgeEnabled: true,
+      createEdgeResourceIri: "urn:test:owner",
+    }, "main")).toThrow(/predicate/u);
+    expect(() => compileAuthoringDraft({
+      ...emptyAuthoringDraft("create-resource"),
+      label: "Review",
+      createMembershipEnabled: true,
+      createMembershipContainerIri: "urn:test:lane",
+    }, "main")).toThrow(/catalog membership structure/u);
+  });
+
   it("空literalと明示的なproperty削除を区別する", () => {
     const draft = {
       ...emptyAuthoringDraft("set-property"),

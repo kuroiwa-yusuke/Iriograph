@@ -317,6 +317,8 @@ function projectDirectEdge(
     style: template.style,
     waypoints: manualWaypoints,
     labelOffset: overlay?.overlay.routing?.labelOffset,
+    sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
+    targetAnchor: overlay?.overlay.routing?.targetAnchor,
     routingPlacement: manualWaypoints ? "user" : "generated",
     fallback,
     provenance: {
@@ -487,6 +489,8 @@ function projectDerivedEdge(
     style: template.style,
     waypoints: manualWaypoints,
     labelOffset: overlay?.overlay.routing?.labelOffset,
+    sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
+    targetAnchor: overlay?.overlay.routing?.targetAnchor,
     routingPlacement: manualWaypoints ? "user" : "generated",
     fallback: false,
     provenance,

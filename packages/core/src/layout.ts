@@ -1,4 +1,14 @@
-import type { ElementGeometry, Point } from "./model";
+import {
+  edgeEndpointAnchorPoint,
+  isValidEdgeEndpointAnchor,
+} from "./endpoint-anchor";
+import type {
+  EdgeEndpointAnchor,
+  EdgeEndpointShape,
+  ElementGeometry,
+  Point,
+} from "./model";
+import type { ContainerContentInsets } from "./container-content";
 
 export const STANDARD_LAYOUT_REFS = {
   hierarchicalLr: "urn:iriograph:layout:hierarchical-lr:1",
@@ -16,6 +26,10 @@ export type LayoutElement = {
   size?: { width: number; height: number };
   pinned?: boolean;
   placement?: "generated" | "user";
+  /** Concrete renderer boundary used when resolving endpoint anchors. */
+  shape?: EdgeEndpointShape;
+  /** Content rectangle reserved inside a container by its visual template. */
+  contentInsets?: ContainerContentInsets;
 };
 
 export type LayoutEdge = {
@@ -23,6 +37,8 @@ export type LayoutEdge = {
   sourceElementId: string;
   targetElementId: string;
   waypoints?: readonly Point[];
+  sourceAnchor?: EdgeEndpointAnchor;
+  targetAnchor?: EdgeEndpointAnchor;
   routingPlacement?: "generated" | "user";
 };
 
@@ -415,12 +431,10 @@ function measureElement(elementId: string, state: LayoutState): { width: number;
     if (childIds.length > 0) {
       for (const childId of childIds) measureElement(childId, state);
       const natural = naturalGroupLayout(elementId, state).bounds;
+      const insets = elementContentInsets(element, state);
       size = {
-        width: Math.max(size.width, natural.width + state.spacing.containerPadding * 2),
-        height: Math.max(
-          size.height,
-          natural.height + state.spacing.containerHeader + state.spacing.containerPadding * 2,
-        ),
+        width: Math.max(size.width, natural.width + insets.left + insets.right),
+        height: Math.max(size.height, natural.height + insets.top + insets.bottom),
       };
     }
   }
@@ -465,9 +479,10 @@ function placeGroup(groupId: string, origin: Point, state: LayoutState): void {
     state.geometries[childId] = geometry;
 
     if (element.structuralKind === "container") {
+      const insets = elementContentInsets(element, state);
       placeGroup(childId, {
-        x: geometry.x + state.spacing.containerPadding,
-        y: geometry.y + state.spacing.containerHeader + state.spacing.containerPadding,
+        x: geometry.x + insets.left,
+        y: geometry.y + insets.top,
       }, state);
       if (!isFixed(element)) expandGeneratedContainer(childId, state);
     }
@@ -619,28 +634,42 @@ function immediateChildInGroup(
 
 function expandGeneratedContainer(containerId: string, state: LayoutState): void {
   const geometry = state.geometries[containerId]!;
+  const element = state.elements.get(containerId)!;
+  const insets = elementContentInsets(element, state);
   const childGeometries = (state.children.get(containerId) ?? [])
     .map((id) => state.geometries[id])
     .filter((value): value is ElementGeometry => value !== undefined);
   if (childGeometries.length === 0) return;
-  const left = Math.min(geometry.x, ...childGeometries.map((item) => item.x - state.spacing.containerPadding));
+  const left = Math.min(geometry.x, ...childGeometries.map((item) => item.x - insets.left));
   const top = Math.min(
     geometry.y,
-    ...childGeometries.map((item) => item.y - state.spacing.containerPadding - state.spacing.containerHeader),
+    ...childGeometries.map((item) => item.y - insets.top),
   );
   const right = Math.max(
     geometry.x + geometry.width,
-    ...childGeometries.map((item) => item.x + item.width + state.spacing.containerPadding),
+    ...childGeometries.map((item) => item.x + item.width + insets.right),
   );
   const bottom = Math.max(
     geometry.y + geometry.height,
-    ...childGeometries.map((item) => item.y + item.height + state.spacing.containerPadding),
+    ...childGeometries.map((item) => item.y + item.height + insets.bottom),
   );
   state.geometries[containerId] = {
     x: left,
     y: top,
     width: right - left,
     height: bottom - top,
+  };
+}
+
+function elementContentInsets(
+  element: LayoutElement,
+  state: LayoutState,
+): ContainerContentInsets {
+  return element.contentInsets ?? {
+    top: state.spacing.containerHeader + state.spacing.containerPadding,
+    right: state.spacing.containerPadding,
+    bottom: state.spacing.containerPadding,
+    left: state.spacing.containerPadding,
   };
 }
 
@@ -679,7 +708,13 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
       }
       const manual = manualWaypoints(edge);
       if (manual) {
-        routes[edge.elementId] = manualRoute(source, target, manual, false);
+        routes[edge.elementId] = applyEndpointAnchors(
+          manualRoute(source, target, manual, false),
+          edge,
+          source,
+          target,
+          state,
+        );
         return;
       }
       const canonicalRoute = orthogonalRoute(
@@ -688,9 +723,10 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
         state.direction,
         laneOffsets[index]!,
       );
-      routes[edge.elementId] = edge.sourceElementId === canonicalSourceId
+      const route = edge.sourceElementId === canonicalSourceId
         ? canonicalRoute
         : [...canonicalRoute].reverse().map(copyPoint);
+      routes[edge.elementId] = applyEndpointAnchors(route, edge, source, target, state);
     });
   }
   return routes;
@@ -743,10 +779,43 @@ function routeSelfLoopBundle(
   }
   edges.forEach((edge, index) => {
     const manual = manualWaypoints(edge);
-    routes[edge.elementId] = manual
+    const route = manual
       ? manualRoute(geometry, geometry, manual, true)
       : selfLoopRoute(geometry, SELF_LOOP_BASE + index * SELF_LOOP_GAP);
+    routes[edge.elementId] = applyEndpointAnchors(route, edge, geometry, geometry, state);
   });
+}
+
+function applyEndpointAnchors(
+  route: Point[],
+  edge: LayoutEdge,
+  source: ElementGeometry,
+  target: ElementGeometry,
+  state: LayoutState,
+): Point[] {
+  if (route.length < 2) return route;
+  const result = route.map(copyPoint);
+  const sourceElement = state.elements.get(edge.sourceElementId);
+  const targetElement = state.elements.get(edge.targetElementId);
+  if (isValidEdgeEndpointAnchor(edge.sourceAnchor)) {
+    result[0] = edgeEndpointAnchorPoint(
+      source,
+      layoutElementShape(sourceElement),
+      edge.sourceAnchor,
+    );
+  }
+  if (isValidEdgeEndpointAnchor(edge.targetAnchor)) {
+    result[result.length - 1] = edgeEndpointAnchorPoint(
+      target,
+      layoutElementShape(targetElement),
+      edge.targetAnchor,
+    );
+  }
+  return result;
+}
+
+function layoutElementShape(element: LayoutElement | undefined): EdgeEndpointShape {
+  return element?.shape ?? (element?.structuralKind === "container" ? "container" : "rectangle");
 }
 
 function manualWaypoints(edge: LayoutEdge): Point[] | undefined {

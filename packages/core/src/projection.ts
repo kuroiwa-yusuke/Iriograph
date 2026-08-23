@@ -271,6 +271,9 @@ function projectLegacyIriographDocument(
       templateRef: rule.templateRef,
       style: template.style,
       waypoints: overlayEntry?.overlay.routing?.waypoints,
+      labelOffset: overlayEntry?.overlay.routing?.labelOffset,
+      sourceAnchor: overlayEntry?.overlay.routing?.sourceAnchor,
+      targetAnchor: overlayEntry?.overlay.routing?.targetAnchor,
       projectionRuleId: rule.ruleId,
       fallback: false,
     });
@@ -296,6 +299,9 @@ function projectLegacyIriographDocument(
       templateRef: catalog.defaults.edgeTemplateRef,
       style: template.style,
       waypoints: overlayEntry?.overlay.routing?.waypoints,
+      labelOffset: overlayEntry?.overlay.routing?.labelOffset,
+      sourceAnchor: overlayEntry?.overlay.routing?.sourceAnchor,
+      targetAnchor: overlayEntry?.overlay.routing?.targetAnchor,
       fallback: true,
     });
   }

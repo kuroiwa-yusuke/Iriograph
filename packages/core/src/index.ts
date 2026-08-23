@@ -12,6 +12,8 @@ export * from "./rule-resolution";
 export * from "./standard-catalog";
 export * from "./catalog-resolution";
 export * from "./layout";
+export * from "./endpoint-anchor";
+export * from "./container-content";
 export * from "./scene";
 export * from "./reconciliation";
 export * from "./serializer";

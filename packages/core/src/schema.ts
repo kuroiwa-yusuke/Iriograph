@@ -176,7 +176,17 @@ export const iriographDocumentSchema = {
           items: { $ref: "#/$defs/point" },
         },
         labelOffset: { $ref: "#/$defs/point" },
+        sourceAnchor: { $ref: "#/$defs/endpointAnchor" },
+        targetAnchor: { $ref: "#/$defs/endpointAnchor" },
         extensions: extensionProperty,
+      },
+    },
+    endpointAnchor: {
+      type: "object",
+      additionalProperties: false,
+      required: ["position"],
+      properties: {
+        position: { type: "number", minimum: 0, exclusiveMaximum: 1 },
       },
     },
   },
@@ -206,7 +216,6 @@ export const projectionCatalogSchema = {
     profileRef: { type: "string", format: "iri" },
     rules: {
       type: "array",
-      minItems: 1,
       items: { $ref: "#/$defs/rule" },
     },
     templates: {

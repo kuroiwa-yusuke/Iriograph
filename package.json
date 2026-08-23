@@ -13,15 +13,16 @@
     "packages/*"
   ],
   "scripts": {
-    "build:packages": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/vue-editor",
+    "build:packages": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/layout-elk && npm run build --workspace @iriograph/vue-editor",
     "predev": "npm run build:packages",
     "dev": "npm run dev --workspace @iriograph/mock",
-    "build": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/vue-editor && npm run build --workspace @iriograph/mock",
+    "build": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/layout-elk && npm run build --workspace @iriograph/vue-editor && npm run build --workspace @iriograph/mock",
     "pretest": "npm run build:packages",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "verify": "npm run test && npm run typecheck && npm run build && npm run verify:package-consumer",
     "verify:e2e": "playwright test",
+    "verify:performance": "playwright test --config playwright.performance.config.ts",
     "verify:package-consumer": "npm run build:packages && node scripts/verify-package-consumer.mjs"
   },
   "devDependencies": {

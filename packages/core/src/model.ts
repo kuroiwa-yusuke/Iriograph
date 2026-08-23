@@ -71,6 +71,8 @@ export type ViewElementOverlay = {
   routing?: {
     waypoints?: Point[];
     labelOffset?: Point;
+    sourceAnchor?: EdgeEndpointAnchor;
+    targetAnchor?: EdgeEndpointAnchor;
     extensions?: IriographExtensions;
   };
   extensions?: IriographExtensions;
@@ -89,6 +91,16 @@ export type Point = {
   y: number;
   extensions?: IriographExtensions;
 };
+
+/**
+ * Direction around an element perimeter, independent of its concrete size or
+ * shape. Zero is top-center and the value advances clockwise.
+ */
+export type EdgeEndpointAnchor = {
+  position: number;
+};
+
+export type EdgeEndpointShape = NonNullable<VisualTemplate["shape"]> | "container";
 
 export type ProjectionCatalogV1 = {
   schemaVersion: "1";
@@ -349,6 +361,8 @@ export type ProjectedEdge = {
   style: VisualTemplate["style"];
   waypoints?: Point[];
   labelOffset?: Point;
+  sourceAnchor?: EdgeEndpointAnchor;
+  targetAnchor?: EdgeEndpointAnchor;
   routingPlacement: "generated" | "user";
   fallback: boolean;
   provenance: ProjectionProvenance;
@@ -417,6 +431,8 @@ export type SceneEdge = {
   /** User-authored intermediate points only; endpoints are present in route. */
   waypoints?: Point[];
   labelOffset?: Point;
+  sourceAnchor?: EdgeEndpointAnchor;
+  targetAnchor?: EdgeEndpointAnchor;
   projectionRuleId?: string;
   fallback: boolean;
   provenance?: ProjectionProvenance;

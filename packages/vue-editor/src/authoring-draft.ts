@@ -27,6 +27,10 @@ export type EditorCapabilityBindingDraft = EditorPropertyValueDraft & {
   enabled: boolean;
 };
 
+export type AuthoringResourcePickerTarget =
+  | { field: "subjectIri" | "sourceIri" | "targetIri" | "containerIri" | "memberIri" | "structureIri" | "resourceIri" | "createEdgeResourceIri" | "createMembershipContainerIri" }
+  | { field: "propertyValue"; index: number };
+
 export type EditorAuthoringDraft = {
   kind: EditorAuthoringKind;
   resourceIri: string;
@@ -61,6 +65,15 @@ export type EditorAuthoringDraft = {
   initialX: string;
   initialY: string;
   positionPicking: boolean;
+  createEdgeEnabled: boolean;
+  createEdgeDirection: "outgoing" | "incoming";
+  createEdgePredicateIri: string;
+  createEdgeResourceIri: string;
+  createMembershipEnabled: boolean;
+  createMembershipContainerIri: string;
+  createMembershipStructureConfigKey: string;
+  createMembershipContainerTypeIri: string;
+  createMembershipPredicateIri: string;
 };
 
 export type AuthoringChoice = {
@@ -80,6 +93,7 @@ export type AuthoringStructureChoice = {
   key: string;
   kind: "membership" | "sequence" | "alternatives";
   label: string;
+  ruleId?: string;
   typeIri: string;
   predicateIri?: string;
   ordinalPredicatePrefix?: string;
@@ -93,6 +107,9 @@ export type AuthoringPreviewView = {
   addedStatements: string[];
   removedStatements: string[];
   candidateSource: string;
+  operationLabel: string;
+  resourceChips: Array<{ iri: string; label: string; role: string }>;
+  relations: Array<{ kind: "edge" | "membership"; label: string }>;
 };
 
 export function emptyPropertyValueDraft(
@@ -139,6 +156,15 @@ export function emptyAuthoringDraft(
     initialX: "",
     initialY: "",
     positionPicking: false,
+    createEdgeEnabled: false,
+    createEdgeDirection: "outgoing",
+    createEdgePredicateIri: "",
+    createEdgeResourceIri: "",
+    createMembershipEnabled: false,
+    createMembershipContainerIri: "",
+    createMembershipStructureConfigKey: "",
+    createMembershipContainerTypeIri: "",
+    createMembershipPredicateIri: "",
   };
 }
 
@@ -192,6 +218,46 @@ export function compileAuthoringDraft(
           predicateIri: "http://www.w3.org/2000/01/rdf-schema#label",
           object: { kind: "literal", value: draft.label.trim() },
         });
+      }
+      if (draft.createEdgeEnabled) {
+        const predicateIri = requiredIri(
+          draft.createEdgePredicateIri,
+          "作成時のedgeにはpredicateが必要です。",
+        );
+        const existingIri = requiredIri(
+          draft.createEdgeResourceIri,
+          "作成時のedgeには既存resourceが必要です。",
+        );
+        initialStatements.push(draft.createEdgeDirection === "outgoing"
+          ? {
+              subject: { kind: "created-resource" },
+              predicateIri,
+              object: { kind: "iri", iri: existingIri },
+            }
+          : {
+              subject: { kind: "iri", iri: existingIri },
+              predicateIri,
+              object: { kind: "created-resource" },
+            });
+      }
+      if (draft.createMembershipEnabled) {
+        const containerIri = requiredIri(
+          draft.createMembershipContainerIri,
+          "作成時の包含には既存containerが必要です。",
+        );
+        if (
+          !draft.createMembershipStructureConfigKey
+          || !draft.createMembershipContainerTypeIri.trim()
+          || !draft.createMembershipPredicateIri.trim()
+        ) throw new Error("作成時の包含にはcatalog membership structureの選択が必要です。");
+        initialStatements.push({
+          subject: { kind: "iri", iri: containerIri },
+          predicateIri: draft.createMembershipPredicateIri.trim(),
+          object: { kind: "created-resource" },
+        });
+      }
+      if (initialStatements.length === 0) {
+        throw new Error("Resourceにはclass、label、edge、包含のいずれか1 triple以上が必要です。");
       }
       const x = draft.initialX.trim() ? Number(draft.initialX) : undefined;
       const y = draft.initialY.trim() ? Number(draft.initialY) : undefined;
@@ -362,6 +428,12 @@ function objectValue(draft: EditorPropertyValueDraft): AuthoringObjectValue {
     ...(draft.language.trim() ? { language: draft.language.trim() } : {}),
     ...(draft.datatypeIri.trim() ? { datatypeIri: draft.datatypeIri.trim() } : {}),
   };
+}
+
+function requiredIri(value: string, message: string): string {
+  const iri = value.trim();
+  if (!iri) throw new Error(message);
+  return iri;
 }
 
 function propertyValueFromObject(value: AuthoringObjectValue): EditorPropertyValueDraft {

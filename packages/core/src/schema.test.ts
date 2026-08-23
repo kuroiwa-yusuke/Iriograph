@@ -30,7 +30,7 @@ describe("Iriograph document v1 schema", () => {
     );
   });
 
-  it("keeps endpoint-free routing overlays in schema version 1", () => {
+  it("keeps sparse routing overlays, including endpoint anchors, in schema version 1", () => {
     const source = structuredClone(fixture("document.valid.json")) as {
       schemaVersion: string;
       views: Array<{ overlay: Record<string, unknown> }>;
@@ -40,12 +40,35 @@ describe("Iriograph document v1 schema", () => {
       routing: {
         waypoints: [],
         labelOffset: { x: 6, y: -4 },
+        sourceAnchor: { position: 0 },
+        targetAnchor: { position: .75 },
       },
     };
 
     expect(source.schemaVersion).toBe("1");
     expect(validateIriographDocumentV1(source)).toMatchObject({ valid: true, value: source });
   });
+
+  it.each([-0.01, 1, Number.POSITIVE_INFINITY])(
+    "rejects invalid endpoint anchor position %s",
+    (position) => {
+      const source = structuredClone(fixture("document.valid.json")) as {
+        views: Array<{ overlay: Record<string, unknown> }>;
+      };
+      source.views[0]!.overlay.edge = {
+        semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
+        routing: { sourceAnchor: { position } },
+      };
+
+      const result = validateIriographDocumentV1(source);
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.issues).toContainEqual(expect.objectContaining({
+          instancePath: "/views/0/overlay/edge/routing/sourceAnchor/position",
+        }));
+      }
+    },
+  );
 
   it("requires authoringProfileRef", () => {
     const result = validateIriographDocumentV1(fixture("document.invalid-missing-profile.json"));
@@ -133,6 +156,18 @@ describe("normalized projection catalog v1 schema", () => {
     });
   });
 
+  it("accepts an appearance-only template and asset library without rules or defaults", () => {
+    const source = structuredClone(fixture("catalog.valid.json")) as Record<string, unknown>;
+    source.rules = [];
+    delete source.defaults;
+
+    expect(validateProjectionCatalogV1(source)).toMatchObject({
+      valid: true,
+      value: source,
+      issues: [],
+    });
+  });
+
   it("rejects parameters belonging to another projection operator", () => {
     const result = validateProjectionCatalogV1(fixture("catalog.invalid-operator.json"));
 
@@ -145,7 +180,7 @@ describe("normalized projection catalog v1 schema", () => {
     ]));
   });
 
-  it("rejects unsupported versions, invalid IRIs, prototype fields, and empty normalized collections", () => {
+  it("rejects unsupported versions, invalid IRIs, prototype fields, and empty template collections", () => {
     const source = fixture("catalog.invalid-version-and-field.json");
     const result = validateProjectionCatalogV1(source);
 
@@ -156,7 +191,6 @@ describe("normalized projection catalog v1 schema", () => {
       expect.objectContaining({ instancePath: "/schemaVersion", keyword: "const" }),
       expect.objectContaining({ instancePath: "/catalogVersion", keyword: "minLength" }),
       expect.objectContaining({ instancePath: "/catalogId", keyword: "format" }),
-      expect.objectContaining({ instancePath: "/rules", keyword: "minItems" }),
       expect.objectContaining({ instancePath: "/templates", keyword: "minProperties" }),
     ]));
   });

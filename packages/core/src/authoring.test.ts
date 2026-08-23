@@ -127,7 +127,7 @@ describe("structured semantic authoring", () => {
     expect(preview.confirmationId).toBe((
       await previewAuthoringCommands(document, commands, context)
     ).confirmationId);
-    expect(preview.candidateSource).toContain(`@prefix ex: <${NS}> .`);
+    expect(preview.candidateSource).toContain(`@prefix : <${NS}> .`);
     expect(preview.patch.added.length).toBeGreaterThan(8);
     expect(preview.patch.removed.length).toBeGreaterThanOrEqual(4);
 
@@ -354,6 +354,54 @@ describe("structured semantic authoring", () => {
       }], context);
       expect(initialBypass.valid).toBe(false);
       expect(initialBypass.diagnostics).toContainEqual(expect.objectContaining({
+        code: "structural-predicate-create-edit-denied",
+      }));
+    }
+
+    const atomicCreatedMembership = await previewAuthoringCommands(document, [{
+      type: "create-resource",
+      commandId: "atomic-created-membership",
+      resourceIri: `${NS}atomic-member`,
+      initialStatements: [{
+        subject: { kind: "created-resource" },
+        predicateIri: RDFS_LABEL,
+        object: { kind: "literal", value: "Atomic member" },
+      }, {
+        subject: { kind: "iri", iri: `${NS}lane` },
+        predicateIri: RDFS_MEMBER,
+        object: { kind: "created-resource" },
+      }],
+    }], context);
+    expect(atomicCreatedMembership.valid).toBe(true);
+    expect(atomicCreatedMembership.patch.added).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        subject: { termType: "NamedNode", value: `${NS}lane` },
+        predicateIri: RDFS_MEMBER,
+        object: { termType: "NamedNode", value: `${NS}atomic-member` },
+      }),
+    ]));
+
+    for (const statement of [{
+      subject: { kind: "iri" as const, iri: `${NS}a` },
+      predicateIri: RDFS_MEMBER,
+      object: { kind: "created-resource" as const },
+    }, {
+      subject: { kind: "iri" as const, iri: `${NS}seq` },
+      predicateIri: `${RDF_ORDINAL_PREFIX}4`,
+      object: { kind: "created-resource" as const },
+    }]) {
+      const rejected = await previewAuthoringCommands(document, [{
+        type: "create-resource",
+        commandId: `rejected-created-structure-${statement.predicateIri}`,
+        resourceIri: `${NS}rejected-created-structure`,
+        initialStatements: [{
+          subject: { kind: "created-resource" },
+          predicateIri: RDFS_LABEL,
+          object: { kind: "literal", value: "Rejected" },
+        }, statement],
+      }], context);
+      expect(rejected.valid).toBe(false);
+      expect(rejected.diagnostics).toContainEqual(expect.objectContaining({
         code: "structural-predicate-create-edit-denied",
       }));
     }
@@ -1092,7 +1140,7 @@ ex:b rdfs:label "B" .
     expect(canonicalLlm.diagnostics).toEqual([]);
     expect(canonicalLlm.accepted).toBe(true);
     expect(canonicalLlm.document.semantic.source).not.toBe(exact);
-    expect(canonicalLlm.document.semantic.source).toContain("<urn:test:authoring:new-resource>");
+    expect(canonicalLlm.document.semantic.source).toContain(":new-resource rdfs:label");
 
     const unknown = `${baseSource}\nex:a ex:newPredicate ex:b .`;
     const human = await applyAuthoringSource(document, unknown, context, { actor: "human" });

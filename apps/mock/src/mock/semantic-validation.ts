@@ -7,15 +7,9 @@ import type {
 
 const DEMO = "urn:iriograph:demo:";
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const RDF_BAG = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag";
 const RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label";
-const LABEL_REQUIRED_TYPES = new Set([
-  `${DEMO}StartEvent`,
-  `${DEMO}UserTask`,
-  `${DEMO}ServiceTask`,
-  `${DEMO}EndEvent`,
-  `${DEMO}Reference`,
-  `${DEMO}ExclusiveGateway`,
-]);
+const RDFS_MEMBER = "http://www.w3.org/2000/01/rdf-schema#member";
 
 /** Static fixture adapter: demonstrates the port without adding a SHACL engine dependency. */
 export const mockSemanticValidationContext: ResolvedSemanticValidationContext = {
@@ -30,15 +24,22 @@ export const mockSemanticValidationContext: ResolvedSemanticValidationContext = 
 };
 
 function validateRequiredLabels(request: SemanticValidationRequest): SemanticValidationFinding[] {
-  const typedResources = request.dataset.statements
-    .filter((statement) => (
+  const labelRequired = new Set<string>();
+  for (const statement of request.dataset.statements) {
+    if (
       statement.subject.termType === "NamedNode"
+      && statement.subject.value.startsWith(DEMO)
       && statement.predicate.value === RDF_TYPE
       && statement.object.termType === "NamedNode"
-      && LABEL_REQUIRED_TYPES.has(statement.object.value)
-    ));
-  return typedResources.flatMap((statement) => {
-    const semanticRef = statement.subject.value;
+      && statement.object.value === RDF_BAG
+    ) labelRequired.add(statement.subject.value);
+    if (
+      statement.predicate.value === RDFS_MEMBER
+      && statement.object.termType === "NamedNode"
+      && statement.object.value.startsWith(DEMO)
+    ) labelRequired.add(statement.object.value);
+  }
+  return [...labelRequired].sort(compareText).flatMap((semanticRef) => {
     const hasLabel = request.dataset.statements.some((candidate) => (
       candidate.subject.termType === "NamedNode"
       && candidate.subject.value === semanticRef
@@ -51,12 +52,16 @@ function validateRequiredLabels(request: SemanticValidationRequest): SemanticVal
     return [{
       findingId: `required-label:${semanticRef}`,
       severity: "error",
-      code: "demo-label-required",
-      message: "業務フロー要素には空でないrdfs:labelが必要です。",
+      code: "demo-visible-resource-label-required",
+      message: "Mockのlaneと直接memberには空でないrdfs:labelが必要です。",
       semanticRef,
       sourceRange,
     }];
   });
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function responseFor(

@@ -62,10 +62,32 @@ presentation undo itemとして保存します。標準snapは8 unit gridと6px 
 
 EdgeはCoreが供給するendpoint込み`SceneEdge.route`を描画し、`waypoints`にはmanual中間点だけを
 保持します。選択したedgeはpathのdouble clickまたはInspectorからwaypointを追加でき、handleの
-drag・Arrow key・Delete/Backspace、labelのdrag・Arrow key・resetを利用できます。
+drag、またはCanvas keyboard commandからwaypointの選択・追加・削除・移動、label位置の変更を利用できます。
 Generated edgeで表示されるbend handleを初めて編集すると、その時点のderived route中間点を
 manual waypointへseedします。
 `IriographDiagramCanvas`は完全なsparse routingを`routingUpdate`で通知します。従来の
 `routingChange({ elementId, waypoints })`もwaypoint操作に限って互換通知されます。
 Edge本体のDelete/Backspaceは即時削除ではなく、Core provenanceからexact semantic commandを
-authoring sidebarへseedします。`readOnly`ではsemantic/presentation write入口を無効にします。
+右Inspectorのauthoring draftへseedします。Source/target endpoint anchorはCanvas handleまたは
+Inspectorの正規化値でnode周囲へ移動でき、waypointと同じsparse routing overlayだけに保存します。
+`readOnly`ではsemantic/presentation write入口を無効にします。
+
+Meaning authoringは右Inspector上部にあり、label-firstのclass/predicate/resource選択と完全IRIの
+Advanced入力を提供します。Canvas resource pickerは明示中だけnode/containerをdraftへseedします。
+Resource作成時はlabel/type、既存resourceとのdirect edge、catalog規定container membership、初期位置を
+一つのPreview/Applyへまとめられます。通常dragからmembershipは推論せず、表示領域と意味上のparentが
+食い違う要素には警告と、semantic draftまたはpresentation-only修正の選択肢を表示します。
+
+## Keyboard and accessibility
+
+Canvasはnode、container、edgeを共通のmulti-select scene navigatorとして扱い、Canvas自身だけを
+tab stopにします。Arrowでactive itemを移動し、Enter/Spaceで選択、Ctrl/Cmd+Spaceでtoggle、
+Shift+Arrowでrange選択します。Ctrl/Cmd+Arrowはgeometryまたはactive waypointを移動し、
+Ctrl/Cmd+Shift+Arrowはresizeまたはedge label位置を変更します。`W`/Insertでwaypoint追加、
+`[`/`,`と`]`/`.`で対象waypoint移動、Ctrl/Cmd+Backspace/Deleteで削除できます。
+
+Key repeatはCanvas上のpreviewだけを更新し、keyup/blurで一つのpresentation historyへ確定します。
+Escapeはpreviewを破棄します。`input`、`textarea`、`select`、`contenteditable`、IME composition中の
+eventはCanvas/global shortcutの対象外です。`readOnly`でもfocus、selection、pan、zoom、revealは
+利用できます。ARIA、focus fallback、dialog、live statusを含む規範契約はworkspaceの
+`docs/accessibility.md`を参照してください。

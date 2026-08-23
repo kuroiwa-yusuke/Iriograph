@@ -277,8 +277,14 @@ function applyCreateResource(
       ? { kind: "iri" as const, iri: command.resourceIri }
       : statement.object;
     const predicateTerm = context.terms.find((candidate) => candidate.iri === statement.predicateIri);
+    const allowedCreatedMembership = isAllowedCreatedMembershipStatement(
+      store,
+      statement,
+      context,
+    );
     if (
       statement.predicateIri !== RDF_TYPE
+      && !allowedCreatedMembership
       && (
         statement.predicateIri === RDFS_MEMBER
         || isOrdinalPredicate(statement.predicateIri)
@@ -320,6 +326,31 @@ function applyCreateResource(
       positions.push({ resourceIri: command.resourceIri, position: { viewId, x, y } });
     }
   }
+}
+
+function isAllowedCreatedMembershipStatement(
+  store: Store,
+  statement: CreateResourceCommand["initialStatements"][number],
+  context: ResolvedAuthoringContext,
+): boolean {
+  if (
+    statement.subject.kind === "created-resource"
+    || statement.object.kind !== "created-resource"
+    || !isAbsoluteIri(statement.subject.iri)
+  ) return false;
+  const containerIri = statement.subject.iri;
+  for (const profile of context.runtime.catalogsByProfile.values()) {
+    for (const rule of profile.catalog.rules) {
+      if (rule.match.kind !== "type") continue;
+      const operator = rule.project;
+      if (
+        operator.operator !== "membership-container"
+        || operator.membershipPredicate !== statement.predicateIri
+      ) continue;
+      if (store.countQuads(containerIri, RDF_TYPE, rule.match.iri, null) > 0) return true;
+    }
+  }
+  return false;
 }
 
 function applySetProperty(

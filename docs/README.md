@@ -7,6 +7,9 @@ Iriographの目的は、tripleを単にnode-link図へ変換することでは�
 - [authoring-profile.md](./authoring-profile.md): 人間・LLMの語彙統制と表示要求からのsemantic rewrite仕様
 - [interface.md](./interface.md): document、catalog、Scene、editorの公開契約
 - [implementation.md](./implementation.md): package境界と処理構成
+- [semantic-notation.md](./semantic-notation.md): 意味Turtleと表示notationの分離、serializer表記規則
+- [layout-optimization.md](./layout-optimization.md): 混雑最適化pipeline、layout adapter選択、性能・品質指標
+- [accessibility.md](./accessibility.md): Canvas keyboard、focus、ARIAの規範契約
 - [distribution.md](./distribution.md): package配布contractとSemVer方針
 - [testing.md](./testing.md): component test、browser E2Eと完了時の検証手順
 - [backlog.md](./backlog.md): 未実装事項の優先順位、依存、完了条件

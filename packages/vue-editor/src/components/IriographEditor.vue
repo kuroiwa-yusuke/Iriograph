@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, toRaw, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, toRaw, useId, watch } from "vue";
 
 import {
   applyAuthoringSource,
@@ -52,10 +52,16 @@ import {
   type AuthoringChoice,
   type AuthoringCapabilityChoice,
   type AuthoringPreviewView,
+  type AuthoringResourcePickerTarget,
   type AuthoringStructureChoice,
   type EditorAuthoringDraft,
   structureKey,
 } from "../authoring-draft";
+import {
+  containmentPresentationTranslation,
+  findContainmentConsistencyWarnings,
+  type ContainmentConsistencyWarning,
+} from "../containment-consistency";
 import {
   AssetSceneSession,
   normalizePickedAssetRef,
@@ -65,6 +71,7 @@ import {
   appendEdgeWaypoint,
   normalizeEditableRouting,
   removeEdgeWaypoint,
+  routingWithEndpointAnchor,
   type EdgeRoutingUpdate,
 } from "../edge-routing";
 import {
@@ -172,11 +179,16 @@ const applyingTurtle = ref(false);
 const semanticWarningConfirmation = ref<SemanticWarningConfirmation>();
 const authoringDraft = ref<EditorAuthoringDraft>(emptyAuthoringDraft());
 const authoringPreview = ref<AuthoringPreview>();
+const authoringResourcePicker = ref<AuthoringResourcePickerTarget>();
 const authoringBusy = ref(false);
 const pickingAsset = ref(false);
 const viewCommandBusy = ref(false);
 const viewDialogMode = ref<"add" | "configure">();
 const viewForm = ref({ viewId: "", profileRef: "", layoutRef: "", locale: "" });
+const viewDialog = ref<HTMLFormElement>();
+const viewDialogInitialFocus = ref<HTMLInputElement>();
+const viewDialogTitleId = `${useId()}-view-dialog-title`;
+let viewDialogReturnFocus: HTMLElement | undefined;
 const defaultLayoutRegistry = createStandardLayoutRegistry();
 const assetSceneSession = new AssetSceneSession();
 let lastEmittedJson = "";
@@ -202,6 +214,10 @@ const scene = computed(() => {
     sessionFor(activeView.value?.viewId ?? "").temporaryHiddenElementIds,
   );
 });
+const containmentWarnings = computed(() => findContainmentConsistencyWarnings(scene.value));
+const containmentWarningElementIds = computed(() => [...new Set(
+  containmentWarnings.value.map((warning) => warning.elementId),
+)]);
 const selectedElementIdsSet = computed(() => new Set(selectedElementIds.value));
 const selectedElement = computed<SelectedElement | undefined>(() => [
   ...scene.value.nodes,
@@ -232,7 +248,10 @@ const selectedEdge = computed(() => selectedElement.value?.structuralKind === "e
   : undefined);
 const selectedManualWaypoints = computed(() => selectedEdge.value?.waypoints ?? []);
 const hasSelectedEditableRouting = computed(() => Boolean(
-  selectedEdge.value?.waypoints?.length || selectedEdge.value?.labelOffset,
+  selectedEdge.value?.waypoints?.length
+    || selectedEdge.value?.labelOffset
+    || selectedEdge.value?.sourceAnchor
+    || selectedEdge.value?.targetAnchor,
 ));
 const diagnostics = computed(() => [
   ...schemaDiagnostics.value,
@@ -322,6 +341,22 @@ const selectedAuthoringResource = computed<AuthoringChoice | undefined>(() => {
     ? { iri: element.semanticRef, label: element.label }
     : undefined;
 });
+const authoringResourcePickerLabel = computed(() => {
+  const target = authoringResourcePicker.value;
+  if (!target) return "resource";
+  if (target.field === "propertyValue") return `Property value ${target.index + 1}`;
+  return {
+    subjectIri: "Property subject",
+    sourceIri: "Edge source",
+    targetIri: "Edge target",
+    containerIri: "Membership container",
+    memberIri: "Membership member",
+    structureIri: "Structure",
+    resourceIri: "Delete resource",
+    createEdgeResourceIri: "Create edge resource",
+    createMembershipContainerIri: "Create membership container",
+  }[target.field];
+});
 
 function capabilityResourceIris(capability: SemanticEditCapability): string[] {
   switch (capability.command) {
@@ -349,6 +384,7 @@ const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
         key: structureKey("membership", rule.match.iri, operator.membershipPredicate),
         kind: "membership",
         label: `${rule.ruleId} — membership`,
+        ruleId: rule.ruleId,
         typeIri: rule.match.iri,
         predicateIri: operator.membershipPredicate,
       }];
@@ -358,6 +394,7 @@ const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
         key: structureKey("sequence", rule.match.iri, operator.ordinalPredicatePrefix),
         kind: "sequence",
         label: `${rule.ruleId} — sequence`,
+        ruleId: rule.ruleId,
         typeIri: rule.match.iri,
         ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
       }];
@@ -372,6 +409,7 @@ const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
         ),
         kind: "alternatives",
         label: `${rule.ruleId} — alternatives (default #${operator.defaultOrdinal})`,
+        ruleId: rule.ruleId,
         typeIri: rule.match.iri,
         ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
         defaultOrdinal: operator.defaultOrdinal,
@@ -425,6 +463,98 @@ function currentDraftStructureChoice(draft: EditorAuthoringDraft): AuthoringStru
   }
   return undefined;
 }
+
+function authoringOperationLabel(kind: EditorAuthoringDraft["kind"]): string {
+  return {
+    "create-resource": "Resourceを作成",
+    "set-property": "属性を設定",
+    "connect-resources": "Resourceを接続",
+    "set-membership": "包含を設定",
+    "set-sequence": "順序を設定",
+    "set-alternatives": "選択肢を設定",
+    "delete-resource": "Resourceを削除",
+    "remove-statement": "元tripleを削除",
+    "apply-capability": "Capability patch",
+  }[kind];
+}
+
+function authoringPreviewResourceChips(
+  value: EditorAuthoringDraft,
+): AuthoringPreviewView["resourceChips"] {
+  const chips: AuthoringPreviewView["resourceChips"] = [];
+  const add = (iri: string, role: string, fallback?: string) => {
+    if (!iri && !fallback) return;
+    const choice = authoringResourceChoices.value.find((item) => item.iri === iri);
+    chips.push({ iri: iri || "urn:iriograph:pending-resource", label: choice?.label || fallback || compactRef(iri), role });
+  };
+  switch (value.kind) {
+    case "create-resource":
+      add(value.resourceIri, "作成", value.label || "新しいresource");
+      if (value.createEdgeEnabled) add(value.createEdgeResourceIri, "接続先");
+      if (value.createMembershipEnabled) add(value.createMembershipContainerIri, "Container");
+      break;
+    case "set-property":
+      add(value.subjectIri, "Subject");
+      for (const item of value.propertyValues) if (item.objectKind === "iri") add(item.value, "Value");
+      break;
+    case "connect-resources":
+      add(value.sourceIri, "Source");
+      add(value.targetIri, "Target");
+      break;
+    case "set-membership":
+      add(value.containerIri, "Container");
+      add(value.memberIri, "Member");
+      break;
+    case "set-sequence":
+    case "set-alternatives":
+      add(value.structureIri, "Structure");
+      for (const member of value.membersText.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)) add(member, "Member");
+      break;
+    case "delete-resource":
+      add(value.resourceIri, "削除対象");
+      break;
+    case "remove-statement":
+      add(value.statementSubject, "Subject");
+      add(value.statementObject, "Object");
+      break;
+    case "apply-capability":
+      for (const [name, binding] of Object.entries(value.capabilityBindings)) {
+        if (binding.enabled && binding.objectKind === "iri") add(binding.value, name);
+      }
+      break;
+  }
+  return chips.filter((chip, index) => chips.findIndex((candidate) => (
+    candidate.iri === chip.iri && candidate.role === chip.role
+  )) === index);
+}
+
+function authoringPreviewRelations(
+  value: EditorAuthoringDraft,
+): AuthoringPreviewView["relations"] {
+  const labelFor = (iri: string, choices: AuthoringChoice[]) => (
+    choices.find((item) => item.iri === iri)?.label || compactRef(iri)
+  );
+  if (value.kind === "create-resource") {
+    return [
+      ...(value.createEdgeEnabled
+        ? [{ kind: "edge" as const, label: labelFor(value.createEdgePredicateIri, authoringEdgeChoices.value) }]
+        : []),
+      ...(value.createMembershipEnabled
+        ? [{ kind: "membership" as const, label: authoringStructureChoices.value.find((item) => item.key === value.createMembershipStructureConfigKey)?.label || "包含" }]
+        : []),
+    ];
+  }
+  if (value.kind === "set-membership") {
+    return [{ kind: "membership", label: authoringStructureChoices.value.find((item) => item.key === value.structureConfigKey)?.label || "包含" }];
+  }
+  if (value.kind === "connect-resources" || value.kind === "set-property") {
+    return [{ kind: "edge", label: labelFor(value.predicateIri, value.kind === "connect-resources" ? authoringEdgeChoices.value : authoringPropertyChoices.value) }];
+  }
+  if (value.kind === "remove-statement") {
+    return [{ kind: "edge", label: labelFor(value.statementPredicate, authoringPropertyChoices.value) }];
+  }
+  return [];
+}
 const authoringPreviewView = computed<AuthoringPreviewView | undefined>(() => {
   const preview = authoringPreview.value;
   if (!preview) return undefined;
@@ -435,6 +565,9 @@ const authoringPreviewView = computed<AuthoringPreviewView | undefined>(() => {
     addedStatements: preview.patch.added.map(formatTripleChange),
     removedStatements: preview.patch.removed.map(formatTripleChange),
     candidateSource: preview.candidateSource ?? "",
+    operationLabel: authoringOperationLabel(authoringDraft.value.kind),
+    resourceChips: authoringPreviewResourceChips(authoringDraft.value),
+    relations: authoringPreviewRelations(authoringDraft.value),
   };
 });
 const authoringDraftPosition = computed<Point | undefined>(() => {
@@ -493,11 +626,15 @@ const selectedElementDiagnostics = computed(() => {
   const element = selectedElement.value;
   return element ? diagnostics.value.filter((diagnostic) => diagnosticTargetsElement(diagnostic, element)) : [];
 });
+const selectedContainmentWarnings = computed(() => containmentWarnings.value.filter((warning) => (
+  warning.elementId === selectedElementId.value
+)));
 
 watch(
   () => props.modelValue,
   (value) => {
     cancelAssetPicker();
+    cancelAuthoringPicking();
     const nextJson = JSON.stringify(value);
     if (nextJson === lastEmittedJson) {
       lastEmittedJson = "";
@@ -561,6 +698,7 @@ watch(
     if (authoringDraft.value.positionPicking) {
       authoringDraft.value = { ...authoringDraft.value, positionPicking: false };
     }
+    authoringResourcePicker.value = undefined;
   },
 );
 
@@ -1010,6 +1148,8 @@ function addSelectedWaypoint(): void {
     routing: {
       waypoints: appendEdgeWaypoint(edge),
       labelOffset: edge.labelOffset,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
     },
   }, true);
 }
@@ -1022,6 +1162,8 @@ function removeSelectedWaypoint(index: number): void {
     routing: {
       waypoints: removeEdgeWaypoint(edge.waypoints, index),
       labelOffset: edge.labelOffset,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
     },
   }, true);
 }
@@ -1038,7 +1180,12 @@ function updateWaypointField(index: number, field: "x" | "y", event: Event): voi
   );
   changeRouting({
     elementId: edge.elementId,
-    routing: { waypoints, labelOffset: edge.labelOffset },
+    routing: {
+      waypoints,
+      labelOffset: edge.labelOffset,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
+    },
   }, true);
 }
 
@@ -1050,6 +1197,8 @@ function updateLabelOffsetField(field: "x" | "y", event: Event): void {
     elementId: edge.elementId,
     routing: {
       waypoints: edge.waypoints,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
       labelOffset: {
         x: field === "x" ? value : edge.labelOffset?.x ?? 0,
         y: field === "y" ? value : edge.labelOffset?.y ?? 0,
@@ -1063,7 +1212,33 @@ function resetSelectedLabelOffset(): void {
   if (!edge?.label) return;
   changeRouting({
     elementId: edge.elementId,
-    routing: { waypoints: edge.waypoints },
+    routing: {
+      waypoints: edge.waypoints,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
+    },
+  }, true);
+}
+
+function updateEndpointAnchor(
+  endpoint: "source" | "target",
+  event: Event,
+): void {
+  const edge = selectedEdge.value;
+  const value = Number((event.target as HTMLInputElement).value);
+  if (!edge || !Number.isFinite(value) || value < 0 || value >= 1) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: routingWithEndpointAnchor(edge, endpoint, { position: value }),
+  }, true);
+}
+
+function resetEndpointAnchor(endpoint: "source" | "target"): void {
+  const edge = selectedEdge.value;
+  if (!edge) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: routingWithEndpointAnchor(edge, endpoint, undefined),
   }, true);
 }
 
@@ -1234,6 +1409,7 @@ function clearSelectedOverride(): void {
 function updateAuthoringDraft(next: EditorAuthoringDraft): void {
   if (props.readOnly) return;
   const changedKind = next.kind !== authoringDraft.value.kind;
+  if (changedKind) cancelAuthoringPicking();
   const selected = selectedElement.value?.structuralKind === "edge"
     ? undefined
     : selectedElement.value;
@@ -1365,6 +1541,81 @@ function seedParentRemoval(): void {
   seedFromProvenance(element.parentProvenance?.editCapability, "inspector-parent-command");
 }
 
+function seedContainmentAddition(warning: ContainmentConsistencyWarning): void {
+  if (warning.kind !== "visual-only" || !authoringEnabled.value) return;
+  const element = geometryElement(warning.elementId);
+  const container = geometryElement(warning.visualContainerId);
+  if (!element || !container || container.structuralKind !== "container") return;
+  const matching = membershipChoicesForContainer(container);
+  const selected = matching.length === 1 ? matching[0] : undefined;
+  updateAuthoringDraft({
+    ...emptyAuthoringDraft("set-membership", element.semanticRef),
+    containerIri: container.semanticRef,
+    memberIri: element.semanticRef,
+    present: true,
+    structureConfigKey: selected?.key ?? "",
+    containerTypeIri: selected?.typeIri ?? "",
+    membershipPredicateIri: selected?.predicateIri ?? "",
+  });
+}
+
+function seedContainmentRemoval(warning: ContainmentConsistencyWarning): void {
+  if (warning.kind !== "semantic-only" || !authoringEnabled.value) return;
+  const element = geometryElement(warning.elementId);
+  seedFromProvenance(element?.parentProvenance?.editCapability, "containment-warning-remove");
+}
+
+function canSeedContainmentRemoval(warning: ContainmentConsistencyWarning): boolean {
+  return warning.kind === "semantic-only"
+    && Boolean(geometryElement(warning.elementId)?.parentProvenance?.editCapability);
+}
+
+function applyContainmentPresentationFix(
+  warning: ContainmentConsistencyWarning,
+  direction: "inside" | "outside",
+): void {
+  if (props.readOnly) return;
+  const action = direction === "inside" && warning.kind === "semantic-only"
+    ? {
+        kind: "move-inside-semantic-container" as const,
+        elementId: warning.elementId,
+        containerElementId: warning.semanticContainerId,
+      }
+    : direction === "outside" && warning.kind === "visual-only"
+      ? {
+          kind: "move-outside-visual-container" as const,
+          elementId: warning.elementId,
+          containerElementId: warning.visualContainerId,
+        }
+      : undefined;
+  if (!action) return;
+  const translation = containmentPresentationTranslation(scene.value, action);
+  if (!translation) return;
+  changeGeometryBatch(translateSelection(
+    scene.value,
+    [warning.elementId],
+    translation,
+    {
+      grid: { enabled: false },
+      targets: { enabled: false },
+    },
+  ), true);
+}
+
+function containmentElementLabel(elementId: string): string {
+  return geometryElement(elementId)?.label ?? compactRef(elementId);
+}
+
+function containmentWarningMessage(warning: ContainmentConsistencyWarning): string {
+  if (warning.kind === "visual-only") {
+    return `${containmentElementLabel(warning.elementId)} は見た目上 ${containmentElementLabel(warning.visualContainerId)} の中ですが、意味上の包含はありません。`;
+  }
+  const visual = warning.visualContainerId && warning.visualContainerId !== warning.semanticContainerId
+    ? ` 現在は見た目上 ${containmentElementLabel(warning.visualContainerId)} にあります。`
+    : "";
+  return `${containmentElementLabel(warning.elementId)} は意味上 ${containmentElementLabel(warning.semanticContainerId)} の配下ですが、領域内に収まっていません。${visual}`;
+}
+
 function seedFromProvenance(
   capability: SemanticEditCapability | undefined,
   commandId: string,
@@ -1391,11 +1642,12 @@ function seedSelectedResource(
 
 function beginDraftPositionPicking(): void {
   if (props.readOnly || authoringDraft.value.kind !== "create-resource") return;
+  authoringResourcePicker.value = undefined;
   updateAuthoringDraft({ ...authoringDraft.value, positionPicking: true });
   panel.value = "diagram";
 }
 
-function seedDraftPosition(position: Point): void {
+function seedDraftPosition(position: Point, containerIri?: string): void {
   if (
     props.readOnly
     || authoringDraft.value.kind !== "create-resource"
@@ -1411,18 +1663,73 @@ function seedDraftPosition(position: Point): void {
     initialX: String(Math.round(bounded.x)),
     initialY: String(Math.round(bounded.y)),
     positionPicking: false,
+    ...(containerIri ? createMembershipSeed(containerIri) : {}),
   });
+}
+
+function createMembershipSeed(containerIri: string): Partial<EditorAuthoringDraft> {
+  const container = scene.value.containers.find((item) => item.semanticRef === containerIri);
+  const matching = container ? membershipChoicesForContainer(container) : [];
+  const selected = matching.length === 1 ? matching[0] : undefined;
+  return {
+    createMembershipEnabled: true,
+    createMembershipContainerIri: containerIri,
+    createMembershipStructureConfigKey: selected?.key ?? "",
+    createMembershipContainerTypeIri: selected?.typeIri ?? "",
+    createMembershipPredicateIri: selected?.predicateIri ?? "",
+  };
+}
+
+function membershipChoicesForContainer(container: SceneContainer): AuthoringStructureChoice[] {
+  const choices = authoringStructureChoices.value.filter((item) => item.kind === "membership");
+  const ruleId = container.provenance?.rule?.ruleId;
+  if (ruleId) return choices.filter((item) => item.ruleId === ruleId);
+  return choices.length === 1 ? choices : [];
+}
+
+function beginResourcePicking(target: AuthoringResourcePickerTarget): void {
+  if (!authoringEnabled.value || authoringBusy.value || props.readOnly) return;
+  const same = JSON.stringify(authoringResourcePicker.value) === JSON.stringify(target);
+  authoringResourcePicker.value = same ? undefined : clone(target);
+  if (authoringDraft.value.positionPicking) {
+    authoringDraft.value = { ...authoringDraft.value, positionPicking: false };
+  }
+  panel.value = "diagram";
+}
+
+function seedDraftResource(semanticRef: string): void {
+  const target = authoringResourcePicker.value;
+  if (!target || props.readOnly) return;
+  const next = clone(authoringDraft.value);
+  if (target.field === "propertyValue") {
+    const value = next.propertyValues[target.index];
+    if (!value || value.objectKind !== "iri") return;
+    next.propertyValues[target.index] = { ...value, value: semanticRef };
+  } else {
+    next[target.field] = semanticRef;
+  }
+  authoringResourcePicker.value = undefined;
+  updateAuthoringDraft(next);
+}
+
+function cancelAuthoringPicking(): void {
+  authoringResourcePicker.value = undefined;
+  if (authoringDraft.value.positionPicking) {
+    authoringDraft.value = { ...authoringDraft.value, positionPicking: false };
+  }
 }
 
 function cancelAuthoringDraft(): void {
   if (authoringBusy.value) cancelAuthoringRequest();
   authoringDraft.value = emptyAuthoringDraft();
+  authoringResourcePicker.value = undefined;
   authoringPreview.value = undefined;
   applyDiagnostics.value = [];
 }
 
 function resetAuthoringDraft(): void {
   authoringDraft.value = emptyAuthoringDraft();
+  authoringResourcePicker.value = undefined;
   authoringPreview.value = undefined;
 }
 
@@ -1606,13 +1913,13 @@ async function flushPendingEdits(): Promise<boolean> {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.isComposing || isTextInput(event.target)) return;
   const command = event.ctrlKey || event.metaKey;
   if (command && event.key.toLowerCase() === "s") {
     event.preventDefault();
     void requestSave();
     return;
   }
-  if (isTextInput(event.target)) return;
   if (command && event.key.toLowerCase() === "a") {
     event.preventDefault();
     selectAll();
@@ -1620,6 +1927,10 @@ function handleKeydown(event: KeyboardEvent): void {
   }
   if (event.key === "Escape") {
     event.preventDefault();
+    if (authoringResourcePicker.value || authoringDraft.value.positionPicking) {
+      cancelAuthoringPicking();
+      return;
+    }
     clearSelection();
     return;
   }
@@ -1663,7 +1974,7 @@ function openAddViewDialog(): void {
     layoutRef: activeView.value?.layoutRef ?? layoutChoices.value[0] ?? "",
     locale: activeView.value?.locale ?? "",
   };
-  viewDialogMode.value = "add";
+  openViewDialog("add");
 }
 
 function openConfigureViewDialog(): void {
@@ -1675,12 +1986,51 @@ function openConfigureViewDialog(): void {
     layoutRef: view.layoutRef,
     locale: view.locale ?? "",
   };
-  viewDialogMode.value = "configure";
+  openViewDialog("configure");
 }
 
 function closeViewDialog(): void {
   if (viewCommandBusy.value) return;
+  finishViewDialog();
+}
+
+function openViewDialog(mode: "add" | "configure"): void {
+  viewDialogReturnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : undefined;
+  viewDialogMode.value = mode;
+  void nextTick(() => {
+    viewDialogInitialFocus.value?.focus();
+  });
+}
+
+function finishViewDialog(): void {
   viewDialogMode.value = undefined;
+  const returnTarget = viewDialogReturnFocus;
+  viewDialogReturnFocus = undefined;
+  void nextTick(() => {
+    if (returnTarget?.isConnected) returnTarget.focus();
+  });
+}
+
+function handleViewDialogKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeViewDialog();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const controls = [...(viewDialog.value?.querySelectorAll<HTMLElement>(
+    "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+  ) ?? [])].filter((element) => !element.hasAttribute("hidden"));
+  if (controls.length === 0) return;
+  const current = controls.indexOf(document.activeElement as HTMLElement);
+  const next = event.shiftKey
+    ? current <= 0 ? controls.at(-1)! : controls[current - 1]!
+    : current < 0 || current === controls.length - 1 ? controls[0]! : controls[current + 1]!;
+  event.preventDefault();
+  next.focus();
 }
 
 async function submitViewDialog(): Promise<void> {
@@ -1700,7 +2050,7 @@ async function submitViewDialog(): Promise<void> {
         layoutRef: form.layoutRef,
         locale: form.locale.trim() || null,
       };
-  if (await executeViewCommand(command)) viewDialogMode.value = undefined;
+  if (await executeViewCommand(command)) finishViewDialog();
 }
 
 async function duplicateActiveView(): Promise<void> {
@@ -2000,7 +2350,12 @@ function compactRef(value: string): string {
 }
 
 function isTextInput(target: EventTarget | null): boolean {
-  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
+  return target instanceof Element && Boolean(target.closest([
+    "input",
+    "textarea",
+    "select",
+    "[contenteditable]:not([contenteditable='false'])",
+  ].join(",")));
 }
 
 function emptyScene(
@@ -2117,27 +2472,6 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <span><b>{{ scene.containers.length }}</b> areas</span>
           </div>
         </section>
-        <AuthoringPanel
-          :model-value="authoringDraft"
-          :enabled="authoringEnabled"
-          :blocked-reason="authoringBlockedReason"
-          :busy="authoringBusy"
-          :classes="authoringClassChoices"
-          :properties="authoringPropertyChoices"
-          :edge-predicates="authoringEdgeChoices"
-          :resources="authoringResourceChoices"
-          :capabilities="authoringCapabilityChoices"
-          :structures="authoringStructureChoices"
-          :selected-resource="selectedAuthoringResource"
-          :preview="authoringPreviewView"
-          :diagnostics="applyDiagnostics"
-          @update:model-value="updateAuthoringDraft"
-          @preview="previewStructuredAuthoring"
-          @apply="applyStructuredAuthoring"
-          @cancel="cancelAuthoringDraft"
-          @pick-position="beginDraftPositionPicking"
-          @seed-selection="seedSelectedResource"
-        />
         <nav class="iriograph-element-list" aria-label="Scene elements">
           <small>SCENE ELEMENTS <span>derived</span></small>
           <button
@@ -2246,8 +2580,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             v-if="sceneLoading || sceneError"
             class="iriograph-scene-status"
             :class="{ error: !sceneLoading && sceneError }"
-            role="status"
-            aria-live="polite"
+            :role="!sceneLoading && sceneError ? 'alert' : 'status'"
+            :aria-live="!sceneLoading && sceneError ? 'assertive' : 'polite'"
           >
             <b>{{ sceneLoading ? "図を更新中…" : "図を表示できません" }}</b>
             <span v-if="!sceneLoading && sceneError">{{ sceneError.message }}</span>
@@ -2260,10 +2594,15 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :zoom="zoom"
             :snap="snapSettings"
             :read-only="readOnly || sceneLoading || applyingTurtle || authoringBusy"
+            :busy="sceneLoading || applyingTurtle || authoringBusy"
             :semantic-position-picking="authoringDraft.positionPicking"
+            :semantic-resource-picking="Boolean(authoringResourcePicker)"
+            :semantic-resource-pick-label="authoringResourcePickerLabel"
             :semantic-draft-position="authoringDraftPosition"
+            :containment-warning-element-ids="containmentWarningElementIds"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
+            @selection-set-request="selectElements"
             @gesture-start="beginGesture"
             @gesture-end="endGesture"
             @resize-change="changeGeometry"
@@ -2271,6 +2610,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @routing-update="changeRouting"
             @semantic-edit-request="seedSemanticEdit"
             @semantic-position-request="seedDraftPosition"
+            @semantic-resource-request="seedDraftResource"
+            @semantic-pick-cancel="cancelAuthoringPicking"
           />
         </section>
 
@@ -2322,8 +2663,32 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </main>
 
       <aside class="iriograph-inspector">
+        <AuthoringPanel
+          :model-value="authoringDraft"
+          :enabled="authoringEnabled"
+          :blocked-reason="authoringBlockedReason"
+          :busy="authoringBusy"
+          :classes="authoringClassChoices"
+          :properties="authoringPropertyChoices"
+          :edge-predicates="authoringEdgeChoices"
+          :resources="authoringResourceChoices"
+          :capabilities="authoringCapabilityChoices"
+          :structures="authoringStructureChoices"
+          :selected-resource="selectedAuthoringResource"
+          :picker-target="authoringResourcePicker"
+          :preview="authoringPreviewView"
+          :diagnostics="applyDiagnostics"
+          @update:model-value="updateAuthoringDraft"
+          @preview="previewStructuredAuthoring"
+          @apply="applyStructuredAuthoring"
+          @cancel="cancelAuthoringDraft"
+          @pick-position="beginDraftPositionPicking"
+          @pick-resource="beginResourcePicking"
+          @seed-selection="seedSelectedResource"
+        />
+        <div class="iriograph-inspector-divider"><small>DISPLAY INSPECTOR</small><span>View overlay</span></div>
         <header>
-          <div><small>INSPECTOR</small><strong>{{ selectedElement?.label ?? "No selection" }}</strong></div>
+          <div><small>DISPLAY</small><strong>{{ selectedElement?.label ?? "No selection" }}</strong></div>
           <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length} selected` : selectedElement.structuralKind }}</span>
         </header>
         <template v-if="selectedElement">
@@ -2337,6 +2702,43 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || authoringBusy || turtlePending"
               @click="seedParentRemoval"
             >包含から外す</button>
+          </section>
+          <section v-if="selectedContainmentWarnings.length" class="iriograph-containment-warnings">
+            <label>Containment consistency</label>
+            <article
+              v-for="warning in selectedContainmentWarnings"
+              :key="warning.diagnosticId"
+              role="status"
+            >
+              <b>表示と意味の包含が一致していません</b>
+              <span>{{ containmentWarningMessage(warning) }}</span>
+              <div>
+                <template v-if="warning.kind === 'visual-only'">
+                  <button
+                    type="button"
+                    :disabled="!authoringEnabled || authoringBusy"
+                    @click="seedContainmentAddition(warning)"
+                  >意味包含のdraftを作成</button>
+                  <button
+                    type="button"
+                    :disabled="readOnly"
+                    @click="applyContainmentPresentationFix(warning, 'outside')"
+                  >表示だけ領域外へ移動</button>
+                </template>
+                <template v-else>
+                  <button
+                    type="button"
+                    :disabled="readOnly"
+                    @click="applyContainmentPresentationFix(warning, 'inside')"
+                  >表示を意味上の領域へ戻す</button>
+                  <button
+                    type="button"
+                    :disabled="!authoringEnabled || authoringBusy || !canSeedContainmentRemoval(warning)"
+                    @click="seedContainmentRemoval(warning)"
+                  >意味包含を外すdraftを作成</button>
+                </template>
+              </div>
+            </article>
           </section>
           <section v-if="selectedElementDiagnostics.length" class="iriograph-element-diagnostics">
             <label>Diagnostics</label>
@@ -2454,6 +2856,31 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || !selectedElement.labelOffset"
               @click="resetSelectedLabelOffset"
             >Label位置をリセット</button>
+            <label>Endpoint anchors</label>
+            <div class="iriograph-endpoint-anchor-fields">
+              <div v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
+                <label>
+                  <span>{{ endpoint }}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="0.999999"
+                    step="0.01"
+                    :aria-label="`${endpoint} endpoint anchor`"
+                    :value="selectedElement[endpoint === 'source' ? 'sourceAnchor' : 'targetAnchor']?.position ?? ''"
+                    :placeholder="'automatic'"
+                    :disabled="readOnly"
+                    @change="updateEndpointAnchor(endpoint, $event)"
+                  />
+                </label>
+                <button
+                  type="button"
+                  :aria-label="`${endpoint} endpoint anchorをリセット`"
+                  :disabled="readOnly || !selectedElement[endpoint === 'source' ? 'sourceAnchor' : 'targetAnchor']"
+                  @click="resetEndpointAnchor(endpoint)"
+                >Reset</button>
+              </div>
+            </div>
             <button
               type="button"
               class="iriograph-wide-button"
@@ -2478,14 +2905,22 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       role="presentation"
       @click.self="closeViewDialog"
     >
-      <form class="iriograph-view-dialog" role="dialog" aria-modal="true" aria-labelledby="iriograph-view-dialog-title" @submit.prevent="submitViewDialog">
+      <form
+        ref="viewDialog"
+        class="iriograph-view-dialog"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="viewDialogTitleId"
+        @keydown="handleViewDialogKeydown"
+        @submit.prevent="submitViewDialog"
+      >
         <header>
-          <strong id="iriograph-view-dialog-title">{{ viewDialogMode === "add" ? "Named viewを追加" : "View設定" }}</strong>
+          <strong :id="viewDialogTitleId">{{ viewDialogMode === "add" ? "Named viewを追加" : "View設定" }}</strong>
           <button type="button" aria-label="閉じる" :disabled="viewCommandBusy" @click="closeViewDialog">×</button>
         </header>
         <label>
           View ID
-          <input v-model="viewForm.viewId" :readonly="viewDialogMode === 'configure'" required />
+          <input ref="viewDialogInitialFocus" v-model="viewForm.viewId" :readonly="viewDialogMode === 'configure'" required />
           <small v-if="viewDialogMode === 'configure'">viewIdは作成後に変更できません。</small>
         </label>
         <label>

@@ -114,6 +114,22 @@ describe("display reconciliation", () => {
     });
   });
 
+  it("anchorだけのsparse routing overlayを保持する", async () => {
+    const previous = documentFor(oldSource);
+    for (const view of previous.views) {
+      const edge = overlayFor(view.overlay, directEdgeRef)!;
+      edge.routing = { sourceAnchor: { position: 0 }, targetAnchor: { position: .75 } };
+    }
+
+    const result = await applySemanticSource(previous, oldSource, runtimeContext());
+
+    expect(result.accepted).toBe(true);
+    expect(overlayFor(result.document.views[0]!.overlay, directEdgeRef)?.routing).toEqual({
+      sourceAnchor: { position: 0 },
+      targetAnchor: { position: .75 },
+    });
+  });
+
   it("derived edgeのendpoint変更時はrouting全体を捨てappearanceを保持する", async () => {
     const previous = documentFor(sequenceEndpointOldSource);
     for (const view of previous.views) {
@@ -124,6 +140,8 @@ describe("display reconciliation", () => {
           routing: {
             waypoints: [{ x: 250, y: 70 }],
             labelOffset: { x: 4, y: -6 },
+            sourceAnchor: { position: .25 },
+            targetAnchor: { position: .75 },
           },
         },
       };

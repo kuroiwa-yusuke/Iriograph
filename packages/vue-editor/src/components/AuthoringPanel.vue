@@ -6,6 +6,7 @@ import type {
   AuthoringCapabilityChoice,
   AuthoringChoice,
   AuthoringPreviewView,
+  AuthoringResourcePickerTarget,
   AuthoringStructureChoice,
   EditorAuthoringDraft,
   EditorAuthoringKind,
@@ -18,6 +19,7 @@ import {
   emptyPropertyValueDraft,
   splitIriLines,
 } from "../authoring-draft";
+import IriChoiceField from "./IriChoiceField.vue";
 
 const props = withDefaults(defineProps<{
   modelValue: EditorAuthoringDraft;
@@ -33,6 +35,7 @@ const props = withDefaults(defineProps<{
   selectedResource?: AuthoringChoice;
   preview?: AuthoringPreviewView;
   diagnostics?: ProjectionDiagnostic[];
+  pickerTarget?: AuthoringResourcePickerTarget;
 }>(), {
   enabled: true,
   blockedReason: "",
@@ -46,13 +49,11 @@ const props = withDefaults(defineProps<{
   selectedResource: undefined,
   preview: undefined,
   diagnostics: () => [],
+  pickerTarget: undefined,
 });
 
 const instanceId = useId();
 const resourceListId = `${instanceId}-authoring-resources`;
-const classListId = `${instanceId}-authoring-classes`;
-const propertyListId = `${instanceId}-authoring-properties`;
-const edgeListId = `${instanceId}-authoring-edges`;
 
 const emit = defineEmits<{
   "update:modelValue": [draft: EditorAuthoringDraft];
@@ -60,6 +61,7 @@ const emit = defineEmits<{
   apply: [];
   cancel: [];
   pickPosition: [];
+  pickResource: [target: AuthoringResourcePickerTarget];
   seedSelection: [target: "edge-source" | "edge-target" | "membership-container" | "membership-member"];
 }>();
 
@@ -82,6 +84,7 @@ const relevantStructures = computed(() => props.structures.filter((item) => (
   || (props.modelValue.kind === "set-sequence" && item.kind === "sequence")
   || (props.modelValue.kind === "set-alternatives" && item.kind === "alternatives")
 )));
+const membershipStructures = computed(() => props.structures.filter((item) => item.kind === "membership"));
 
 function update<K extends keyof EditorAuthoringDraft>(
   key: K,
@@ -147,6 +150,25 @@ function selectStructure(event: Event): void {
       ? memberAtOrdinal(props.modelValue.membersText, selected.defaultOrdinal ?? 1)
       : props.modelValue.defaultMemberIri,
   });
+}
+
+function selectCreateMembershipStructure(event: Event): void {
+  const key = inputValue(event);
+  const selected = membershipStructures.value.find((item) => item.key === key);
+  emit("update:modelValue", {
+    ...props.modelValue,
+    createMembershipStructureConfigKey: selected?.key ?? "",
+    createMembershipContainerTypeIri: selected?.typeIri ?? "",
+    createMembershipPredicateIri: selected?.predicateIri ?? "",
+  });
+}
+
+function requestResource(target: AuthoringResourcePickerTarget): void {
+  emit("pickResource", target);
+}
+
+function isPicking(target: AuthoringResourcePickerTarget): boolean {
+  return JSON.stringify(props.pickerTarget) === JSON.stringify(target);
 }
 
 function updateMembers(value: string): void {
@@ -215,10 +237,19 @@ function requestPosition(): void {
     </label>
 
     <template v-if="modelValue.kind === 'create-resource'">
-      <label><span>Resource IRI（空欄で採番）</span><input aria-label="Resource IRI" :value="modelValue.resourceIri" :disabled="!enabled || busy" @input="update('resourceIri', inputValue($event))" /></label>
-      <label><span>Class</span><input aria-label="Resource class" :list="classListId" :value="modelValue.classIri" :disabled="!enabled || busy" @input="update('classIri', inputValue($event))" /></label>
-      <datalist :id="classListId"><option v-for="item in classes" :key="item.iri" :value="item.iri">{{ item.label }}</option></datalist>
       <label><span>Label</span><input aria-label="Resource label" :value="modelValue.label" :disabled="!enabled || busy" @input="update('label', inputValue($event))" /></label>
+      <IriChoiceField
+        label="Class"
+        input-label="Resource class"
+        :model-value="modelValue.classIri"
+        :choices="classes"
+        :enabled="enabled && !busy"
+        @update:model-value="update('classIri', $event)"
+      />
+      <details class="iriograph-authoring-advanced">
+        <summary>Advanced: Resource IRI（空欄で採番）</summary>
+        <input aria-label="Resource IRI" :value="modelValue.resourceIri" :disabled="!enabled || busy" @input="update('resourceIri', inputValue($event))" />
+      </details>
       <button type="button" class="iriograph-wide-button" :aria-pressed="modelValue.positionPicking" :disabled="!enabled || busy" @click="requestPosition">
         {{ modelValue.positionPicking ? "Canvasの空白をクリック…" : "Canvasで位置指定" }}
       </button>
@@ -226,18 +257,35 @@ function requestPosition(): void {
         <label><span>x</span><input aria-label="Initial x" type="number" :value="modelValue.initialX" :disabled="!enabled || busy" @input="update('initialX', inputValue($event))" /></label>
         <label><span>y</span><input aria-label="Initial y" type="number" :value="modelValue.initialY" :disabled="!enabled || busy" @input="update('initialY', inputValue($event))" /></label>
       </div>
+      <fieldset class="iriograph-authoring-value-row">
+        <legend>同時にdirect edgeを作成（任意）</legend>
+        <label class="iriograph-authoring-check"><input aria-label="Create edge enabled" type="checkbox" :checked="modelValue.createEdgeEnabled" :disabled="!enabled || busy" @change="update('createEdgeEnabled', ($event.target as HTMLInputElement).checked)" /><span>既存resourceとのedgeを追加</span></label>
+        <template v-if="modelValue.createEdgeEnabled">
+          <label><span>方向</span><select aria-label="Create edge direction" :value="modelValue.createEdgeDirection" :disabled="!enabled || busy" @change="update('createEdgeDirection', inputValue($event) as 'outgoing' | 'incoming')"><option value="outgoing">作成resource → 既存resource</option><option value="incoming">既存resource → 作成resource</option></select></label>
+          <IriChoiceField label="Predicate" input-label="Create edge predicate" :model-value="modelValue.createEdgePredicateIri" :choices="edgePredicates" :enabled="enabled && !busy" :allow-empty="false" @update:model-value="update('createEdgePredicateIri', $event)" />
+          <IriChoiceField label="既存resource" input-label="Create edge resource" :model-value="modelValue.createEdgeResourceIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'createEdgeResourceIri' })" @update:model-value="update('createEdgeResourceIri', $event)" @pick="requestResource({ field: 'createEdgeResourceIri' })" />
+        </template>
+      </fieldset>
+      <fieldset class="iriograph-authoring-value-row">
+        <legend>同時にcontainerへ含める（任意）</legend>
+        <label class="iriograph-authoring-check"><input aria-label="Create membership enabled" type="checkbox" :checked="modelValue.createMembershipEnabled" :disabled="!enabled || busy" @change="update('createMembershipEnabled', ($event.target as HTMLInputElement).checked)" /><span>catalog規定の包含を追加</span></label>
+        <template v-if="modelValue.createMembershipEnabled">
+          <label><span>Membership structure</span><select aria-label="Create membership structure" :value="modelValue.createMembershipStructureConfigKey" :disabled="!enabled || busy" @change="selectCreateMembershipStructure"><option value="">選択してください</option><option v-for="item in membershipStructures" :key="item.key" :value="item.key" :title="`${item.typeIri} / ${item.predicateIri}`">{{ item.label }}</option></select></label>
+          <IriChoiceField label="Container" input-label="Create membership container" :model-value="modelValue.createMembershipContainerIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'createMembershipContainerIri' })" @update:model-value="update('createMembershipContainerIri', $event)" @pick="requestResource({ field: 'createMembershipContainerIri' })" />
+        </template>
+      </fieldset>
     </template>
 
     <template v-else-if="modelValue.kind === 'set-property'">
-      <label><span>Subject IRI</span><input aria-label="Property subject" :list="resourceListId" :value="modelValue.subjectIri" :disabled="!enabled || busy" @input="update('subjectIri', inputValue($event))" /></label>
-      <label><span>Predicate</span><input aria-label="Property predicate" :list="propertyListId" :value="modelValue.predicateIri" :disabled="!enabled || busy" @input="update('predicateIri', inputValue($event))" /></label>
-      <datalist :id="propertyListId"><option v-for="item in properties" :key="item.iri" :value="item.iri">{{ item.label }}</option></datalist>
+      <IriChoiceField label="Subject" input-label="Property subject" :model-value="modelValue.subjectIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'subjectIri' })" @update:model-value="update('subjectIri', $event)" @pick="requestResource({ field: 'subjectIri' })" />
+      <IriChoiceField label="Predicate" input-label="Property predicate" :model-value="modelValue.predicateIri" :choices="properties" :enabled="enabled && !busy" :allow-empty="false" @update:model-value="update('predicateIri', $event)" />
       <label><span>更新方法</span><select aria-label="Property update mode" :value="modelValue.propertyMode" :disabled="!enabled || busy" @change="update('propertyMode', inputValue($event) as 'replace' | 'delete')"><option value="replace">値を完全置換</option><option value="delete">属性を削除</option></select></label>
       <template v-if="modelValue.propertyMode === 'replace'">
         <fieldset v-for="(value, index) in modelValue.propertyValues" :key="index" class="iriograph-authoring-value-row">
           <legend>Value {{ index + 1 }}</legend>
           <label><span>Object kind</span><select :aria-label="`Property object kind ${index + 1}`" :value="value.objectKind" :disabled="!enabled || busy" @change="updatePropertyValue(index, 'objectKind', inputValue($event) as 'literal' | 'iri')"><option value="literal">Literal</option><option value="iri">IRI</option></select></label>
-          <label><span>Value</span><input :aria-label="`Property value ${index + 1}`" :list="value.objectKind === 'iri' ? resourceListId : undefined" :value="value.value" :disabled="!enabled || busy" @input="updatePropertyValue(index, 'value', inputValue($event))" /></label>
+          <IriChoiceField v-if="value.objectKind === 'iri'" label="Value resource" :input-label="`Property value ${index + 1}`" :model-value="value.value" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'propertyValue', index })" @update:model-value="updatePropertyValue(index, 'value', $event)" @pick="requestResource({ field: 'propertyValue', index })" />
+          <label v-else><span>Value</span><input :aria-label="`Property value ${index + 1}`" :value="value.value" :disabled="!enabled || busy" @input="updatePropertyValue(index, 'value', inputValue($event))" /></label>
           <template v-if="value.objectKind === 'literal'">
             <label><span>Language</span><input :aria-label="`Literal language ${index + 1}`" :value="value.language" :disabled="!enabled || busy || Boolean(value.datatypeIri)" @input="updatePropertyValue(index, 'language', inputValue($event))" /></label>
             <label><span>Datatype IRI</span><input :aria-label="`Literal datatype ${index + 1}`" :value="value.datatypeIri" :disabled="!enabled || busy || Boolean(value.language)" @input="updatePropertyValue(index, 'datatypeIri', inputValue($event))" /></label>
@@ -250,20 +298,19 @@ function requestPosition(): void {
     </template>
 
     <template v-else-if="modelValue.kind === 'connect-resources'">
-      <label><span>Source IRI</span><input aria-label="Edge source" :list="resourceListId" :value="modelValue.sourceIri" :disabled="!enabled || busy" @input="update('sourceIri', inputValue($event))" /></label>
+      <IriChoiceField label="Source" input-label="Edge source" :model-value="modelValue.sourceIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'sourceIri' })" @update:model-value="update('sourceIri', $event)" @pick="requestResource({ field: 'sourceIri' })" />
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('seedSelection', 'edge-source')">選択中をSourceへ</button>
-      <label><span>Predicate</span><input aria-label="Edge predicate" :list="edgeListId" :value="modelValue.predicateIri" :disabled="!enabled || busy" @input="update('predicateIri', inputValue($event))" /></label>
-      <datalist :id="edgeListId"><option v-for="item in edgePredicates" :key="item.iri" :value="item.iri">{{ item.label }}</option></datalist>
-      <label><span>Target IRI</span><input aria-label="Edge target" :list="resourceListId" :value="modelValue.targetIri" :disabled="!enabled || busy" @input="update('targetIri', inputValue($event))" /></label>
+      <IriChoiceField label="Predicate" input-label="Edge predicate" :model-value="modelValue.predicateIri" :choices="edgePredicates" :enabled="enabled && !busy" :allow-empty="false" @update:model-value="update('predicateIri', $event)" />
+      <IriChoiceField label="Target" input-label="Edge target" :model-value="modelValue.targetIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'targetIri' })" @update:model-value="update('targetIri', $event)" @pick="requestResource({ field: 'targetIri' })" />
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('seedSelection', 'edge-target')">選択中をTargetへ</button>
     </template>
 
     <template v-else-if="modelValue.kind === 'set-membership'">
       <label><span>Catalog structure</span><select aria-label="Membership structure config" :value="modelValue.structureConfigKey" :disabled="!enabled || busy" @change="selectStructure"><option value="">選択してください</option><option v-for="item in relevantStructures" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
       <small v-if="modelValue.containerTypeIri">{{ modelValue.containerTypeIri }} / {{ modelValue.membershipPredicateIri }}</small>
-      <label><span>Container IRI</span><input aria-label="Membership container" :list="resourceListId" :value="modelValue.containerIri" :disabled="!enabled || busy" @input="update('containerIri', inputValue($event))" /></label>
+      <IriChoiceField label="Container" input-label="Membership container" :model-value="modelValue.containerIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'containerIri' })" @update:model-value="update('containerIri', $event)" @pick="requestResource({ field: 'containerIri' })" />
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('seedSelection', 'membership-container')">選択中をContainerへ</button>
-      <label><span>Member IRI</span><input aria-label="Membership member" :list="resourceListId" :value="modelValue.memberIri" :disabled="!enabled || busy" @input="update('memberIri', inputValue($event))" /></label>
+      <IriChoiceField label="Member" input-label="Membership member" :model-value="modelValue.memberIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'memberIri' })" @update:model-value="update('memberIri', $event)" @pick="requestResource({ field: 'memberIri' })" />
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('seedSelection', 'membership-member')">選択中をMemberへ</button>
       <label class="iriograph-authoring-check"><input aria-label="Membership present" type="checkbox" :checked="modelValue.present" :disabled="!enabled || busy" @change="update('present', ($event.target as HTMLInputElement).checked)" /><span>Containerへ含める</span></label>
     </template>
@@ -271,7 +318,7 @@ function requestPosition(): void {
     <template v-else-if="modelValue.kind === 'set-sequence' || modelValue.kind === 'set-alternatives'">
       <label><span>Catalog structure</span><select aria-label="Ordinal structure config" :value="modelValue.structureConfigKey" :disabled="!enabled || busy" @change="selectStructure"><option value="">選択してください</option><option v-for="item in relevantStructures" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
       <small v-if="modelValue.ordinalPredicatePrefix">{{ modelValue.kind === 'set-sequence' ? modelValue.sequenceTypeIri : modelValue.alternativeTypeIri }} / {{ modelValue.ordinalPredicatePrefix }}</small>
-      <label><span>Structure IRI</span><input aria-label="Structure IRI" :list="resourceListId" :value="modelValue.structureIri" :disabled="!enabled || busy" @input="update('structureIri', inputValue($event))" /></label>
+      <IriChoiceField label="Structure" input-label="Structure IRI" :model-value="modelValue.structureIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'structureIri' })" @update:model-value="update('structureIri', $event)" @pick="requestResource({ field: 'structureIri' })" />
       <label><span>Members（ordinal順・1行1 IRI）</span><textarea aria-label="Structure members" :value="modelValue.membersText" :disabled="!enabled || busy" @input="updateMembers(inputValue($event))" /></label>
       <template v-if="modelValue.kind === 'set-alternatives'">
         <label><span>Default ordinal slot</span><input aria-label="Default ordinal" type="number" min="1" :value="modelValue.defaultOrdinal" readonly /></label>
@@ -280,7 +327,7 @@ function requestPosition(): void {
     </template>
 
     <template v-else-if="modelValue.kind === 'delete-resource'">
-      <label><span>Resource IRI</span><input aria-label="Delete resource IRI" :list="resourceListId" :value="modelValue.resourceIri" :disabled="!enabled || busy" @input="update('resourceIri', inputValue($event))" /></label>
+      <IriChoiceField label="Resource" input-label="Delete resource IRI" :model-value="modelValue.resourceIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'resourceIri' })" @update:model-value="update('resourceIri', $event)" @pick="requestResource({ field: 'resourceIri' })" />
       <label class="iriograph-authoring-check"><input aria-label="Explicit cascade" type="checkbox" :checked="modelValue.cascade" :disabled="!enabled || busy" @change="update('cascade', ($event.target as HTMLInputElement).checked)" /><span>Previewした参照もcascade削除</span></label>
     </template>
 
@@ -315,10 +362,21 @@ function requestPosition(): void {
     </div>
 
     <section v-if="preview" class="iriograph-authoring-preview">
-      <div><b>{{ preview.valid ? "適用可能" : "適用不可" }}</b><code>{{ preview.confirmationId }}</code></div>
+      <div><b>{{ preview.operationLabel }}</b><span>{{ preview.valid ? "適用可能" : "適用不可" }}</span></div>
+      <div class="iriograph-preview-summary">
+        <span class="iriograph-preview-count add">追加 {{ preview.addedStatements.length }} triple</span>
+        <span class="iriograph-preview-count remove">削除 {{ preview.removedStatements.length }} triple</span>
+        <span v-for="relation in preview.relations" :key="`${relation.kind}:${relation.label}`" :class="['iriograph-preview-relation', relation.kind]">
+          {{ relation.kind === 'membership' ? '⊂' : '→' }} {{ relation.label }}
+        </span>
+      </div>
+      <div v-if="preview.resourceChips.length" class="iriograph-preview-resources">
+        <span v-for="chip in preview.resourceChips" :key="`${chip.role}:${chip.iri}`" class="iriograph-resource-chip" :title="chip.iri">
+          <small>{{ chip.role }}</small>{{ chip.label }}
+        </span>
+      </div>
       <ul v-if="preview.diagnostics.length"><li v-for="(item, index) in preview.diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ item.code }}</b> {{ item.message }}</li></ul>
-      <details :open="preview.removedStatements.length > 0"><summary>削除 {{ preview.removedStatements.length }} triple</summary><pre>{{ preview.removedStatements.join('\n') }}</pre></details>
-      <details :open="preview.addedStatements.length > 0"><summary>追加 {{ preview.addedStatements.length }} triple</summary><pre>{{ preview.addedStatements.join('\n') }}</pre></details>
+      <details><summary>Exact triples（削除 {{ preview.removedStatements.length }} / 追加 {{ preview.addedStatements.length }}）</summary><h5>Removed</h5><pre>{{ preview.removedStatements.join('\n') }}</pre><h5>Added</h5><pre>{{ preview.addedStatements.join('\n') }}</pre></details>
       <details><summary>Candidate Turtle</summary><pre>{{ preview.candidateSource }}</pre></details>
     </section>
   </section>

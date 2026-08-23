@@ -6,6 +6,10 @@ import {
   type ResolvedAuthoringContext,
   type ResourceIriAllocator,
 } from "@iriograph/core";
+import {
+  ELK_LAYOUT_REFS,
+  ElkLayeredLayoutAdapter,
+} from "@iriograph/layout-elk";
 
 import { mockProjectionCatalog } from "./catalog";
 
@@ -13,12 +17,16 @@ const DEMO_NAMESPACE = "urn:iriograph:demo:";
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const RDFS = "http://www.w3.org/2000/01/rdf-schema#";
 
+const mockLayoutRegistry = createStandardLayoutRegistry();
+mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR"));
+mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredTb, "TB"));
+
 export const mockProjectionRuntimeContext = createProjectionRuntimeContext([{
   profileRef: mockProjectionCatalog.profileRef,
   sourceCatalogRefs: [catalogRef(mockProjectionCatalog)],
   catalog: mockProjectionCatalog,
   ruleOrigins: [],
-}], createStandardLayoutRegistry());
+}], mockLayoutRegistry);
 
 export const mockResourceIriAllocator: ResourceIriAllocator = {
   allocate(request) {
@@ -52,12 +60,6 @@ export function createMockAuthoringContext(
       llmMinting: "deny",
     },
     terms: [
-      ...["StartEvent", "UserTask", "ServiceTask", "EndEvent", "Reference", "ExclusiveGateway"]
-        .map((name) => ({
-          iri: `${DEMO_NAMESPACE}${name}`,
-          kind: "class" as const,
-          label: name,
-        })),
       { iri: `${RDF}Bag`, kind: "structure", roles: ["type-object"], label: "Bag / Lane" },
       { iri: `${RDF}Seq`, kind: "structure", roles: ["type-object"], label: "Sequence" },
       { iri: `${RDF}Alt`, kind: "structure", roles: ["type-object"], label: "Alternatives" },

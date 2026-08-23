@@ -53,6 +53,10 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - `docs/view-management.md`: named view command、active view、view別session、一時hideの規範仕様。
 - `docs/interface.md`: document、catalog、Sceneの公開契約。
 - `docs/implementation.md`: package境界と投影処理。
+- `docs/semantic-notation.md`: 意味Turtleと表示notation、canonical serializerの境界。
+- `docs/layout-optimization.md`: 自動配置pipeline、layout adapter、性能・品質基準。
+- `docs/accessibility.md`: Canvas keyboard、focus、ARIAの規範仕様。
+- `docs/distribution.md`: package配布、lockstep version、依存licenseの方針。
 - `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。
 
 バックログを完了ログにせず、細かな試行錯誤は設計文書へ残さない。

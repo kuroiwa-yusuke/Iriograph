@@ -21,8 +21,8 @@ describe("mock authoring host", () => {
       suggestedLocalName: "Review Task",
       initialStatements: [{
         subject: { kind: "created-resource" as const },
-        predicateIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
-        object: { kind: "iri" as const, iri: "urn:iriograph:demo:UserTask" },
+        predicateIri: "http://www.w3.org/2000/01/rdf-schema#label",
+        object: { kind: "literal" as const, value: "Review task" },
       }],
     };
 
@@ -53,7 +53,7 @@ function fixture(): IriographDocumentV1 {
       source: `
 @prefix wf: <urn:iriograph:demo:> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
-wf:start a wf:StartEvent ; rdfs:label "Start" .
+wf:start rdfs:label "Start" .
 `,
     },
     views: [{

@@ -22,6 +22,7 @@ try {
   await cp(fixtureSource, consumerDirectory, { recursive: true });
 
   const coreTarball = await pack("packages/core", artifactsDirectory);
+  const layoutElkTarball = await pack("packages/layout-elk", artifactsDirectory);
   const editorTarball = await pack("packages/vue-editor", artifactsDirectory);
 
   runNpm([
@@ -31,6 +32,7 @@ try {
     "--no-fund",
     "--package-lock=false",
     coreTarball,
+    layoutElkTarball,
     editorTarball,
   ], consumerDirectory);
 
@@ -62,19 +64,28 @@ async function pack(packageDirectory, destination) {
 
 async function verifyInstalledContract(consumer) {
   const coreDirectory = join(consumer, "node_modules", "@iriograph", "core");
+  const layoutElkDirectory = join(consumer, "node_modules", "@iriograph", "layout-elk");
   const editorDirectory = join(consumer, "node_modules", "@iriograph", "vue-editor");
-  const [coreStat, editorStat, corePackage, editorPackage] = await Promise.all([
+  const [coreStat, layoutElkStat, editorStat, corePackage, layoutElkPackage, editorPackage] = await Promise.all([
     lstat(coreDirectory),
+    lstat(layoutElkDirectory),
     lstat(editorDirectory),
     readJson(join(coreDirectory, "package.json")),
+    readJson(join(layoutElkDirectory, "package.json")),
     readJson(join(editorDirectory, "package.json")),
   ]);
 
-  if (coreStat.isSymbolicLink() || editorStat.isSymbolicLink()) {
+  if (coreStat.isSymbolicLink() || layoutElkStat.isSymbolicLink() || editorStat.isSymbolicLink()) {
     throw new Error("consumer resolved a workspace symlink instead of packed packages");
   }
-  if (editorPackage.version !== corePackage.version) {
-    throw new Error("@iriograph/core and @iriograph/vue-editor versions must match");
+  if (layoutElkPackage.version !== corePackage.version || editorPackage.version !== corePackage.version) {
+    throw new Error("all @iriograph package versions must match");
+  }
+  if (layoutElkPackage.dependencies?.["@iriograph/core"] !== corePackage.version) {
+    throw new Error("@iriograph/layout-elk must depend on the exact packed core version");
+  }
+  if (typeof layoutElkPackage.dependencies?.elkjs !== "string") {
+    throw new Error("@iriograph/layout-elk must declare elkjs as a runtime dependency");
   }
   if (editorPackage.dependencies?.["@iriograph/core"] !== corePackage.version) {
     throw new Error("@iriograph/vue-editor must depend on the exact packed core version");
@@ -91,6 +102,7 @@ async function verifyInstalledContract(consumer) {
   }
   await readFile(join(editorDirectory, cssExport), "utf8");
   await readFile(join(coreDirectory, "dist", "index.d.ts"), "utf8");
+  await readFile(join(layoutElkDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(editorDirectory, "dist", "types", "index.d.ts"), "utf8");
 }
 

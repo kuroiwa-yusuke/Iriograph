@@ -12,11 +12,13 @@ Iriographは「意味グラフを図として編集・検証・再利用する�
 
 display overlayが保持するのは、geometry、pin、edge routing、明示的なtemplate/icon overrideなど、catalogとlayoutから復元できない、またはユーザーが意図的に固定した情報です。色や既定iconなどの生成可能な情報はcatalogを正本にします。
 
+Turtleへ置くdomain resourceとdomain vocabularyも区別します。`rdf:type`は見た目を選ぶ印ではなく、LLM、validation、query、推論、再利用で必要な分類だけを表します。表示だけのstart/task/gateway種別は各named viewのoverlayからcatalog templateを参照し、appearanceを正当化するためだけのtypeをTurtleへ追加しません。詳細は[semantic-notation.md](./semantic-notation.md)を正本とします。
+
 ## 意味を作るリッチ編集
 
 リッチエディタでnode、属性、edge、包含を作る操作は、Sceneへの図形追加ではなくsemantic graphの編集です。Editorは操作をTurtleのgraph delta候補へ変換し、semantic transactionの検証に成功した場合だけ正本とSceneを更新します。Sceneに仮nodeを作り、後から意味を付けて保存する状態をdocumentには許容しません。
 
-- node作成ではnamed IRIを決め、同じtransactionでそのresourceを含む少なくとも1つのtripleを作る。`rdf:type`、`rdfs:label`、domain property、既存resourceとの関係などが初期statementになる。
+- node作成ではnamed IRIを決め、同じtransactionでそのresourceを含む少なくとも1つのtripleを作る。`rdfs:label`、意味のある`rdf:type`、domain property、既存resourceとの関係などが初期statementになる。Template選択だけを目的とするtypeは作らない。
 - 属性編集はpredicateとIRI/literal valueを持つtripleの追加、置換、削除として行う。
 - edge作成ではpredicateを必須とし、直接IRI-object tripleまたはprojection capabilityが定義するgraph patchを作る。便宜的な`:relation`のような語彙を暗黙に生成しない。
 - 包含編集では`rdf:Bag`resourceと`rdfs:member`等、選択したcapabilityの意味構造を書く。nodeをcontainer内へdragするだけの操作はpresentationであり、意味的所属を暗黙に追加しない。
@@ -33,7 +35,7 @@ semantic transaction成功後は、全viewをそれぞれのprofile、catalog、
 
 ## Turtleの再serialize
 
-Turtle sourceを直接編集してsemantic transactionを適用した場合は、ユーザーが入力した妥当な原文をそのまま`semantic.source`へ保持します。一方、structured commandとLLM editはRDF datasetへのgraph patchとして検証した後、共通serializerでTurtleを決定的に再生成します。同じparse済みdataset（blank node IDを含む）、保持したprefix/base context、serializer versionからはquadの入力順に依存せず同じsourceを得るものとし、prefixとbase IRIは有効な範囲で再利用します。v1は完全なRDF Dataset Canonicalizationをcontractに含めません。
+Turtle sourceを直接編集してsemantic transactionを適用した場合は、ユーザーが入力した妥当な原文をそのまま`semantic.source`へ保持します。一方、structured commandとLLM editはRDF datasetへのgraph patchとして検証した後、共通serializerでTurtleを決定的に再生成します。Serializerはblank node labelを決定し、expanded subject/predicate/object tupleでdedupe・sortしてからnotationを選びます。標準`rdf`/`rdfs`/`xsd`、base/default、妥当で実際に使う入力prefixの順でcompactし、`rdf:type`は`a`、有効なprefixed nameにできないIRIだけをfull IRIにします。同じparse済みdataset（blank node IDを含む）、prefix/base context、serializer versionからはquadの入力順やprefix mapの列挙順に依存せず同じsourceを得ます。v1は完全なRDF Dataset Canonicalizationをcontractに含めません。
 
 Comment、空白、改行位置、property listのまとめ方、triple記述順などはRDF graphの意味ではありません。直接編集直後には残りますが、structured commandまたはLLM editによる再serializeを一度でも通した後の保持は保証しません。Source reviewは文字列diffだけに依存せず、RDF term単位のsemantic diffも利用します。
 
@@ -57,7 +59,7 @@ diagrams.net/draw.ioは自由な作図に優れますが、図形・接続・座
 
 ## Catalogによる拡張
 
-rendererへ`if predicate == ...`を増やしません。業務class、predicate、relation resource、containment、template、assetはcatalogへ宣言します。未登録のIRI-object tripleは通常矢印として表示し、未知語彙でも最低限読める状態を保ちます。
+rendererへ`if predicate == ...`を増やしません。意味のある業務class、predicate、relation resource、containmentはsemantic ruleとしてcatalogへ宣言できます。意味ruleを持たないtemplateとassetもappearance libraryとしてcatalogへ置き、view overlayから参照できます。未登録のIRI-object tripleは通常矢印として表示し、未知語彙でも最低限読める状態を保ちます。
 
 primitiveを増やす基準は、新しい業務領域ではなく新しい空間文法が必要かどうかです。たとえば「経理タスク」は既存node templateで表現し、「領域による包含」はcontainerという空間文法として追加します。
 
@@ -65,7 +67,7 @@ primitiveを増やす基準は、新しい業務領域ではなく新しい空�
 
 ベースプロファイルは、包含に`rdf:Bag`と`rdfs:member`、順序に`rdf:Seq`と`rdf:_n`、選択に`rdf:Alt`、参照に`rdfs:seeAlso`または`rdfs:isDefinedBy`を利用できるようにします。これらはspecial projectionへopt-inする共通構造であり、すべての業務graphに使用を強制しません。その他のdomain語彙はgeneric node/edgeとして成立します。
 
-RDF/RDFSだけでBPMNの全概念を表すのではなく、RDF/RDFSの共通構造だけを制約付きで使う方針です。user taskとservice taskの違いなどdomain固有の意味が必要なら、既存のdomain ontologyまたは利用側が自己記述した語彙を追加catalogへ結びます。標準語彙がないために独自語彙を導入する場合も、Iriograph coreのnamespaceではなく利用domainのnamespaceに置きます。
+RDF/RDFSだけでBPMNの全概念を表すのではなく、RDF/RDFSの共通構造だけを制約付きで使う方針です。user taskとservice taskの違いをLLM、validation、query、再利用でも使うなら、既存のdomain ontologyまたは利用側が自己記述した語彙を追加catalogへ結びます。見た目しか変わらないならtypeを作らずoverlayでtemplateを選びます。標準語彙がないために独自語彙を導入する場合も、Iriograph coreのnamespaceではなく利用domainのnamespaceに置きます。
 
 この方針には二つの境界があります。
 
@@ -82,7 +84,7 @@ resolverは取得ポリシーの境界でもあります。許可scheme、origin
 
 ## LLMとの境界
 
-LLMへ渡す主対象は`semantic.source`のTurtleです。これにauthoring profileから抽出した使用可能語彙と、必要なprojection capabilityだけを付与します。Rendererは未知語彙をgeneric node/edgeとして受け入れますが、LLMはprofile外のpredicate、class、namespaceを追加できません。
+LLMへ渡す主対象は`semantic.source`のTurtleです。これにauthoring profileから抽出した使用可能語彙と、必要なprojection capabilityだけを付与します。TurtleにはLLMの理解・検証・再利用に必要な意味だけを置き、template選択だけのtypeやoverlayを入力へ混ぜません。Rendererは未知語彙をgeneric node/edgeとして受け入れますが、LLMはprofile外のpredicate、class、namespaceを追加できません。
 
 LLMが返したTurtleはparse・語彙差分・構造規則を一つのsemantic transactionとして検証し、成功時だけ正本へ反映します。その後、存続IRIのユーザーoverlayを維持し、新規IRIへ決定的なlayoutを補完し、消滅IRIのoverlayを除去します。
 

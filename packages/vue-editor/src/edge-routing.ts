@@ -1,8 +1,16 @@
-import type { ElementGeometry, Point, SceneEdge } from "@iriograph/core";
+import {
+  isValidEdgeEndpointAnchor,
+  type EdgeEndpointAnchor,
+  type ElementGeometry,
+  type Point,
+  type SceneEdge,
+} from "@iriograph/core";
 
 export type EditableEdgeRouting = {
   waypoints?: Point[];
   labelOffset?: Point;
+  sourceAnchor?: EdgeEndpointAnchor;
+  targetAnchor?: EdgeEndpointAnchor;
 };
 
 export type EdgeRoutingUpdate = {
@@ -205,30 +213,55 @@ export function normalizeEditableRouting(
     && (routing.labelOffset.x !== 0 || routing.labelOffset.y !== 0)
     ? copyPoint(routing.labelOffset)
     : undefined;
-  if (!waypoints && !labelOffset) return undefined;
+  const sourceAnchor = isValidEdgeEndpointAnchor(routing.sourceAnchor)
+    ? { ...routing.sourceAnchor }
+    : undefined;
+  const targetAnchor = isValidEdgeEndpointAnchor(routing.targetAnchor)
+    ? { ...routing.targetAnchor }
+    : undefined;
+  if (!waypoints && !labelOffset && !sourceAnchor && !targetAnchor) return undefined;
   return {
     ...(waypoints ? { waypoints } : {}),
     ...(labelOffset ? { labelOffset } : {}),
+    ...(sourceAnchor ? { sourceAnchor } : {}),
+    ...(targetAnchor ? { targetAnchor } : {}),
   };
 }
 
 export function routingWithWaypoints(
-  edge: Pick<SceneEdge, "labelOffset">,
+  edge: Pick<SceneEdge, "labelOffset" | "sourceAnchor" | "targetAnchor">,
   waypoints: readonly Point[] | undefined,
 ): EditableEdgeRouting | undefined {
   return normalizeEditableRouting({
     waypoints: waypoints?.map(copyPoint),
     labelOffset: edge.labelOffset ? copyPoint(edge.labelOffset) : undefined,
+    sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
+    targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
   });
 }
 
 export function routingWithLabelOffset(
-  edge: Pick<SceneEdge, "waypoints">,
+  edge: Pick<SceneEdge, "waypoints" | "sourceAnchor" | "targetAnchor">,
   labelOffset: Point | undefined,
 ): EditableEdgeRouting | undefined {
   return normalizeEditableRouting({
     waypoints: edge.waypoints?.map(copyPoint),
     labelOffset: labelOffset ? copyPoint(labelOffset) : undefined,
+    sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
+    targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
+  });
+}
+
+export function routingWithEndpointAnchor(
+  edge: Pick<SceneEdge, "waypoints" | "labelOffset" | "sourceAnchor" | "targetAnchor">,
+  endpoint: "source" | "target",
+  anchor: EdgeEndpointAnchor | undefined,
+): EditableEdgeRouting | undefined {
+  return normalizeEditableRouting({
+    waypoints: edge.waypoints?.map(copyPoint),
+    labelOffset: edge.labelOffset ? copyPoint(edge.labelOffset) : undefined,
+    sourceAnchor: endpoint === "source" ? anchor : edge.sourceAnchor,
+    targetAnchor: endpoint === "target" ? anchor : edge.targetAnchor,
   });
 }
 

@@ -14,7 +14,7 @@ Iriograph documentは次の三層を分離します。
 
 | 層 | 正本 | 責務 |
 |---|---|---|
-| Semantic | `semantic.source`のTurtle | resourceのidentity、型、関係、順序、包含、label |
+| Semantic | `semantic.source`のTurtle | resourceのidentity、意味のある型・関係・順序・包含・label |
 | Projection | profileとcatalog | RDF/RDFS構造をScene primitiveと既定appearanceへ写す規則 |
 | Presentation | `views[].overlay` | ユーザーが固定したgeometry、routing、template/icon override |
 
@@ -24,6 +24,7 @@ Iriograph documentは次の三層を分離します。
 - IriographはRDF/RDFS語彙を再定義しません。決定的な作図に必要な追加制約だけをapplication profileとして定めます。
 - Turtleは任意のdomain IRIをclass、predicate、resourceとして利用できます。ベースプロファイルに未登録のIRI-object tripleも拒否しません。
 - 自然言語labelをclass判定、構造判定、rule matchingに使ってはなりません。
+- `rdf:type`をtemplate、shape、色、iconの選択だけのために追加してはなりません。LLM、validation、query、推論、再利用に必要な分類だけをTurtleへ置きます。
 - 座標、色、shape、icon、viewport、edge waypointをTurtleへ入れてはなりません。
 - rendererへRDF/RDFS IRIまたは業務IRIごとの分岐を直書きしてはなりません。profile/catalogが標準IRIを汎用projection operatorへbindします。
 
@@ -33,7 +34,7 @@ Iriograph documentは次の三層を分離します。
 
 | 語彙 | Turtle上の役割 | ベースSceneへの投影 |
 |---|---|---|
-| `rdf:type` | resourceの分類 | template ruleと構造ruleの照合に使い、edgeとしては表示しない |
+| `rdf:type` | resourceの意味上の分類 | classが存在する場合はtemplate ruleと構造ruleの照合に使い、edgeとしては表示しない |
 | `rdfs:label` | 人向け表示名 | node、container、edgeのlabel候補 |
 | `rdfs:comment` | 説明 | metadataとして保持し、v1のScene elementは生成しない |
 | `rdf:Bag` | 順不同の包含領域 | `container`として表示する |
@@ -63,7 +64,7 @@ Iriograph documentは次の三層を分離します。
 
 ### 3.3 自由なdomain語彙
 
-上表以外のclassとpredicateも利用できます。IRIをobjectに持つ未登録predicateは、subjectからobjectへの通常矢印として表示します。edge labelはpredicateの`rdfs:label`を優先し、なければcompact IRIを使います。
+上表以外のclassとpredicateも利用できます。ただしdomain resource IRIとdomain vocabulary IRIを区別し、表示だけのtypeをvocabularyとして導入しません。IRIをobjectに持つ未登録predicateは、subjectからobjectへの通常矢印として表示します。edge labelはpredicateの`rdfs:label`を優先し、なければcompact IRIを使います。
 
 literalをobjectに持つ未登録predicateは意味グラフには保持しますが、annotation投影が未確定のv1ではScene elementを生成しません。
 
@@ -300,18 +301,19 @@ overlayにlabelを複製しません。既定template、shape、色、iconもcat
 :approvalPolicy rdfs:label "承認ポリシー"@ja .
 ```
 
-開始event、user task、service task、終了eventの見た目はこのTurtleだけからは区別しません。標準またはdomain ontologyのtypeがあれば追加catalogでtemplate/iconへ結び、なければgeneric nodeを使います。Turtleにない業務意味をlabel文字列から推測して補ってはなりません。
+開始event、user task、service task、終了eventの見た目はこのTurtleだけからは区別しません。各named viewはoverlayからcatalogのstart/task/gateway等のtemplateを明示参照できます。標準またはdomain ontologyのtypeをLLM、validation、query、再利用でも使う場合だけ、そのtypeをTurtleへ置いてcatalog ruleへ結びます。Turtleにない業務意味を外観やlabel文字列から推測して補ってはなりません。
 
 ## 9. Extension方針
 
-1. domain標準語彙で自然に表せる意味は、そのIRIを優先し、独立catalogで表示へ結びます。
-2. domain固有語彙が必要なら、利用側namespaceで定義し、`rdfs:Class`、`rdf:Property`、`rdfs:subClassOf`、`rdfs:subPropertyOf`、`rdfs:label`等で自己記述することを推奨します。
+1. domain標準語彙で自然に表せ、LLM、validation、query、再利用に必要な意味は、そのIRIを優先し、独立catalogで表示へ結びます。
+2. domain固有語彙が意味として必要なら、利用側namespaceで定義し、`rdfs:Class`、`rdf:Property`、`rdfs:subClassOf`、`rdfs:subPropertyOf`、`rdfs:label`等で自己記述することを推奨します。Appearanceだけなら語彙を作らずtemplate/asset libraryとview overlayを使います。
 3. 新しいclassやpredicateの追加だけでcore operatorを増やしてはなりません。既存operatorとtemplateのcatalog ruleを追加します。
 4. 新しい空間文法が必要な場合だけoperatorまたはScene primitiveを追加し、domain IRIとは分離します。
 5. OWL、PROV-O、SKOS、SHACL等は任意のimport/profileとして追加できます。ベースプロファイルの利用条件にはしません。
-6. LLMへはcatalogやoverlayではなくTurtleを主入力として渡します。LLMが返したTurtleは本プロファイルの構造検証を通した後にだけ採用します。
+6. LLMへはcatalogやoverlayではなく、必要な意味だけを持つTurtleを主入力として渡します。LLMが返したTurtleは本プロファイルの構造検証を通した後にだけ採用します。
 
 未知語彙をgeneric node/edgeとして投影できることは、その語彙をLLMが自由に生成できることを意味しません。人間・LLMのsemantic write policyと表示要求からのrewriteは[authoring-profile.md](./authoring-profile.md)に従います。
+Domain resourceとvocabulary、appearance-only情報の判定は[semantic-notation.md](./semantic-notation.md)に従います。
 
 ## 10. v1で扱わない事項
 

@@ -16,8 +16,11 @@ import {
 } from "./serializer";
 import { standardRdfRdfsCatalog } from "./standard-catalog";
 
-const { namedNode, quad } = DataFactory;
+const { literal, namedNode, quad } = DataFactory;
 const BASE = "urn:test:serializer:";
+const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const RDFS = "http://www.w3.org/2000/01/rdf-schema#";
+const XSD = "http://www.w3.org/2001/XMLSchema#";
 
 describe("canonical Turtle serializer v1", () => {
   it("同じdatasetをquad入力順に依存せず同じTurtleへserializeする", () => {
@@ -46,8 +49,8 @@ describe("canonical Turtle serializer v1", () => {
 
     expect(canonical.source).toContain("_:b0");
     expect(canonical.source).toContain('"English"@en');
-    expect(canonical.source).toContain('"42"^^<http://www.w3.org/2001/XMLSchema#integer>');
-    expect(canonical.source).toContain('"line\\n\\\"quoted\\\""^^<http://www.w3.org/2001/XMLSchema#string>');
+    expect(canonical.source).toContain('"42"^^xsd:integer');
+    expect(canonical.source).toContain('"line\\n\\\"quoted\\\""^^xsd:string');
     const again = canonicalizeTurtleSourceV1(canonical.source, BASE);
     expect(again.accepted).toBe(true);
     if (again.accepted) expect(again.source).toBe(canonical.source);
@@ -64,6 +67,78 @@ describe("canonical Turtle serializer v1", () => {
     expect(first.source).not.toContain("keep me");
     expect(first.source).not.toContain("[");
     expect(first.source).toMatch(/^@base /u);
+  });
+
+  it("standard、base/default、入力aliasを決定的に選びunused/collisionを省く", () => {
+    const other = "urn:test:other:";
+    const collision = "urn:test:collision:";
+    const quads = [
+      quad(namedNode(`${BASE}root`), namedNode(`${other}slash/value`), namedNode(`${BASE}bad[value`)),
+      quad(namedNode(`${BASE}root`), namedNode(RDF_TYPE), namedNode(`${RDFS}Class`)),
+      quad(namedNode(`${BASE}root`), namedNode(`${other}count`), literal("7", namedNode(`${XSD}integer`))),
+      quad(namedNode(`${BASE}root`), namedNode(`${collision}predicate`), namedNode(`${other}tail`)),
+    ];
+    const first = serializeCanonicalTurtleV1({
+      serializerVersion: TURTLE_SERIALIZER_VERSION_V1,
+      quads,
+      baseIri: BASE,
+      prefixes: {
+        z: other,
+        unused: "urn:test:unused:",
+        rdf: collision,
+        "bad.": collision,
+        a: other,
+      },
+    });
+    const second = serializeCanonicalTurtleV1({
+      serializerVersion: TURTLE_SERIALIZER_VERSION_V1,
+      quads: [...quads].reverse(),
+      baseIri: BASE,
+      prefixes: {
+        a: other,
+        "bad.": collision,
+        rdf: collision,
+        unused: "urn:test:unused:",
+        z: other,
+      },
+    });
+
+    expect(first).toEqual(second);
+    expect(first.accepted).toBe(true);
+    if (!first.accepted) return;
+    expect(first.source).toContain(`@prefix : <${BASE}> .`);
+    expect(first.source).toContain(`@prefix rdfs: <${RDFS}> .`);
+    expect(first.source).toContain(`@prefix xsd: <${XSD}> .`);
+    expect(first.source).toContain(`@prefix a: <${other}> .`);
+    expect(first.source).not.toContain("@prefix rdf:");
+    expect(first.source).not.toContain("@prefix z:");
+    expect(first.source).not.toContain("@prefix unused:");
+    expect(first.source).not.toContain("@prefix bad.:");
+    expect(first.source).toContain(":root a rdfs:Class .");
+    expect(first.source).toContain(":root a:slash\\/value <urn:test:serializer:bad[value> .");
+    expect(first.source).toContain("<urn:test:collision:predicate>");
+
+    const roundTrip = canonicalizeTurtleSourceV1(first.source, BASE);
+    expect(roundTrip.accepted).toBe(true);
+    if (roundTrip.accepted) expect(roundTrip.source).toBe(first.source);
+  });
+
+  it("入力default prefixをbase未指定時だけ使い、invalid localだけfull IRIへ戻す", () => {
+    const quads = [
+      quad(namedNode(`${BASE}root`), namedNode(`${BASE}normal`), namedNode(`${BASE}tail`)),
+      quad(namedNode(`${BASE}root`), namedNode(`${BASE}bad[value`), namedNode(`${BASE}tail`)),
+    ];
+    const result = serializeCanonicalTurtleV1({
+      serializerVersion: TURTLE_SERIALIZER_VERSION_V1,
+      quads,
+      prefixes: { "": BASE },
+    });
+    expect(result.accepted).toBe(true);
+    if (!result.accepted) return;
+    expect(result.source).toContain(`@prefix : <${BASE}> .`);
+    expect(result.source).toContain(":root :normal :tail .");
+    expect(result.source).toContain("<urn:test:serializer:bad[value>");
+    expect(new Parser().parse(result.source)).toHaveLength(2);
   });
 
   it("direct source editは妥当な原文をbyte-for-byte保持し、canonical入口だけ再serializeする", async () => {

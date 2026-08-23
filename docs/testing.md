@@ -9,12 +9,20 @@ Iriographはpureなgraph処理、DOM event contract、editor transaction、実br
 - Coreのparse、validation、projection、layout、reconciliation、serializer、asset policyのunit test
 - Semantic validation portのsnapshot/fingerprint、adapter fail-closed、warning confirmation、abort、全write入口共通化のunit test
 - Vue editorのasset lease session test
-- happy-dom上の`DiagramCanvas` pointer component test。dragのzoom換算、multi-selection、group preview/batch、container clamp、resize minimum、endpoint込みroute、generated bend seed、waypoint追加・削除・移動、label offset、parallel/self-loop選択、ARIA/keyboard、pan競合、fit、minimap、selection revealとgesture境界を確認する
-- happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routingとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
+- happy-dom上の`DiagramCanvas` pointer/keyboard component test。dragのzoom換算、multi-selection、group preview/batch、container clamp、resize minimum、endpoint込みroute、source/target anchor、generated bend seed、waypoint追加・削除・移動、label offset、parallel/self-loop選択、single-tab-stop navigator、`aria-activedescendant`、決定的focus/range、key repeat previewとkeyup/blur commit、Escape cancel、readOnly/IME除外、pan競合、fit、minimap、selection revealとgesture境界を確認する
+- happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routingとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、label-first semantic authoring、Canvas resource picker、resource＋edge＋membership作成、display/semantic containment警告と明示修正、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
 - Core/View editorのnamed view test。target-only atomic command、immutable/unique ID、locale-only exact overlay、invalid view delete、last-view guard、controlled/uncontrolled active view、view別selection/viewport/temporary hideを確認する
 - 全workspaceのtypecheck/buildと、packed tarballを使う外部consumer検証
 
 Component testは`@iriograph/core`のsourceへtest時だけaliasし、未buildのclean checkoutでも単独実行できます。配布buildではCoreをexternalのまま保ち、test fileは型宣言とpackage tarballへ含めません。
+
+## P1-08性能回帰
+
+Coreの通常Vitest suiteは固定生成されるnormal 500 node/1,000 edgeとstress 2,000 node/4,000 edgeを使い、Turtle parse、semantic projection、標準layout、layoutを除く代表編集再投影を監視します。Fixtureは50 nodeごとの`rdf:Bag` containment、全nodeのlabel、重複しない前方向edgeを含み、同じscaleからbyte-exactなsourceを生成します。
+
+各operationは一回warmupし、続く3 sampleのmedianを判定値にします。Stressの初回projection+標準layout 2,000 ms、normalのlabel変更+semantic再投影100 msをそのままCI gateとし、machine計測からの動的倍率、performance testのskip、fixture縮小は行いません。Sample、median、budgetはtest outputへJSONで出します。
+
+DOMなしのCore testはpan/drag 30 fpsを測りません。Coreではpan中にprojection/layoutを起動しない責務境界を維持し、`npm run verify:performance`はMockの固定500 node/1,000 edge Sceneを実Chromiumで開き、panとnode dragそれぞれの`requestAnimationFrame`間隔p95 33.3 ms以下を確認します。通常E2Eとは別のPlaywright configとCI jobで実行します。詳細なfixture、段階的layout、品質指標、engine選択は[layout-optimization.md](./layout-optimization.md)を参照します。
 
 ## Browser E2E
 
@@ -39,6 +47,8 @@ E2Eはmock fixtureのnamed view切替・追加・複製・設定・削除・over
 
 - CoreにDOMやbrowser mockを持ち込まない
 - Pointerの座標計算は`DiagramCanvas` component test、document revisionやhistoryは`IriographEditor` integration testで検証する
+- Keyboard commandのmodifier優先順位とeditable/IME除外はpure command test、実DOM focus/ARIAは`DiagramCanvas` component test、Turtle不変と一gesture一historyは`IriographEditor` integration test、Tab移動と実browser key dispatchはPlaywright E2Eで検証する
+- Accessibility回帰ではCanvas shell内の`tabindex="0"`が一つだけであること、全node/container/edge optionが実DOM IDを持つこと、dialogのinitial focus/Escape/focus return、busy/status/alertを確認する。規範契約は`docs/accessibility.md`を参照する
 - Navigation testではviewportの変化と同時に`update:modelValue`とhistoryが不変であること、read-onlyでも利用できることを確認する
 - Selection testでは集合とprimaryがdocument/historyへ入らないこと、modifier/clear/select-all、Scene更新時の消滅ID除去、read-onlyでも選択できることを確認する
 - Group geometry testでは全participantの同delta、containerごとのbounds、membershipとTurtle不変、pointerupの一batch、undo一回でのatomic rollbackを確認する
@@ -59,5 +69,6 @@ E2Eはmock fixtureのnamed view切替・追加・複製・設定・削除・over
 - Active view testではcontrolled/uncontrolled、存在しないIDの先頭fallback、切替時の旧Scene/asset/validation stale破棄、view別selection/primary/viewport/temporary hideを確認する
 - Temporary hide testではexact ID、container descendant closure、incident edgeだけが除かれ、document/overlay/historyへ保存されないことを確認する
 - Canvas作成位置testではblank clickがephemeral draft markerだけを更新し、bounds clamp後の位置がApply成功時だけsemantic作成と一つのhistory itemへcommitされることを確認する
+- Containment consistency testではheaderを除くcontent、nested/overlap/cycleを決定的に扱い、plain dragがTurtleを変更せず、semantic修正はdraftだけをseedし、presentation修正はoverlayだけを更新することを確認する
 - 保存testでは`save` eventだけでなく、その前にpending editがacceptまたはrejectされた結果を確認する
 - Browser smokeのsample件数へ依存するassertionを変更する場合は、workspace fixture変更と同じcommitで更新する

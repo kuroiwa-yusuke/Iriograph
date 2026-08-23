@@ -5,7 +5,8 @@
 | Package | 責務 | 持たない責務 |
 |---|---|---|
 | `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、human semantic commandのatomic graph patch/preview/apply、非同期layout adapter契約と標準軽量layout、asset lease/policy検証 | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
-| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、inspector、サイドバーのstructured semantic authoring | 語彙判定、永続化、認証、catalog取得 |
+| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、右Inspectorのstructured semantic authoring | 語彙判定、永続化、認証、catalog取得 |
+| `@iriograph/layout-elk` | ELK.js Layeredへのoptional adapter、compound hierarchy、直交route、host engine/Worker注入 | semantic解釈、document内のengine固有option、hard pinの近似 |
 | `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocator例 | 投影規則、editor内部state |
 
 ## 投影処理
@@ -20,7 +21,7 @@
 8. `layoutRef`に対応する非同期layout adapterを呼び、generated elementのgeometryとendpoint込みrouteを決定する
 9. asset resolverでicon IRIを表示URLへ解決する
 
-Sceneは毎回導出します。`projectSemanticView`はStep 1〜7だけを行ってgeometry未確定の`ProjectedScene`を同期的に返します。`buildIriographView`はviewのprofileに対応する解決済みcatalogを選択し、Step 8を非同期に実行して`DiagramScene`を返します。Step 9は`resolveDiagramSceneAssets`による別の非同期enrichmentであり、projection、layout、semantic reconciliationへasset取得を混ぜません。RendererはTurtle store、layout engine、asset resolverを直接問い合わせず、完成SceneのURLだけを使います。Coreには決定的な標準軽量layoutを同梱し、Vue editorはこれをdefaultにします。Hostは明示注入した同じadapter契約で高機能layoutへ差し替えます。通常の再layoutはgenerated elementだけを移動し、user geometryとpinned geometryはfixed constraintにします。
+Sceneは毎回導出します。`projectSemanticView`はStep 1〜7だけを行ってgeometry未確定の`ProjectedScene`を同期的に返します。`buildIriographView`はviewのprofileに対応する解決済みcatalogを選択し、Step 8を非同期に実行して`DiagramScene`を返します。Step 9は`resolveDiagramSceneAssets`による別の非同期enrichmentであり、projection、layout、semantic reconciliationへasset取得を混ぜません。RendererはTurtle store、layout engine、asset resolverを直接問い合わせず、完成SceneのURLだけを使います。Coreには決定的な標準軽量layoutを同梱し、Vue editorはこれをdefaultにします。Hostは明示注入した同じadapter契約で高機能layoutへ差し替えます。通常の再layoutはgenerated elementだけを移動し、user geometryとpinned geometryはfixed constraintにします。Containerのheader位置から導くcontent insetはCoreを正本とし、標準/ELK layout、Canvas境界制約、包含不一致検出で共有します。
 
 ## Catalog解決
 
@@ -33,7 +34,7 @@ Semantic transactionの`reconcileIriographDocumentViews`は引き続き全view�
 旧view結果を採用しません。Session-only filterはprojection前のqueryではなく、完成Sceneのexact ID
 subsetとして適用します。
 
-Local mockはnetwork resolverを持たないstatic fixtureなので、RDF/RDFS標準catalogとdefaultsを持たないdomain extension catalogを同じ競合規則で決定的に結合してeditorへ注入します。URIからの取得、cache、認証をmock固有のprojection処理へ混ぜません。
+Local mockはnetwork resolverを持たないstatic fixtureなので、RDF/RDFS標準catalogと、semantic rule/defaultsを持たないdomain appearance libraryを決定的に結合してeditorへ注入します。Libraryのtemplate/assetは各named view overlayから明示参照し、見た目だけのdomain type ruleを作りません。URIからの取得、cache、認証をmock固有のprojection処理へ混ぜません。
 
 ## Asset解決
 
@@ -83,9 +84,13 @@ Rich editorのnode、属性、edge、包含、順序、選択編集は次のパ�
 8. Reconcile済みcandidate datasetをhost注入のengine-independent portでdomain validationする。Domain errorまたはadapter contract errorならcandidate全体をrollbackする
 9. Candidate Turtleとreconcile済みoverlayを一つのdocument revisionとして確定し、semantic diffとpresentation diffを別々に返す
 
+Meaning authoringは右Inspector上部、display overlay編集はその下へ置きます。Resource/class/predicateはlabelを主表示にし、完全IRIはselect value、tooltip、Advanced入力として保持します。Canvas pickerは明示modeでresource IRIをdraftへseedするだけです。Container背景での作成位置指定は、そのcontainerのprojection provenanceとexactに一致するmembership ruleが一意な場合だけ構造設定も補完し、候補が曖昧ならユーザー選択を要求します。
+
+Geometryとsemantic parentの不一致はVue editorのderived warningです。Node/container centerが意味上無関係なcontainer content上にある場合、またはsemantic child全体がparent contentから外れる場合に警告し、通常dragからmembershipを自動生成しません。表示位置の修正はpresentation historyだけへ入り、包含の追加・削除はprovenance/catalogから作るstructured draftのPreview/Applyへ送ります。
+
 Step 7で新規geometryを保存する場合は`placement: "generated"`とし、userがdrag、resize、作成位置指定をした後の`placement: "user"`と区別します。Template、style、iconなどcatalog由来のappearanceはSceneへ導出し、overlayには複製しません。P1-08でprepared pipeline内のparse結果共有やvalidation/projection順を最適化しても、phase別diagnostic、domain error時のatomic rollback、warning確認、最終documentの結果契約は変えません。
 
-再serializeはprefixとbase IRIを有効な範囲で再利用しますが、comment、空白、property list、source上のtriple順は保持保証しません。同じparse済みdataset（blank node IDを含む）、保持したprefix/base context、serializer versionから、quadの入力順に依存せず同じsourceを得ます。v1はRDF Dataset Canonicalizationを実装せず、構造的に区別できないblank node間では入力IDをtie-breakに使います。
+再serializeはcanonical blank node labelを決定し、expanded subject/predicate/object tupleでdedupe・sortしてから表記をcompactします。`rdf`/`rdfs`/`xsd`の固定binding、base IRI由来のdefault prefix、妥当な入力prefixの優先順を固定し、実際に使用する宣言だけを出力します。`rdf:type`は`a`、Turtleの有効なprefixed nameへ変換できないIRIだけをfull IRIにします。Prefix alias/collisionやquad入力順がstatement順を変えてはなりません。Comment、空白、property list、source上のtriple順は保持保証しません。v1はRDF Dataset Canonicalizationを実装せず、構造的に区別できないblank node間では入力IDをtie-breakに使います。Human textareaのdirect sourceはこのserializerを通さず、妥当な原文を保持します。
 
 「resourceを作成して指定位置へ置く」のようにsemantic commandとpresentation patchを含む一つのUI操作は、先にsemantic resultとreconcile済みdocumentを候補として作り、その結果へpresentation patchを検証適用してから一つのdocument revisionとundo itemとしてcommitします。どちらかが失敗した場合はTurtle、overlayとも元documentを維持します。
 
@@ -113,19 +118,19 @@ ViewportもVue editorのsession stateです。`DiagramCanvas`がscroll metrics�
 
 ## 性能基準
 
-P1の暫定基準は、500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集操作応答を100ms未満、pan/dragを30fps以上、stress規模では初回projectionと標準軽量layoutを合計2秒未満とするbenchmarkをCIで監視します。測定環境、fixture seed、warm-up回数を固定し、絶対時間と前回比の両方を記録します。
+500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集再投影を100ms未満、実Chromiumのpan/drag frame間隔p95を33.3ms以下、stress規模では初回projectionと標準軽量layoutを合計2秒未満とする固定benchmarkをCIで監視します。測定環境、fixture scale、warm-up回数を固定し、絶対budgetを動的倍率なしで判定します。Vue Canvasはviewport変更とScene要素変更を別のmemo境界で扱い、pan時の静的Scene全体のDOM patchとdrag時の無関係要素更新を避けます。
 
 表示要求をLLMへ接続するhostは、まずpresentationだけで達成できるか判定します。意味構造が必要な場合だけ、view profile/catalogからprojection capability summaryを導出し、許可語彙とともにLLM adapterへ渡します。分類、検証、失敗時rollbackは[authoring-profile.md](./authoring-profile.md)に従います。
 
 ## 現在のlocal mock
 
-購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。開始・終了event、user/service task、gateway等のdomain typeは構造を独自述語で再定義せず、domain extension catalogからappearanceへ対応付けます。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
+購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。`relatedTo`と`retry`は業務上意味のあるdomain edgeとしてTurtleに残します。開始・終了event、user/service task、gateway等の外観だけを選ぶdomain typeは持たず、両named viewのoverlayがdomain appearance libraryのtemplateを参照します。Mock validatorは旧appearance typeではなく、`rdf:Bag`とその直接memberという可視・構造的な集合へlabel制約を適用します。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
 
-Editorはdrag、resize、edge waypoint追加・削除・移動、edge label位置、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。加えて、host注入のstatic authoring context/allocatorを使い、resource、属性、直接edge、包含、Seq、Alt、capability patch、resource削除をサイドバーでpreviewして明示適用できます。Turtleの適用、semantic authoring、保存、書出は非同期reconciliationの完了を待ちます。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+Editorはdrag、resize、edge waypoint追加・削除・移動、edge label位置、source/target endpoint anchor、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。加えて、host注入のstatic authoring context/allocatorを使い、resource、属性、直接edge、包含、Seq、Alt、capability patch、resource削除を右Inspectorでpreviewして明示適用できます。作成時は既存resourceとのedgeとcontainer membershipも同じatomic previewへ含められ、見た目と意味の包含不一致はCanvasとInspectorに警告されます。Turtleの適用、semantic authoring、保存、書出は非同期reconciliationの完了を待ちます。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
 
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 
-現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、manual edge route、parallel edge、reciprocal edge、self-loopを決定的に扱います。より高機能なroutingや大規模graph向けengineは、Coreへ依存を追加せずhost注入adapterとして実装します。
+現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、manual edge route、endpoint anchor、parallel edge、reciprocal edge、self-loopを決定的に扱います。`@iriograph/layout-elk`はcompound graphと直交routing向けのoptional adapterとして実装済みで、固定user geometryをhard constraintとして保証できない入力では標準adapterへ保守的にfallbackします。大規模browser実行ではhost-managed Worker engineを注入できます。
 
 ## Editor回帰test境界
 

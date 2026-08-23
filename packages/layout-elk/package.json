@@ -1,0 +1,55 @@
+{
+  "name": "@iriograph/layout-elk",
+  "version": "0.1.0",
+  "description": "Optional ELK.js layered layout adapter for Iriograph scenes.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
+    "directory": "packages/layout-elk"
+  },
+  "homepage": "https://github.com/kuroiwa-yusuke/Iriograph#readme",
+  "bugs": {
+    "url": "https://github.com/kuroiwa-yusuke/Iriograph/issues"
+  },
+  "keywords": [
+    "rdf",
+    "diagram",
+    "layout",
+    "elkjs",
+    "semantic-graph"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@iriograph/core": "0.1.0",
+    "elkjs": "0.12.0"
+  }
+}

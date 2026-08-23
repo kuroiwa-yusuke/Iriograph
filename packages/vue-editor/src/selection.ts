@@ -1,9 +1,10 @@
-import type {
-  DiagramScene,
-  ElementGeometry,
-  Point,
-  SceneContainer,
-  SceneNode,
+import {
+  containerContentBounds,
+  type DiagramScene,
+  type ElementGeometry,
+  type Point,
+  type SceneContainer,
+  type SceneNode,
 } from "@iriograph/core";
 
 export type GeometryElement = SceneNode | SceneContainer;
@@ -102,16 +103,7 @@ export function selectedGeometryElements(
 }
 
 export function diagramContainerContentBounds(parent: SceneContainer): ElementGeometry {
-  const left = parent.headerPosition === "left" ? 78 : 16;
-  const top = parent.headerPosition === "top" ? 46 : 16;
-  const right = 16;
-  const bottom = 16;
-  return {
-    x: parent.geometry.x + left,
-    y: parent.geometry.y + top,
-    width: Math.max(0, parent.geometry.width - left - right),
-    height: Math.max(0, parent.geometry.height - top - bottom),
-  };
+  return containerContentBounds(parent.geometry, parent.headerPosition);
 }
 
 export function translateSelection(

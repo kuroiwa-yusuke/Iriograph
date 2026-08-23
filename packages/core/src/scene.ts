@@ -9,6 +9,7 @@ import {
   type LayoutDiagnostic,
   type LayoutMode,
 } from "./layout";
+import { containerContentInsets } from "./container-content";
 import type {
   DiagramScene,
   IriographDocument,
@@ -114,12 +115,18 @@ export async function layoutProjectedDiagramScene(
         size: element.defaultSize,
         pinned: element.pinned,
         placement: element.placement,
+        shape: element.structuralKind === "container" ? "container" : element.shape,
+        contentInsets: element.structuralKind === "container"
+          ? containerContentInsets(element.headerPosition)
+          : undefined,
       })),
       edges: projected.edges.map((edge) => ({
         elementId: edge.elementId,
         sourceElementId: edge.sourceElementId,
         targetElementId: edge.targetElementId,
         waypoints: edge.waypoints,
+        sourceAnchor: edge.sourceAnchor,
+        targetAnchor: edge.targetAnchor,
         routingPlacement: edge.routingPlacement,
       })),
     },
@@ -181,6 +188,8 @@ export async function layoutProjectedDiagramScene(
       route: route?.map((point) => ({ ...point })),
       waypoints,
       labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
+      sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
+      targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
       fallback: edge.fallback,
       provenance: edge.provenance,
     };

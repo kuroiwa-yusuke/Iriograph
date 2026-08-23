@@ -12,6 +12,7 @@ import {
 
 import type {
   DiagramScene,
+  EdgeEndpointShape,
   ElementGeometry,
   Point,
   ProjectionDiagnostic,
@@ -19,9 +20,14 @@ import type {
   SceneEdge,
   SceneNode,
 } from "@iriograph/core";
-import { diagnosticTargetsSceneElement } from "@iriograph/core";
+import {
+  diagnosticTargetsSceneElement,
+  edgeEndpointAnchorFromPoint,
+  edgeEndpointAnchorPoint,
+} from "@iriograph/core";
 
 import {
+  appendEdgeWaypoint,
   derivedEdgeRoute,
   editableEdgeWaypoints,
   edgeLabelBase,
@@ -30,9 +36,22 @@ import {
   previewEdgeRoute,
   removeEdgeWaypoint,
   routingWithLabelOffset,
+  routingWithEndpointAnchor,
   routingWithWaypoints,
+  type EditableEdgeRouting,
   type EdgeRoutingUpdate,
 } from "../edge-routing";
+import {
+  moveSceneNavigatorFocus,
+  restoreSceneNavigatorFocus,
+  sceneNavigatorItems,
+  sceneNavigatorRange,
+  type SceneNavigatorItem,
+} from "../scene-navigation";
+import {
+  keyboardArrowMovement,
+  resolveCanvasKeyboardCommand,
+} from "../keyboard-commands";
 import {
   diagramFitZoom,
   normalizeDiagramZoom,
@@ -60,7 +79,11 @@ const props = withDefaults(defineProps<{
   readOnly?: boolean;
   snap?: DiagramSnapSettings;
   semanticPositionPicking?: boolean;
+  semanticResourcePicking?: boolean;
+  semanticResourcePickLabel?: string;
   semanticDraftPosition?: Point;
+  containmentWarningElementIds?: string[];
+  busy?: boolean;
 }>(), {
   selectedElementId: "",
   selectedElementIds: () => [],
@@ -68,12 +91,17 @@ const props = withDefaults(defineProps<{
   readOnly: false,
   snap: () => normalizeDiagramSnapSettings(),
   semanticPositionPicking: false,
+  semanticResourcePicking: false,
+  semanticResourcePickLabel: "resource",
   semanticDraftPosition: undefined,
+  containmentWarningElementIds: () => [],
+  busy: false,
 });
 
 const emit = defineEmits<{
   select: [elementId: string];
   selectionRequest: [request: DiagramSelectionRequest];
+  selectionSetRequest: [elementIds: string[]];
   zoomChange: [zoom: number];
   gestureStart: [];
   gestureEnd: [];
@@ -84,7 +112,10 @@ const emit = defineEmits<{
   /** Seeds a semantic authoring draft; it never mutates the graph directly. */
   semanticEditRequest: [elementId: string];
   /** Seeds draft coordinates only; it never mutates the graph or history. */
-  semanticPositionRequest: [position: Point];
+  semanticPositionRequest: [position: Point, containerIri?: string];
+  /** Explicit picker mode only; normal selection and drag never emit this. */
+  semanticResourceRequest: [semanticRef: string];
+  semanticPickCancel: [];
   /** @deprecated Use routingUpdate for the complete sparse routing value. */
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
@@ -95,6 +126,7 @@ const instanceId = useId();
 const arrowMarkerId = `${instanceId}-arrow`;
 const scrollElement = ref<HTMLElement>();
 const stageElement = ref<HTMLElement>();
+const edgeLayerElement = ref<SVGSVGElement>();
 const viewport = reactive<DiagramViewportMetrics>({
   scrollLeft: 0,
   scrollTop: 0,
@@ -103,21 +135,44 @@ const viewport = reactive<DiagramViewportMetrics>({
 });
 const viewportPanning = ref(false);
 const previewGeometries = ref<Record<string, ElementGeometry>>({});
+const previewRouting = ref<Record<string, EditableEdgeRouting | null>>({});
+const navigatorItems = computed(() => sceneNavigatorItems(props.scene));
+const activeNavigatorElementId = ref("");
+const navigatorAnchorElementId = ref("");
+const activeWaypointIndex = ref(0);
+const liveAnnouncement = ref("");
+const compositionActive = ref(false);
+let previousNavigatorItems: SceneNavigatorItem[] = [];
+let keyboardGesture: KeyboardGesture | undefined;
 let resizeObserver: ResizeObserver | undefined;
 let stopViewportTracking: (() => void) | undefined;
 
-const originalNodesById = computed(() => new Map(props.scene.nodes.map((node) => [
-  node.elementId,
-  node,
-])));
-const nodesById = computed(() => new Map(props.scene.nodes.map((node) => [
-  node.elementId,
-  { ...node, geometry: geometryFor(node) },
-])));
+type KeyboardGesture = {
+  kind: "move" | "resize" | "waypoint" | "label" | "waypoint-add" | "waypoint-remove";
+  elementId: string;
+  commitKey: string;
+  initialScene: DiagramScene;
+  delta: Point;
+  geometryChanges?: GeometryChange[];
+  routing?: EditableEdgeRouting;
+};
+
+const originalEndpointElementsById = computed(() => new Map(
+  [...props.scene.containers, ...props.scene.nodes].map((element) => [element.elementId, element]),
+));
+const endpointElementsById = computed(() => new Map(
+  [...props.scene.containers, ...props.scene.nodes].map((element) => [
+    element.elementId,
+    { ...element, geometry: geometryFor(element) },
+  ]),
+));
 const selectedElementIdsSet = computed(() => new Set([
   ...props.selectedElementIds,
   ...(props.selectedElementId ? [props.selectedElementId] : []),
 ]));
+const containmentWarningElementIdsSet = computed(() => new Set(
+  props.containmentWarningElementIds,
+));
 const selectedEdge = computed(() => props.scene.edges.find((edge) => edge.elementId === props.selectedElementId));
 const minimapViewport = computed(() => {
   const offset = stageOffset();
@@ -154,7 +209,11 @@ function diagnosticClass(element: DiagnosticElement): Record<string, boolean> {
 
 function diagnosticAriaSuffix(element: DiagnosticElement): string {
   const diagnostics = diagnosticsForElement(element);
-  return diagnostics.length > 0 ? `、診断${diagnostics.length}件` : "";
+  const diagnostic = diagnostics.length > 0 ? `、診断${diagnostics.length}件` : "";
+  const containment = containmentWarningElementIdsSet.value.has(element.elementId)
+    ? "、表示と意味の包含が不一致"
+    : "";
+  return `${diagnostic}${containment}`;
 }
 
 onMounted(() => {
@@ -170,6 +229,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("resize", updateViewportMetrics);
   resizeObserver?.disconnect();
   stopViewportTracking?.();
+  if (keyboardGesture) cancelKeyboardGesture();
+  else clearKeyboardPreview();
 });
 
 watch(
@@ -180,15 +241,42 @@ watch(
 watch(
   () => props.scene,
   () => {
-    previewGeometries.value = {};
+    // A host-driven Scene replacement invalidates the gesture snapshot. Do
+    // not let a later keyup commit geometry or routing derived from stale IDs.
+    if (keyboardGesture) cancelKeyboardGesture();
+    else clearKeyboardPreview();
+    if (props.semanticPositionPicking || props.semanticResourcePicking) emit("semanticPickCancel");
   },
 );
 
+watch(() => props.readOnly, (readOnly) => {
+  // Permission can change while a key is held. Pending presentation writes
+  // are discarded at that boundary, while navigation remains available.
+  if (readOnly && keyboardGesture) cancelKeyboardGesture();
+});
+
+watch(navigatorItems, (nextItems) => {
+  activeNavigatorElementId.value = restoreSceneNavigatorFocus(
+    previousNavigatorItems,
+    nextItems,
+    activeNavigatorElementId.value,
+    props.selectedElementId,
+  );
+  previousNavigatorItems = [...nextItems];
+}, { immediate: true });
+
+watch(() => props.selectedElementId, (elementId) => {
+  if (!elementId || !navigatorItems.value.some((item) => item.elementId === elementId)) return;
+  activeNavigatorElementId.value = elementId;
+  navigatorAnchorElementId.value = elementId;
+  if (props.scene.edges.some((edge) => edge.elementId === elementId)) activeWaypointIndex.value = 0;
+});
+
 function pathFor(edge: SceneEdge): string {
-  const route = previewedDerivedRoute(edge);
-  if (route.length >= 2) return polylinePath(route);
-  const source = nodesById.value.get(edge.sourceElementId);
-  const target = nodesById.value.get(edge.targetElementId);
+  const derivedRoute = previewedDerivedRoute(edge);
+  if (derivedRoute.length >= 2) return polylinePath(renderedRoute(edge));
+  const source = endpointElementsById.value.get(edge.sourceElementId);
+  const target = endpointElementsById.value.get(edge.targetElementId);
   if (!source || !target) return "";
   const start = centerOf(source.geometry);
   const end = centerOf(target.geometry);
@@ -202,21 +290,49 @@ function pathFor(edge: SceneEdge): string {
 
 function edgeLabelPosition(edge: SceneEdge): Point {
   const base = edgeLabelBase({ route: renderedRoute(edge) });
+  const preview = previewRouting.value[edge.elementId];
+  const labelOffset = preview === undefined ? edge.labelOffset : preview?.labelOffset;
   return {
-    x: base.x + (edge.labelOffset?.x ?? 0),
-    y: base.y + (edge.labelOffset?.y ?? 0),
+    x: base.x + (labelOffset?.x ?? 0),
+    y: base.y + (labelOffset?.y ?? 0),
   };
 }
 
 function editableWaypoints(edge: SceneEdge): Point[] {
+  const preview = previewRouting.value[edge.elementId];
+  if (preview !== undefined) return preview?.waypoints?.map((point) => ({ ...point })) ?? [];
   return editableEdgeWaypoints({ route: renderedRoute(edge), waypoints: edge.waypoints });
 }
 
 function renderedRoute(edge: SceneEdge): Point[] {
   const route = previewedDerivedRoute(edge);
-  if (route.length >= 2) return route;
-  const source = nodesById.value.get(edge.sourceElementId);
-  const target = nodesById.value.get(edge.targetElementId);
+  const preview = previewRouting.value[edge.elementId];
+  let result = route;
+  if (preview !== undefined && route.length >= 2 && preview?.waypoints) {
+    result = [route[0]!, ...preview.waypoints, route.at(-1)!];
+  }
+  const source = endpointElementsById.value.get(edge.sourceElementId);
+  const target = endpointElementsById.value.get(edge.targetElementId);
+  if (result.length >= 2) {
+    result = result.map((point) => ({ ...point }));
+    const sourceAnchor = preview === undefined ? edge.sourceAnchor : preview?.sourceAnchor;
+    const targetAnchor = preview === undefined ? edge.targetAnchor : preview?.targetAnchor;
+    if (source && sourceAnchor) {
+      result[0] = edgeEndpointAnchorPoint(
+        source.geometry,
+        endpointElementShape(source),
+        sourceAnchor,
+      );
+    }
+    if (target && targetAnchor) {
+      result[result.length - 1] = edgeEndpointAnchorPoint(
+        target.geometry,
+        endpointElementShape(target),
+        targetAnchor,
+      );
+    }
+    return result;
+  }
   if (!source || !target) return [];
   const start = centerOf(source.geometry);
   const end = centerOf(target.geometry);
@@ -226,16 +342,30 @@ function renderedRoute(edge: SceneEdge): Point[] {
 function previewedDerivedRoute(edge: SceneEdge): Point[] {
   const route = derivedEdgeRoute(edge);
   if (route.length < 2) return route;
-  const sourceOriginal = originalNodesById.value.get(edge.sourceElementId);
-  const targetOriginal = originalNodesById.value.get(edge.targetElementId);
-  const sourcePreview = nodesById.value.get(edge.sourceElementId);
-  const targetPreview = nodesById.value.get(edge.targetElementId);
+  const sourceOriginal = originalEndpointElementsById.value.get(edge.sourceElementId);
+  const targetOriginal = originalEndpointElementsById.value.get(edge.targetElementId);
+  const sourcePreview = endpointElementsById.value.get(edge.sourceElementId);
+  const targetPreview = endpointElementsById.value.get(edge.targetElementId);
   if (!sourceOriginal || !targetOriginal || !sourcePreview || !targetPreview) return route;
   return previewEdgeRoute(
     edge,
     { original: sourceOriginal.geometry, preview: sourcePreview.geometry },
     { original: targetOriginal.geometry, preview: targetPreview.geometry },
   );
+}
+
+function endpointElementShape(element: SceneNode | SceneContainer): EdgeEndpointShape {
+  return element.structuralKind === "container" ? "container" : element.shape;
+}
+
+function endpointAnchorHandlePoint(
+  edge: SceneEdge,
+  endpoint: "source" | "target",
+): Point {
+  const route = renderedRoute(edge);
+  return endpoint === "source"
+    ? route[0] ?? { x: 0, y: 0 }
+    : route.at(-1) ?? { x: 0, y: 0 };
 }
 
 function polylinePath(points: readonly Point[]): string {
@@ -253,6 +383,25 @@ function centerOf(geometry: ElementGeometry): Point {
 
 function startMove(event: PointerEvent, element: GeometryElement): void {
   if (event.button !== 0 || resizeHandleTarget(event)) return;
+  if (props.semanticResourcePicking) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!props.readOnly) emit("semanticResourceRequest", element.semanticRef);
+    return;
+  }
+  if (props.semanticPositionPicking) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (
+      !props.readOnly
+      && element.structuralKind === "container"
+      && event.target === event.currentTarget
+    ) {
+      const position = semanticPositionAt(event);
+      if (position) emit("semanticPositionRequest", position, element.semanticRef);
+    }
+    return;
+  }
   event.preventDefault();
   const modifiedSelection = event.ctrlKey || event.metaKey || event.shiftKey;
   const alreadySelected = selectedElementIdsSet.value.has(element.elementId);
@@ -356,6 +505,41 @@ function startLabelMove(event: PointerEvent, edge: SceneEdge): void {
       x: initial.x + (moveEvent.clientX - origin.x) / props.zoom,
       y: initial.y + (moveEvent.clientY - origin.y) / props.zoom,
     });
+  });
+}
+
+function startEndpointAnchorMove(
+  event: PointerEvent,
+  edge: SceneEdge,
+  endpoint: "source" | "target",
+): void {
+  if (props.readOnly || event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
+  const elementId = endpoint === "source" ? edge.sourceElementId : edge.targetElementId;
+  const element = endpointElementsById.value.get(elementId);
+  if (!element) return;
+  emit("gestureStart");
+  let pending: EditableEdgeRouting | undefined;
+  trackPointer((moveEvent) => {
+    const point = canvasPoint(moveEvent);
+    if (!point) return;
+    pending = routingWithEndpointAnchor(
+      edge,
+      endpoint,
+      edgeEndpointAnchorFromPoint(element.geometry, point),
+    );
+    previewRouting.value = {
+      ...previewRouting.value,
+      [edge.elementId]: pending ?? null,
+    };
+  }, (cancelled) => {
+    previewRouting.value = { ...previewRouting.value };
+    delete previewRouting.value[edge.elementId];
+    if (!cancelled && pending) {
+      emit("routingUpdate", { elementId: edge.elementId, routing: pending });
+    }
   });
 }
 
@@ -472,14 +656,49 @@ function emitLabelRouting(edge: SceneEdge, labelOffset: Point | undefined): void
 }
 
 function edgeAriaLabel(edge: SceneEdge): string {
-  const source = nodesById.value.get(edge.sourceElementId)?.label ?? edge.sourceElementId;
-  const target = nodesById.value.get(edge.targetElementId)?.label ?? edge.targetElementId;
+  const source = endpointElementsById.value.get(edge.sourceElementId)?.label ?? edge.sourceElementId;
+  const target = endpointElementsById.value.get(edge.targetElementId)?.label ?? edge.targetElementId;
   return `${source}から${target}への${edge.label || "edge"}`;
 }
 
+function navigatorDomId(elementId: string): string {
+  return `${instanceId}-scene-${encodeURIComponent(elementId)}`;
+}
+
+function navigatorPosition(elementId: string): number {
+  return navigatorItems.value.findIndex((item) => item.elementId === elementId) + 1;
+}
+
+function navigatorAriaLabel(elementId: string, label: string, kind: string): string {
+  const selected = selectedElementIdsSet.value.has(elementId) ? "、選択済み" : "";
+  const primary = props.selectedElementId === elementId ? "、primary" : "";
+  return `${kind}、${label}${selected}${primary}`;
+}
+
+function announce(message: string): void {
+  liveAnnouncement.value = "";
+  void nextTick(() => {
+    liveAnnouncement.value = message;
+  });
+}
+
+function announceActiveNavigatorItem(action: string): void {
+  const index = navigatorItems.value.findIndex((item) => (
+    item.elementId === activeNavigatorElementId.value
+  ));
+  const item = navigatorItems.value[index];
+  if (!item) return;
+  announce(`${action}、${item.kind}、${item.label}、${index + 1}/${navigatorItems.value.length}`);
+}
+
 function canvasPoint(event: MouseEvent): Point | undefined {
-  const group = event.currentTarget as SVGGElement | null;
-  const bounds = group?.ownerSVGElement?.getBoundingClientRect();
+  const target = event.currentTarget;
+  const svg = target instanceof SVGSVGElement
+    ? target
+    : target instanceof SVGElement
+      ? target.ownerSVGElement
+      : edgeLayerElement.value;
+  const bounds = svg?.getBoundingClientRect();
   if (!bounds || bounds.width <= 0 || bounds.height <= 0) return undefined;
   return {
     x: (event.clientX - bounds.left) * props.scene.width / bounds.width,
@@ -549,8 +768,353 @@ function semanticPositionAt(event: PointerEvent): Point | undefined {
 }
 
 function handleViewportKeydown(event: KeyboardEvent): void {
-  if (event.target !== scrollElement.value || event.ctrlKey || event.metaKey || event.altKey) return;
-  handleNavigationKeydown(event);
+  if (event.target !== scrollElement.value) return;
+  const command = resolveCanvasKeyboardCommand(event, {
+    editableTarget: isEditableEventTarget(event.target),
+    compositionActive: compositionActive.value,
+  });
+  if (command.kind === "none") return;
+
+  if (command.kind === "cancel" && (props.semanticPositionPicking || props.semanticResourcePicking)) {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("semanticPickCancel");
+    announce("Canvas選択をキャンセルしました");
+    return;
+  }
+
+  if (command.kind === "cancel") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (keyboardGesture) cancelKeyboardGesture();
+    else requestSelection({ elementId: "", mode: "replace" });
+    announce("操作をキャンセルしました");
+    return;
+  }
+
+  if (command.kind === "select-all") {
+    event.preventDefault();
+    event.stopPropagation();
+    requestSelectionSet(navigatorItems.value.map((item) => item.elementId));
+    announce(`すべての要素、${navigatorItems.value.length}件を選択`);
+    return;
+  }
+
+  const movement = keyboardArrowMovement(event.key, event.shiftKey ? 10 : 1);
+  if (movement && command.kind === "presentation-secondary") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!props.readOnly) previewKeyboardResizeOrLabel(event, movement);
+    return;
+  }
+  if (movement && command.kind === "presentation-primary") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!props.readOnly) previewKeyboardMoveOrWaypoint(event, movement);
+    return;
+  }
+  if (command.kind === "waypoint-add") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!props.readOnly) previewKeyboardWaypointChange(event, "add");
+    return;
+  }
+  if (command.kind === "waypoint-remove") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!props.readOnly) previewKeyboardWaypointChange(event, "remove");
+    return;
+  }
+  if (command.kind === "waypoint-focus") {
+    event.preventDefault();
+    event.stopPropagation();
+    moveActiveWaypoint(command.movement);
+    return;
+  }
+  if (command.kind === "select") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (activeNavigatorElementId.value) {
+      requestSelection({ elementId: activeNavigatorElementId.value, mode: "replace" });
+      navigatorAnchorElementId.value = activeNavigatorElementId.value;
+      announceActiveNavigatorItem("選択");
+    }
+    return;
+  }
+  if (command.kind === "toggle-selection") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (activeNavigatorElementId.value) {
+      requestSelection({ elementId: activeNavigatorElementId.value, mode: "toggle" });
+      navigatorAnchorElementId.value = activeNavigatorElementId.value;
+      announceActiveNavigatorItem("選択を切替");
+    }
+    return;
+  }
+  if (command.kind === "semantic-edit") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!props.readOnly && activeNavigatorElementId.value) {
+      emit("semanticEditRequest", activeNavigatorElementId.value);
+      announceActiveNavigatorItem("意味編集を開始");
+    }
+    return;
+  }
+  if (command.kind === "focus") {
+    handleSceneNavigatorKeydown(event, command.movement, command.range);
+    return;
+  }
+  if (command.kind === "pan") handleNavigationKeydown(event);
+}
+
+function handleViewportKeyup(event: KeyboardEvent): void {
+  if (!keyboardGesture || event.isComposing || compositionActive.value) return;
+  if (event.key !== keyboardGesture.commitKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  commitKeyboardGesture();
+}
+
+function handleViewportBlur(): void {
+  if (keyboardGesture) commitKeyboardGesture();
+}
+
+function handleSceneNavigatorKeydown(
+  event: KeyboardEvent,
+  navigation: "next" | "previous" | "first" | "last",
+  range: boolean,
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const previous = activeNavigatorElementId.value;
+  const next = moveSceneNavigatorFocus(navigatorItems.value, previous, navigation);
+  activeNavigatorElementId.value = next;
+  void revealElement(next);
+  if (range) {
+    navigatorAnchorElementId.value ||= previous || next;
+    requestSelectionSet(sceneNavigatorRange(
+      navigatorItems.value,
+      navigatorAnchorElementId.value,
+      next,
+    ));
+  } else {
+    navigatorAnchorElementId.value = next;
+  }
+  announceActiveNavigatorItem(range ? "範囲選択" : "フォーカス");
+}
+
+function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): void {
+  const activeId = activeNavigatorElementId.value;
+  const edge = props.scene.edges.find((candidate) => candidate.elementId === activeId);
+  if (edge) {
+    if (!selectedElementIdsSet.value.has(activeId)) {
+      requestSelection({ elementId: activeId, mode: "replace" });
+    }
+    const gesture = beginKeyboardGesture("waypoint", edge.elementId, event.key);
+    gesture.delta.x += movement.x;
+    gesture.delta.y += movement.y;
+    const originalWaypoints = editableEdgeWaypoints(edge);
+    const seeded = originalWaypoints.length > 0 ? originalWaypoints : appendEdgeWaypoint(edge);
+    const index = clamp(activeWaypointIndex.value, 0, Math.max(0, seeded.length - 1));
+    activeWaypointIndex.value = index;
+    const waypoints = moveEdgeWaypoint(
+      seeded,
+      index,
+      gesture.delta,
+      { width: props.scene.width, height: props.scene.height, padding: 8 },
+    );
+    gesture.routing = routingWithWaypoints(edge, waypoints);
+    previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
+    announce(`Waypoint ${index + 1}を移動`);
+    return;
+  }
+
+  const selected = selectedElementIdsSet.value.has(activeId)
+    ? [...selectedElementIdsSet.value]
+    : activeId ? [activeId] : [];
+  if (activeId && !selectedElementIdsSet.value.has(activeId)) {
+    requestSelection({ elementId: activeId, mode: "replace" });
+  }
+  const gesture = beginKeyboardGesture("move", activeId, event.key);
+  gesture.delta.x += movement.x;
+  gesture.delta.y += movement.y;
+  gesture.geometryChanges = translateSelection(
+    gesture.initialScene,
+    selected,
+    gesture.delta,
+    {
+      grid: { enabled: false, size: props.snap.grid.size },
+      targets: { enabled: false, tolerance: props.snap.targets.tolerance },
+    },
+  );
+  previewGeometries.value = Object.fromEntries(
+    gesture.geometryChanges.map((change) => [change.elementId, change.geometry]),
+  );
+  announce(`選択要素を${Math.abs(gesture.delta.x || gesture.delta.y)}移動`);
+}
+
+function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): void {
+  const activeId = activeNavigatorElementId.value;
+  const edge = props.scene.edges.find((candidate) => candidate.elementId === activeId);
+  if (edge) {
+    if (!selectedElementIdsSet.value.has(activeId)) {
+      requestSelection({ elementId: activeId, mode: "replace" });
+    }
+    if (!edge.label) {
+      announce("このedgeにはlabelがありません");
+      return;
+    }
+    const gesture = beginKeyboardGesture("label", edge.elementId, event.key);
+    gesture.delta.x += movement.x;
+    gesture.delta.y += movement.y;
+    const labelOffset = {
+      x: (edge.labelOffset?.x ?? 0) + gesture.delta.x,
+      y: (edge.labelOffset?.y ?? 0) + gesture.delta.y,
+    };
+    gesture.routing = routingWithLabelOffset(edge, labelOffset);
+    previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
+    announce("edge labelを移動");
+    return;
+  }
+
+  const element = [...props.scene.containers, ...props.scene.nodes]
+    .find((candidate) => candidate.elementId === activeId);
+  if (!element) return;
+  if (!selectedElementIdsSet.value.has(activeId)) {
+    requestSelection({ elementId: activeId, mode: "replace" });
+  }
+  const gesture = beginKeyboardGesture("resize", element.elementId, event.key);
+  gesture.delta.x += movement.x;
+  gesture.delta.y += movement.y;
+  const initial = [...gesture.initialScene.containers, ...gesture.initialScene.nodes]
+    .find((candidate) => candidate.elementId === element.elementId);
+  if (!initial) return;
+  const change = resizeGeometryElement(gesture.initialScene, element.elementId, {
+    width: initial.geometry.width + gesture.delta.x,
+    height: initial.geometry.height + gesture.delta.y,
+  });
+  gesture.geometryChanges = change ? [change] : [];
+  previewGeometries.value = change ? { [change.elementId]: change.geometry } : {};
+  announce(`サイズ ${Math.round(change?.geometry.width ?? initial.geometry.width)} × ${Math.round(change?.geometry.height ?? initial.geometry.height)}`);
+}
+
+function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | "remove"): void {
+  const edge = props.scene.edges.find((candidate) => (
+    candidate.elementId === activeNavigatorElementId.value
+  ));
+  if (!edge) return;
+  if (!selectedElementIdsSet.value.has(edge.elementId)) {
+    requestSelection({ elementId: edge.elementId, mode: "replace" });
+  }
+  if (event.repeat) return;
+  const gesture = beginKeyboardGesture(
+    operation === "add" ? "waypoint-add" : "waypoint-remove",
+    edge.elementId,
+    event.key,
+  );
+  const current = editableEdgeWaypoints(edge);
+  const waypoints = operation === "add"
+    ? appendEdgeWaypoint(edge)
+    : removeEdgeWaypoint(current, clamp(activeWaypointIndex.value, 0, current.length - 1));
+  activeWaypointIndex.value = Math.max(0, (waypoints?.length ?? 1) - 1);
+  gesture.routing = routingWithWaypoints(edge, waypoints);
+  previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
+  announce(operation === "add" ? "Waypointを追加" : "Waypointを削除");
+}
+
+function moveActiveWaypoint(movement: "previous" | "next"): void {
+  const edge = props.scene.edges.find((candidate) => (
+    candidate.elementId === activeNavigatorElementId.value
+  ));
+  if (!edge) return;
+  const count = editableEdgeWaypoints(edge).length;
+  if (count === 0) {
+    announce("Waypointはありません");
+    return;
+  }
+  const delta = movement === "next" ? 1 : -1;
+  activeWaypointIndex.value = (activeWaypointIndex.value + delta + count) % count;
+  announce(`Waypoint ${activeWaypointIndex.value + 1}/${count}を対象にしました`);
+}
+
+function beginKeyboardGesture(
+  kind: KeyboardGesture["kind"],
+  elementId: string,
+  commitKey: string,
+): KeyboardGesture {
+  if (
+    keyboardGesture
+    && (keyboardGesture.kind !== kind || keyboardGesture.elementId !== elementId || keyboardGesture.commitKey !== commitKey)
+  ) commitKeyboardGesture();
+  if (!keyboardGesture) {
+    keyboardGesture = {
+      kind,
+      elementId,
+      commitKey,
+      initialScene: snapshotScene(props.scene),
+      delta: { x: 0, y: 0 },
+    };
+    emit("gestureStart");
+  }
+  return keyboardGesture;
+}
+
+function commitKeyboardGesture(): void {
+  const gesture = keyboardGesture;
+  if (!gesture) return;
+  if (gesture.kind === "resize") {
+    const change = gesture.geometryChanges?.[0];
+    if (change) {
+      emit("resizeChange", change);
+      emit("geometryChange", change);
+    }
+  } else if (gesture.kind === "move") {
+    const changes = gesture.geometryChanges ?? [];
+    if (changes.length > 0) {
+      emit("geometryBatchChange", changes);
+      for (const change of changes) emit("geometryChange", change);
+    }
+  } else {
+    const edge = props.scene.edges.find((candidate) => candidate.elementId === gesture.elementId);
+    if (edge) emitKeyboardRouting(edge, gesture.routing, gesture.kind !== "label");
+  }
+  clearKeyboardPreview();
+  emit("gestureEnd");
+  announce("変更を確定");
+}
+
+function cancelKeyboardGesture(): void {
+  if (!keyboardGesture) return;
+  clearKeyboardPreview();
+  emit("gestureEnd");
+}
+
+function clearKeyboardPreview(): void {
+  keyboardGesture = undefined;
+  previewGeometries.value = {};
+  previewRouting.value = {};
+}
+
+function emitKeyboardRouting(
+  edge: SceneEdge,
+  routing: EditableEdgeRouting | undefined,
+  emitLegacyWaypointChange: boolean,
+): void {
+  emit("routingUpdate", { elementId: edge.elementId, routing });
+  if (!emitLegacyWaypointChange) return;
+  emit("routingChange", {
+    elementId: edge.elementId,
+    waypoints: routing?.waypoints?.map((point) => ({ ...point })) ?? [],
+  });
+}
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest([
+    "input",
+    "textarea",
+    "select",
+    "[contenteditable]:not([contenteditable='false'])",
+  ].join(",")));
 }
 
 function handleMinimapKeydown(event: KeyboardEvent): void {
@@ -734,6 +1298,7 @@ function isBlankCanvasTarget(target: EventTarget | null): boolean {
     ".iriograph-scene-container",
     ".iriograph-edge-group",
     ".iriograph-waypoints",
+    ".iriograph-endpoint-anchors",
     ".iriograph-resize-handle",
   ].join(","));
 }
@@ -781,8 +1346,16 @@ function selectEdge(event: MouseEvent, edge: SceneEdge): void {
 }
 
 function requestSelection(request: DiagramSelectionRequest): void {
+  if (request.elementId) activeNavigatorElementId.value = request.elementId;
   emit("select", request.elementId);
   emit("selectionRequest", request);
+}
+
+function requestSelectionSet(elementIds: string[]): void {
+  const primary = elementIds.at(-1) ?? "";
+  if (primary) activeNavigatorElementId.value = primary;
+  emit("select", primary);
+  emit("selectionSetRequest", elementIds);
 }
 
 function geometryFor(element: GeometryElement): ElementGeometry {
@@ -802,6 +1375,8 @@ function snapshotScene(scene: DiagramScene): DiagramScene {
       route: edge.route?.map((point) => ({ ...point })),
       waypoints: edge.waypoints?.map((point) => ({ ...point })),
       labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
+      sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
+      targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
     })),
     diagnostics: [...scene.diagnostics],
   };
@@ -819,16 +1394,32 @@ defineExpose<DiagramCanvasNavigationApi>({
 </script>
 
 <template>
-  <div class="iriograph-canvas-shell" :class="{ panning: viewportPanning }">
+  <div class="iriograph-canvas-shell" :class="{ panning: viewportPanning, 'semantic-picking': semanticPositionPicking || semanticResourcePicking }">
     <div
       ref="scrollElement"
       class="iriograph-canvas-scroll"
       tabindex="0"
-      aria-label="Diagram viewport"
+      role="listbox"
+      aria-label="Diagram scene navigator"
+      aria-multiselectable="true"
+      :aria-activedescendant="activeNavigatorElementId ? navigatorDomId(activeNavigatorElementId) : undefined"
+      :aria-busy="busy"
+      :aria-describedby="`${instanceId}-keyboard-help`"
       @scroll="updateViewportMetrics"
       @keydown="handleViewportKeydown"
+      @keyup="handleViewportKeyup"
+      @blur="handleViewportBlur"
+      @compositionstart="compositionActive = true"
+      @compositionend="compositionActive = false"
       @pointerdown="startViewportPan"
     >
+      <span :id="`${instanceId}-keyboard-help`" class="iriograph-visually-hidden">
+        矢印で要素フォーカス、Enterで選択、ControlまたはCommandと矢印で移動、ControlまたはCommandとShiftと矢印でサイズ変更
+      </span>
+      <span v-if="semanticResourcePicking" class="iriograph-visually-hidden" role="status">
+        Canvas上のnodeまたはcontainerから{{ semanticResourcePickLabel }}を選択してください。Escapeでキャンセルできます。
+      </span>
+      <span class="iriograph-visually-hidden" role="status" aria-live="polite" aria-atomic="true">{{ liveAnnouncement }}</span>
       <div
         ref="stageElement"
         class="iriograph-canvas-stage"
@@ -836,6 +1427,18 @@ defineExpose<DiagramCanvasNavigationApi>({
       >
         <div
           class="iriograph-diagram-canvas"
+          v-memo="[
+            scene,
+            zoom,
+            previewGeometries,
+            previewRouting,
+            selectedElementId,
+            selectedElementIds,
+            activeNavigatorElementId,
+            readOnly,
+            semanticDraftPosition,
+            containmentWarningElementIds,
+          ]"
           :style="{
             width: `${scene.width}px`,
             height: `${scene.height}px`,
@@ -850,16 +1453,30 @@ defineExpose<DiagramCanvasNavigationApi>({
             :style="{ left: `${semanticDraftPosition.x}px`, top: `${semanticDraftPosition.y}px` }"
           />
 
-          <button
+          <div
             v-for="container in scene.containers"
             :key="container.elementId"
-            type="button"
+            v-memo="[
+              container,
+              previewGeometries[container.elementId],
+              selectedElementIdsSet.has(container.elementId),
+              activeNavigatorElementId === container.elementId,
+              containmentWarningElementIdsSet.has(container.elementId),
+              scene.diagnostics,
+              readOnly,
+            ]"
+            :id="navigatorDomId(container.elementId)"
             class="iriograph-scene-container"
+            :class="[{ selected: selectedElementIdsSet.has(container.elementId), 'navigator-active': activeNavigatorElementId === container.elementId, 'containment-warning': containmentWarningElementIdsSet.has(container.elementId) }, diagnosticClass(container)]"
+            role="option"
+            tabindex="-1"
             :data-element-id="container.elementId"
             :data-parent-element-id="container.parentElementId ?? ''"
             :data-header-position="container.headerPosition"
-            :class="[{ selected: selectedElementIdsSet.has(container.elementId) }, diagnosticClass(container)]"
-            :aria-label="`${container.label}を選択${diagnosticAriaSuffix(container)}`"
+            :aria-label="`${navigatorAriaLabel(container.elementId, container.label, 'container')}${diagnosticAriaSuffix(container)}`"
+            :aria-selected="selectedElementIdsSet.has(container.elementId)"
+            :aria-posinset="navigatorPosition(container.elementId)"
+            :aria-setsize="navigatorItems.length"
             :style="{
               left: `${geometryFor(container).x}px`,
               top: `${geometryFor(container).y}px`,
@@ -885,9 +1502,10 @@ defineExpose<DiagramCanvasNavigationApi>({
               title="領域サイズを変更"
               @pointerdown="startResize($event, container)"
             />
-          </button>
+          </div>
 
           <svg
+            ref="edgeLayerElement"
             class="iriograph-edge-layer"
             :width="scene.width"
             :height="scene.height"
@@ -902,13 +1520,26 @@ defineExpose<DiagramCanvasNavigationApi>({
             <g
               v-for="edge in scene.edges"
               :key="edge.elementId"
+              v-memo="[
+                edge,
+                previewRouting[edge.elementId],
+                previewGeometries[edge.sourceElementId],
+                previewGeometries[edge.targetElementId],
+                selectedElementIdsSet.has(edge.elementId),
+                activeNavigatorElementId === edge.elementId,
+                scene.diagnostics,
+                readOnly,
+              ]"
+              :id="navigatorDomId(edge.elementId)"
               class="iriograph-edge-group"
-              :class="[{ selected: selectedElementIdsSet.has(edge.elementId), fallback: edge.fallback }, diagnosticClass(edge)]"
+              :class="[{ selected: selectedElementIdsSet.has(edge.elementId), 'navigator-active': activeNavigatorElementId === edge.elementId, fallback: edge.fallback }, diagnosticClass(edge)]"
               :data-element-id="edge.elementId"
-              tabindex="0"
-              role="button"
-              :aria-label="`${edgeAriaLabel(edge)}${diagnosticAriaSuffix(edge)}`"
+              tabindex="-1"
+              role="option"
+              :aria-label="`${navigatorAriaLabel(edge.elementId, edgeAriaLabel(edge), 'edge')}${diagnosticAriaSuffix(edge)}`"
               :aria-selected="selectedElementIdsSet.has(edge.elementId)"
+              :aria-posinset="navigatorPosition(edge.elementId)"
+              :aria-setsize="navigatorItems.length"
               @click.stop="selectEdge($event, edge)"
               @keydown="handleEdgeKeydown($event, edge)"
               @dblclick.stop="addWaypointAtPointer($event, edge)"
@@ -930,9 +1561,8 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :fill="edge.style.text"
                 text-anchor="middle"
                 dominant-baseline="central"
-                :tabindex="readOnly ? undefined : 0"
-                role="button"
-                :aria-label="`${edge.label} label位置`"
+                tabindex="-1"
+                aria-hidden="true"
                 @pointerdown="startLabelMove($event, edge)"
                 @keydown="handleLabelKeydown($event, edge)"
                 @dblclick.stop
@@ -946,28 +1576,63 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :key="index"
                 :cx="point.x"
                 :cy="point.y"
-                r="6"
-                tabindex="0"
-                role="button"
-                :aria-label="`Waypoint ${index + 1} / ${editableWaypoints(selectedEdge).length}`"
+                r="11"
+                :class="{ active: index === activeWaypointIndex }"
+                tabindex="-1"
+                aria-hidden="true"
                 @pointerdown="startWaypointMove($event, selectedEdge, index)"
                 @keydown="handleWaypointKeydown($event, selectedEdge, index)"
               />
             </g>
+            <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors" aria-hidden="true">
+              <circle
+                class="source"
+                :cx="endpointAnchorHandlePoint(selectedEdge, 'source').x"
+                :cy="endpointAnchorHandlePoint(selectedEdge, 'source').y"
+                r="8"
+                tabindex="-1"
+                @pointerdown="startEndpointAnchorMove($event, selectedEdge, 'source')"
+              >
+                <title>Source endpoint anchor</title>
+              </circle>
+              <circle
+                class="target"
+                :cx="endpointAnchorHandlePoint(selectedEdge, 'target').x"
+                :cy="endpointAnchorHandlePoint(selectedEdge, 'target').y"
+                r="8"
+                tabindex="-1"
+                @pointerdown="startEndpointAnchorMove($event, selectedEdge, 'target')"
+              >
+                <title>Target endpoint anchor</title>
+              </circle>
+            </g>
           </svg>
 
-          <button
+          <div
             v-for="node in scene.nodes"
             :key="node.elementId"
-            type="button"
+            v-memo="[
+              node,
+              previewGeometries[node.elementId],
+              selectedElementIdsSet.has(node.elementId),
+              activeNavigatorElementId === node.elementId,
+              containmentWarningElementIdsSet.has(node.elementId),
+              scene.diagnostics,
+              readOnly,
+            ]"
+            :id="navigatorDomId(node.elementId)"
             class="iriograph-scene-node"
+            role="option"
+            tabindex="-1"
             :data-element-id="node.elementId"
             :data-parent-element-id="node.parentElementId ?? ''"
             :class="[
               `shape-${node.shape}`,
               {
                 selected: selectedElementIdsSet.has(node.elementId),
+                'navigator-active': activeNavigatorElementId === node.elementId,
                 'user-placed': node.placement === 'user',
+                'containment-warning': containmentWarningElementIdsSet.has(node.elementId),
                 ...diagnosticClass(node),
               },
             ]"
@@ -981,7 +1646,10 @@ defineExpose<DiagramCanvasNavigationApi>({
               color: node.style.text,
               '--iriograph-node-accent': node.style.accent ?? node.style.stroke,
             }"
-            :aria-label="`${node.label}を選択${diagnosticAriaSuffix(node)}`"
+            :aria-label="`${navigatorAriaLabel(node.elementId, node.label, 'node')}${diagnosticAriaSuffix(node)}`"
+            :aria-selected="selectedElementIdsSet.has(node.elementId)"
+            :aria-posinset="navigatorPosition(node.elementId)"
+            :aria-setsize="navigatorItems.length"
             @pointerdown="startMove($event, node)"
             @keydown="handleGeometrySemanticKeydown($event, node.elementId)"
           >
@@ -997,7 +1665,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               title="nodeサイズを変更"
               @pointerdown="startResize($event, node)"
             />
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1006,7 +1674,7 @@ defineExpose<DiagramCanvasNavigationApi>({
       <svg
         :viewBox="`0 0 ${scene.width} ${scene.height}`"
         preserveAspectRatio="none"
-        tabindex="0"
+        tabindex="-1"
         aria-label="Minimapでviewportを移動"
         @keydown="handleMinimapKeydown"
         @pointerdown="beginMinimapPan"
@@ -1015,6 +1683,7 @@ defineExpose<DiagramCanvasNavigationApi>({
         <rect
           v-for="container in scene.containers"
           :key="container.elementId"
+          v-memo="[container, previewGeometries[container.elementId]]"
           class="iriograph-minimap-container"
           :x="geometryFor(container).x"
           :y="geometryFor(container).y"
@@ -1024,12 +1693,19 @@ defineExpose<DiagramCanvasNavigationApi>({
         <path
           v-for="edge in scene.edges"
           :key="edge.elementId"
+          v-memo="[
+            edge,
+            previewRouting[edge.elementId],
+            previewGeometries[edge.sourceElementId],
+            previewGeometries[edge.targetElementId],
+          ]"
           class="iriograph-minimap-edge"
           :d="pathFor(edge)"
         />
         <rect
           v-for="node in scene.nodes"
           :key="node.elementId"
+          v-memo="[node, previewGeometries[node.elementId]]"
           class="iriograph-minimap-node"
           :x="geometryFor(node).x"
           :y="geometryFor(node).y"

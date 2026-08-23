@@ -40,6 +40,7 @@ import {
   serializeCanonicalTurtleV1,
   TURTLE_SERIALIZER_VERSION_V1,
 } from "./serializer";
+import { containerContentBounds as boundsForContainer } from "./container-content";
 
 export async function previewAuthoringCommands(
   document: IriographDocument,
@@ -719,14 +720,5 @@ function containerContentBounds(parent: SceneContainer): {
   width: number;
   height: number;
 } {
-  const left = parent.headerPosition === "left" ? 78 : 16;
-  const top = parent.headerPosition === "top" ? 46 : 16;
-  const right = 16;
-  const bottom = 16;
-  return {
-    x: parent.geometry.x + left,
-    y: parent.geometry.y + top,
-    width: Math.max(0, parent.geometry.width - left - right),
-    height: Math.max(0, parent.geometry.height - top - bottom),
-  };
+  return boundsForContainer(parent.geometry, parent.headerPosition);
 }

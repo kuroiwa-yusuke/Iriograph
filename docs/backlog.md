@@ -4,7 +4,7 @@
 
 ## 現在の基準点
 
-Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。Core/editorは0.1.0の配布contract、tarball consumer検証、editor component回帰testとPlaywright browser smokeを持ち、session-onlyのviewport navigation、multi-selection、境界を守る一括移動、整列、等間隔、grid/target snap、manual edge routing、label位置、parallel edge、self-loopも接続されています。Human semantic authoringはresolved contextとallocatorをhostから受け、resource・属性・edge・包含・Seq/Alt・削除をdraft、exact graph patch preview、明示Applyのatomic transactionとして扱います。意味編集と表示編集のtransactionは分離されていますが、API安定版ではありません。
+Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとcompact serializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。Core/editorは0.1.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、edge endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。Human semantic authoringは右Inspectorでresource・属性・edge・包含・Seq/Alt・削除をlabel-first draft、rich preview、明示Applyのatomic transactionとして扱い、作成時のedge/membership、Canvas resource picker、display/semantic containment不一致警告を備えます。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
 
 Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq、Alt、seeAlsoを使う購入承認例です。Domain語彙はこれらの標準構造を置き換えずnode等のappearanceを選択し、標準catalogとdefaultsを持たないdomain extension catalogを決定的に結合しています。
 
@@ -14,13 +14,6 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq�
 - P1: 最初の実用MVPに必要
 - P2: kuroxiom-cloud・LLM連携と運用に必要
 - P3: 利用領域を広げる拡張
-
-## P1 — 実用MVP
-
-| ID | 項目 | 依存 | 完了条件 |
-|---|---|---|---|
-| P1-07 | accessibilityとkeyboard編集 | P0-11、P1-01〜03 | focus順、選択、移動、resize、routingの主要操作をkeyboardで完結できる |
-| P1-08 | 大規模graph性能基準 | P0-07 | 通常500 node/1,000 edgeでlayout以外の編集応答100ms未満・pan/drag 30fps以上、stress 2,000 node/4,000 edgeで初回projection+標準layout 2秒未満を暫定基準とし、固定fixtureのbenchmarkをCIで監視する |
 
 ## P2 — Cloud・LLM・運用
 
@@ -45,4 +38,4 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq�
 
 ## MVP判定
 
-P0をすべて満たし、P1-01〜05とP1-07を満たした時点を最初の実用MVPとします。P2はcloud導入のrelease gateであり、core/editorのMVP判定とは分けます。
+P0とP1を満たした状態を最初の実用MVPとします。P2はcloud導入のrelease gateであり、core/editorのMVP判定とは分けます。

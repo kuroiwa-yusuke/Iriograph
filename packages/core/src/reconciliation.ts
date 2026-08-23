@@ -1,4 +1,5 @@
 import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics";
+import { isValidEdgeEndpointAnchor } from "./endpoint-anchor";
 import type {
   DiagramScene,
   DiagramView,
@@ -313,6 +314,12 @@ function normalizeRouting(
   if (!routing) return undefined;
   const result = clone(routing);
   if (result.waypoints?.length === 0) delete result.waypoints;
+  if (result.sourceAnchor && !isValidEdgeEndpointAnchor(result.sourceAnchor)) {
+    delete result.sourceAnchor;
+  }
+  if (result.targetAnchor && !isValidEdgeEndpointAnchor(result.targetAnchor)) {
+    delete result.targetAnchor;
+  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 

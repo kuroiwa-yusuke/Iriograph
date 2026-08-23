@@ -22,6 +22,7 @@ import {
   mockResourceIriAllocator,
 } from "./mock/authoring";
 import { mockSemanticValidationContext } from "./mock/semantic-validation";
+import { createMockPerformanceDocument } from "./mock/performance-fixture";
 import {
   createMockAssetHost,
   workspaceAssetPickResult,
@@ -96,6 +97,14 @@ onBeforeUnmount(() => {
 async function initializeWorkspace(): Promise<void> {
   workspaceReady.value = false;
   workspaceError.value = "";
+  if (new URLSearchParams(window.location.search).get("benchmark") === "normal") {
+    const benchmarkDocument = createMockPerformanceDocument();
+    document.value = benchmarkDocument;
+    activeFilePath.value = "benchmarks/normal-500-1000.iriograph";
+    savedJson.value = JSON.stringify(benchmarkDocument);
+    workspaceReady.value = true;
+    return;
+  }
   let nextAssetHost: MockAssetHost | undefined;
   try {
     const nextWorkspace = await loadMockWorkspace();

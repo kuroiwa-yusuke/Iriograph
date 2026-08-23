@@ -51,11 +51,11 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(9);
 
   await page.getByRole("button", { name: /Turtle/ }).click();
-  const domainInvalidSource = `${acceptedSource}\n<urn:iriograph:demo:e2e-invalid> a <urn:iriograph:demo:UserTask> .\n`;
+  const domainInvalidSource = `${acceptedSource}\n<urn:iriograph:demo:requesterLane> <http://www.w3.org/2000/01/rdf-schema#member> <urn:iriograph:demo:e2e-invalid> .\n`;
   await textarea.fill(domainInvalidSource);
   await page.getByRole("button", { name: "検証して適用" }).click();
-  await expect(page.locator(".iriograph-diagnostics").getByText("demo-label-required")).toBeVisible();
-  await page.getByRole("button", { name: "Source" }).click();
+  await expect(page.locator(".iriograph-diagnostics").getByText("demo-visible-resource-label-required")).toBeVisible();
+  await page.getByRole("button", { name: "Source", exact: true }).click();
   await expect.poll(() => textarea.evaluate((element) => (
     (element as HTMLTextAreaElement).selectionStart
   ))).toBe(domainInvalidSource.indexOf("<urn:iriograph:demo:e2e-invalid>"));
@@ -104,8 +104,14 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   await expect(viewSelect).toHaveValue("main");
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(7);
 
-  await page.locator(".iriograph-view-actions").getByRole("button", { name: "追加" }).click();
+  const addViewButton = page.locator(".iriograph-view-actions").getByRole("button", { name: "追加" });
+  await addViewButton.click();
   await expect(page.locator(".iriograph-view-dialog")).toBeVisible();
+  await expect(page.locator('.iriograph-view-dialog input[required]').first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".iriograph-view-dialog")).toHaveCount(0);
+  await expect(addViewButton).toBeFocused();
+  await addViewButton.click();
   await page.locator('.iriograph-view-dialog input:not([readonly])').first().fill("audit");
   await page.locator('.iriograph-view-dialog button[type="submit"]').click();
   await expect(viewSelect).toHaveValue("audit");
@@ -124,7 +130,6 @@ test("structured semantic authoringをPreviewして位置とTurtleをatomicに�
 
   await page.goto("/");
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
-  await page.getByLabel("Resource class").fill("urn:iriograph:demo:UserTask");
   await page.getByLabel("Resource label").fill("E2E semantic task");
   await page.getByRole("button", { name: "Canvasで位置指定" }).click();
   const grid = page.locator(".iriograph-canvas-grid");
@@ -142,7 +147,7 @@ test("structured semantic authoringをPreviewして位置とTurtleをatomicに�
   expect(initialY).toBeGreaterThan(0);
 
   await page.getByRole("button", { name: "差分をPreview" }).click();
-  await expect(page.getByText("追加 2 triple")).toBeVisible();
+  await expect(page.getByText("追加 1 triple")).toBeVisible();
   await expect(page.getByText("適用可能", { exact: true })).toBeVisible();
   await page.locator(".iriograph-authoring-actions .primary").click();
 
@@ -275,24 +280,21 @@ test("parallel/self-loopを個別選択しwaypointとlabel routingを編集・re
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
   await page.goto("/");
-  const parallel = page.getByRole("button", { name: /内容を審査から承認ポリシーへの/ });
+  const parallel = page.getByRole("option", { name: /内容を審査から承認ポリシーへの/ });
   await expect(parallel).toHaveCount(2);
   const parallelPaths = await parallel.locator(".iriograph-edge-path").evaluateAll(
     (paths) => paths.map((path) => path.getAttribute("d")),
   );
   expect(new Set(parallelPaths).size).toBe(2);
-  await parallel.nth(0).focus();
-  await page.keyboard.press("Enter");
+  await parallel.nth(0).dispatchEvent("click");
   await expect(parallel.nth(0)).toHaveAttribute("aria-selected", "true");
-  await parallel.nth(1).focus();
-  await page.keyboard.press("Enter");
+  await parallel.nth(1).dispatchEvent("click");
   await expect(parallel.nth(1)).toHaveAttribute("aria-selected", "true");
   await expect(parallel.nth(0)).toHaveAttribute("aria-selected", "false");
 
-  const selfLoop = page.getByRole("button", { name: /内容を審査から内容を審査へのretry/ });
+  const selfLoop = page.getByRole("option", { name: /内容を審査から内容を審査へのretry/ });
   await expect(selfLoop).toHaveCount(1);
-  await selfLoop.focus();
-  await page.keyboard.press("Enter");
+  await selfLoop.dispatchEvent("click");
   await expect(selfLoop).toHaveAttribute("aria-selected", "true");
   const turtleBefore = await readTurtle(page);
 
@@ -326,8 +328,7 @@ test("parallel/self-loopを個別選択しwaypointとlabel routingを編集・re
     await page.locator('.iriograph-waypoint-row button[aria-label*="を削除"]').first().click();
   }
   await expect(page.getByText("automatic", { exact: true })).toBeVisible();
-  await selfLoop.focus();
-  await page.keyboard.press("Delete");
+  await selfLoop.dispatchEvent("keydown", { key: "Delete" });
   await expect(page.getByText("automatic", { exact: true })).toBeVisible();
   expect(await readTurtle(page)).toBe(turtleBefore);
 
@@ -348,8 +349,11 @@ test("viewport navigationをmouse/keyboard、fit、minimap、selection revealで
   const viewport = page.locator(".iriograph-canvas-scroll");
 
   await viewport.focus();
+  const activeBefore = await viewport.getAttribute("aria-activedescendant");
   await page.keyboard.press("ArrowRight");
-  await expect.poll(async () => (await scrollPosition(viewport)).left).toBe(64);
+  await expect(viewport).not.toHaveAttribute("aria-activedescendant", activeBefore ?? "");
+  await page.keyboard.press("Shift+PageDown");
+  await expect.poll(async () => (await scrollPosition(viewport)).left).toBeGreaterThan(0);
 
   const grid = page.locator(".iriograph-canvas-grid");
   await dispatchPointerDrag(page, grid, await requiredBox(grid, "canvas grid"), -48, -32);
@@ -375,6 +379,46 @@ test("viewport navigationをmouse/keyboard、fit、minimap、selection revealで
   await expect(page.locator(".status-cluster .status-pill.neutral")).toContainText("保存済み");
   await expect(page.locator(".topbar .ghost-button").filter({ hasText: "保存" })).toBeDisabled();
 
+  expect(consoleErrors).toEqual([]);
+});
+
+test("single-tab-stop navigatorで選択・geometry・routingをkeyboard完結する", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.goto("/");
+  const canvasShell = page.locator(".iriograph-canvas-shell");
+  const viewport = page.locator(".iriograph-canvas-scroll");
+  await expect(canvasShell.locator('[tabindex="0"]')).toHaveCount(1);
+  await expect(viewport).toHaveAttribute("role", "listbox");
+
+  const node = page.locator(".iriograph-scene-node").first();
+  await node.click();
+  const turtleBefore = await readTurtle(page);
+  const initialLeft = await numericStyle(node, "left");
+  await viewport.focus();
+  await page.keyboard.press("Control+ArrowRight");
+  await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(initialLeft + 1, 0);
+  expect(await readTurtle(page)).toBe(turtleBefore);
+  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(initialLeft, 0);
+
+  await viewport.focus();
+  await page.keyboard.press("Shift+ArrowRight");
+  await expect(page.locator('.iriograph-canvas-scroll [role="option"][aria-selected="true"]'))
+    .toHaveCount(2);
+
+  const edge = page.locator(".iriograph-edge-group").first();
+  await edge.dispatchEvent("click");
+  const waypointCount = await page.locator(".iriograph-waypoint-row").count();
+  await viewport.focus();
+  await page.keyboard.press("w");
+  await expect.poll(() => page.locator(".iriograph-waypoint-row").count())
+    .toBeGreaterThan(waypointCount);
+  expect(await readTurtle(page)).toBe(turtleBefore);
   expect(consoleErrors).toEqual([]);
 });
 

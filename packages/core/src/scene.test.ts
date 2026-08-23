@@ -74,6 +74,43 @@ describe("ProjectedScene conversion", () => {
     expect(scene.edges[0]?.labelOffset).toEqual({ x: 7, y: -9 });
   });
 
+  it("endpoint anchorをprojectionとlayout経由でSceneへ渡す", async () => {
+    const projected = projectSemanticView(documentFor({
+      edge: {
+        semanticRef: statementIdentity("urn:test:scene:a", "urn:test:scene:p", "urn:test:scene:b"),
+        routing: {
+          sourceAnchor: { position: 0 },
+          targetAnchor: { position: .5 },
+        },
+      },
+    }), standardRdfRdfsCatalog);
+
+    expect(projected.edges[0]).toMatchObject({
+      sourceAnchor: { position: 0 },
+      targetAnchor: { position: .5 },
+      routingPlacement: "generated",
+    });
+
+    const scene = await layoutProjectedDiagramScene(
+      projected,
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    const edge = scene.edges[0]!;
+    const source = scene.nodes.find((node) => node.elementId === edge.sourceElementId)!;
+    const target = scene.nodes.find((node) => node.elementId === edge.targetElementId)!;
+    expect(edge.sourceAnchor).toEqual({ position: 0 });
+    expect(edge.targetAnchor).toEqual({ position: .5 });
+    expect(edge.route?.[0]).toEqual({
+      x: source.geometry.x + source.geometry.width / 2,
+      y: source.geometry.y,
+    });
+    expect(edge.route?.at(-1)).toEqual({
+      x: target.geometry.x + target.geometry.width / 2,
+      y: target.geometry.y + target.geometry.height,
+    });
+  });
+
   it("profileとlayoutRefをruntime contextからview単位で解決する", async () => {
     const context: ProjectionRuntimeContext = {
       catalogsByProfile: new Map([[

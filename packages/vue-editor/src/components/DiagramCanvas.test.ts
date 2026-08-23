@@ -112,6 +112,40 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
   });
 
+  it("selected edgeのsource/target anchor handleをperimeter方向へdragしてpreview後に確定する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), selectedElementId: "edge-a-b" },
+    });
+    const svg = wrapper.get<SVGSVGElement>(".iriograph-edge-layer");
+    svg.element.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 500,
+      width: 800, height: 500, toJSON: () => undefined,
+    });
+    const handles = wrapper.findAll(".iriograph-endpoint-anchors circle");
+    expect(handles).toHaveLength(2);
+    expect(handles[0]!.classes()).toContain("source");
+    expect(handles[1]!.classes()).toContain("target");
+
+    await handles[0]!.trigger("pointerdown", { button: 0, clientX: 140, clientY: 70 });
+    dispatchPointer("pointermove", 80, 20);
+    await flushPreview();
+    expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cx")).toBe("80");
+    expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cy")).toBe("40");
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+    dispatchPointer("pointerup", 80, 20);
+
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: {
+        waypoints: [{ x: 140, y: 90 }],
+        sourceAnchor: { position: 0 },
+      },
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
   it("Scene routeをendpoint込みpolylineとして描画しlegacy edgeだけ旧経路へfallbackする", () => {
     const scene = sceneFixture();
     scene.edges.push({
@@ -195,7 +229,8 @@ describe("DiagramCanvas pointer gestures", () => {
     const label = wrapper.get(".iriograph-edge-label");
     expect(label.attributes("x")).toBe("100");
     expect(label.attributes("y")).toBe("100");
-    expect(label.attributes("role")).toBe("button");
+    expect(label.attributes("aria-hidden")).toBe("true");
+    expect(label.attributes("tabindex")).toBe("-1");
 
     await label.trigger("pointerdown", { button: 0, clientX: 100, clientY: 100 });
     dispatchPointer("pointermove", 124, 84);
@@ -235,7 +270,8 @@ describe("DiagramCanvas pointer gestures", () => {
     await groups[1]!.trigger("keydown", { key: "Delete" });
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
     expect(wrapper.find(".iriograph-waypoints").exists()).toBe(false);
-    expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBeUndefined();
+    expect(wrapper.find(".iriograph-endpoint-anchors").exists()).toBe(false);
+    expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBe("-1");
   });
 
   it("Deleteはsemantic graphを直接変更せずauthoring draft seedだけを通知する", async () => {
@@ -264,7 +300,164 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.find(".iriograph-edge-label").exists()).toBe(false);
   });
 
-  it("blank canvasのmouse dragとfocusされたviewportのkeyだけをpanに使う", async () => {
+  it("Canvasだけをtab stopにし全scene itemをstable optionとして参照する", () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "edge-a-b",
+        selectedElementIds: ["edge-a-b"],
+        busy: true,
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    const options = wrapper.findAll('[role="option"]');
+
+    expect(wrapper.findAll('[tabindex="0"]')).toHaveLength(1);
+    expect(viewport.attributes("role")).toBe("listbox");
+    expect(viewport.attributes("aria-busy")).toBe("true");
+    expect(viewport.attributes("aria-activedescendant")).toContain("edge-a-b");
+    expect(options).toHaveLength(3);
+    expect(options.every((option) => option.attributes("tabindex") === "-1")).toBe(true);
+    expect(options.every((option) => option.attributes("id"))).toBe(true);
+    expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBe("-1");
+    expect(wrapper.get(".iriograph-waypoints circle").attributes("tabindex")).toBe("-1");
+    expect(wrapper.get(".iriograph-minimap svg").attributes("tabindex")).toBe("-1");
+  });
+
+  it("Arrow focus、toggle、range selectionを共通navigator順序で通知する", async () => {
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene: sceneFixture() } });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    expect(viewport.attributes("aria-activedescendant")).toContain("node-a");
+
+    await viewport.trigger("keydown", { key: "ArrowRight" });
+    expect(viewport.attributes("aria-activedescendant")).toContain("node-b");
+    await viewport.trigger("keydown", { key: " ", ctrlKey: true });
+    expect(lastPayload(wrapper, "selectionRequest")).toEqual({ elementId: "node-b", mode: "toggle" });
+    await viewport.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    expect(lastPayload(wrapper, "selectionSetRequest")).toEqual(["node-b", "edge-a-b"]);
+    expect(viewport.attributes("aria-activedescendant")).toContain("edge-a-b");
+  });
+
+  it("key repeatをephemeral geometry preview一つにまとめkeyupでcommitする", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "node-a",
+        selectedElementIds: ["node-a"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true, repeat: true });
+
+    expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 22px");
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+
+    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    expect(lastPayload<{ elementId: string; geometry: ElementGeometry }[]>(wrapper, "geometryBatchChange"))
+      .toEqual([{ elementId: "node-a", geometry: { x: 22, y: 40, width: 120, height: 60 } }]);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("keyboard previewをCanvas blurでも一度だけcommitする", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "node-a",
+        selectedElementIds: ["node-a"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    await viewport.trigger("keydown", { key: "ArrowDown", ctrlKey: true });
+    await viewport.trigger("blur");
+    await viewport.trigger("keyup", { key: "ArrowDown", ctrlKey: true });
+
+    expect(wrapper.emitted("geometryBatchChange")).toHaveLength(1);
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("Escapeでkeyboard previewを破棄しreadOnly/IMEではwriteを通知しない", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "node-a",
+        selectedElementIds: ["node-a"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("keydown", { key: "Escape" });
+    expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 20px");
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    await wrapper.setProps({ readOnly: true });
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("compositionstart");
+    await viewport.trigger("keydown", { key: "ArrowRight" });
+    await viewport.trigger("compositionend");
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+  });
+
+  it("gesture中のScene差替えとreadOnly化ではstale previewをcommitしない", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "node-a",
+        selectedElementIds: ["node-a"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await wrapper.setProps({ scene: { ...sceneFixture(), width: 900 } });
+    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await wrapper.setProps({ readOnly: true });
+    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(2);
+  });
+
+  it("edge waypoint/label routingをkeydown previewからkeyupで確定する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        selectedElementId: "edge-a-b",
+        selectedElementIds: ["edge-a-b"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true, repeat: true });
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: { waypoints: [{ x: 142, y: 90 }] },
+    });
+    const legacyWaypointChanges = wrapper.emitted("routingChange")?.length;
+
+    await viewport.trigger("keydown", { key: "ArrowDown", ctrlKey: true, shiftKey: true });
+    await viewport.trigger("keyup", { key: "ArrowDown", ctrlKey: true, shiftKey: true });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: { waypoints: [{ x: 140, y: 90 }], labelOffset: { x: 0, y: 10 } },
+    });
+    expect(wrapper.emitted("routingChange")).toHaveLength(legacyWaypointChanges ?? 0);
+  });
+
+  it("blank canvasのmouse drag、Page key pan、Arrow scene navigationを分離する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
       props: { scene: sceneFixture() },
@@ -286,9 +479,11 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureStart")).toBeUndefined();
 
     await viewport.trigger("keydown", { key: "ArrowRight" });
-    expect(viewport.element.scrollLeft).toBe(114);
+    expect(viewport.attributes("aria-activedescendant")).toContain("node-b");
+    expect(viewport.element.scrollLeft).toBeGreaterThan(50);
+    viewport.element.scrollTop = 40;
     await viewport.trigger("keydown", { key: "PageDown" });
-    expect(viewport.element.scrollTop).toBe(184);
+    expect(viewport.element.scrollTop).toBeGreaterThan(40);
   });
 
   it("primary node gestureをpanから分離し、middle dragはreadOnlyでもnavigationに使う", async () => {
@@ -590,6 +785,55 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     dispatchPointer("pointerup", 110, 120);
     expect(lastPayload(wrapper, "semanticPositionRequest")).toEqual({ x: 100, y: 100 });
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureStart")).toBeUndefined();
+  });
+
+  it("明示resource picker中だけnode/container clickをsemanticRefへ変換しEscape・Scene置換で解除要求する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        semanticResourcePicking: true,
+        semanticResourcePickLabel: "Edge target",
+      },
+    });
+    await wrapper.get(".iriograph-scene-node").trigger("pointerdown", {
+      button: 0,
+      clientX: 80,
+      clientY: 70,
+    });
+    expect(lastPayload(wrapper, "semanticResourceRequest")).toBe("urn:test:canvas:a");
+    expect(wrapper.emitted("selectionRequest")).toBeUndefined();
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+
+    await wrapper.get(".iriograph-canvas-scroll").trigger("keydown", { key: "Escape" });
+    expect(wrapper.emitted("semanticPickCancel")).toHaveLength(1);
+
+    await wrapper.setProps({ scene: { ...sceneFixture(), width: 801 } });
+    expect(wrapper.emitted("semanticPickCancel")).toHaveLength(2);
+  });
+
+  it("position picker中のcontainer背景clickは位置とcontainer IRIだけをdraft seedとして通知する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: containedSceneFixture(), semanticPositionPicking: true },
+    });
+    const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
+    stage.getBoundingClientRect = () => ({
+      x: 10, y: 20, left: 10, top: 20, right: 810, bottom: 520,
+      width: 800, height: 500, toJSON: () => undefined,
+    });
+
+    await wrapper.get(".iriograph-scene-container").trigger("pointerdown", {
+      button: 0,
+      clientX: 110,
+      clientY: 120,
+    });
+    expect(wrapper.emitted("semanticPositionRequest")?.at(-1)).toEqual([
+      { x: 100, y: 100 },
+      "urn:test:canvas:container-a",
+    ]);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
     expect(wrapper.emitted("gestureStart")).toBeUndefined();
   });

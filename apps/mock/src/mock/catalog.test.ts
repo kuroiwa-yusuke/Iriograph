@@ -15,6 +15,7 @@ import {
 describe("normalized RDF/RDFS mock", () => {
   it("defaultsなしdomain catalogをstandard catalogと決定的に結合する", () => {
     expect(workflowDomainCatalog.defaults).toBeUndefined();
+    expect(workflowDomainCatalog.rules).toEqual([]);
     expect(mockProjectionCatalog.profileRef).toBe(standardRdfRdfsCatalog.profileRef);
     expect(mockProjectionCatalog.defaults).toEqual(standardRdfRdfsCatalog.defaults);
     expect(Object.keys(mockProjectionCatalog.templates)).toEqual(
@@ -40,7 +41,14 @@ describe("normalized RDF/RDFS mock", () => {
       "urn:iriograph:demo:requesterLane",
     ]);
     expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:approvalPolicy"))
-      .toMatchObject({ iconRef: "urn:iriograph:mock-workspace:asset:approval-policy" });
+      .toMatchObject({
+        templateRef: "urn:iriograph:template:reference:1",
+        iconRef: "urn:iriograph:mock-workspace:asset:approval-policy",
+      });
+    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:start"))
+      .toMatchObject({ templateRef: "urn:iriograph:template:start-event:1" });
+    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:gateway"))
+      .toMatchObject({ templateRef: "urn:iriograph:template:gateway:1" });
     expect(projected.edges.some((edge) => edge.provenance.operator === "alternative")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "ordinal-sequence")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "direct-edge")).toBe(true);
@@ -52,17 +60,38 @@ describe("normalized RDF/RDFS mock", () => {
     expect(projected.edges.filter((edge) => (
       edge.sourceElementId === review.elementId && edge.targetElementId === review.elementId
     ))).toHaveLength(1);
+
+    const topDown = projectSemanticView(document, mockProjectionCatalog, "top-down");
+    expect(topDown.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(topDown.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:register"))
+      .toMatchObject({ templateRef: "urn:iriograph:template:service-task:1" });
+    expect(topDown.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:end"))
+      .toMatchObject({ templateRef: "urn:iriograph:template:end-event:1" });
   });
 
   it("旧workflow構造語彙をsemantic sourceに残さない", () => {
     const source = sampleDocument().semantic.source;
-    for (const obsolete of ["wf:Lane", "wf:SequenceFlow", "wf:from", "wf:to", "wf:inLane"]) {
+    for (const obsolete of [
+      "wf:Lane",
+      "wf:SequenceFlow",
+      "wf:from",
+      "wf:to",
+      "wf:inLane",
+      "wf:StartEvent",
+      "wf:UserTask",
+      "wf:ServiceTask",
+      "wf:ExclusiveGateway",
+      "wf:EndEvent",
+      "wf:Reference",
+    ]) {
       expect(source).not.toContain(obsolete);
     }
     expect(source).toContain("a rdf:Bag");
     expect(source).toContain("a rdf:Seq");
     expect(source).toContain("a rdf:Alt");
     expect(source).toContain("rdfs:seeAlso");
+    expect(source).toContain("wf:relatedTo");
+    expect(source).toContain("wf:retry");
   });
 });
 

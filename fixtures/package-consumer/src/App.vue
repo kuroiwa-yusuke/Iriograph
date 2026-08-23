@@ -6,9 +6,17 @@ import {
   type IriographDocumentV1,
   type ProjectionCatalogV1,
 } from "@iriograph/core";
+import {
+  ELK_LAYOUT_REFS,
+  ElkLayeredLayoutAdapter,
+} from "@iriograph/layout-elk";
 import { IriographEditor } from "@iriograph/vue-editor";
 
 const catalog: ProjectionCatalogV1 = standardRdfRdfsCatalog;
+const elkLayoutAdapter = new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR");
+if (elkLayoutAdapter.layoutRef !== ELK_LAYOUT_REFS.layeredLr) {
+  throw new Error("packed ELK layout adapter contract is invalid");
+}
 const document = ref<IriographDocumentV1>({
   schemaVersion: "1",
   kind: "iriograph.document",
