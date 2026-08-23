@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.document",
+  "documentId": "purchase-approval",
+  "semantic": {
+    "format": "text/turtle",
+    "baseIri": "urn:example:purchase:",
+    "authoringProfileRef": "urn:example:authoring-profile:purchase@1",
+    "source": "@prefix : <urn:example:purchase:> .\n:request <urn:example:status> :pending .",
+    "extensions": {
+      "urn:example:extension:semantic-metadata": {
+        "revision": 3
+      }
+    }
+  },
+  "imports": [
+    {
+      "catalogRef": "urn:iriograph:catalog:rdf-rdfs@1"
+    }
+  ],
+  "views": [
+    {
+      "viewId": "main",
+      "kind": "node-link",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "locale": "ja-JP",
+      "overlay": {
+        "request": {
+          "semanticRef": "urn:example:purchase:request",
+          "geometry": {
+            "x": 10,
+            "y": 20,
+            "width": 160,
+            "height": 72
+          },
+          "placement": "user"
+        }
+      }
+    }
+  ],
+  "extensions": {
+    "https://example.com/iriograph/extensions/review": {
+      "approved": false
+    }
+  }
+}

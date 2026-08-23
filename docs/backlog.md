@@ -24,9 +24,9 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 | P0-03 | RDF/RDFS profile構造validation | P0-01、P0-02 | named IRI、Bag parent、container cycle、Seq/Altの連番・個数・重複型をvalid/invalid fixtureで検証する |
 | P0-04 | 限定RDFS closureとrule競合解決 | P0-01、P0-02 | `subClassOf`/`subPropertyOf`の推移閉包、priority、specificityを登録順非依存で解決し、同順位競合を投影前errorにする |
 | P0-05 | catalog import・version・integrity解決contract | P0-01、P0-04 | host resolver I/F、重複catalog、version不一致、取得失敗のdiagnosticが決定的になる |
-| P0-06 | stable resource/triple/derived-edge identity | P0-01、P0-02 | Turtle再整形後の直接triple、Seq transition、Alt branchとnamed resourceでoverlay照合testが通る |
-| P0-07 | 決定的layout engine v1 | P0-02、P0-06 | node-link、階層LR/TB、Bag container、pinned nodeを扱い、同一入力から同一座標を得る |
-| P0-08 | 正式display reconciliation | P0-04、P0-06、P0-07 | 追加・削除・type変更・containment・sequence変更で全viewをそれぞれのprofile/layoutから再投影する。存続user overlayを互換な範囲で維持し、新規geometryにgenerated provenanceを付け、catalog由来appearanceを複製しないfixture testが通る |
+| P0-06 | stable resource/triple/derived-edge identity | P0-01、P0-02 | Turtle再整形後の直接triple、Seq transition、Alt branchとnamed resourceでoverlay照合testが通る。Structured/LLM editはversioned serializerで決定的にTurtleを再生成し、direct source editは適用原文を保持する。再serialize後のcomment・書式保持を保証しないことをfixtureで固定する |
+| P0-07 | projection分離と決定的layout engine v1 | P0-02、P0-06 | Projectionがgeometry未確定Sceneを返し、別の非同期layout adapterがnode-link、階層LR/TB、Bag container、pinned nodeを扱う。Coreの標準軽量adapterをeditor defaultにし、host注入adapterへ差替え可能で、同一入力から同一座標を得る |
+| P0-08 | 正式display reconciliation | P0-04、P0-06、P0-07 | 追加・削除・type変更・containment・sequence変更で全named viewをそれぞれのprofile/layoutから再投影する。存続user overlayを互換な範囲で維持し、通常再配置はgeneratedだけを対象にし、新規geometryにgenerated provenanceを付け、catalog由来appearanceを複製しないfixture testが通る |
 | P0-09 | workspace asset picker、resolver、安全policy contract | P0-01 | documentは安定asset IRIだけを保持し、host注入の選択UIと非同期resolverでworkspace assetを表示できる。未解決fallback、移動・削除diagnostic、media type・容量、許可scheme/origin、Blob URL lifecycleをtestし、mockのtreeにcatalog外assetの縦切りがある |
 | P0-10 | package配布contract | P0-01〜09 | coreとVue editorのexports、CSS、peer dependency、semver方針を定め、別fixture appでbuildできる |
 | P0-11 | editor操作の回帰test基盤 | P0-10 | drag、resize、routing、undo/redo、Turtle適用、保存flushをcomponent/E2E testで検証する |
@@ -38,11 +38,11 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 | P1-01 | pan、fit、minimap、選択への移動 | P0-07、P0-11 | 大きい図をmouse/keyboardで移動でき、選択elementをviewportへ表示できる |
 | P1-02 | multi-select、整列、等間隔、snap | P0-11 | 一括移動を一transactionでundoでき、container境界を破らない |
 | P1-03 | edge routing編集の完成 | P0-07、P0-11 | waypoint追加・削除、label位置、self-loop、parallel edgeを編集・保存できる |
-| P1-04 | human semantic authoring commands | P0-06、P0-08 | actor=`human`でprofile/hostから安全に採番したnamed IRIと初期tripleが必須のnode作成、literal/IRI属性編集、predicate必須の直接edgeまたはcapability graph patch、明示的なcontainment/sequence/alternativeをTurtle graph transactionとして編集できる。仮nodeと暗黙generic predicateを保存せず、dragはmembershipを変更しない。Unknown term warning、derived edge/所属のprovenanceからの逆編集、Turtle直接編集と共通validation/reconciliation、作成位置を含むatomic undo/rollbackをcomponent/E2E testする |
+| P1-04 | human semantic authoring commands | P0-06、P0-08 | actor=`human`でprofile/hostから安全に採番したnamed IRIと初期tripleが必須のnode作成、literal/IRI属性編集、predicate必須の直接edgeまたはcapability graph patch、明示的なcontainment/sequence/alternative、参照時rejectを既定とするresource削除とpreview付きexplicit cascadeをTurtle graph transactionとして編集できる。Seq/Alt削除はatomicに再採番する。操作はサイドバーdraft→triple/graph patch preview・validation→明示適用とし、canvas gestureはdraftをseedするだけにする。Ghost、仮node、暗黙generic predicateを保存せず、dragはmembershipを変更しない。`ResolvedAuthoringContext`/allocator契約とstatic mock fixtureをP1で用意し、URI resolverはP2-01に残す。Unknown term warning、derived edge/所属のprovenanceからの逆編集、Turtle直接編集と共通validation/reconciliation、作成位置を含むatomic undo/rollbackをcomponent/E2E testする |
 | P1-05 | SHACL等のsemantic validation port | P0-01 | syntax errorとdomain constraintを分け、semanticRef付きdiagnosticをSceneとsourceへ対応付ける |
-| P1-06 | 複数view、locale、filterとview管理 | P0-08 | 同じTurtleに異なるprofile/layout/locale/filter/overlayを追加・複製・削除できる |
+| P1-06 | named view、localeとview管理 | P0-08 | 同じTurtleに異なるprofile/layout/locale/overlayを持つnamed viewを選択・追加・複製・削除でき、view profileが表示構造を選ぶ。SPARQL/汎用filter editorは導入せず、一時hideはsession stateにだけ保持する |
 | P1-07 | accessibilityとkeyboard編集 | P0-11、P1-01〜03 | focus順、選択、移動、resize、routingの主要操作をkeyboardで完結できる |
-| P1-08 | 大規模graph性能基準 | P0-07 | 目標node/edge数を定め、投影・layout・操作応答のbenchmarkをCIで監視する |
+| P1-08 | 大規模graph性能基準 | P0-07 | 通常500 node/1,000 edgeでlayout以外の編集応答100ms未満・pan/drag 30fps以上、stress 2,000 node/4,000 edgeで初回projection+標準layout 2秒未満を暫定基準とし、固定fixtureのbenchmarkをCIで監視する |
 
 ## P2 — Cloud・LLM・運用
 

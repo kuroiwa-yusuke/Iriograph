@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.document",
+  "documentId": "invalid-extension-key",
+  "semantic": {
+    "format": "text/turtle",
+    "baseIri": "urn:example:extension:",
+    "authoringProfileRef": "urn:example:profile:1",
+    "source": ""
+  },
+  "views": [
+    {
+      "viewId": "main",
+      "kind": "node-link",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "overlay": {}
+    }
+  ],
+  "extensions": {
+    "vendorOption": true
+  }
+}

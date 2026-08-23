@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.catalog",
+  "catalogId": "urn:example:catalog:invalid-operator",
+  "catalogVersion": "1",
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+  "rules": [
+    {
+      "ruleId": "invalid-membership",
+      "priority": 100,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "membership-container",
+        "ordinalPredicatePrefix": "http://www.w3.org/1999/02/22-rdf-syntax-ns#_"
+      },
+      "templateRef": "urn:example:template:container"
+    }
+  ],
+  "templates": {
+    "urn:example:template:container": {
+      "templateRef": "urn:example:template:container",
+      "structuralKind": "container",
+      "style": {
+        "fill": "white",
+        "stroke": "black",
+        "text": "black"
+      }
+    }
+  },
+  "assets": {}
+}

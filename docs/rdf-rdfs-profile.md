@@ -59,7 +59,7 @@ Iriograph documentは次の三層を分離します。
 | `rdfs:domain` | propertyのsubject側class | domain edgeとして表示する |
 | `rdfs:range` | propertyのobject/value側class | range edgeとして表示する |
 
-これらは業務フローで必須ではありません。ontology自体を同じ意味グラフで扱う場合にも独自語彙を増やさないため、ベースcatalogが表示形式を提供します。view filterを導入した後は、instance中心のviewからontology resourceを除外しても構いません。
+これらは業務フローで必須ではありません。ontology自体を同じ意味グラフで扱う場合にも独自語彙を増やさないため、ベースcatalogが表示形式を提供します。v1は汎用filter式を持たず、instance中心等の構造選択が必要なら別のnamed viewとview profileを使用します。
 
 ### 3.3 自由なdomain語彙
 

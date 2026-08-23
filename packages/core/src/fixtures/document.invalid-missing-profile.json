@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.document",
+  "documentId": "missing-profile",
+  "semantic": {
+    "format": "text/turtle",
+    "baseIri": "urn:example:missing:",
+    "source": ""
+  },
+  "views": [
+    {
+      "viewId": "main",
+      "kind": "node-link",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "overlay": {}
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.catalog",
+  "catalogId": "urn:iriograph:catalog:rdf-rdfs",
+  "catalogVersion": "1",
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+  "rules": [
+    {
+      "ruleId": "generic-resource",
+      "priority": 10,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/2000/01/rdf-schema#Resource",
+        "entailment": "rdfs-subclass"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:iriograph:template:node:1"
+    },
+    {
+      "ruleId": "bag-membership",
+      "priority": 100,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "membership-container",
+        "membershipPredicate": "http://www.w3.org/2000/01/rdf-schema#member"
+      },
+      "templateRef": "urn:iriograph:template:container:1"
+    },
+    {
+      "ruleId": "sequence",
+      "priority": 100,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Seq",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "ordinal-sequence",
+        "ordinalPredicatePrefix": "http://www.w3.org/1999/02/22-rdf-syntax-ns#_"
+      },
+      "templateRef": "urn:iriograph:template:edge:1"
+    },
+    {
+      "ruleId": "alternative",
+      "priority": 100,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Alt",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "alternative",
+        "ordinalPredicatePrefix": "http://www.w3.org/1999/02/22-rdf-syntax-ns#_",
+        "defaultOrdinal": 1
+      },
+      "templateRef": "urn:iriograph:template:choice:1"
+    },
+    {
+      "ruleId": "reference-edge",
+      "priority": 100,
+      "match": {
+        "kind": "predicate",
+        "iri": "http://www.w3.org/2000/01/rdf-schema#seeAlso",
+        "entailment": "rdfs-subproperty"
+      },
+      "project": {
+        "operator": "direct-edge"
+      },
+      "templateRef": "urn:iriograph:template:edge:1"
+    },
+    {
+      "ruleId": "suppress-type",
+      "priority": 100,
+      "match": {
+        "kind": "predicate",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "suppress"
+      }
+    },
+    {
+      "ruleId": "fallback-edge",
+      "priority": 0,
+      "match": {
+        "kind": "any-iri-object"
+      },
+      "project": {
+        "operator": "direct-edge"
+      },
+      "templateRef": "urn:iriograph:template:edge:1"
+    }
+  ],
+  "templates": {
+    "urn:iriograph:template:node:1": {
+      "templateRef": "urn:iriograph:template:node:1",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "style": {
+        "fill": "white",
+        "stroke": "black",
+        "text": "black"
+      }
+    },
+    "urn:iriograph:template:container:1": {
+      "templateRef": "urn:iriograph:template:container:1",
+      "structuralKind": "container",
+      "headerPosition": "top",
+      "style": {
+        "fill": "white",
+        "stroke": "black",
+        "text": "black"
+      }
+    },
+    "urn:iriograph:template:choice:1": {
+      "templateRef": "urn:iriograph:template:choice:1",
+      "structuralKind": "node",
+      "shape": "diamond",
+      "style": {
+        "fill": "white",
+        "stroke": "black",
+        "text": "black"
+      }
+    },
+    "urn:iriograph:template:edge:1": {
+      "templateRef": "urn:iriograph:template:edge:1",
+      "structuralKind": "edge",
+      "style": {
+        "fill": "none",
+        "stroke": "black",
+        "text": "black"
+      }
+    }
+  },
+  "assets": {
+    "urn:example:asset:task-icon": {
+      "assetRef": "urn:example:asset:task-icon",
+      "mediaType": "image/svg+xml",
+      "url": "https://example.com/assets/task.svg"
+    }
+  },
+  "defaults": {
+    "nodeTemplateRef": "urn:iriograph:template:node:1",
+    "edgeTemplateRef": "urn:iriograph:template:edge:1",
+    "layoutRef": "urn:iriograph:layout:hierarchical-lr:1"
+  },
+  "extensions": {
+    "urn:example:extension:catalog-owner": "architecture-team"
+  }
+}

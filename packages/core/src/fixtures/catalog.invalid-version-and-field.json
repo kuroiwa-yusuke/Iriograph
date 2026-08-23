@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "2",
+  "kind": "iriograph.catalog",
+  "catalogId": "not an IRI",
+  "catalogVersion": "",
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+  "rules": [],
+  "templates": {},
+  "assets": {},
+  "nodeRules": []
+}

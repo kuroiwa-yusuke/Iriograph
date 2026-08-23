@@ -12,6 +12,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Sceneの構造名は`node`、`edge`、`container`、`annotation`など表示・編集上の性質で付ける。
 - View overlayはgeometry、pin、manual routeなど、catalogから復元できない表示情報だけを持つ。
 - Vue、DOM、workspace、HTTP、権限をcoreへ入れない。
+- Semantic projection、layout、rendererを分離する。Coreは非同期layout adapter契約と標準の軽量layoutを持ち、hostが同じ契約で高機能layoutへ差し替えられるようにする。
 - Asset URIは識別子であり、取得URLと同一視しない。取得は注入resolverへ委譲する。
 - ResourceのidentityにlabelやTurtleの行番号を使わない。IRIを優先する。
 - LLMへはsemantic Turtle、許可語彙、関連projection capabilityだけを公開し、view overlayを編集対象にしない。
@@ -35,7 +36,11 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Rich editorのnode、edge、属性、包含作成はsemantic transactionとする。表示だけの仮nodeをdocumentへ保存せず、node作成時はnamed IRIと少なくとも1つのtripleを同時に確定する。
 - Edge作成はpredicateまたはprofile由来capabilityを必須にし、空欄を補うgeneric predicateを暗黙生成しない。Containerへのplain dragからmembership tripleを推測しない。
 - Human structured command、Turtle直接編集、LLM返却Turtleはcandidate graph以降のvalidation、全view projection、display reconciliationを共有する。
+- Rich editorのsemantic node、edge、属性、包含、削除は、サイドバー上のdraft、生成予定triple/graph patchのpreview、validation、明示適用の順で確定する。Canvas gestureはdraftをseedするだけで、ghost node/edgeはephemeral UI stateとしdocumentへ保存しない。
+- Structured commandとLLM editの成功時は、同じdataset serializerでTurtleを決定的に再生成する。Turtle sourceの直接編集は適用された原文を保持するが、後の再serialize時にcomment、空白、triple記述順などの書式が保持されることを保証しない。
+- Resource削除は参照が残る場合に既定で拒否する。参照tripleのpreviewを伴う明示的cascadeだけを許可し、Seq/Altのordinal変更は一つのatomic patchで再採番する。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
+- 通常の自動再配置は`placement: "generated"`の要素だけを対象とし、user配置をlayout更新で移動しない。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
 - 保存schema変更にはversion方針とtestを伴わせる。
 

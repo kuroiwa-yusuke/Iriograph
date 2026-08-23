@@ -1,19 +1,50 @@
-export type IriographDocument = {
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+/**
+ * Extension keys are absolute IRIs. Runtime validation enforces this boundary;
+ * regular fields remain closed so extensions cannot silently become core API.
+ */
+export type IriographExtensions = Record<string, JsonValue>;
+
+export type IriographDocumentV1 = {
   schemaVersion: "1";
   kind: "iriograph.document";
   documentId: string;
   semantic: {
     format: "text/turtle";
     baseIri: string;
+    authoringProfileRef: string;
     source: string;
+    extensions?: IriographExtensions;
   };
   imports?: CatalogImport[];
   views: DiagramView[];
+  extensions?: IriographExtensions;
 };
+
+/** @deprecated Migration-only shape accepted by the prototype editor. */
+export type LegacyIriographDocument = Omit<IriographDocumentV1, "semantic"> & {
+  semantic: Omit<IriographDocumentV1["semantic"], "authoringProfileRef"> & {
+    authoringProfileRef?: never;
+  };
+};
+
+/**
+ * Existing renderer/editor APIs temporarily accept the prototype document.
+ * New persistence boundaries must validate and return IriographDocumentV1.
+ */
+export type IriographDocument = IriographDocumentV1 | LegacyIriographDocument;
 
 export type CatalogImport = {
   catalogRef: string;
   integrity?: string;
+  extensions?: IriographExtensions;
 };
 
 export type DiagramView = {
@@ -21,7 +52,9 @@ export type DiagramView = {
   kind: "node-link";
   profileRef: string;
   layoutRef: string;
+  locale?: string;
   overlay: Record<string, ViewElementOverlay>;
+  extensions?: IriographExtensions;
 };
 
 export type ViewElementOverlay = {
@@ -33,11 +66,14 @@ export type ViewElementOverlay = {
     templateRef?: string;
     iconRef?: string;
     styleToken?: string;
+    extensions?: IriographExtensions;
   };
   routing?: {
     waypoints?: Point[];
     labelOffset?: Point;
+    extensions?: IriographExtensions;
   };
+  extensions?: IriographExtensions;
 };
 
 export type ElementGeometry = {
@@ -45,28 +81,99 @@ export type ElementGeometry = {
   y: number;
   width: number;
   height: number;
+  extensions?: IriographExtensions;
 };
 
 export type Point = {
   x: number;
   y: number;
+  extensions?: IriographExtensions;
 };
 
-export type DiagramCatalog = {
+export type ProjectionCatalogV1 = {
+  schemaVersion: "1";
+  kind: "iriograph.catalog";
   catalogId: string;
   catalogVersion: string;
   profileRef: string;
-  defaults: {
-    nodeTemplateRef: string;
-    edgeTemplateRef: string;
-    layoutRef: string;
-  };
+  rules: ProjectionRule[];
+  templates: Record<string, VisualTemplate>;
+  assets: Record<string, AssetDefinition>;
+  defaults?: CatalogDefaults;
+  extensions?: IriographExtensions;
+};
+
+export type CatalogDefaults = {
+  nodeTemplateRef: string;
+  edgeTemplateRef: string;
+  layoutRef: string;
+  extensions?: IriographExtensions;
+};
+
+export type ProjectionRule = {
+  ruleId: string;
+  priority: number;
+  match: ProjectionRuleMatch;
+  project: ProjectionOperator;
+  templateRef?: string;
+  extensions?: IriographExtensions;
+};
+
+export type ProjectionRuleMatch =
+  | {
+      kind: "type" | "predicate";
+      iri: string;
+      entailment: "exact" | "rdfs-subclass" | "rdfs-subproperty";
+      extensions?: IriographExtensions;
+    }
+  | {
+      kind: "any-iri-object";
+      extensions?: IriographExtensions;
+    };
+
+export type ProjectionOperator =
+  | {
+      operator: "resource";
+      structuralKind: "node" | "container";
+      extensions?: IriographExtensions;
+    }
+  | {
+      operator: "direct-edge" | "suppress";
+      extensions?: IriographExtensions;
+    }
+  | {
+      operator: "membership-container";
+      membershipPredicate: string;
+      extensions?: IriographExtensions;
+    }
+  | {
+      operator: "ordinal-sequence";
+      ordinalPredicatePrefix: string;
+      extensions?: IriographExtensions;
+    }
+  | {
+      operator: "alternative";
+      ordinalPredicatePrefix: string;
+      defaultOrdinal: number;
+      extensions?: IriographExtensions;
+    };
+
+/** @deprecated Prototype catalog accepted until projection moves to ProjectionCatalogV1. */
+export type LegacyDiagramCatalog = {
+  catalogId: string;
+  catalogVersion: string;
+  profileRef: string;
+  defaults: CatalogDefaults;
   nodeRules: NodeProjectionRule[];
   relationRules: RelationProjectionRule[];
   containmentRules: ContainmentProjectionRule[];
   templates: Record<string, VisualTemplate>;
   assets: Record<string, AssetDefinition>;
+  extensions?: IriographExtensions;
 };
+
+/** @deprecated Use ProjectionCatalogV1 at new persistence boundaries. */
+export type DiagramCatalog = LegacyDiagramCatalog;
 
 export type NodeProjectionRule = {
   ruleId: string;
@@ -75,6 +182,7 @@ export type NodeProjectionRule = {
   templateRef: string;
   labelPath?: string;
   priority?: number;
+  extensions?: IriographExtensions;
 };
 
 export type RelationProjectionRule = {
@@ -85,6 +193,7 @@ export type RelationProjectionRule = {
   labelPath?: string;
   templateRef: string;
   priority?: number;
+  extensions?: IriographExtensions;
 };
 
 export type ContainmentProjectionRule = {
@@ -92,6 +201,7 @@ export type ContainmentProjectionRule = {
   predicate: string;
   child: "subject" | "object";
   parent: "subject" | "object";
+  extensions?: IriographExtensions;
 };
 
 export type VisualTemplate = {
@@ -106,17 +216,21 @@ export type VisualTemplate = {
     text: string;
     accent?: string;
     dash?: string;
+    extensions?: IriographExtensions;
   };
   defaultSize?: {
     width: number;
     height: number;
+    extensions?: IriographExtensions;
   };
+  extensions?: IriographExtensions;
 };
 
 export type AssetDefinition = {
   assetRef: string;
   mediaType: "image/svg+xml" | "image/png" | "image/webp";
   url: string;
+  extensions?: IriographExtensions;
 };
 
 export type ProjectionOptions = {

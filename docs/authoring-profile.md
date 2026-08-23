@@ -113,9 +113,16 @@ Human structured commandは次のpolicyに従います。
 - edgeはpredicateまたは明示的なsemantic capabilityの選択を必須にする。選択されたpredicateにcatalog ruleがなくても、policy上許可されたIRI-object tripleならunknown fallbackの通常矢印として表示できる
 - `:relation`等の一般的なpredicateを空欄のfallbackとして生成しない。適切な語彙がなければ、humanUnknown policyに従って警告・拒否し、または語彙整備を促す
 - 包含、順序、選択は、structure profileとprojection capabilityで許可されたgraph patchとして一括適用する。Dragをmembershipと解釈するなど、presentation gestureからsemantic tripleを暗黙生成しない
+- Resource削除は参照statementが残る場合に既定で拒否する。影響statementをpreviewし人が明示したcascadeだけを許可し、Seq/Alt memberの削除では残るordinalを同じpatchで再採番する
 - `humanUnknown: warn`の操作はdiagnosticと完全IRIを提示し、人が明示確認した場合だけ再実行できる
 
 Structured commandはRDF datasetへのgraph patchに変換した後、Turtle textareaの候補sourceおよびLLMが返した候補sourceと同じパイプラインへ合流します。Actor policyは差分検証時に適用し、その後の構造検証、domain validation、全viewの再投影、display reconciliationはactor間で共通にします。
+
+Node、edge、属性、包含、削除の入力はサイドバー上のcommand draftです。Canvas gestureはsource/target、作成位置、候補container等をdraftへseedできますが、それだけではsemantic graphを変更しません。Editorは追加・削除予定のtripleまたは構造graph patch、完全IRI、validation結果をpreviewし、ユーザーの明示適用後にだけtransactionを開始します。適用前のghost elementはephemeral UI stateでありdocumentへ保存しません。
+
+P1 editorはhostから取得処理ではなく、解決済みの`ResolvedAuthoringContext`と任意のresource IRI allocatorを受け取ります。Mockはstatic fixtureを注入します。Profile/vocabulary URIからcontextを取得するresolverはP2-01で実装します。
+
+Structured commandとLLM editが成功した場合は、candidate datasetを共通のversioned serializerで決定的なTurtleへ再生成します。Turtle textareaの直接編集は妥当な原文を保持します。Comment、空白、改行、triple記述順は後の再serialize時には保持を保証せず、reviewにはgraph単位のsemantic diffを用います。
 
 ## 7. LLMへ渡すcontext
 

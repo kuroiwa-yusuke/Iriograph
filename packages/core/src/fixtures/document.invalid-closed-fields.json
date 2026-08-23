@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.document",
+  "documentId": "closed-fields",
+  "semantic": {
+    "format": "text/turtle",
+    "baseIri": "not an IRI",
+    "authoringProfileRef": "urn:example:profile:1",
+    "source": "",
+    "displayColor": "red"
+  },
+  "views": [
+    {
+      "viewId": "main",
+      "kind": "node-link",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "locale": "ja_JP",
+      "overlay": {}
+    },
+    {
+      "viewId": "main",
+      "kind": "node-link",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "overlay": {}
+    }
+  ]
+}

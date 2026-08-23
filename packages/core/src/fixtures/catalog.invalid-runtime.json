@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.catalog",
+  "catalogId": "urn:example:catalog:invalid-runtime",
+  "catalogVersion": "1",
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+  "rules": [
+    {
+      "ruleId": "duplicate",
+      "priority": 100,
+      "match": {
+        "kind": "type",
+        "iri": "urn:example:Task",
+        "entailment": "rdfs-subproperty"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:example:template:missing"
+    },
+    {
+      "ruleId": "duplicate",
+      "priority": 10,
+      "match": {
+        "kind": "any-iri-object"
+      },
+      "project": {
+        "operator": "direct-edge"
+      },
+      "templateRef": "urn:example:template:edge"
+    }
+  ],
+  "templates": {
+    "urn:example:template:edge": {
+      "templateRef": "urn:example:template:different",
+      "structuralKind": "edge",
+      "style": {
+        "fill": "none",
+        "stroke": "black",
+        "text": "black"
+      }
+    }
+  },
+  "assets": {
+    "urn:example:asset:icon": {
+      "assetRef": "urn:example:asset:different",
+      "mediaType": "image/png",
+      "url": "https://example.com/icon.png"
+    }
+  }
+}
