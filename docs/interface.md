@@ -44,6 +44,10 @@ overlayには次を保持できます。
 - `appearance`: template、icon、style tokenの明示override
 - `routing`: edge waypointとlabel offset
 
+`appearance.iconRef`はassetの安定したIRIだけを保持します。workspace path、取得URL、
+認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
+導出する既定値、overlayの`iconRef`はユーザーが個別に選択したoverrideです。
+
 ## Catalog
 
 v1 target catalogは次の宣言を持ちます。
@@ -109,6 +113,13 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映
 
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
+
+Target asset contractでは、hostがworkspace tree由来のasset pickerと非同期resolverを
+editorへ注入します。pickerは`assetRef`と表示用metadataを返し、resolverは`assetRef`から
+一時URLを取得します。ファイル移動後も維持できるopaque IDを優先し、pathしか持たない
+hostは移動時の参照更新を担います。未解決・権限拒否・unsupported mediaは図全体を
+失敗させずfallback表示とdiagnosticにします。現行の同期`resolveAssetUrl`は、この境界を
+確認するprototypeです。
 
 ## LLM adapter
 

@@ -27,7 +27,7 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 | P0-06 | stable resource/triple/derived-edge identity | P0-01、P0-02 | Turtle再整形後の直接triple、Seq transition、Alt branchとnamed resourceでoverlay照合testが通る |
 | P0-07 | 決定的layout engine v1 | P0-02、P0-06 | node-link、階層LR/TB、Bag container、pinned nodeを扱い、同一入力から同一座標を得る |
 | P0-08 | 正式display reconciliation | P0-04、P0-06、P0-07 | 追加・削除・type変更・containment・sequence変更で存続user overlayを維持し、新規要素を補完するfixture testが通る |
-| P0-09 | asset resolverと安全policy contract | P0-01 | URI→URL、未解決fallback、media type、許可scheme/origin、失敗状態をhostから制御できる |
+| P0-09 | workspace asset picker、resolver、安全policy contract | P0-01 | documentは安定asset IRIだけを保持し、host注入の選択UIと非同期resolverでworkspace assetを表示できる。未解決fallback、移動・削除diagnostic、media type・容量、許可scheme/origin、Blob URL lifecycleをtestし、mockのtreeにcatalog外assetの縦切りがある |
 | P0-10 | package配布contract | P0-01〜09 | coreとVue editorのexports、CSS、peer dependency、semver方針を定め、別fixture appでbuildできる |
 | P0-11 | editor操作の回帰test基盤 | P0-10 | drag、resize、routing、undo/redo、Turtle適用、保存flushをcomponent/E2E testで検証する |
 

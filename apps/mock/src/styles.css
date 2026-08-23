@@ -14,7 +14,7 @@ html,
 body,
 #app {
   width: 100%;
-  min-width: 1160px;
+  min-width: 1380px;
   height: 100%;
   margin: 0;
   overflow: hidden;
@@ -193,16 +193,221 @@ button {
   opacity: .45;
 }
 
-.host-editor-region {
+.host-workbench {
   min-height: 0;
   flex: 1;
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+
+.workspace-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 12px 0 12px 12px;
+  overflow: hidden;
+  border: 1px solid #bdcac6;
+  border-radius: 5px 0 0 5px;
+  background: #f7faf8;
+  box-shadow: 0 7px 24px rgb(18 49 51 / 8%);
+}
+
+.workspace-panel > header {
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #cbd6d2;
+  background: #edf3f0;
+}
+
+.workspace-panel > header span,
+.workspace-asset-preview small {
+  color: #708785;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+.workspace-panel > header strong {
+  overflow: hidden;
+  color: #294649;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-tree {
+  min-height: 130px;
+  padding: 8px 0;
+  overflow: auto;
+  border-bottom: 1px solid #d5deda;
+}
+
+.workspace-tree button {
+  width: 100%;
+  min-height: 29px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-top: 5px;
+  padding-right: 8px;
+  padding-bottom: 5px;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: #456063;
+  background: transparent;
+  font-size: 10px;
+  text-align: left;
+}
+
+.workspace-tree button:not(:disabled) {
+  cursor: pointer;
+}
+
+.workspace-tree button:not(:disabled):hover,
+.workspace-tree button.selected {
+  background: #e9f1ed;
+}
+
+.workspace-tree button.active {
+  border-left-color: #bc8d35;
+  color: #263f42;
+  background: #fff9e9;
+  font-weight: 700;
+}
+
+.workspace-tree button:disabled {
+  color: #718482;
+  cursor: default;
+  font-weight: 750;
+  opacity: 1;
+}
+
+.workspace-tree button i {
+  width: 12px;
+  flex: 0 0 12px;
+  color: #8aa09b;
+  font-size: 9px;
+  font-style: normal;
+  text-align: center;
+}
+
+.workspace-tree button.kind-iriograph-document i {
+  color: #b78527;
+}
+
+.workspace-tree button.kind-asset i {
+  color: #4b8587;
+}
+
+.workspace-tree button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-asset-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 13px;
+  overflow: auto;
+}
+
+.workspace-asset-preview img {
+  width: 54px;
+  height: 54px;
+  padding: 10px;
+  border: 1px solid #c8d4d0;
+  border-radius: 5px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.workspace-asset-preview strong {
+  color: #304d50;
+  font-size: 11px;
+}
+
+.workspace-asset-preview code {
+  padding: 7px;
+  overflow-wrap: anywhere;
+  border: 1px solid #d8e0dd;
+  border-radius: 4px;
+  color: #657879;
+  background: #f0f5f2;
+  font-size: 9px;
+}
+
+.workspace-asset-preview button,
+.workspace-load-state button {
+  align-self: flex-start;
+  padding: 5px 9px;
+  border: 1px solid #8fa5a1;
+  border-radius: 4px;
+  color: #3e5c5e;
+  background: #fff;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.workspace-asset-preview p {
+  margin: 0;
+  color: #718482;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.workspace-panel > footer {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: auto;
+  padding: 7px 11px;
+  border-top: 1px solid #d5deda;
+  color: #758987;
+  background: #edf3f0;
+  font-size: 9px;
+}
+
+.host-editor-region {
+  min-width: 0;
+  min-height: 0;
   padding: 12px;
+  padding-left: 0;
 }
 
 .host-editor-region > .iriograph-editor {
   border: 1px solid #bdcac6;
+  border-left: 0;
   border-radius: 5px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
   box-shadow: 0 7px 24px rgb(18 49 51 / 12%);
+}
+
+.workspace-load-state {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  color: #345356;
+}
+
+.workspace-load-state p {
+  margin: 0;
+  color: #6b7f7d;
+  font-size: 12px;
+}
+
+.workspace-load-state.error strong {
+  color: #9d4945;
 }
 
 .sr-only {

@@ -6,7 +6,7 @@
 |---|---|---|
 | `@iriograph/core` | model、Turtle parse、catalog投影、検証、reconciliation | Vue、DOM、HTTP、workspace |
 | `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、inspector | 永続化、認証、catalog取得 |
-| `@iriograph/mock` | local host、localStorage保存、取込・書出、asset resolver例 | 投影規則、editor内部state |
+| `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver例 | 投影規則、editor内部state |
 
 ## 投影処理
 
@@ -35,7 +35,12 @@ Target semantic transactionはactorを`human`または`llm`として受け取り
 
 購入承認フローを例に、lane containment、開始・終了event、user/service task、gateway、relation resourceによるsequence flow、未登録predicateのfallback edgeを一画面に表示します。
 
-editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、zoom、Turtle編集、document/catalog参照を提供します。mock hostはCtrl/Cmd+S、localStorage、`.iriograph`取込・書出を提供します。
+editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、zoom、Turtle編集、document/catalog参照を提供します。mock hostはrepository内の`public/workspace`をmanifestからtree表示し、実体の`.iriograph`を読み込みます。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+
+同じworkspaceの画像はmanifest上でasset IRIとURLを対応付けます。sample documentの
+catalog外icon overrideはこのresolverを通るため、Turtle・catalog・editor packageへ
+workspace pathや画像bytesを混ぜずに参照表示する最小の縦切りになっています。非同期取得、
+picker、移動追従、安全policyを含む正式contractはP0-09で実装します。
 
 現在のfallback layoutは決定的な単純配置です。graph topologyとcontainer制約を使う正式layout engineはバックログで管理します。
 

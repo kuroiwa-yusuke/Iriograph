@@ -182,17 +182,17 @@
     "urn:iriograph:icon:user-task:1": {
       "assetRef": "urn:iriograph:icon:user-task:1",
       "mediaType": "image/svg+xml",
-      "url": "/icons/user-task.svg"
+      "url": "/workspace/assets/icons/user-task.svg"
     },
     "urn:iriograph:icon:service-task:1": {
       "assetRef": "urn:iriograph:icon:service-task:1",
       "mediaType": "image/svg+xml",
-      "url": "/icons/service-task.svg"
+      "url": "/workspace/assets/icons/service-task.svg"
     },
     "urn:iriograph:icon:reference:1": {
       "assetRef": "urn:iriograph:icon:reference:1",
       "mediaType": "image/svg+xml",
-      "url": "/icons/reference.svg"
+      "url": "/workspace/assets/icons/reference.svg"
     }
   }
 }

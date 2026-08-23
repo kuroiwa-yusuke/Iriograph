@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc -p tsconfig.json --noEmit && vite build",
-    "typecheck": "vue-tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "vitest run"
   },
   "dependencies": {
     "@iriograph/core": "0.0.0",

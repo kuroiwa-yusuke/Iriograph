@@ -20,7 +20,9 @@ Dockerを利用する場合:
 docker compose up --build
 ```
 
-ブラウザで `http://localhost:5173` を開きます。検証一式は次で実行できます。
+ブラウザで `http://localhost:5173` を開きます。mock hostは
+`apps/mock/public/workspace`にある実際の`.iriograph`と画像assetをtree表示し、
+編集内容はbrowserのpath別working copyへ保存します。検証一式は次で実行できます。
 
 ```sh
 npm run verify

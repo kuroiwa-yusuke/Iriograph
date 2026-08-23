@@ -10,31 +10,72 @@ import type {
 import { IriographEditor } from "@iriograph/vue-editor";
 
 import rawCatalog from "./mock/catalog.json";
-import { mockDocument } from "./mock/document";
+import {
+  buildWorkspaceTreeRows,
+  loadMockWorkspace,
+  readIriographDocument,
+  type MockWorkspaceEntry,
+  type MockWorkspaceManifest,
+  type MockWorkspaceTreeRow,
+} from "./mock/workspace";
 
-const STORAGE_KEY = "iriograph.mock.purchase-approval";
+const STORAGE_PREFIX = "iriograph.mock.workspace:";
 
 const catalog = rawCatalog as unknown as DiagramCatalog;
 const editor = ref<InstanceType<typeof IriographEditor> | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
-const document = ref<IriographDocument>(loadLocalDocument());
-const savedJson = ref(JSON.stringify(document.value));
+const workspace = ref<MockWorkspaceManifest>();
+const workspaceReady = ref(false);
+const workspaceError = ref("");
+const activeFilePath = ref("");
+const selectedAssetRef = ref("");
+const document = ref<IriographDocument>(emptyDocument());
+const savedJson = ref("");
 const saving = ref(false);
 const saveMessage = ref("");
 const diagnostics = ref<ProjectionDiagnostic[]>([]);
 let saveMessageTimer: number | undefined;
 
-const dirty = computed(() => JSON.stringify(document.value) !== savedJson.value);
-const errorCount = computed(() => diagnostics.value.filter((item) => item.severity === "error").length);
+const dirty = computed(() => workspaceReady.value
+  && JSON.stringify(document.value) !== savedJson.value);
+const errorCount = computed(() => diagnostics.value
+  .filter((item) => item.severity === "error").length);
+const workspaceRows = computed(() => buildWorkspaceTreeRows(workspace.value?.entries ?? []));
+const activeAsset = computed(() => workspace.value?.entries.find(
+  (entry) => entry.kind === "asset" && entry.assetRef === selectedAssetRef.value,
+));
+const documentTitle = computed(() => activeFilePath.value.split("/").at(-1)
+  ?.replace(/\.iriograph$/, "") ?? document.value.documentId);
 
 onMounted(() => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
+  void initializeWorkspace();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", handleGlobalKeydown, true);
   if (saveMessageTimer !== undefined) window.clearTimeout(saveMessageTimer);
 });
+
+async function initializeWorkspace(): Promise<void> {
+  workspaceReady.value = false;
+  workspaceError.value = "";
+  try {
+    workspace.value = await loadMockWorkspace();
+    const entry = workspace.value.entries.find(
+      (candidate) => candidate.kind === "iriograph-document"
+        && candidate.path === workspace.value?.defaultDocumentPath,
+    );
+    if (!entry) throw new Error("default Iriograph documentがworkspaceにありません。");
+    await openWorkspaceDocument(entry, true);
+  } catch (cause) {
+    workspaceError.value = cause instanceof Error
+      ? cause.message
+      : "Workspaceの読み込みに失敗しました。";
+  } finally {
+    workspaceReady.value = !workspaceError.value;
+  }
+}
 
 function handleGlobalKeydown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
@@ -45,12 +86,12 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
 }
 
 function saveDocument(): void {
-  if (!editor.value?.flushPendingEdits()) return;
+  if (!workspaceReady.value || !editor.value?.flushPendingEdits()) return;
   saving.value = true;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(document.value));
+  window.localStorage.setItem(storageKey(activeFilePath.value), JSON.stringify(document.value));
   savedJson.value = JSON.stringify(document.value);
   saving.value = false;
-  showSaveMessage("ローカル保存済み");
+  showSaveMessage("browser working copyを保存しました");
 }
 
 function selectImportFile(): void {
@@ -65,11 +106,13 @@ async function importDocument(event: Event): Promise<void> {
 
   try {
     const imported = JSON.parse(await file.text()) as IriographDocument;
-    if (imported?.kind !== "iriograph.document" || imported.schemaVersion !== "1") {
+    if (!isIriographDocument(imported)) {
       throw new Error("Iriograph document schema v1ではありません。");
     }
     document.value = structuredClone(imported);
+    activeFilePath.value = `imports/${file.name}`;
     savedJson.value = JSON.stringify(imported);
+    workspaceReady.value = true;
     showSaveMessage(`${file.name}を取り込みました`);
   } catch (cause) {
     showSaveMessage(cause instanceof Error ? cause.message : "取込に失敗しました");
@@ -77,7 +120,7 @@ async function importDocument(event: Event): Promise<void> {
 }
 
 function exportDocument(): void {
-  if (!editor.value?.flushPendingEdits()) return;
+  if (!workspaceReady.value || !editor.value?.flushPendingEdits()) return;
   const blob = new Blob([JSON.stringify(document.value, null, 2)], {
     type: "application/json",
   });
@@ -90,34 +133,102 @@ function exportDocument(): void {
   showSaveMessage("書き出しました");
 }
 
-function resetMock(): void {
-  document.value = structuredClone(mockDocument);
-  savedJson.value = JSON.stringify(document.value);
-  window.localStorage.removeItem(STORAGE_KEY);
-  showSaveMessage("サンプルへ戻しました");
+async function resetMock(): Promise<void> {
+  const entry = workspace.value?.entries.find(
+    (candidate) => candidate.kind === "iriograph-document"
+      && candidate.path === workspace.value?.defaultDocumentPath,
+  );
+  if (!entry) return;
+  window.localStorage.removeItem(storageKey(entry.path));
+  await openWorkspaceDocument(entry, false);
+  showSaveMessage("repositoryのサンプルへ戻しました");
 }
 
 function resolveAssetUrl(
   assetRef: string,
   definition: AssetDefinition | undefined,
 ): string | undefined {
-  // hostがURIから実URLへの解決を注入する境界の最小例です。
+  // workspace assetの取得先はportable documentではなくhost manifestから解決します。
+  const workspaceAsset = workspace.value?.entries.find(
+    (entry) => entry.kind === "asset" && entry.assetRef === assetRef,
+  );
+  if (workspaceAsset) return workspaceAsset.url;
   if (definition) return definition.url;
   if (assetRef.startsWith("https://") || assetRef.startsWith("data:image/")) return assetRef;
   return undefined;
 }
 
-function loadLocalDocument(): IriographDocument {
-  try {
-    const source = window.localStorage.getItem(STORAGE_KEY);
-    if (!source) return structuredClone(mockDocument);
-    const parsed = JSON.parse(source) as IriographDocument;
-    return parsed?.kind === "iriograph.document" && parsed.schemaVersion === "1"
-      ? parsed
-      : structuredClone(mockDocument);
-  } catch {
-    return structuredClone(mockDocument);
+async function selectWorkspaceRow(row: MockWorkspaceTreeRow): Promise<void> {
+  if (!row.entry) return;
+  if (row.entry.kind === "asset") {
+    selectedAssetRef.value = row.entry.assetRef ?? "";
+    return;
   }
+  if (row.path === activeFilePath.value) return;
+  if (dirty.value) {
+    showSaveMessage("未保存の変更があるためfile切替を中止しました");
+    return;
+  }
+  await openWorkspaceDocument(row.entry, true);
+}
+
+async function openWorkspaceDocument(
+  entry: MockWorkspaceEntry,
+  preferWorkingCopy: boolean,
+): Promise<void> {
+  try {
+    const sourceDocument = await readIriographDocument(entry);
+    const workingCopy = preferWorkingCopy
+      ? readStoredDocument(storageKey(entry.path))
+      : undefined;
+    const next = workingCopy ?? sourceDocument;
+    document.value = structuredClone(next);
+    activeFilePath.value = entry.path;
+    savedJson.value = JSON.stringify(next);
+    diagnostics.value = [];
+    workspaceReady.value = true;
+    workspaceError.value = "";
+  } catch (cause) {
+    workspaceError.value = cause instanceof Error
+      ? cause.message
+      : `${entry.path}の読み込みに失敗しました。`;
+  }
+}
+
+async function copyAssetRef(): Promise<void> {
+  if (!activeAsset.value?.assetRef) return;
+  try {
+    await navigator.clipboard.writeText(activeAsset.value.assetRef);
+    showSaveMessage("asset IRIをコピーしました");
+  } catch {
+    showSaveMessage("clipboardへコピーできませんでした");
+  }
+}
+
+function readStoredDocument(key: string): IriographDocument | undefined {
+  try {
+    const source = window.localStorage.getItem(key);
+    if (!source) return undefined;
+    const parsed = JSON.parse(source) as unknown;
+    return isIriographDocument(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isIriographDocument(value: unknown): value is IriographDocument {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<IriographDocument>;
+  return candidate.kind === "iriograph.document"
+    && candidate.schemaVersion === "1"
+    && typeof candidate.documentId === "string"
+    && candidate.semantic?.format === "text/turtle"
+    && typeof candidate.semantic.source === "string"
+    && Array.isArray(candidate.views);
+}
+
+function storageKey(path: string): string {
+  return `${STORAGE_PREFIX}${path}`;
 }
 
 function showSaveMessage(message: string): void {
@@ -126,6 +237,26 @@ function showSaveMessage(message: string): void {
   saveMessageTimer = window.setTimeout(() => {
     saveMessage.value = "";
   }, 2600);
+}
+
+function emptyDocument(): IriographDocument {
+  return {
+    schemaVersion: "1",
+    kind: "iriograph.document",
+    documentId: "loading",
+    semantic: {
+      format: "text/turtle",
+      baseIri: "urn:iriograph:loading:",
+      source: "",
+    },
+    views: [{
+      viewId: "main",
+      kind: "node-link",
+      profileRef: catalog.profileRef,
+      layoutRef: catalog.defaults.layoutRef,
+      overlay: {},
+    }],
+  };
 }
 </script>
 
@@ -137,8 +268,8 @@ function showSaveMessage(message: string): void {
         <div><strong>Iriograph</strong><span>local package host</span></div>
       </div>
       <div class="document-heading">
-        <span class="eyebrow">Source editor</span>
-        <strong>Purchase approval</strong>
+        <span class="eyebrow">Workspace editor</span>
+        <strong>{{ documentTitle || "Loading…" }}</strong>
         <span class="revision">embedded @iriograph/vue-editor</span>
       </div>
       <div class="status-cluster">
@@ -157,25 +288,78 @@ function showSaveMessage(message: string): void {
         />
         <button type="button" class="ghost-button" :disabled="!dirty" @click="saveDocument">保存</button>
         <button type="button" class="ghost-button" @click="selectImportFile">取込</button>
-        <button type="button" class="ghost-button" @click="exportDocument">書出</button>
+        <button type="button" class="ghost-button" :disabled="!workspaceReady" @click="exportDocument">書出</button>
         <button type="button" class="ghost-button" @click="resetMock">Reset</button>
       </div>
     </header>
 
-    <main class="host-editor-region">
-      <IriographEditor
-        ref="editor"
-        v-model="document"
-        :catalog="catalog"
-        title="Purchase approval"
-        file-path="models/purchase-approval.iriograph"
-        :dirty="dirty"
-        :saving="saving"
-        :save-message="saveMessage"
-        :resolve-asset-url="resolveAssetUrl"
-        @save="saveDocument"
-        @validation-changed="diagnostics = $event"
-      />
+    <main v-if="workspaceError" class="workspace-load-state error">
+      <strong>Workspaceを開けませんでした</strong>
+      <p>{{ workspaceError }}</p>
+      <button type="button" @click="initializeWorkspace">再試行</button>
+    </main>
+
+    <main v-else-if="!workspaceReady" class="workspace-load-state">
+      <strong>Workspaceを読み込み中…</strong>
+      <p>repository内の `.iriograph` とasset manifestを参照しています。</p>
+    </main>
+
+    <main v-else class="host-workbench">
+      <aside class="workspace-panel" aria-label="Mock workspace files">
+        <header>
+          <span>WORKSPACE</span>
+          <strong>{{ workspace?.name }}</strong>
+        </header>
+        <nav class="workspace-tree" aria-label="Workspace tree">
+          <button
+            v-for="row in workspaceRows"
+            :key="`${row.kind}:${row.path}`"
+            type="button"
+            :class="[
+              `kind-${row.kind}`,
+              {
+                active: row.path === activeFilePath,
+                selected: row.entry?.assetRef === selectedAssetRef,
+              },
+            ]"
+            :style="{ paddingLeft: `${12 + row.depth * 16}px` }"
+            :disabled="row.kind === 'folder'"
+            :title="row.entry?.assetRef ?? row.path"
+            @click="selectWorkspaceRow(row)"
+          >
+            <i aria-hidden="true">{{ row.kind === "folder" ? "▾" : row.kind === "asset" ? "◇" : "◆" }}</i>
+            <span>{{ row.name }}</span>
+          </button>
+        </nav>
+        <section v-if="activeAsset" class="workspace-asset-preview">
+          <small>ASSET REFERENCE</small>
+          <img :src="activeAsset.url" :alt="activeAsset.path" />
+          <strong>{{ activeAsset.path.split("/").at(-1) }}</strong>
+          <code>{{ activeAsset.assetRef }}</code>
+          <button type="button" @click="copyAssetRef">IRIをコピー</button>
+          <p>画像bytesではなく、このIRIだけをoverlayが保持します。</p>
+        </section>
+        <footer>
+          <span>Host-owned tree</span>
+          <small>{{ workspace?.entries.length }} files</small>
+        </footer>
+      </aside>
+
+      <section class="host-editor-region">
+        <IriographEditor
+          ref="editor"
+          v-model="document"
+          :catalog="catalog"
+          :title="documentTitle"
+          :file-path="activeFilePath"
+          :dirty="dirty"
+          :saving="saving"
+          :save-message="saveMessage"
+          :resolve-asset-url="resolveAssetUrl"
+          @save="saveDocument"
+          @validation-changed="diagnostics = $event"
+        />
+      </section>
     </main>
   </div>
 </template>

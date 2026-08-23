@@ -1,0 +1,41 @@
+{
+  "workspaceId": "iriograph-local-mock",
+  "name": "Iriograph local workspace",
+  "defaultDocumentPath": "models/purchase-approval.iriograph",
+  "entries": [
+    {
+      "kind": "iriograph-document",
+      "path": "models/purchase-approval.iriograph",
+      "mediaType": "application/vnd.iriograph+json",
+      "url": "/workspace/models/purchase-approval.iriograph"
+    },
+    {
+      "kind": "asset",
+      "path": "assets/icons/user-task.svg",
+      "mediaType": "image/svg+xml",
+      "assetRef": "urn:iriograph:icon:user-task:1",
+      "url": "/workspace/assets/icons/user-task.svg"
+    },
+    {
+      "kind": "asset",
+      "path": "assets/icons/service-task.svg",
+      "mediaType": "image/svg+xml",
+      "assetRef": "urn:iriograph:icon:service-task:1",
+      "url": "/workspace/assets/icons/service-task.svg"
+    },
+    {
+      "kind": "asset",
+      "path": "assets/icons/reference.svg",
+      "mediaType": "image/svg+xml",
+      "assetRef": "urn:iriograph:icon:reference:1",
+      "url": "/workspace/assets/icons/reference.svg"
+    },
+    {
+      "kind": "asset",
+      "path": "assets/icons/approval-policy.svg",
+      "mediaType": "image/svg+xml",
+      "assetRef": "urn:iriograph:mock-workspace:asset:approval-policy",
+      "url": "/workspace/assets/icons/approval-policy.svg"
+    }
+  ]
+}
