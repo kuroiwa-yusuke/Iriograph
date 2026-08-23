@@ -996,6 +996,152 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
+
+  it("ProjectionRuntimeContextをprimary propとしてcatalogなしで表示する", async () => {
+    const runtime = createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], createStandardLayoutRegistry());
+    wrapper = await mountEditor({ runtimeContext: runtime, catalog: undefined });
+
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").nodes).toHaveLength(2);
+    expect(wrapper.find(".iriograph-diagnostics .error").exists()).toBe(false);
+  });
+
+  it("uncontrolled active viewを切替え、selection・zoom・temporary hideをview別sessionへ戻す", async () => {
+    const fixture = multiViewDocumentFixture();
+    wrapper = await mountEditor({ modelValue: fixture });
+    const select = wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]');
+    const api = wrapper.vm as unknown as IriographEditorNavigationApi & IriographEditorSelectionApi;
+    let canvas = wrapper.getComponent(DiagramCanvas);
+    const mainA = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    api.selectElement(mainA.elementId);
+    await api.zoomTo(1.5);
+    await settle();
+
+    await select.setValue("review");
+    await waitUntil(() => wrapper!.get<HTMLSelectElement>('select[aria-label="Named view"]').element.value === "review");
+    canvas = wrapper.getComponent(DiagramCanvas);
+    const reviewB = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}b`)!;
+    api.selectElement(reviewB.elementId);
+    await settle();
+    expect(canvas.props("selectedElementId")).toBe(reviewB.elementId);
+    expect(wrapper.text()).toContain("100%");
+
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').setValue("main");
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("selectedElementId") === mainA.elementId);
+    expect(wrapper.text()).toContain("150%");
+    const beforeHideUpdates = wrapper.emitted("update:modelValue")?.length ?? 0;
+    await buttonWithText(wrapper, "一時非表示").trigger("click");
+    await settle();
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").nodes).toHaveLength(1);
+    expect(wrapper.emitted("update:modelValue")?.length ?? 0).toBe(beforeHideUpdates);
+
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').setValue("review");
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("selectedElementId") === reviewB.elementId);
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").nodes).toHaveLength(2);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').setValue("main");
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").nodes.length === 1);
+    expect(buttonWithText(wrapper, "再表示").text()).toContain("(1)");
+  });
+
+  it("active view切替で旧viewのvalidation結果をabortしSceneへ採用しない", async () => {
+    let calls = 0;
+    let oldRequestAborted = false;
+    let releaseOld!: () => void;
+    const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const context: ResolvedSemanticValidationContext = {
+      contextId: "urn:test:view-switch-validation",
+      contextRevision: "1",
+      validator: {
+        async validate(request, signal) {
+          calls += 1;
+          if (calls === 2) {
+            await oldGate;
+            oldRequestAborted = signal.aborted;
+          }
+          return validationResponse(request, []);
+        },
+      },
+    };
+    wrapper = await mountEditor({
+      modelValue: multiViewDocumentFixture(),
+      semanticValidationContext: context,
+    });
+    const select = wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]');
+    await select.setValue("review");
+    await waitUntil(() => calls >= 2);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').setValue("main");
+    await waitUntil(() => calls >= 3);
+    releaseOld();
+    await settle();
+
+    expect(oldRequestAborted).toBe(true);
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").viewId).toBe("main");
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').element.value).toBe("main");
+  });
+
+  it("uncontrolled duplicateは新viewをactiveにし、controlled duplicateは親へ選択要求だけをemitする", async () => {
+    wrapper = await mountEditor({ modelValue: multiViewDocumentFixture() });
+    await buttonWithText(wrapper, "複製").trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views.some((view) => view.viewId === "main-copy"));
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').element.value).toBe("main-copy");
+    expect(wrapper.emitted("update:activeViewId")?.at(-1)?.[0]).toBe("main-copy");
+    wrapper.unmount();
+
+    wrapper = await mountEditor({
+      modelValue: multiViewDocumentFixture(),
+      activeViewId: "main",
+    });
+    await buttonWithText(wrapper, "複製").trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views.some((view) => view.viewId === "main-copy"));
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').element.value).toBe("main");
+    expect(wrapper.emitted("update:activeViewId")?.at(-1)?.[0]).toBe("main-copy");
+  });
+
+  it("存在しないcontrolled activeViewIdはdocument先頭viewへfallbackする", async () => {
+    wrapper = await mountEditor({
+      modelValue: multiViewDocumentFixture(),
+      activeViewId: "missing",
+    });
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]').element.value).toBe("main");
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").viewId).toBe("main");
+  });
+
+  it("controlled view選択は親へ要求し、prop更新まで表示Sceneを切り替えない", async () => {
+    wrapper = await mountEditor({
+      modelValue: multiViewDocumentFixture(),
+      activeViewId: "main",
+    });
+    const select = wrapper.get<HTMLSelectElement>('select[aria-label="Named view"]');
+    await select.setValue("review");
+    expect(wrapper.emitted("update:activeViewId")?.at(-1)?.[0]).toBe("review");
+    expect(select.element.value).toBe("main");
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").viewId).toBe("main");
+
+    await wrapper.setProps({ activeViewId: "review" });
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").viewId === "review");
+    expect(select.element.value).toBe("review");
+  });
+
+  it("view configureはIDをreadonlyにし、last view deleteをUIでも禁止する", async () => {
+    wrapper = await mountEditor();
+    expect(buttonWithText(wrapper, "削除").attributes("disabled")).toBeDefined();
+    await buttonWithText(wrapper, "設定").trigger("click");
+    const viewId = wrapper.get<HTMLInputElement>('.iriograph-view-dialog input[readonly]');
+    expect(viewId.element.value).toBe("main");
+    await wrapper.get<HTMLInputElement>('.iriograph-view-dialog input[placeholder="ja"]')
+      .setValue("en-US");
+    await wrapper.get<HTMLButtonElement>('.iriograph-view-dialog button[type="submit"]')
+      .trigger("click");
+    await waitUntil(() => (
+      (wrapper!.emitted("update:modelValue")?.at(-1)?.[0] as IriographDocument | undefined)
+        ?.views[0]?.locale === "en-US"
+    ));
+    expect(latestDocument(wrapper).views[0]!.viewId).toBe("main");
+  });
 });
 
 async function mountEditor(
@@ -1131,6 +1277,16 @@ function documentFixture(): IriographDocumentV1 {
       overlay: {},
     }],
   };
+}
+
+function multiViewDocumentFixture(): IriographDocumentV1 {
+  const document = documentFixture();
+  document.views.push({
+    ...structuredClone(document.views[0]!),
+    viewId: "review",
+    locale: "en",
+  });
+  return document;
 }
 
 function threeNodeDocumentFixture(): IriographDocumentV1 {

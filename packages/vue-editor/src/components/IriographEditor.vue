@@ -5,6 +5,7 @@ import {
   applyAuthoringSource,
   applyAuthoringPreview,
   applySemanticSource,
+  applyViewCommand,
   buildIriographView,
   createProjectionRuntimeContext,
   createStandardLayoutRegistry,
@@ -38,6 +39,7 @@ import {
   type SceneEdge,
   type SceneNode,
   type ViewElementOverlay,
+  type ViewCommand,
 } from "@iriograph/core";
 
 import AuthoringPanel from "./AuthoringPanel.vue";
@@ -71,6 +73,11 @@ import {
   type IriographEditorNavigationApi,
 } from "../viewport";
 import {
+  createDiagramViewSession,
+  sceneWithTemporaryHiddenElements,
+  type DiagramViewSession,
+} from "../view-session";
+import {
   alignSelection,
   distributeSelection,
   normalizeDiagramSnapSettings,
@@ -93,7 +100,11 @@ type SelectedElement = SceneNode | SceneContainer | SceneEdge;
 
 const props = withDefaults(defineProps<{
   modelValue: IriographDocument;
-  catalog: ProjectionCatalogV1;
+  /** Primary multi-catalog projection contract. */
+  runtimeContext?: ProjectionRuntimeContext;
+  /** @deprecated Use runtimeContext. */
+  catalog?: ProjectionCatalogV1;
+  activeViewId?: string;
   layoutRegistry?: LayoutAdapterRegistry;
   title?: string;
   filePath?: string;
@@ -125,10 +136,14 @@ const props = withDefaults(defineProps<{
   authoringContext: undefined,
   semanticValidationContext: undefined,
   resourceIriAllocator: undefined,
+  runtimeContext: undefined,
+  catalog: undefined,
+  activeViewId: undefined,
 });
 
 const emit = defineEmits<{
   "update:modelValue": [document: IriographDocument];
+  "update:activeViewId": [viewId: string];
   save: [];
   selectionChanged: [elementId: string];
   selectionSetChanged: [elementIds: string[]];
@@ -136,6 +151,9 @@ const emit = defineEmits<{
 }>();
 
 const draft = ref<IriographDocument>(clone(props.modelValue));
+const currentActiveViewId = ref(resolveActiveViewId(draft.value, props.activeViewId));
+const viewSessions = new Map<string, DiagramViewSession>();
+const viewSessionRevision = ref(0);
 const turtleDraft = ref(draft.value.semantic.source);
 const panel = ref<Panel>("diagram");
 const selectedElementId = ref("");
@@ -148,7 +166,7 @@ const history = ref<IriographDocument[]>([]);
 const future = ref<IriographDocument[]>([]);
 const schemaDiagnostics = ref<ProjectionDiagnostic[]>([]);
 const applyDiagnostics = ref<ProjectionDiagnostic[]>([]);
-const scene = ref<DiagramScene>(emptyScene(draft.value.views[0]?.viewId ?? ""));
+const rawScene = ref<DiagramScene>(emptyScene(currentActiveViewId.value));
 const sceneLoading = ref(true);
 const applyingTurtle = ref(false);
 const semanticWarningConfirmation = ref<SemanticWarningConfirmation>();
@@ -156,6 +174,9 @@ const authoringDraft = ref<EditorAuthoringDraft>(emptyAuthoringDraft());
 const authoringPreview = ref<AuthoringPreview>();
 const authoringBusy = ref(false);
 const pickingAsset = ref(false);
+const viewCommandBusy = ref(false);
+const viewDialogMode = ref<"add" | "configure">();
+const viewForm = ref({ viewId: "", profileRef: "", layoutRef: "", locale: "" });
 const defaultLayoutRegistry = createStandardLayoutRegistry();
 const assetSceneSession = new AssetSceneSession();
 let lastEmittedJson = "";
@@ -168,8 +189,19 @@ let authoringRequestToken = 0;
 let authoringAbortController: AbortController | undefined;
 let pickerRequestToken = 0;
 let pickerAbortController: AbortController | undefined;
+let viewCommandRequestToken = 0;
+let viewCommandAbortController: AbortController | undefined;
 
-const activeView = computed(() => draft.value.views[0]);
+const activeView = computed(() => draft.value.views.find((view) => (
+  view.viewId === currentActiveViewId.value
+)) ?? draft.value.views[0]);
+const scene = computed(() => {
+  viewSessionRevision.value;
+  return sceneWithTemporaryHiddenElements(
+    rawScene.value,
+    sessionFor(activeView.value?.viewId ?? "").temporaryHiddenElementIds,
+  );
+});
 const selectedElementIdsSet = computed(() => new Set(selectedElementIds.value));
 const selectedElement = computed<SelectedElement | undefined>(() => [
   ...scene.value.nodes,
@@ -180,6 +212,21 @@ const selectedOverlay = computed<ViewElementOverlay | undefined>(() => {
   if (!activeView.value || !selectedElementId.value) return undefined;
   return activeView.value.overlay[selectedElementId.value];
 });
+const projectionRuntimeContext = computed<ProjectionRuntimeContext | undefined>(() => {
+  const source = props.runtimeContext ?? props.authoringContext?.runtime;
+  if (source) return unwrapProjectionRuntimeContext(source);
+  return props.catalog ? projectionContextFromLegacyCatalog(props.catalog) : undefined;
+});
+const activeCatalog = computed(() => {
+  const view = activeView.value;
+  return view ? projectionRuntimeContext.value?.catalogsByProfile.get(view.profileRef)?.catalog : undefined;
+});
+const profileChoices = computed(() => [...(projectionRuntimeContext.value?.catalogsByProfile.keys() ?? [])]);
+const layoutChoices = computed(() => [...new Set([
+  ...draft.value.views.map((view) => view.layoutRef),
+  "urn:iriograph:layout:hierarchical-lr:1",
+  "urn:iriograph:layout:hierarchical-tb:1",
+])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0));
 const selectedEdge = computed(() => selectedElement.value?.structuralKind === "edge"
   ? selectedElement.value
   : undefined);
@@ -211,13 +258,13 @@ const structuredAuthoringPending = computed(() => (
 const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
   if (!props.authoringContext) return undefined;
   const source = toRaw(props.authoringContext);
-  const runtime = toRaw(source.runtime);
+  const runtime = projectionRuntimeContext.value ?? unwrapProjectionRuntimeContext(toRaw(source.runtime));
   return {
     ...source,
     runtime: {
       ...runtime,
-      catalogsByProfile: toRaw(runtime.catalogsByProfile),
-      layouts: toRaw(runtime.layouts),
+      catalogsByProfile: runtime.catalogsByProfile,
+      layouts: runtime.layouts,
       projectionOptions: runtime.projectionOptions
         ? toRaw(runtime.projectionOptions)
         : undefined,
@@ -405,7 +452,8 @@ const authoringDraftElementSize = computed(() => {
   const context = authoringContext.value;
   const view = activeView.value;
   const resolved = view ? context?.runtime.catalogsByProfile.get(view.profileRef) : undefined;
-  const catalog = resolved?.catalog ?? props.catalog;
+  const catalog = resolved?.catalog ?? activeCatalog.value;
+  if (!catalog) return { width: 120, height: 60 };
   const requestedClass = authoringDraft.value.classIri.trim();
   const rule = catalog.rules.find((candidate) => (
     candidate.match.kind === "type"
@@ -425,7 +473,7 @@ const selectedGeometryCount = computed(() => selectedGeometryElements(
 const canAlignSelection = computed(() => !props.readOnly && selectedGeometryCount.value >= 2);
 const canDistributeSelection = computed(() => !props.readOnly && selectedGeometryCount.value >= 3);
 const documentJson = computed(() => JSON.stringify(draft.value, null, 2));
-const catalogJson = computed(() => JSON.stringify(props.catalog, null, 2));
+const catalogJson = computed(() => JSON.stringify(activeCatalog.value ?? {}, null, 2));
 const overlayJson = computed(() => JSON.stringify(activeView.value?.overlay ?? {}, null, 2));
 const heading = computed(() => props.title || props.filePath || draft.value.documentId || "Untitled");
 const stateLabel = computed(() => {
@@ -433,10 +481,14 @@ const stateLabel = computed(() => {
   if (props.saveMessage) return props.saveMessage;
   return props.dirty || turtlePending.value || structuredAuthoringPending.value ? "未保存" : "保存済み";
 });
-const nodeTemplateRefs = computed(() => Object.values(props.catalog.templates)
+const nodeTemplateRefs = computed(() => Object.values(activeCatalog.value?.templates ?? {})
   .filter((template) => template.structuralKind === selectedElement.value?.structuralKind)
   .map((template) => template.templateRef));
-const assetRefs = computed(() => Object.keys(props.catalog.assets));
+const assetRefs = computed(() => Object.keys(activeCatalog.value?.assets ?? {}));
+const temporaryHiddenCount = computed(() => {
+  viewSessionRevision.value;
+  return sessionFor(activeView.value?.viewId ?? "").temporaryHiddenElementIds.size;
+});
 const selectedElementDiagnostics = computed(() => {
   const element = selectedElement.value;
   return element ? diagnostics.value.filter((diagnostic) => diagnosticTargetsElement(diagnostic, element)) : [];
@@ -453,7 +505,17 @@ watch(
     }
     if (nextJson === JSON.stringify(draft.value)) return;
     cancelSemanticRequest();
+    saveActiveViewSession();
     draft.value = clone(value);
+    const nextViewId = resolveActiveViewId(
+      draft.value,
+      props.activeViewId ?? currentActiveViewId.value,
+    );
+    if (nextViewId !== currentActiveViewId.value) {
+      currentActiveViewId.value = nextViewId;
+      restoreActiveViewSession();
+      rawScene.value = emptyScene(nextViewId);
+    }
     turtleDraft.value = value.semantic.source;
     history.value = [];
     future.value = [];
@@ -466,6 +528,7 @@ watch(
 
 watch(
   [
+    () => props.runtimeContext,
     () => props.catalog,
     () => props.layoutRegistry,
     () => props.assetAccess?.resolver,
@@ -478,6 +541,14 @@ watch(
     void refreshScene();
   },
   { deep: true },
+);
+
+watch(
+  () => props.activeViewId,
+  (viewId) => {
+    if (viewId === undefined) return;
+    void activateView(resolveActiveViewId(draft.value, viewId));
+  },
 );
 
 watch(
@@ -549,6 +620,7 @@ onBeforeUnmount(() => {
   cancelAssetPicker();
   cancelSemanticRequest();
   cancelAuthoringRequest();
+  cancelViewCommandRequest();
   sceneValidationAbortController?.abort();
   assetSceneSession.dispose();
 });
@@ -560,21 +632,30 @@ async function refreshScene(): Promise<void> {
   sceneValidationAbortController = validationController;
   const assetRequest = assetSceneSession.begin();
   const document = clone(draft.value);
-  const catalog = clone(props.catalog);
+  const runtime = projectionRuntimeContext.value;
+  const catalog = activeCatalog.value;
   const assetAccess = props.assetAccess;
   const validationContext = semanticValidationContext.value;
-  const viewId = document.views[0]?.viewId ?? "";
+  const viewId = resolveActiveViewId(document, currentActiveViewId.value);
   sceneLoading.value = true;
-  schemaDiagnostics.value = schemaDiagnosticsFor(document, catalog);
+  schemaDiagnostics.value = schemaDiagnosticsFor(document, runtime);
 
-  if (schemaDiagnostics.value.some((item) => item.severity === "error")) {
+  if (!runtime || !catalog || schemaDiagnostics.value.some((item) => item.severity === "error")) {
+    if (runtime && !catalog) {
+      schemaDiagnostics.value = [...schemaDiagnostics.value, {
+        severity: "error",
+        category: "profile",
+        code: "profile-catalog-unresolved",
+        message: `profileの解決済みcatalogがありません: ${activeView.value?.profileRef ?? "<none>"}`,
+      }];
+    }
     if (requestToken !== sceneRequestToken) return;
     const committed = assetSceneSession.commitWithoutAssets(
       assetRequest,
       emptyScene(viewId, schemaDiagnostics.value),
     );
     if (!committed.accepted) return;
-    scene.value = committed.scene;
+    rawScene.value = committed.scene;
     sceneLoading.value = false;
     clearMissingSelection(scene.value);
     return;
@@ -584,7 +665,7 @@ async function refreshScene(): Promise<void> {
     const projected = await buildIriographView(
       document,
       viewId,
-      projectionContext(catalog),
+      runtime,
       "incremental",
     );
     const semanticValidation = validationContext
@@ -597,7 +678,7 @@ async function refreshScene(): Promise<void> {
       ? await assetSceneSession.enrich(assetRequest, projected, catalog.assets, assetAccess)
       : assetSceneSession.commitWithoutAssets(assetRequest, projected);
     if (requestToken !== sceneRequestToken || !result.accepted) return;
-    scene.value = {
+    rawScene.value = {
       ...result.scene,
       diagnostics: [...result.scene.diagnostics, ...semanticValidation.diagnostics]
         .filter(uniqueDiagnostic()),
@@ -610,7 +691,7 @@ async function refreshScene(): Promise<void> {
       message: cause instanceof Error ? cause.message : String(cause),
     }]));
     if (!committed.accepted) return;
-    scene.value = committed.scene;
+    rawScene.value = committed.scene;
   } finally {
     if (requestToken === sceneRequestToken) {
       if (sceneValidationAbortController === validationController) {
@@ -622,7 +703,7 @@ async function refreshScene(): Promise<void> {
   }
 }
 
-function projectionContext(catalog: ProjectionCatalogV1): ProjectionRuntimeContext {
+function projectionContextFromLegacyCatalog(catalog: ProjectionCatalogV1): ProjectionRuntimeContext {
   const catalogRef = `${catalog.catalogId}@${catalog.catalogVersion}`;
   return createProjectionRuntimeContext([{
     profileRef: catalog.profileRef,
@@ -632,15 +713,101 @@ function projectionContext(catalog: ProjectionCatalogV1): ProjectionRuntimeConte
   }], props.layoutRegistry ?? defaultLayoutRegistry);
 }
 
+function unwrapProjectionRuntimeContext(source: ProjectionRuntimeContext): ProjectionRuntimeContext {
+  const runtime = toRaw(source);
+  return {
+    ...runtime,
+    catalogsByProfile: toRaw(runtime.catalogsByProfile),
+    layouts: toRaw(runtime.layouts),
+    projectionOptions: runtime.projectionOptions ? toRaw(runtime.projectionOptions) : undefined,
+  };
+}
+
+function resolveActiveViewId(document: IriographDocument, requested?: string): string {
+  if (requested && document.views.some((view) => view.viewId === requested)) return requested;
+  return document.views[0]?.viewId ?? "";
+}
+
+function sessionFor(viewId: string): DiagramViewSession {
+  const existing = viewSessions.get(viewId);
+  if (existing) return existing;
+  const created = createDiagramViewSession();
+  viewSessions.set(viewId, created);
+  return created;
+}
+
+function saveActiveViewSession(): void {
+  const viewId = currentActiveViewId.value;
+  if (!viewId) return;
+  const session = sessionFor(viewId);
+  session.selectedElementIds = [...selectedElementIds.value];
+  session.primaryElementId = selectedElementId.value;
+  session.viewport = diagramCanvas.value?.getViewportState() ?? {
+    ...session.viewport,
+    zoom: zoom.value,
+  };
+}
+
+function restoreActiveViewSession(): void {
+  const session = sessionFor(currentActiveViewId.value);
+  selectedElementIds.value = [...session.selectedElementIds];
+  selectedElementId.value = session.primaryElementId;
+  zoom.value = normalizeDiagramZoom(session.viewport.zoom);
+  emit("selectionChanged", selectedElementId.value);
+  emit("selectionSetChanged", [...selectedElementIds.value]);
+}
+
+async function activateView(viewId: string): Promise<void> {
+  const nextViewId = resolveActiveViewId(draft.value, viewId);
+  if (!nextViewId || nextViewId === currentActiveViewId.value) return;
+  saveActiveViewSession();
+  cancelAssetPicker();
+  cancelSemanticRequest();
+  cancelViewCommandRequest();
+  invalidateAuthoringPreview();
+  sceneValidationAbortController?.abort();
+  currentActiveViewId.value = nextViewId;
+  rawScene.value = emptyScene(nextViewId);
+  applyDiagnostics.value = [];
+  restoreActiveViewSession();
+  await refreshScene();
+  if (currentActiveViewId.value !== nextViewId) return;
+  await nextTick();
+  await diagramCanvas.value?.restoreViewport(sessionFor(nextViewId).viewport);
+}
+
+function requestActiveView(event: Event): void {
+  const select = event.target as HTMLSelectElement;
+  const requested = select.value;
+  if (!draft.value.views.some((view) => view.viewId === requested)) return;
+  emit("update:activeViewId", requested);
+  if (props.activeViewId === undefined) {
+    void activateView(requested);
+    return;
+  }
+  select.value = currentActiveViewId.value;
+}
+
 function schemaDiagnosticsFor(
   document: IriographDocument,
-  catalog: ProjectionCatalogV1,
+  runtime: ProjectionRuntimeContext | undefined,
 ): ProjectionDiagnostic[] {
   const documentResult = validateIriographDocumentV1(document);
-  const catalogResult = validateProjectionCatalogV1(catalog);
+  const catalogResults = runtime
+    ? [...new Set([...runtime.catalogsByProfile.values()].map((entry) => entry.catalog))]
+      .map((catalog) => validateProjectionCatalogV1(catalog))
+    : [];
   return [
     ...(documentResult.valid ? [] : documentResult.issues.map((issue) => schemaDiagnostic("document", issue))),
-    ...(catalogResult.valid ? [] : catalogResult.issues.map((issue) => schemaDiagnostic("catalog", issue))),
+    ...(runtime ? [] : [{
+      severity: "error" as const,
+      category: "profile" as const,
+      code: "projection-runtime-context-missing",
+      message: "ProjectionRuntimeContextが提供されていません。",
+    }]),
+    ...catalogResults.flatMap((result) => (
+      result.valid ? [] : result.issues.map((issue) => schemaDiagnostic("catalog", issue))
+    )),
   ];
 }
 
@@ -704,6 +871,9 @@ function setSelection(elementIds: readonly string[]): void {
   ) return;
   selectedElementIds.value = next;
   selectedElementId.value = primary;
+  const session = sessionFor(currentActiveViewId.value);
+  session.selectedElementIds = [...next];
+  session.primaryElementId = primary;
   emit("selectionChanged", primary);
   emit("selectionSetChanged", [...next]);
 }
@@ -735,7 +905,7 @@ function endGesture(): void {
 function changeGeometry(payload: { elementId: string; geometry: ElementGeometry }): void {
   mutateDocument((document) => {
     const element = geometryElement(payload.elementId);
-    const view = document.views[0];
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     if (!element || !view) return;
     const current = view.overlay[payload.elementId] ?? { semanticRef: element.semanticRef };
     view.overlay[payload.elementId] = {
@@ -750,7 +920,7 @@ function changeGeometry(payload: { elementId: string; geometry: ElementGeometry 
 function changeGeometryBatch(changes: readonly GeometryChange[], recordHistory = false): void {
   if (changes.length === 0) return;
   mutateDocument((document) => {
-    const view = document.views[0];
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     if (!view) return;
     for (const change of changes) {
       const element = geometryElement(change.elementId);
@@ -799,7 +969,7 @@ function updateSnapGridSize(event: Event): void {
 function changeRouting(payload: EdgeRoutingUpdate, recordHistory = false): void {
   mutateDocument((document) => {
     const edge = scene.value.edges.find((candidate) => candidate.elementId === payload.elementId);
-    const view = document.views[0];
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     if (!edge || !view) return;
     const current = view.overlay[payload.elementId] ?? { semanticRef: edge.semanticRef };
     const requestedRouting = payload.routing && !edge.label
@@ -1029,7 +1199,7 @@ function updateAppearance(
     );
   }
   mutateDocument((document) => {
-    const view = document.views[0];
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     if (!view) return;
     const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
     const appearance = { ...current.appearance, [field]: value };
@@ -1045,7 +1215,7 @@ function clearSelectedOverride(): void {
   const element = selectedElement.value;
   if (!element) return;
   mutateDocument((document) => {
-    const view = document.views[0];
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     const overlay = view?.overlay[element.elementId];
     if (!overlay) return;
     if (element.structuralKind === "edge") {
@@ -1308,8 +1478,8 @@ async function applyTurtleDraft(): Promise<boolean> {
   semanticAbortController = controller;
   const previous = clone(draft.value);
   const previousJson = JSON.stringify(previous);
-  const catalog = clone(props.catalog);
-  schemaDiagnostics.value = schemaDiagnosticsFor(previous, catalog);
+  const runtime = projectionRuntimeContext.value;
+  schemaDiagnostics.value = schemaDiagnosticsFor(previous, runtime);
   if (schemaDiagnostics.value.some((item) => item.severity === "error")) {
     cancelSemanticRequest();
     return false;
@@ -1325,16 +1495,27 @@ async function applyTurtleDraft(): Promise<boolean> {
           signal: controller.signal,
           warningConfirmation: semanticWarningConfirmation.value,
         })
-      : await applySemanticSource(
+      : runtime
+        ? await applySemanticSource(
           previous,
           turtleDraft.value,
-          projectionContext(catalog),
+          runtime,
           {
             validationContext: semanticValidationContext.value,
             warningConfirmation: semanticWarningConfirmation.value,
             signal: controller.signal,
           },
-        );
+        )
+        : {
+            accepted: false,
+            document: previous,
+            diagnostics: [{
+              severity: "error",
+              category: "profile",
+              code: "projection-runtime-context-missing",
+              message: "ProjectionRuntimeContextが提供されていません。",
+            }],
+          };
   } catch (cause) {
     if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
     applyDiagnostics.value = [{
@@ -1383,7 +1564,7 @@ function revertTurtleDraft(): void {
   turtleDraft.value = draft.value.semantic.source;
   applyDiagnostics.value = [];
   semanticWarningConfirmation.value = undefined;
-  schemaDiagnostics.value = schemaDiagnosticsFor(draft.value, props.catalog);
+  schemaDiagnostics.value = schemaDiagnosticsFor(draft.value, projectionRuntimeContext.value);
 }
 
 function undo(): void {
@@ -1474,6 +1655,189 @@ function handleKeydown(event: KeyboardEvent): void {
   ), true);
 }
 
+function openAddViewDialog(): void {
+  const profileRef = activeView.value?.profileRef ?? profileChoices.value[0] ?? "";
+  viewForm.value = {
+    viewId: allocateViewId("view"),
+    profileRef,
+    layoutRef: activeView.value?.layoutRef ?? layoutChoices.value[0] ?? "",
+    locale: activeView.value?.locale ?? "",
+  };
+  viewDialogMode.value = "add";
+}
+
+function openConfigureViewDialog(): void {
+  const view = activeView.value;
+  if (!view) return;
+  viewForm.value = {
+    viewId: view.viewId,
+    profileRef: view.profileRef,
+    layoutRef: view.layoutRef,
+    locale: view.locale ?? "",
+  };
+  viewDialogMode.value = "configure";
+}
+
+function closeViewDialog(): void {
+  if (viewCommandBusy.value) return;
+  viewDialogMode.value = undefined;
+}
+
+async function submitViewDialog(): Promise<void> {
+  const form = viewForm.value;
+  const command: ViewCommand = viewDialogMode.value === "add"
+    ? {
+        command: "add",
+        viewId: form.viewId,
+        profileRef: form.profileRef,
+        layoutRef: form.layoutRef,
+        ...(form.locale.trim() ? { locale: form.locale.trim() } : {}),
+      }
+    : {
+        command: "configure",
+        viewId: form.viewId,
+        profileRef: form.profileRef,
+        layoutRef: form.layoutRef,
+        locale: form.locale.trim() || null,
+      };
+  if (await executeViewCommand(command)) viewDialogMode.value = undefined;
+}
+
+async function duplicateActiveView(): Promise<void> {
+  const view = activeView.value;
+  if (!view) return;
+  await executeViewCommand({
+    command: "duplicate",
+    sourceViewId: view.viewId,
+    viewId: allocateViewId(`${view.viewId}-copy`),
+  });
+}
+
+async function deleteActiveView(): Promise<void> {
+  const view = activeView.value;
+  if (!view) return;
+  await executeViewCommand({ command: "delete", viewId: view.viewId });
+}
+
+async function resetActiveViewOverlay(): Promise<void> {
+  const view = activeView.value;
+  if (!view) return;
+  await executeViewCommand({ command: "reset-overlay", viewId: view.viewId });
+}
+
+async function executeViewCommand(command: ViewCommand): Promise<boolean> {
+  if (props.readOnly || viewCommandBusy.value) return false;
+  if (turtlePending.value || structuredAuthoringPending.value) {
+    applyDiagnostics.value = [{
+      severity: "error",
+      category: "projection",
+      code: "view-command-semantic-draft-pending",
+      message: "未適用のsemantic draftを適用または破棄してからviewを変更してください。",
+    }];
+    return false;
+  }
+  const runtime = projectionRuntimeContext.value;
+  if (!runtime) {
+    applyDiagnostics.value = [{
+      severity: "error",
+      category: "profile",
+      code: "projection-runtime-context-missing",
+      message: "ProjectionRuntimeContextが提供されていません。",
+    }];
+    return false;
+  }
+  const requestToken = ++viewCommandRequestToken;
+  viewCommandAbortController?.abort();
+  const controller = new AbortController();
+  viewCommandAbortController = controller;
+  const previous = clone(draft.value);
+  const previousJson = JSON.stringify(previous);
+  viewCommandBusy.value = true;
+  let result;
+  try {
+    result = await applyViewCommand(previous, command, runtime, { signal: controller.signal });
+  } catch (cause) {
+    if (requestToken !== viewCommandRequestToken || controller.signal.aborted) return false;
+    applyDiagnostics.value = [{
+      severity: "error",
+      category: "projection",
+      code: "view-command-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    }];
+    return false;
+  } finally {
+    if (requestToken === viewCommandRequestToken) {
+      viewCommandBusy.value = false;
+      viewCommandAbortController = undefined;
+    }
+  }
+  if (
+    requestToken !== viewCommandRequestToken
+    || controller.signal.aborted
+    || JSON.stringify(draft.value) !== previousJson
+  ) return false;
+  applyDiagnostics.value = result.diagnostics;
+  if (!result.accepted) return false;
+
+  saveActiveViewSession();
+  let nextViewId = currentActiveViewId.value;
+  let controlledViewRequest: string | undefined;
+  if (command.command === "delete") {
+    viewSessions.delete(command.viewId);
+    nextViewId = resolveActiveViewId(result.document, nextViewId);
+  } else if (command.command === "add" || command.command === "duplicate") {
+    const requestedViewId = result.affectedViewId ?? nextViewId;
+    if (props.activeViewId === undefined) nextViewId = requestedViewId;
+    else controlledViewRequest = requestedViewId;
+  }
+  const viewChanged = nextViewId !== currentActiveViewId.value;
+  currentActiveViewId.value = nextViewId;
+  if (viewChanged) {
+    emit("update:activeViewId", nextViewId);
+  }
+  rawScene.value = emptyScene(nextViewId);
+  restoreActiveViewSession();
+  publish(result.document, true);
+  if (controlledViewRequest) emit("update:activeViewId", controlledViewRequest);
+  await refreshScene();
+  if (currentActiveViewId.value === nextViewId) {
+    await nextTick();
+    await diagramCanvas.value?.restoreViewport(sessionFor(nextViewId).viewport);
+  }
+  return true;
+}
+
+function cancelViewCommandRequest(): void {
+  viewCommandRequestToken += 1;
+  viewCommandAbortController?.abort();
+  viewCommandAbortController = undefined;
+  viewCommandBusy.value = false;
+}
+
+function allocateViewId(base: string): string {
+  const existing = new Set(draft.value.views.map((view) => view.viewId));
+  if (!existing.has(base)) return base;
+  let suffix = 2;
+  while (existing.has(`${base}-${suffix}`)) suffix += 1;
+  return `${base}-${suffix}`;
+}
+
+function hideSelectionTemporarily(): void {
+  const session = sessionFor(currentActiveViewId.value);
+  for (const elementId of selectedElementIds.value) {
+    session.temporaryHiddenElementIds.add(elementId);
+  }
+  viewSessionRevision.value += 1;
+  clearSelection();
+}
+
+function showAllTemporaryHidden(): void {
+  const session = sessionFor(currentActiveViewId.value);
+  if (session.temporaryHiddenElementIds.size === 0) return;
+  session.temporaryHiddenElementIds.clear();
+  viewSessionRevision.value += 1;
+}
+
 function mutateDocument(
   mutation: (document: IriographDocument) => void,
   recordHistory = true,
@@ -1500,8 +1864,16 @@ function publish(next: IriographDocument, recordHistory: boolean): void {
 
 function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): void {
   invalidateAuthoringPreview();
+  saveActiveViewSession();
   const pendingTurtle = turtleDraft.value;
   draft.value = clone(next);
+  const nextViewId = resolveActiveViewId(draft.value, currentActiveViewId.value);
+  if (nextViewId !== currentActiveViewId.value) {
+    currentActiveViewId.value = nextViewId;
+    emit("update:activeViewId", nextViewId);
+    rawScene.value = emptyScene(nextViewId);
+    restoreActiveViewSession();
+  }
   turtleDraft.value = preserveTurtleDraft ? pendingTurtle : next.semantic.source;
   applyDiagnostics.value = [];
   lastEmittedJson = JSON.stringify(draft.value);
@@ -1520,6 +1892,7 @@ function trimHistory(): void {
 
 function setZoomState(value: number): void {
   zoom.value = normalizeDiagramZoom(value);
+  sessionFor(currentActiveViewId.value).viewport.zoom = zoom.value;
 }
 
 async function zoomTo(value: number): Promise<void> {
@@ -1714,8 +2087,30 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       <aside class="iriograph-elements-panel">
         <section class="iriograph-view-summary">
           <small>ACTIVE VIEW</small>
-          <strong>{{ activeView?.viewId ?? "No view" }}</strong>
+          <select
+            :value="activeView?.viewId ?? ''"
+            :disabled="viewCommandBusy"
+            aria-label="Named view"
+            @change="requestActiveView"
+          >
+            <option v-for="view in draft.views" :key="view.viewId" :value="view.viewId">
+              {{ view.viewId }}
+            </option>
+          </select>
           <code>{{ activeView?.profileRef }}</code>
+          <div class="iriograph-view-actions" aria-label="Named view actions">
+            <button type="button" :disabled="readOnly || viewCommandBusy" @click="openAddViewDialog">追加</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="duplicateActiveView">複製</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="openConfigureViewDialog">設定</button>
+            <button
+              type="button"
+              :disabled="readOnly || viewCommandBusy || draft.views.length <= 1"
+              @click="deleteActiveView"
+            >削除</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="resetActiveViewOverlay">
+              Overlay reset
+            </button>
+          </div>
           <div>
             <span><b>{{ scene.nodes.length }}</b> nodes</span>
             <span><b>{{ scene.edges.length }}</b> edges</span>
@@ -1809,6 +2204,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <span aria-live="polite">{{ selectedElementIds.length }} selected</span>
               <button type="button" aria-label="すべて選択" title="Select all (Ctrl/Cmd+A)" @click="selectAll">全選択</button>
               <button type="button" aria-label="選択を解除" title="Clear selection (Escape)" :disabled="selectedElementIds.length === 0" @click="clearSelection">解除</button>
+              <button type="button" :disabled="selectedElementIds.length === 0" @click="hideSelectionTemporarily">一時非表示</button>
+              <button type="button" :disabled="temporaryHiddenCount === 0" @click="showAllTemporaryHidden">
+                再表示<span v-if="temporaryHiddenCount"> ({{ temporaryHiddenCount }})</span>
+              </button>
             </div>
             <div class="iriograph-arrange-actions">
               <button type="button" aria-label="左揃え" :disabled="!canAlignSelection" @click="alignSelected('left')">左</button>
@@ -2071,6 +2470,48 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <pre>{{ overlayJson }}</pre>
         </section>
       </aside>
+    </div>
+
+    <div
+      v-if="viewDialogMode"
+      class="iriograph-view-dialog-backdrop"
+      role="presentation"
+      @click.self="closeViewDialog"
+    >
+      <form class="iriograph-view-dialog" role="dialog" aria-modal="true" aria-labelledby="iriograph-view-dialog-title" @submit.prevent="submitViewDialog">
+        <header>
+          <strong id="iriograph-view-dialog-title">{{ viewDialogMode === "add" ? "Named viewを追加" : "View設定" }}</strong>
+          <button type="button" aria-label="閉じる" :disabled="viewCommandBusy" @click="closeViewDialog">×</button>
+        </header>
+        <label>
+          View ID
+          <input v-model="viewForm.viewId" :readonly="viewDialogMode === 'configure'" required />
+          <small v-if="viewDialogMode === 'configure'">viewIdは作成後に変更できません。</small>
+        </label>
+        <label>
+          Profile
+          <select v-model="viewForm.profileRef" required>
+            <option v-for="profileRef in profileChoices" :key="profileRef" :value="profileRef">{{ profileRef }}</option>
+          </select>
+        </label>
+        <label>
+          Layout
+          <input v-model="viewForm.layoutRef" list="iriograph-layout-options" required />
+          <datalist id="iriograph-layout-options">
+            <option v-for="layoutRef in layoutChoices" :key="layoutRef" :value="layoutRef" />
+          </datalist>
+        </label>
+        <label>
+          Locale (BCP 47)
+          <input v-model="viewForm.locale" placeholder="ja" />
+        </label>
+        <footer>
+          <button type="button" :disabled="viewCommandBusy" @click="closeViewDialog">キャンセル</button>
+          <button type="submit" class="primary" :disabled="viewCommandBusy">
+            {{ viewCommandBusy ? "適用中…" : viewDialogMode === "add" ? "追加" : "適用" }}
+          </button>
+        </footer>
+      </form>
     </div>
   </article>
 </template>

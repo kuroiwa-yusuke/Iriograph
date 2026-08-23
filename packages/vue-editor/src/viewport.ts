@@ -16,6 +16,14 @@ export type DiagramCanvasNavigationApi = {
   fitToView(): Promise<void>;
   revealElement(elementId: string): Promise<boolean>;
   centerOn(point: Point): void;
+  getViewportState(): DiagramViewportState;
+  restoreViewport(state: DiagramViewportState): Promise<void>;
+};
+
+export type DiagramViewportState = {
+  zoom: number;
+  scrollLeft: number;
+  scrollTop: number;
 };
 
 export type IriographEditorNavigationApi = {

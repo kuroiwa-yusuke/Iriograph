@@ -4,6 +4,7 @@
   --iriograph-line: #cbd6d2;
   --iriograph-paper: #fffefb;
   width: 100%;
+  position: relative;
   height: 100%;
   min-width: 980px;
   min-height: 580px;
@@ -152,11 +153,20 @@
   background: linear-gradient(145deg, #fdfcf5, #f4f8f5);
 }
 
-.iriograph-view-summary > strong {
+.iriograph-view-summary > strong,
+.iriograph-view-summary > select {
   display: block;
   margin: 5px 0 4px;
   font-family: Georgia, "Yu Mincho", serif;
   font-size: 17px;
+}
+
+.iriograph-view-summary > select {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid #bdcbc7;
+  border-radius: 4px;
+  background: #fff;
 }
 
 .iriograph-view-summary > code {
@@ -175,6 +185,21 @@
   margin-top: 14px;
 }
 
+.iriograph-view-summary > .iriograph-view-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 9px;
+}
+
+.iriograph-view-actions button {
+  min-width: 0;
+  padding: 4px;
+  border: 1px solid #b7c7c2;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 8px;
+}
+
 .iriograph-view-summary > div span {
   padding: 6px 2px;
   border-radius: 4px;
@@ -189,6 +214,65 @@
   color: #24494a;
   font-family: Georgia, serif;
   font-size: 14px;
+}
+
+.iriograph-view-dialog-backdrop {
+  position: absolute;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(18 36 37 / 45%);
+}
+
+.iriograph-view-dialog {
+  width: min(500px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #9eb0ab;
+  border-radius: 8px;
+  background: #fffefb;
+  box-shadow: 0 18px 48px rgb(18 36 37 / 24%);
+}
+
+.iriograph-view-dialog > header,
+.iriograph-view-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-view-dialog > label {
+  display: grid;
+  gap: 4px;
+  color: #536a69;
+  font-weight: 700;
+}
+
+.iriograph-view-dialog input,
+.iriograph-view-dialog select {
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid #bdcbc7;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.iriograph-view-dialog button {
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid #617b7a;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-view-dialog button.primary {
+  color: #fff;
+  border-color: #275c5e;
+  background: #275c5e;
 }
 
 .iriograph-element-list {

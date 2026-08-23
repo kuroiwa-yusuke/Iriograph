@@ -599,7 +599,7 @@ function isAbsoluteIri(value: string): boolean {
   }
 }
 
-function isBcp47LanguageTag(value: string): boolean {
+export function isBcp47LanguageTag(value: string): boolean {
   const normalized = value.toLowerCase();
   if (GRANDFATHERED_LANGUAGE_TAGS.has(normalized) || PRIVATE_USE_LANGUAGE_TAG.test(value)) return true;
   try {

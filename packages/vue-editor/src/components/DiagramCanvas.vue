@@ -39,6 +39,7 @@ import {
   scrollToRevealBounds,
   type DiagramCanvasNavigationApi,
   type DiagramViewportMetrics,
+  type DiagramViewportState,
 } from "../viewport";
 import {
   normalizeDiagramSnapSettings,
@@ -641,6 +642,22 @@ function panBy(deltaX: number, deltaY: number): void {
   setViewportScroll(viewport.scrollLeft + deltaX, viewport.scrollTop + deltaY);
 }
 
+function getViewportState(): DiagramViewportState {
+  updateViewportMetrics();
+  return {
+    zoom: normalizeDiagramZoom(props.zoom),
+    scrollLeft: viewport.scrollLeft,
+    scrollTop: viewport.scrollTop,
+  };
+}
+
+async function restoreViewport(state: DiagramViewportState): Promise<void> {
+  emit("zoomChange", normalizeDiagramZoom(state.zoom));
+  await nextTick();
+  updateViewportMetrics();
+  setViewportScroll(state.scrollLeft, state.scrollTop);
+}
+
 async function zoomTo(value: number): Promise<void> {
   updateViewportMetrics();
   const offset = stageOffset();
@@ -796,6 +813,8 @@ defineExpose<DiagramCanvasNavigationApi>({
   fitToView,
   revealElement,
   centerOn,
+  getViewportState,
+  restoreViewport,
 });
 </script>
 

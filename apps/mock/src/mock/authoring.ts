@@ -13,7 +13,7 @@ const DEMO_NAMESPACE = "urn:iriograph:demo:";
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const RDFS = "http://www.w3.org/2000/01/rdf-schema#";
 
-const runtime = createProjectionRuntimeContext([{
+export const mockProjectionRuntimeContext = createProjectionRuntimeContext([{
   profileRef: mockProjectionCatalog.profileRef,
   sourceCatalogRefs: [catalogRef(mockProjectionCatalog)],
   catalog: mockProjectionCatalog,
@@ -42,7 +42,7 @@ export function createMockAuthoringContext(
     contextRevision: "1",
     documentRevision: shortHash(JSON.stringify(document)),
     authoringProfileRef: document.semantic.authoringProfileRef,
-    runtime,
+    runtime: mockProjectionRuntimeContext,
     resourcePolicy: { allowedMintNamespaces: [DEMO_NAMESPACE] },
     termPolicy: {
       existingUnknown: "preserve",

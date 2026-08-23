@@ -94,6 +94,14 @@
           "placement": "generated"
         }
       }
+    },
+    {
+      "viewId": "top-down",
+      "kind": "node-link",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-tb:1",
+      "locale": "ja",
+      "overlay": {}
     }
   ]
 }

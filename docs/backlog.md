@@ -4,7 +4,7 @@
 
 ## 現在の基準点
 
-Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Core/editorは0.1.0の配布contract、tarball consumer検証、editor component回帰testとPlaywright browser smokeを持ち、session-onlyのviewport navigation、multi-selection、境界を守る一括移動、整列、等間隔、grid/target snap、manual edge routing、label位置、parallel edge、self-loopも接続されています。Human semantic authoringはresolved contextとallocatorをhostから受け、resource・属性・edge・包含・Seq/Alt・削除をdraft、exact graph patch preview、明示Applyのatomic transactionとして扱います。意味編集と表示編集のtransactionは分離されていますが、API安定版ではありません。
+Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。Core/editorは0.1.0の配布contract、tarball consumer検証、editor component回帰testとPlaywright browser smokeを持ち、session-onlyのviewport navigation、multi-selection、境界を守る一括移動、整列、等間隔、grid/target snap、manual edge routing、label位置、parallel edge、self-loopも接続されています。Human semantic authoringはresolved contextとallocatorをhostから受け、resource・属性・edge・包含・Seq/Alt・削除をdraft、exact graph patch preview、明示Applyのatomic transactionとして扱います。意味編集と表示編集のtransactionは分離されていますが、API安定版ではありません。
 
 Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq、Alt、seeAlsoを使う購入承認例です。Domain語彙はこれらの標準構造を置き換えずnode等のappearanceを選択し、標準catalogとdefaultsを持たないdomain extension catalogを決定的に結合しています。
 
@@ -19,7 +19,6 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq�
 
 | ID | 項目 | 依存 | 完了条件 |
 |---|---|---|---|
-| P1-06 | named view、localeとview管理 | P0-08 | 同じTurtleに異なるprofile/layout/locale/overlayを持つnamed viewを選択・追加・複製・削除でき、view profileが表示構造を選ぶ。SPARQL/汎用filter editorは導入せず、一時hideはsession stateにだけ保持する |
 | P1-07 | accessibilityとkeyboard編集 | P0-11、P1-01〜03 | focus順、選択、移動、resize、routingの主要操作をkeyboardで完結できる |
 | P1-08 | 大規模graph性能基準 | P0-07 | 通常500 node/1,000 edgeでlayout以外の編集応答100ms未満・pan/drag 30fps以上、stress 2,000 node/4,000 edgeで初回projection+標準layout 2秒未満を暫定基準とし、固定fixtureのbenchmarkをCIで監視する |
 

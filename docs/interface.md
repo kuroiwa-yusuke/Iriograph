@@ -39,6 +39,12 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、選択集合とprimary selection、snap設定、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
 
+Viewの永続変更は`applyViewCommand`の`add`、`duplicate`、`configure`、`delete`、
+`reset-overlay`だけを使います。`viewId`はimmutableで、duplicateはoverlayをexact cloneしながら
+新IDを割り当てます。configureは対象viewだけを再照合し、locale-only変更はoverlayをexactに
+維持します。deleteは壊れたviewにも適用でき、最後のviewは拒否します。詳細は
+[view-management.md](./view-management.md)を正本とします。
+
 overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
@@ -208,7 +214,8 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
   <IriographEditor
     ref="editor"
     v-model="document"
-    :catalog="catalog"
+    v-model:active-view-id="activeViewId"
+    :runtime-context="projectionRuntimeContext"
     :dirty="dirty"
     :saving="saving"
     :asset-access="assetAccess"
@@ -223,7 +230,9 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 主なcontract:
 
 - `modelValue` / `update:modelValue`: portable document正本
-- `catalog`: hostが解決済みのprojection catalog
+- `runtimeContext`: profile別catalog、layout registry、projection optionを持つ正規contract
+- `catalog`: 単一catalog host向けのdeprecated互換prop
+- `activeViewId` / `update:activeViewId`: optional controlled active view。省略時はuncontrolled
 - `save`: packageは永続化せずhostへ保存要求を通知
 - `validationChanged`: semantic/project diagnostics
 - `assetAccess`: 非同期resolver、media/size/URL policy、host revision

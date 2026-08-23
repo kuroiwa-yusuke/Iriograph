@@ -17,7 +17,8 @@ import "@iriograph/vue-editor/styles.css";
 ```vue
 <IriographEditor
   v-model="document"
-  :catalog="catalog"
+  v-model:active-view-id="activeViewId"
+  :runtime-context="projectionRuntimeContext"
   :authoring-context="resolvedAuthoringContext"
   :semantic-validation-context="resolvedSemanticValidationContext"
   :resource-iri-allocator="resourceIriAllocator"
@@ -25,7 +26,8 @@ import "@iriograph/vue-editor/styles.css";
 />
 ```
 
-`catalog`にはvalidated `ProjectionCatalogV1`を渡します。意味グラフのstructured editを有効に
+`runtimeContext`にはprofile別の解決済みcatalogとlayout registryを持つ
+`ProjectionRuntimeContext`を渡します。旧`catalog` propはdeprecated互換です。意味グラフのstructured editを有効に
 する場合は、hostで解決した`ResolvedAuthoringContext`と、必要に応じて
 `ResourceIriAllocator`を渡します。Editorはresource・属性・edge・包含・Seq/Alt・削除を
 サイドバーdraftとして保持し、exact triple差分のPreviewと明示Apply後にだけ`v-model`を更新します。
@@ -40,6 +42,11 @@ Canvasの空白clickで指定する新規resource位置は適用前にはephemer
 Domain constraintはhost解決済み`ResolvedSemanticValidationContext`を注入します。
 SHACL等のengineはhost adapterの選択であり、Editorはengine-independentなdiagnosticだけを扱います。
 Loaded domain errorはSceneへannotationし、candidate errorはrollbackします。
+
+Named viewは追加、複製、profile/layout/locale設定、削除、overlay resetをUIから操作できます。
+`activeViewId`はcontrolled、未指定時はuncontrolledです。Selection/primary、viewport、temporary
+hideはviewId別sessionにだけ保持されます。一時hideはexact element IDとcontainer descendant・
+incident edgeだけを除き、document、overlay、historyを変更しません。
 
 Component refは`panBy()`、`zoomTo()`、`fitToView()`、`revealSelection()`、
 `focusElement(elementId)`も公開します。Pan、zoom、minimap、selection revealはeditor session

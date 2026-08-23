@@ -20,3 +20,4 @@ export * from "./authoring-model";
 export * from "./authoring-validation";
 export * from "./authoring";
 export * from "./semantic-validation";
+export * from "./view-commands";

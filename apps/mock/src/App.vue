@@ -18,6 +18,7 @@ import {
 import { mockProjectionCatalog } from "./mock/catalog";
 import {
   createMockAuthoringContext,
+  mockProjectionRuntimeContext,
   mockResourceIriAllocator,
 } from "./mock/authoring";
 import { mockSemanticValidationContext } from "./mock/semantic-validation";
@@ -408,7 +409,7 @@ function emptyDocument(): IriographDocumentV1 {
         <IriographEditor
           ref="editor"
           v-model="document"
-          :catalog="catalog"
+          :runtime-context="mockProjectionRuntimeContext"
           :title="documentTitle"
           :file-path="activeFilePath"
           :dirty="dirty"

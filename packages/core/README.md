@@ -15,6 +15,7 @@ import {
   createStandardLayoutRegistry,
   previewAuthoringCommands,
   applyAuthoringPreview,
+  applyViewCommand,
   standardRdfRdfsCatalog,
   validateIriographDocumentV1,
 } from "@iriograph/core";
@@ -34,6 +35,13 @@ const scene = await buildIriographView(
   validation.value.views[0]!.viewId,
   context,
 );
+
+const viewUpdate = await applyViewCommand(validation.value, {
+  command: "duplicate",
+  sourceViewId: "main",
+  viewId: "review",
+}, context);
+if (!viewUpdate.accepted) throw new Error(viewUpdate.diagnostics[0]?.message);
 
 const preview = await previewAuthoringCommands(
   validation.value,

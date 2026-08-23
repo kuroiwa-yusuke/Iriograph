@@ -11,6 +11,7 @@ Iriographはpureなgraph処理、DOM event contract、editor transaction、実br
 - Vue editorのasset lease session test
 - happy-dom上の`DiagramCanvas` pointer component test。dragのzoom換算、multi-selection、group preview/batch、container clamp、resize minimum、endpoint込みroute、generated bend seed、waypoint追加・削除・移動、label offset、parallel/self-loop選択、ARIA/keyboard、pan競合、fit、minimap、selection revealとgesture境界を確認する
 - happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routingとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
+- Core/View editorのnamed view test。target-only atomic command、immutable/unique ID、locale-only exact overlay、invalid view delete、last-view guard、controlled/uncontrolled active view、view別selection/viewport/temporary hideを確認する
 - 全workspaceのtypecheck/buildと、packed tarballを使う外部consumer検証
 
 Component testは`@iriograph/core`のsourceへtest時だけaliasし、未buildのclean checkoutでも単独実行できます。配布buildではCoreをexternalのまま保ち、test fileは型宣言とpackage tarballへ含めません。
@@ -32,7 +33,7 @@ docker build -f Dockerfile.e2e -t iriograph-e2e .
 docker run --rm --ipc=host iriograph-e2e
 ```
 
-E2Eはmock fixtureのnode drag、multi-select、group drag、grid snap、整列、等間隔、undo/redo、resize、edge waypoint追加・移動・削除、label drag/reset、parallel/self-loop個別選択、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、presentation操作後のTurtle不変、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
+E2Eはmock fixtureのnamed view切替・追加・複製・設定・削除・overlay reset・temporary hide、node drag、multi-select、group drag、grid snap、整列、等間隔、undo/redo、resize、edge waypoint追加・移動・削除、label drag/reset、parallel/self-loop個別選択、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、presentation操作後のTurtle不変、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
 
 ## Test追加規則
 
@@ -54,6 +55,9 @@ E2Eはmock fixtureのnode drag、multi-select、group drag、grid snap、整列�
 - Structure/delete testではBag membership、Seq/Altのatomic再構成、Altのfinal member順・重複・default slot一致、参照時の既定reject、exact cascade preview、正規ordinalだけの再採番、prefix類似property保持、Seq/Alt最小件数違反rollback、既知語彙resource削除rejectを検証する
 - Provenance逆編集testではdirect statement、membership、sequence、alternativeのcapabilityからdraftをseedし、provenance欠落時に見た目からpredicateを推測しないことを確認する
 - 未適用Turtle draftとstructured authoring draftが排他的であり、readOnly、async stale、複数viewの一つの失敗でdocument全体が不変であることを確認する
+- View command testでは対象以外のviewがexactに不変、locale-onlyとduplicateのoverlayがexact、profile primitive変更が旧Sceneとの互換性で再照合されることを確認する
+- Active view testではcontrolled/uncontrolled、存在しないIDの先頭fallback、切替時の旧Scene/asset/validation stale破棄、view別selection/primary/viewport/temporary hideを確認する
+- Temporary hide testではexact ID、container descendant closure、incident edgeだけが除かれ、document/overlay/historyへ保存されないことを確認する
 - Canvas作成位置testではblank clickがephemeral draft markerだけを更新し、bounds clamp後の位置がApply成功時だけsemantic作成と一つのhistory itemへcommitされることを確認する
 - 保存testでは`save` eventだけでなく、その前にpending editがacceptまたはrejectされた結果を確認する
 - Browser smokeのsample件数へ依存するassertionを変更する場合は、workspace fixture変更と同じcommitで更新する

@@ -65,6 +65,56 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   expect(consoleErrors).toEqual([]);
 });
 
+test("named view管理とtemporary hideをsemantic sourceから分離する", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.goto("/");
+  const viewSelect = page.getByLabel("Named view", { exact: true });
+  await expect(viewSelect.locator("option")).toHaveCount(2);
+  await expect(viewSelect).toHaveValue("main");
+  const turtleBefore = await readTurtle(page);
+
+  await page.locator(".iriograph-scene-node").first().click();
+  await page.getByRole("button", { name: "一時非表示" }).click();
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(7);
+  await expect(page.getByRole("button", { name: /再表示/ })).toContainText("(1)");
+
+  await viewSelect.selectOption("top-down");
+  await expect(viewSelect).toHaveValue("top-down");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
+
+  await page.locator(".iriograph-view-actions").getByRole("button", { name: "複製" }).click();
+  await expect(viewSelect).toHaveValue("top-down-copy");
+  await expect(viewSelect.locator("option")).toHaveCount(3);
+
+  await page.locator(".iriograph-view-actions").getByRole("button", { name: "設定" }).click();
+  await expect(page.locator('.iriograph-view-dialog input[readonly]')).toHaveValue("top-down-copy");
+  await page.locator('.iriograph-view-dialog input[placeholder="ja"]').fill("en-US");
+  await page.locator('.iriograph-view-dialog button[type="submit"]').click();
+  await expect(page.locator(".iriograph-view-dialog")).toHaveCount(0);
+
+  await page.locator(".iriograph-view-actions").getByRole("button", { name: "Overlay reset" }).click();
+  await expect(viewSelect).toHaveValue("top-down-copy");
+  await page.locator(".iriograph-view-actions").getByRole("button", { name: "削除" }).click();
+  await expect(viewSelect.locator("option")).toHaveCount(2);
+  await expect(viewSelect).toHaveValue("main");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(7);
+
+  await page.locator(".iriograph-view-actions").getByRole("button", { name: "追加" }).click();
+  await expect(page.locator(".iriograph-view-dialog")).toBeVisible();
+  await page.locator('.iriograph-view-dialog input:not([readonly])').first().fill("audit");
+  await page.locator('.iriograph-view-dialog button[type="submit"]').click();
+  await expect(viewSelect).toHaveValue("audit");
+  await expect(viewSelect.locator("option")).toHaveCount(3);
+
+  await expect.poll(() => readTurtle(page)).toBe(turtleBefore);
+  expect(consoleErrors).toEqual([]);
+});
+
 test("structured semantic authoringをPreviewして位置とTurtleをatomicに適用・undoする", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {

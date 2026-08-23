@@ -26,6 +26,13 @@ Sceneは毎回導出します。`projectSemanticView`はStep 1〜7だけを行�
 
 Portable documentの`imports`はhost境界の`ProjectionCatalogResolver`でraw bytesへ解決します。Coreの`resolveProjectionCatalogImports`はversion付き`catalogRef`、任意のSHA-256 integrity、取得結果のcatalog identity、runtime schemaを検証してから、同じprofileのcatalogを`catalogRef`順に結合します。Rule IDはorigin catalogとlocal IDから修飾し、template、asset、rule IDの衝突やprofile内のdefaults欠落・複数定義をlast-winsにせずerrorにします。解決済みcatalogとrule originは`ProjectionRuntimeContext`へ渡し、projection provenanceでは元のcatalogRefとlocal rule IDを復元します。
 
+Named viewのpresentation transactionはCoreの`applyViewCommand`へ集約します。追加・設定・resetは
+対象viewだけを切り出してreconciliation/layoutし、candidate採用時にだけ元documentへ戻します。
+Semantic transactionの`reconcileIriographDocumentViews`は引き続き全viewを処理し、両経路を
+混同しません。Editorはactive view切替ごとにScene/asset/validation request tokenを更新し、遅延した
+旧view結果を採用しません。Session-only filterはprojection前のqueryではなく、完成Sceneのexact ID
+subsetとして適用します。
+
 Local mockはnetwork resolverを持たないstatic fixtureなので、RDF/RDFS標準catalogとdefaultsを持たないdomain extension catalogを同じ競合規則で決定的に結合してeditorへ注入します。URIからの取得、cache、認証をmock固有のprojection処理へ混ぜません。
 
 ## Asset解決

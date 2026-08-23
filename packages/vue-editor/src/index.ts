@@ -6,4 +6,5 @@ export * from "./viewport";
 export * from "./selection";
 export * from "./edge-routing";
 export * from "./authoring-draft";
+export * from "./view-session";
 export { default as IriographDiagramCanvas } from "./components/DiagramCanvas.vue";
