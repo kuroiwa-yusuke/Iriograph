@@ -70,6 +70,16 @@ ex:a rdf:type ex:Child .
 `;
 
 describe("SemanticAccessIndex", () => {
+  it("Vue-like reactive Proxyをportable JSON境界でsnapshot化する", () => {
+    const document = documentFor(SOURCE);
+    const reactiveDocument = new Proxy(document, {});
+    const index = new SemanticAccessIndex(reactiveDocument, "proxy-revision", { locales: ["ja"] });
+
+    expect(index.searchResources("申請")[0]?.iri).toBe(`${NS}a`);
+    expect(index.document).not.toBe(reactiveDocument);
+    expect(Object.isFrozen(index.document)).toBe(true);
+  });
+
   it("locale順のlabel/commentとlabelなしIRI fallbackを返す", () => {
     const index = indexFor(SOURCE, "rev-1", ["ja-JP", "en"]);
     const a = index.describe(required(index.resourceAlias(`${NS}a`)));

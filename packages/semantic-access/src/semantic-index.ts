@@ -78,7 +78,9 @@ export class SemanticAccessIndex {
 
   constructor(document: IriographDocument, revision: string, options: SemanticAccessOptions = {}) {
     if (!revision) throw new TypeError("Semantic access revision must not be empty.");
-    this.document = deepFreeze(structuredClone(document));
+    // Portable documents are JSON values. A JSON boundary also unwraps Vue
+    // reactive proxies, which structuredClone rejects with DataCloneError.
+    this.document = deepFreeze(clonePortableDocument(document));
     this.revision = revision;
     this.#locales = normalizeLocales(options.locales ?? []);
 
@@ -459,6 +461,10 @@ export class SemanticAccessIndex {
       })
       .sort((left, right) => left.distance - right.distance || compareCodePoints(left.iri, right.iri));
   }
+}
+
+function clonePortableDocument(document: IriographDocument): IriographDocument {
+  return JSON.parse(JSON.stringify(document)) as IriographDocument;
 }
 
 function localizedText(
