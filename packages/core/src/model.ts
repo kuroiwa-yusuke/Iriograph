@@ -49,7 +49,7 @@ export type CatalogImport = {
 
 export type DiagramView = {
   viewId: string;
-  kind: "node-link";
+  kind: "node-link" | "region";
   profileRef: string;
   layoutRef: string;
   locale?: string;
@@ -65,6 +65,11 @@ export type ViewElementOverlay = {
   appearance?: {
     templateRef?: string;
     iconRef?: string;
+    /** IRI of a catalog-owned sparse style preset. */
+    styleRef?: string;
+    /** View-local sparse override. Arbitrary CSS is intentionally unsupported. */
+    style?: VisualStyleOverride;
+    /** @deprecated Use styleRef. An absolute IRI is resolved as a styleRef. */
     styleToken?: string;
     extensions?: IriographExtensions;
   };
@@ -100,7 +105,7 @@ export type EdgeEndpointAnchor = {
   position: number;
 };
 
-export type EdgeEndpointShape = NonNullable<VisualTemplate["shape"]> | "container";
+export type EdgeEndpointShape = NonNullable<VisualTemplate["shape"]> | "container" | "region";
 
 export type ProjectionCatalogV1 = {
   schemaVersion: "1";
@@ -110,6 +115,8 @@ export type ProjectionCatalogV1 = {
   profileRef: string;
   rules: ProjectionRule[];
   templates: Record<string, VisualTemplate>;
+  /** Stable IRI keys mapped to safe, sparse style presets. */
+  styles?: Record<string, VisualStyleOverride>;
   assets: Record<string, AssetDefinition>;
   defaults?: CatalogDefaults;
   extensions?: IriographExtensions;
@@ -118,6 +125,8 @@ export type ProjectionCatalogV1 = {
 export type CatalogDefaults = {
   nodeTemplateRef: string;
   edgeTemplateRef: string;
+  /** Required by hosts that create a region view. */
+  regionTemplateRef?: string;
   layoutRef: string;
   extensions?: IriographExtensions;
 };
@@ -218,18 +227,11 @@ export type ContainmentProjectionRule = {
 
 export type VisualTemplate = {
   templateRef: string;
-  structuralKind: "node" | "edge" | "container" | "annotation";
+  structuralKind: "node" | "edge" | "container" | "region" | "annotation";
   shape?: "rectangle" | "rounded-rectangle" | "circle" | "diamond";
   iconRef?: string;
   headerPosition?: "top" | "left" | "none";
-  style: {
-    fill: string;
-    stroke: string;
-    text: string;
-    accent?: string;
-    dash?: string;
-    extensions?: IriographExtensions;
-  };
+  style: VisualStyle;
   defaultSize?: {
     width: number;
     height: number;
@@ -238,7 +240,26 @@ export type VisualTemplate = {
   extensions?: IriographExtensions;
 };
 
-export type AssetMediaType = "image/svg+xml" | "image/png" | "image/webp";
+/** Renderer-neutral, validated visual style. */
+export type VisualStyle = {
+  fill: string;
+  stroke: string;
+  text: string;
+  accent?: string;
+  fillOpacity?: number;
+  strokeWidth?: number;
+  /** Safe SVG-like numeric dash list, e.g. `6 4`; never arbitrary CSS. */
+  dash?: string;
+  extensions?: IriographExtensions;
+};
+
+export type VisualStyleOverride = Partial<
+  Pick<VisualStyle,
+    "fill" | "stroke" | "text" | "accent" | "fillOpacity" | "strokeWidth" | "dash"
+  >
+> & { extensions?: IriographExtensions };
+
+export type AssetMediaType = "image/svg+xml" | "image/png" | "image/jpeg" | "image/webp";
 
 export type AssetDefinition = {
   assetRef: string;
@@ -310,8 +331,21 @@ export type ProjectedScene = {
   viewId: string;
   nodes: ProjectedNode[];
   containers: ProjectedContainer[];
+  /** Optional on legacy fixture input; Core projection always emits it. */
+  regions?: ProjectedRegion[];
+  /** All semantic memberships, independent of the hierarchy compatibility field. */
+  memberships?: ProjectedMembership[];
   edges: ProjectedEdge[];
   diagnostics: ProjectionDiagnostic[];
+};
+
+export type ProjectedMembership = {
+  semanticRef: string;
+  containerElementId: string;
+  memberElementId: string;
+  /** Region identity in a region view; absent in a hierarchy-only view. */
+  regionElementId?: string;
+  provenance: ProjectionProvenance;
 };
 
 export type ProjectedNode = {
@@ -350,6 +384,20 @@ export type ProjectedContainer = {
   provenance: ProjectionProvenance;
 };
 
+export type ProjectedRegion = {
+  elementId: string;
+  semanticRef: string;
+  structuralKind: "region";
+  label: string;
+  templateRef: string;
+  defaultSize: { width: number; height: number };
+  geometry?: ElementGeometry;
+  style: VisualStyle;
+  pinned: boolean;
+  placement: "generated" | "user";
+  provenance: ProjectionProvenance;
+};
+
 export type ProjectedEdge = {
   elementId: string;
   semanticRef: string;
@@ -374,9 +422,15 @@ export type DiagramScene = {
   height: number;
   nodes: SceneNode[];
   containers: SceneContainer[];
+  /** Optional for backwards-compatible hand-authored Scene fixtures. */
+  regions?: SceneRegion[];
+  /** Optional for backwards-compatible hand-authored Scene fixtures. */
+  memberships?: SceneMembership[];
   edges: SceneEdge[];
   diagnostics: ProjectionDiagnostic[];
 };
+
+export type SceneMembership = ProjectedMembership;
 
 export type SceneNode = {
   elementId: string;
@@ -411,6 +465,19 @@ export type SceneContainer = {
   projectionRuleId?: string;
   parentElementId?: string;
   parentProvenance?: ProjectionProvenance;
+  provenance?: ProjectionProvenance;
+};
+
+export type SceneRegion = {
+  elementId: string;
+  semanticRef: string;
+  structuralKind: "region";
+  label: string;
+  templateRef: string;
+  geometry: ElementGeometry;
+  style: VisualStyle;
+  pinned: boolean;
+  placement: "generated" | "user";
   provenance?: ProjectionProvenance;
 };
 
@@ -468,5 +535,5 @@ export type SemanticSourceUpdate = {
   document: IriographDocument;
   diagnostics: ProjectionDiagnostic[];
   /** Present when domain warnings require an explicit, source-bound retry. */
-  warningConfirmation?: import("./semantic-validation").SemanticWarningConfirmation;
+  warningConfirmation?: import("./semantic-validation.js").SemanticWarningConfirmation;
 };

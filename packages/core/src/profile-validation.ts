@@ -1,12 +1,12 @@
 import type { Quad } from "n3";
 
-import { statementIdentityFromQuad } from "./identity";
+import { statementIdentityFromQuad } from "./identity.js";
 import type {
   ProjectionCatalogV1,
   ProjectionDiagnostic,
   ProjectionOperator,
-} from "./model";
-import type { RdfsClosure } from "./rdfs-closure";
+} from "./model.js";
+import type { RdfsClosure } from "./rdfs-closure.js";
 import {
   canonicalTerm,
   compareCodePoints,
@@ -14,13 +14,13 @@ import {
   isNamedNode,
   namedObjects,
   type SemanticGraph,
-} from "./rdf";
+} from "./rdf.js";
 import {
   matchingResourceRuleCandidates,
   resolveResourceRule,
   type ResolvedProjectionRule,
-} from "./rule-resolution";
-import type { RdfRdfsVocabulary } from "./standard-catalog";
+} from "./rule-resolution.js";
+import type { RdfRdfsVocabulary } from "./standard-catalog.js";
 
 export type NamedResourcePlan = {
   semanticRef: string;
@@ -68,7 +68,7 @@ export function validateProfileStructure(
 
   validateBlankStructuralResources(graph, catalog, closure, vocabulary, diagnostics);
   validateConcreteStructureTypes(graph, catalog, closure, vocabulary, diagnostics);
-  validateMembershipParents(graph, catalog, plans, diagnostics);
+  validateMembershipParents(graph, catalog, closure, plans, diagnostics);
 
   const parentByChild = new Map<string, Array<{ parent: string; quad: Quad }>>();
   const ordinalPrefixes = new Set(
@@ -84,13 +84,12 @@ export function validateProfileStructure(
     const operator = plan.resolved?.rule.project;
     if (!operator) continue;
     if (operator.operator === "membership-container") {
-      validateMembership(graph, plan.semanticRef, operator, parentByChild, diagnostics);
+      validateMembership(graph, plan.semanticRef, operator, closure, parentByChild, diagnostics);
     } else if (operator.operator === "ordinal-sequence" || operator.operator === "alternative") {
       validateOrdinalStructure(graph, plan.semanticRef, operator, diagnostics);
     }
   }
 
-  validateUniqueParents(parentByChild, diagnostics);
   validateContainerCycles(parentByChild, diagnostics);
   validateOrphanOrdinals(graph, plans, ordinalPrefixes, diagnostics);
   return diagnostics;
@@ -99,6 +98,7 @@ export function validateProfileStructure(
 function validateMembershipParents(
   graph: SemanticGraph,
   catalog: ProjectionCatalogV1,
+  closure: RdfsClosure,
   plans: ReadonlyMap<string, NamedResourcePlan>,
   diagnostics: ProjectionDiagnostic[],
 ): void {
@@ -110,22 +110,25 @@ function validateMembershipParents(
       }> => operator.operator === "membership-container")
       .map((operator) => operator.membershipPredicate),
   );
-  for (const predicate of [...predicates].sort(compareCodePoints)) {
-    for (const quad of graph.store.getQuads(null, predicate, null, null)) {
+  for (const quad of graph.quads) {
+    if (!isNamedNode(quad.predicate)) continue;
+    const predicate = [...predicates].find((candidate) => (
+      closure.subpropertyDistance(quad.predicate.value, candidate) !== undefined
+    ));
+    if (!predicate) continue;
       const plan = isNamedNode(quad.subject) ? plans.get(quad.subject.value) : undefined;
       const operator = plan?.resolved?.rule.project;
       if (
         operator?.operator === "membership-container"
-        && operator.membershipPredicate === predicate
+        && closure.subpropertyDistance(quad.predicate.value, operator.membershipPredicate) !== undefined
       ) continue;
       diagnostics.push({
         severity: "error",
         code: "membership-parent-invalid",
-        message: `${quad.subject.value}はmembership-containerとして解決されないため${predicate}を使用できません。`,
+        message: `${quad.subject.value}はmembership-containerとして解決されないため${quad.predicate.value}を使用できません。`,
         semanticRef: isNamedNode(quad.subject) ? quad.subject.value : canonicalTerm(quad.subject),
         statementRef: statementIdentityFromQuad(quad),
       });
-    }
   }
 }
 
@@ -217,10 +220,14 @@ function validateMembership(
   graph: SemanticGraph,
   parentIri: string,
   operator: Extract<ProjectionOperator, { operator: "membership-container" }>,
+  closure: RdfsClosure,
   parentByChild: Map<string, Array<{ parent: string; quad: Quad }>>,
   diagnostics: ProjectionDiagnostic[],
 ): void {
-  for (const quad of graph.store.getQuads(parentIri, operator.membershipPredicate, null, null)) {
+  for (const quad of graph.store.getQuads(parentIri, null, null, null).filter((candidate) => (
+    isNamedNode(candidate.predicate)
+    && closure.subpropertyDistance(candidate.predicate.value, operator.membershipPredicate) !== undefined
+  ))) {
     if (!isNamedNode(quad.object)) {
       diagnostics.push({
         severity: "error",
@@ -312,56 +319,43 @@ function validateOrdinalStructure(
   }
 }
 
-function validateUniqueParents(
-  parentByChild: ReadonlyMap<string, Array<{ parent: string; quad: Quad }>>,
-  diagnostics: ProjectionDiagnostic[],
-): void {
-  for (const [child, entries] of parentByChild) {
-    const parents = [...new Set(entries.map((entry) => entry.parent))].sort(compareCodePoints);
-    if (parents.length <= 1) continue;
-    diagnostics.push({
-      severity: "error",
-      code: "multiple-container-parents",
-      message: `${child}に複数のcontainer parentがあります: ${parents.join(", ")}`,
-      semanticRef: child,
-    });
-  }
-}
-
 function validateContainerCycles(
   parentByChild: ReadonlyMap<string, Array<{ parent: string; quad: Quad }>>,
   diagnostics: ProjectionDiagnostic[],
 ): void {
-  const parent = new Map<string, string>();
+  const parents = new Map<string, string[]>();
   for (const [child, entries] of parentByChild) {
-    const parents = [...new Set(entries.map((entry) => entry.parent))];
-    if (parents.length === 1) parent.set(child, parents[0]!);
+    parents.set(child, [...new Set(entries.map((entry) => entry.parent))].sort(compareCodePoints));
   }
   const reported = new Set<string>();
-  for (const start of [...parent.keys()].sort(compareCodePoints)) {
-    const path: string[] = [];
-    const position = new Map<string, number>();
-    let current: string | undefined = start;
-    while (current !== undefined) {
-      const seenAt = position.get(current);
-      if (seenAt !== undefined) {
-        const cycle = path.slice(seenAt).sort(compareCodePoints);
-        const key = cycle.join("\n");
-        if (!reported.has(key)) {
-          reported.add(key);
-          diagnostics.push({
-            severity: "error",
-            code: "container-cycle",
-            message: `container包含にcycleがあります: ${cycle.join(", ")}`,
-            semanticRef: cycle[0],
-          });
-        }
-        break;
+  const visited = new Set<string>();
+  const active: string[] = [];
+  const activeIndex = new Map<string, number>();
+  const visit = (current: string): void => {
+    if (activeIndex.has(current)) {
+      const cycle = active.slice(activeIndex.get(current)!).sort(compareCodePoints);
+      const key = cycle.join("\n");
+      if (!reported.has(key)) {
+        reported.add(key);
+        diagnostics.push({
+          severity: "error",
+          code: "container-cycle",
+          message: `container包含にcycleがあります: ${cycle.join(", ")}`,
+          semanticRef: cycle[0],
+        });
       }
-      position.set(current, path.length);
-      path.push(current);
-      current = parent.get(current);
+      return;
     }
+    if (visited.has(current)) return;
+    activeIndex.set(current, active.length);
+    active.push(current);
+    for (const parent of parents.get(current) ?? []) visit(parent);
+    active.pop();
+    activeIndex.delete(current);
+    visited.add(current);
+  };
+  for (const start of [...parents.keys()].sort(compareCodePoints)) {
+    visit(start);
   }
 }
 

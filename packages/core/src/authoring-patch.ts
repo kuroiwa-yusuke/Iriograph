@@ -21,19 +21,19 @@ import type {
   ResolvedAuthoringCommand,
   ResolvedAuthoringContext,
   ResolvedCreateResourceCommand,
-} from "./authoring-model";
-import { statementIdentityFromQuad } from "./identity";
-import type { IriographDocument, ProjectionDiagnostic, ProjectionOperator } from "./model";
+} from "./authoring-model.js";
+import { statementIdentityFromQuad } from "./identity.js";
+import type { IriographDocument, ProjectionDiagnostic, ProjectionOperator } from "./model.js";
 import {
   canonicalQuad,
   compareCodePoints,
   isNamedNode,
   namedObjects,
   semanticGraphFromQuads,
-} from "./rdf";
-import { buildLimitedRdfsClosure } from "./rdfs-closure";
-import { resolveResourceRule } from "./rule-resolution";
-import { rdfRdfsVocabulary } from "./standard-catalog";
+} from "./rdf.js";
+import { buildLimitedRdfsClosure } from "./rdfs-closure.js";
+import { resolveResourceRule } from "./rule-resolution.js";
+import { rdfRdfsVocabulary } from "./standard-catalog.js";
 import {
   isAbsoluteIri,
   isAllowedResourceIri,
@@ -45,13 +45,13 @@ import {
   validateAuthoringGraphPolicy,
   validateLiteralInput,
   validateResolvedAuthoringContext,
-} from "./authoring-validation";
+} from "./authoring-validation.js";
 
 const { namedNode, literal, quad } = DataFactory;
 
 export type AuthoringPositionApplication = {
   resourceIri: string;
-  position: import("./authoring-model").AuthoringInitialPosition;
+  position: import("./authoring-model.js").AuthoringInitialPosition;
 };
 
 export type AuthoringCompilation = {
@@ -288,7 +288,7 @@ function applyCreateResource(
       && (
         statement.predicateIri === RDFS_MEMBER
         || isOrdinalPredicate(statement.predicateIri)
-        || isResolvedStructuralPredicate(statement.predicateIri, context)
+        || isResolvedStructuralPredicate(store, statement.predicateIri, context)
         || predicateTerm?.structural
         || predicateTerm?.kind === "structure"
       )
@@ -345,7 +345,7 @@ function isAllowedCreatedMembershipStatement(
       const operator = rule.project;
       if (
         operator.operator !== "membership-container"
-        || operator.membershipPredicate !== statement.predicateIri
+        || !isSubpropertyOf(store, statement.predicateIri, operator.membershipPredicate)
       ) continue;
       if (store.countQuads(containerIri, RDF_TYPE, rule.match.iri, null) > 0) return true;
     }
@@ -366,7 +366,7 @@ function applySetProperty(
     command.predicateIri === RDF_TYPE
     || command.predicateIri === RDFS_MEMBER
     || isOrdinalPredicate(command.predicateIri)
-    || isResolvedStructuralPredicate(command.predicateIri, context)
+    || isResolvedStructuralPredicate(store, command.predicateIri, context)
     || term?.structural
     || term?.kind === "structure"
   ) {
@@ -399,7 +399,7 @@ function applyConnectResources(
     command.predicateIri === RDF_TYPE
     || command.predicateIri === RDFS_MEMBER
     || isOrdinalPredicate(command.predicateIri)
-    || isResolvedStructuralPredicate(command.predicateIri, context)
+    || isResolvedStructuralPredicate(store, command.predicateIri, context)
     || term?.structural
     || term?.kind === "structure"
   ) {
@@ -979,7 +979,7 @@ function hasResolvedStructureConfig(
     if (
       command.type === "set-membership"
       && operator.operator === "membership-container"
-      && operator.membershipPredicate === command.predicateIri
+      && closure.subpropertyDistance(command.predicateIri, operator.membershipPredicate) !== undefined
     ) return true;
     if (
       command.type === "set-sequence"
@@ -997,6 +997,7 @@ function hasResolvedStructureConfig(
 }
 
 function isResolvedStructuralPredicate(
+  store: Store,
   predicateIri: string,
   context: ResolvedAuthoringContext,
 ): boolean {
@@ -1005,7 +1006,7 @@ function isResolvedStructuralPredicate(
       const operator = rule.project;
       if (
         operator.operator === "membership-container"
-        && operator.membershipPredicate === predicateIri
+        && isSubpropertyOf(store, predicateIri, operator.membershipPredicate)
       ) return true;
       if (
         (operator.operator === "ordinal-sequence" || operator.operator === "alternative")
@@ -1015,6 +1016,12 @@ function isResolvedStructuralPredicate(
     }
   }
   return false;
+}
+
+function isSubpropertyOf(store: Store, predicateIri: string, ancestorIri: string): boolean {
+  const graph = semanticGraphFromQuads(store.getQuads(null, null, null, null));
+  return buildLimitedRdfsClosure(graph, rdfRdfsVocabulary)
+    .subpropertyDistance(predicateIri, ancestorIri) !== undefined;
 }
 
 function graphContainsNamedTerm(store: Store, iri: string): boolean {

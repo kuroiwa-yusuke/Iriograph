@@ -7,11 +7,12 @@ IriographはESM packageとして次を同時にreleaseします。
 | Package | 公開contract |
 |---|---|
 | `@iriograph/core` | model、schema、projection、validation、layout、semantic transaction |
+| `@iriograph/semantic-access` | label-first index、revision alias、read API、Core semantic transaction bridge |
 | `@iriograph/layout-elk` | ELK Layered layout adapter、bundled engine、host/Worker engine注入contract |
 | `@iriograph/vue-editor` | Vue componentと`@iriograph/vue-editor/styles.css` |
 
-Vue editorとELK adapterは同じreleaseの`@iriograph/core`へexact versionで依存し、Vue 3はhostが提供する
-peer dependencyとします。0.x期間は3 packageをlockstep versionでreleaseします。Packageは
+Semantic access、Vue editor、ELK adapterは同じreleaseの`@iriograph/core`へexact versionで依存し、Vue 3はhostが提供する
+peer dependencyとします。0.x期間は4 packageをlockstep versionでreleaseします。Packageは
 Node.js 20.19以降でbuild・検証し、browser hostからESMとして利用します。
 
 `@iriograph/layout-elk`は任意導入packageで、runtime dependencyのELK.jsは
@@ -23,9 +24,15 @@ release前に確認します。CoreとVue editorはELKへ依存しません。
 実release前に権利者がlicenseを決定し、metadataとlicense本文を同時に更新します。
 
 Release前には各packageを`npm pack`し、repository workspace外の一時consumerへtarballだけを
-installします。そのconsumerでcore、ELK adapter、Vue editorのimport、CSS subpath、型宣言、Vue peer、
+installします。そのconsumerでcore、semantic access、ELK adapter、Vue editorのimport、CSS subpath、型宣言、Vue peer、
 production buildを検証します。Workspace symlinkや`development` conditionでpackage内sourceを
-参照することは配布contractに含めません。
+参照することは配布contractに含めません。Core、semantic access、ELK adapterの公開ESMは
+Node.jsからbundlerなしでも直接importできることを検証し、配布JavaScript内の相対specifierは
+`.js`拡張子を含めます。
+
+Private releaseはAWS CodeArtifactの`kuroxiom/kuroxiom-packages`へ`@iriograph` scopeで公開します。
+`packages-v<version>` tagまたは明示workflow dispatchをtriggerとし、利用hostは公開確認後にexact versionで
+依存します。Hostへpackage sourceを複製しません。
 
 ## SemVer 0.x
 

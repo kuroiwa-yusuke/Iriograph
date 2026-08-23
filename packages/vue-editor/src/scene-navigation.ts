@@ -1,6 +1,6 @@
 import type { DiagramScene } from "@iriograph/core";
 
-export type SceneNavigatorKind = "container" | "node" | "edge";
+export type SceneNavigatorKind = "container" | "region" | "node" | "edge";
 
 export type SceneNavigatorItem = {
   elementId: string;
@@ -10,8 +10,9 @@ export type SceneNavigatorItem = {
 
 const KIND_ORDER: Record<SceneNavigatorKind, number> = {
   container: 0,
-  node: 1,
-  edge: 2,
+  region: 1,
+  node: 2,
+  edge: 3,
 };
 
 /** A projection-independent order used by focus movement and range selection. */
@@ -20,6 +21,11 @@ export function sceneNavigatorItems(scene: DiagramScene): SceneNavigatorItem[] {
     ...scene.containers.map((element) => ({
       elementId: element.elementId,
       kind: "container" as const,
+      label: element.label,
+    })),
+    ...(scene.regions ?? []).map((element) => ({
+      elementId: element.elementId,
+      kind: "region" as const,
       label: element.label,
     })),
     ...scene.nodes.map((element) => ({

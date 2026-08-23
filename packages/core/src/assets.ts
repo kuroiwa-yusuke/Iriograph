@@ -1,10 +1,10 @@
-import { sortDiagnostics } from "./diagnostics";
+import { sortDiagnostics } from "./diagnostics.js";
 import type {
   AssetDefinition,
   AssetMediaType,
   DiagramScene,
   ProjectionDiagnostic,
-} from "./model";
+} from "./model.js";
 
 export type AssetPolicy = {
   allowedMediaTypes: readonly AssetMediaType[];

@@ -68,6 +68,78 @@ describe("RDF/RDFS standard projection", () => {
     });
   });
 
+  it("複数container membershipをsemanticとして保持しhierarchy parentへ縮約しない", () => {
+    const source = `
+      @prefix : <urn:test:multi:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :contains rdfs:subPropertyOf rdfs:member ; rdfs:label "Contains" ; rdfs:comment "Domain membership" .
+      :left a rdf:Bag ; rdfs:label "Left" ; :contains :shared .
+      :right a rdf:Bag ; rdfs:label "Right" ; rdfs:member :shared .
+      :shared rdfs:label "Shared" .
+    `;
+    const hierarchy = projectSemanticView(documentFor(source), standardRdfRdfsCatalog);
+    const shared = hierarchy.nodes.find((node) => node.semanticRef === "urn:test:multi:shared")!;
+
+    expect(hierarchy.nodes.some((node) => node.semanticRef === "urn:test:multi:shared"))
+      .toBe(true);
+    expect(hierarchy.containers).toHaveLength(2);
+    expect(hierarchy.memberships).toHaveLength(2);
+    expect(hierarchy.memberships?.map((membership) => membership.containerElementId))
+      .toEqual([...hierarchy.memberships!.map((membership) => membership.containerElementId)].sort());
+    expect(hierarchy.memberships).toContainEqual(expect.objectContaining({
+      semanticRef: statementIdentity(
+        "urn:test:multi:left",
+        "urn:test:multi:contains",
+        "urn:test:multi:shared",
+      ),
+      provenance: expect.objectContaining({
+        editCapability: expect.objectContaining({ predicate: "urn:test:multi:contains" }),
+      }),
+    }));
+    expect(shared.parentElementId).toBeUndefined();
+    expect(hierarchy.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "warning",
+      code: "multiple-container-memberships-not-hierarchical",
+    }));
+    expect(hierarchy.diagnostics.some((item) => item.code === "multiple-container-parents"))
+      .toBe(false);
+
+    const regionDocument = documentFor(source);
+    regionDocument.views[0]!.kind = "region";
+    const region = projectSemanticView(regionDocument, standardRdfRdfsCatalog);
+    expect(region.containers).toEqual([]);
+    expect(region.regions).toHaveLength(2);
+    expect(region.memberships?.every((membership) => (
+      membership.regionElementId === membership.containerElementId
+    ))).toBe(true);
+    expect(region.diagnostics).toEqual([]);
+  });
+
+  it("appearanceをtemplate、catalog styleRef、view overrideの順に安全にmergeする", () => {
+    const document = documentFor(`
+      @prefix : <urn:test:style:> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :a rdfs:label "A" .
+    `);
+    document.views[0]!.overlay.a = {
+      semanticRef: "urn:test:style:a",
+      appearance: {
+        styleRef: "urn:iriograph:style:region:overlap:1",
+        style: { fill: "#112233", strokeWidth: 4 },
+      },
+    };
+    const scene = projectSemanticView(document, standardRdfRdfsCatalog);
+    expect(scene.nodes[0]?.style).toMatchObject({
+      fill: "#112233",
+      stroke: "#7c3aed",
+      text: "#4c1d95",
+      fillOpacity: 0.2,
+      strokeWidth: 4,
+      dash: "6 4",
+    });
+  });
+
   it("ordinal-sequence ruleの任意edge templateをderived edgeへ適用する", () => {
     const edgeTemplateRef = "urn:iriograph:template:edge:reference:1";
     const catalog: ProjectionCatalogV1 = {
@@ -118,7 +190,6 @@ describe("RDF/RDFS standard projection", () => {
 
     expect(scene.nodes).toEqual([]);
     expect([...codes]).toEqual(expect.arrayContaining([
-      "multiple-container-parents",
       "container-cycle",
       "non-contiguous-ordinals",
       "alternative-too-few-members",

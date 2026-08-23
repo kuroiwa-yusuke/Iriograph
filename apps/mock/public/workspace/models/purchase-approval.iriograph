@@ -6,15 +6,11 @@
     "format": "text/turtle",
     "baseIri": "urn:iriograph:demo:",
     "authoringProfileRef": "urn:iriograph:authoring-profile:workflow-mock@1",
-    "source": "@prefix wf: <urn:iriograph:demo:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\nwf:requesterLane a rdf:Bag ;\n  rdfs:label \"申請者\"@ja ;\n  rdfs:member wf:start, wf:submit .\n\nwf:operationsLane a rdf:Bag ;\n  rdfs:label \"業務オペレーション\"@ja ;\n  rdfs:member wf:review, wf:approvalPolicy, wf:gateway, wf:register, wf:rework, wf:end .\n\nwf:mainFlow a rdf:Seq ;\n  rdfs:label \"購入申請フロー\"@ja ;\n  rdf:_1 wf:start ;\n  rdf:_2 wf:submit ;\n  rdf:_3 wf:review ;\n  rdf:_4 wf:gateway .\n\nwf:gateway a rdf:Alt ;\n  rdfs:label \"承認？\"@ja ;\n  rdf:_1 wf:approvedPath ;\n  rdf:_2 wf:reworkPath .\n\nwf:approvedPath a rdf:Seq ;\n  rdfs:label \"承認\"@ja ;\n  rdf:_1 wf:register ;\n  rdf:_2 wf:end .\n\nwf:reworkPath a rdf:Seq ;\n  rdfs:label \"差戻し\"@ja ;\n  rdf:_1 wf:rework ;\n  rdf:_2 wf:review .\n\nwf:start rdfs:label \"開始\"@ja .\n\nwf:submit rdfs:label \"申請を提出\"@ja .\n\nwf:review rdfs:label \"内容を審査\"@ja ;\n  rdfs:seeAlso wf:approvalPolicy ;\n  wf:relatedTo wf:approvalPolicy ;\n  wf:retry wf:review .\n\nwf:approvalPolicy rdfs:label \"承認ポリシー\"@ja .\n\nwf:register rdfs:label \"承認結果を登録\"@ja .\n\nwf:rework rdfs:label \"内容を修正\"@ja .\n\nwf:end rdfs:label \"完了\"@ja .\n"
+    "source": "@prefix wf: <urn:iriograph:demo:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\nwf:g-01 a rdf:Bag ;\n  rdfs:label \"申請者\"@ja ;\n  rdfs:comment \"申請を開始し提出する担当領域\"@ja ;\n  rdfs:member wf:n-01, wf:n-02 .\n\nwf:g-02 a rdf:Bag ;\n  rdfs:label \"業務オペレーション\"@ja ;\n  rdfs:comment \"審査から登録までを担当する領域\"@ja ;\n  rdfs:member wf:n-03, wf:n-04, wf:c-01, wf:n-05, wf:n-06, wf:n-07 .\n\nwf:g-03 a rdf:Bag ;\n  rdfs:label \"監査対象\"@ja ;\n  rdfs:comment \"業務領域と直交して監査対象をまとめる領域\"@ja ;\n  wf:p-03 wf:n-03, wf:n-04 .\n\nwf:p-03 rdfs:subPropertyOf rdfs:member ;\n  rdfs:label \"監査対象として含む\"@ja ;\n  rdfs:comment \"標準の包含を特殊化し、元predicateを保持する業務語彙\"@ja .\n\nwf:p-01 rdfs:label \"関連する\"@ja ;\n  rdfs:comment \"業務要素間の一般的な関連\"@ja .\n\nwf:p-02 rdfs:label \"再試行\"@ja ;\n  rdfs:comment \"同じ処理へ戻ってやり直す関係\"@ja .\n\nwf:s-01 a rdf:Seq ;\n  rdfs:label \"購入申請フロー\"@ja ;\n  rdf:_1 wf:n-01 ;\n  rdf:_2 wf:n-02 ;\n  rdf:_3 wf:n-03 ;\n  rdf:_4 wf:c-01 .\n\nwf:c-01 a rdf:Alt ;\n  rdfs:label \"承認？\"@ja ;\n  rdf:_1 wf:s-02 ;\n  rdf:_2 wf:s-03 .\n\nwf:s-02 a rdf:Seq ;\n  rdfs:label \"承認\"@ja ;\n  rdf:_1 wf:n-05 ;\n  rdf:_2 wf:n-07 .\n\nwf:s-03 a rdf:Seq ;\n  rdfs:label \"差戻し\"@ja ;\n  rdf:_1 wf:n-06 ;\n  rdf:_2 wf:n-03 .\n\nwf:n-01 rdfs:label \"開始\"@ja .\n\nwf:n-02 rdfs:label \"申請を提出\"@ja .\n\nwf:n-03 rdfs:label \"内容を審査\"@ja ;\n  rdfs:comment \"購入内容と承認条件を確認する\"@ja ;\n  rdfs:seeAlso wf:n-04 ;\n  wf:p-01 wf:n-04 ;\n  wf:p-02 wf:n-03 .\n\nwf:n-04 rdfs:label \"承認ポリシー\"@ja .\n\nwf:n-05 rdfs:label \"承認結果を登録\"@ja .\n\nwf:n-06 rdfs:label \"内容を修正\"@ja .\n\nwf:n-07 rdfs:label \"完了\"@ja .\n"
   },
   "imports": [
-    {
-      "catalogRef": "urn:iriograph:catalog:rdf-rdfs@1"
-    },
-    {
-      "catalogRef": "urn:iriograph:catalog:workflow-mock@1"
-    }
+    { "catalogRef": "urn:iriograph:catalog:rdf-rdfs@1" },
+    { "catalogRef": "urn:iriograph:catalog:workflow-mock@1" }
   ],
   "views": [
     {
@@ -25,52 +21,49 @@
       "locale": "ja",
       "overlay": {
         "lane:requester": {
-          "semanticRef": "urn:iriograph:demo:requesterLane",
+          "semanticRef": "urn:iriograph:demo:g-01",
           "geometry": { "x": 42, "y": 44, "width": 1036, "height": 196 },
           "pinned": true,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:lane:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:lane:1" }
         },
         "lane:operations": {
-          "semanticRef": "urn:iriograph:demo:operationsLane",
+          "semanticRef": "urn:iriograph:demo:g-02",
           "geometry": { "x": 42, "y": 258, "width": 1036, "height": 364 },
           "pinned": true,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:lane:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:lane:1" }
+        },
+        "lane:audit": {
+          "semanticRef": "urn:iriograph:demo:g-03",
+          "geometry": { "x": 42, "y": 640, "width": 520, "height": 176 },
+          "pinned": true,
+          "placement": "generated",
+          "appearance": { "templateRef": "urn:iriograph:template:lane:1" }
         },
         "node:start": {
-          "semanticRef": "urn:iriograph:demo:start",
+          "semanticRef": "urn:iriograph:demo:n-01",
           "geometry": { "x": 92, "y": 112, "width": 58, "height": 58 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:start-event:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:start-event:1" }
         },
         "node:submit": {
-          "semanticRef": "urn:iriograph:demo:submit",
+          "semanticRef": "urn:iriograph:demo:n-02",
           "geometry": { "x": 220, "y": 102, "width": 170, "height": 76 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:user-task:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:user-task:1" }
         },
         "node:review": {
-          "semanticRef": "urn:iriograph:demo:review",
+          "semanticRef": "urn:iriograph:demo:n-03",
           "geometry": { "x": 220, "y": 344, "width": 170, "height": 76 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:user-task:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:user-task:1" }
         },
         "node:policy": {
-          "semanticRef": "urn:iriograph:demo:approvalPolicy",
+          "semanticRef": "urn:iriograph:demo:n-04",
           "geometry": { "x": 220, "y": 486, "width": 168, "height": 72 },
           "pinned": false,
           "placement": "generated",
@@ -80,91 +73,120 @@
           }
         },
         "node:gateway": {
-          "semanticRef": "urn:iriograph:demo:gateway",
+          "semanticRef": "urn:iriograph:demo:c-01",
           "geometry": { "x": 478, "y": 340, "width": 84, "height": 84 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:gateway:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:gateway:1" }
         },
         "node:register": {
-          "semanticRef": "urn:iriograph:demo:register",
+          "semanticRef": "urn:iriograph:demo:n-05",
           "geometry": { "x": 664, "y": 318, "width": 170, "height": 76 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:service-task:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:service-task:1" }
         },
         "node:rework": {
-          "semanticRef": "urn:iriograph:demo:rework",
+          "semanticRef": "urn:iriograph:demo:n-06",
           "geometry": { "x": 664, "y": 472, "width": 170, "height": 76 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:user-task:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:user-task:1" }
         },
         "node:end": {
-          "semanticRef": "urn:iriograph:demo:end",
+          "semanticRef": "urn:iriograph:demo:n-07",
           "geometry": { "x": 940, "y": 326, "width": 58, "height": 58 },
           "pinned": false,
           "placement": "generated",
-          "appearance": {
-            "templateRef": "urn:iriograph:template:end-event:1"
-          }
+          "appearance": { "templateRef": "urn:iriograph:template:end-event:1" }
         }
       }
     },
     {
-      "viewId": "top-down",
-      "kind": "node-link",
+      "viewId": "regions",
+      "kind": "region",
       "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
-      "layoutRef": "urn:iriograph:layout:elk-layered-tb:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
       "locale": "ja",
       "overlay": {
-        "top:lane-requester": {
-          "semanticRef": "urn:iriograph:demo:requesterLane",
-          "appearance": { "templateRef": "urn:iriograph:template:lane:1" }
+        "region:requester": {
+          "semanticRef": "urn:iriograph:demo:g-01",
+          "geometry": { "x": 48, "y": 54, "width": 520, "height": 242 },
+          "pinned": true,
+          "placement": "user",
+          "appearance": { "style": { "fill": "#dbeafe", "stroke": "#2563eb", "text": "#1e3a8a", "fillOpacity": 0.18 } }
         },
-        "top:lane-operations": {
-          "semanticRef": "urn:iriograph:demo:operationsLane",
-          "appearance": { "templateRef": "urn:iriograph:template:lane:1" }
+        "region:operations": {
+          "semanticRef": "urn:iriograph:demo:g-02",
+          "geometry": { "x": 338, "y": 178, "width": 742, "height": 426 },
+          "pinned": true,
+          "placement": "user",
+          "appearance": { "style": { "fill": "#dcfce7", "stroke": "#15803d", "text": "#14532d", "fillOpacity": 0.18 } }
         },
-        "top:start": {
-          "semanticRef": "urn:iriograph:demo:start",
+        "region:audit": {
+          "semanticRef": "urn:iriograph:demo:g-03",
+          "geometry": { "x": 278, "y": 238, "width": 444, "height": 252 },
+          "pinned": true,
+          "placement": "user",
+          "appearance": { "styleRef": "urn:iriograph:style:region:overlap:1" }
+        },
+        "region:start": {
+          "semanticRef": "urn:iriograph:demo:n-01",
+          "geometry": { "x": 92, "y": 118, "width": 58, "height": 58 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:start-event:1" }
         },
-        "top:submit": {
-          "semanticRef": "urn:iriograph:demo:submit",
+        "region:submit": {
+          "semanticRef": "urn:iriograph:demo:n-02",
+          "geometry": { "x": 224, "y": 106, "width": 170, "height": 76 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:user-task:1" }
         },
-        "top:review": {
-          "semanticRef": "urn:iriograph:demo:review",
+        "region:review": {
+          "semanticRef": "urn:iriograph:demo:n-03",
+          "geometry": { "x": 430, "y": 274, "width": 170, "height": 76 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:user-task:1" }
         },
-        "top:policy": {
-          "semanticRef": "urn:iriograph:demo:approvalPolicy",
+        "region:policy": {
+          "semanticRef": "urn:iriograph:demo:n-04",
+          "geometry": { "x": 486, "y": 382, "width": 168, "height": 72 },
+          "pinned": true,
+          "placement": "user",
           "appearance": {
             "templateRef": "urn:iriograph:template:reference:1",
             "iconRef": "urn:iriograph:mock-workspace:asset:approval-policy"
           }
         },
-        "top:gateway": {
-          "semanticRef": "urn:iriograph:demo:gateway",
+        "region:gateway": {
+          "semanticRef": "urn:iriograph:demo:c-01",
+          "geometry": { "x": 748, "y": 250, "width": 84, "height": 84 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:gateway:1" }
         },
-        "top:register": {
-          "semanticRef": "urn:iriograph:demo:register",
+        "region:register": {
+          "semanticRef": "urn:iriograph:demo:n-05",
+          "geometry": { "x": 846, "y": 332, "width": 170, "height": 76 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:service-task:1" }
         },
-        "top:rework": {
-          "semanticRef": "urn:iriograph:demo:rework",
+        "region:rework": {
+          "semanticRef": "urn:iriograph:demo:n-06",
+          "geometry": { "x": 746, "y": 474, "width": 170, "height": 76 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:user-task:1" }
         },
-        "top:end": {
-          "semanticRef": "urn:iriograph:demo:end",
+        "region:end": {
+          "semanticRef": "urn:iriograph:demo:n-07",
+          "geometry": { "x": 986, "y": 430, "width": 58, "height": 58 },
+          "pinned": true,
+          "placement": "user",
           "appearance": { "templateRef": "urn:iriograph:template:end-event:1" }
         }
       }

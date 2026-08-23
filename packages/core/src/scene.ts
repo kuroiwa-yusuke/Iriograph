@@ -1,15 +1,15 @@
 import type {
   MergedProjectionCatalog,
   ProjectionRuleOrigin,
-} from "./catalog-resolution";
-import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics";
+} from "./catalog-resolution.js";
+import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics.js";
 import {
   layoutProjectedScene,
   type LayoutAdapterRegistry,
   type LayoutDiagnostic,
   type LayoutMode,
-} from "./layout";
-import { containerContentInsets } from "./container-content";
+} from "./layout.js";
+import { containerContentInsets } from "./container-content.js";
 import type {
   DiagramScene,
   IriographDocument,
@@ -20,9 +20,10 @@ import type {
   ProjectionProvenance,
   SceneContainer,
   SceneEdge,
+  SceneRegion,
   SceneNode,
-} from "./model";
-import { projectSemanticView } from "./projection";
+} from "./model.js";
+import { projectSemanticView } from "./projection.js";
 
 export type ResolvedProfileProjection = {
   catalog: ProjectionCatalogV1;
@@ -107,15 +108,17 @@ export async function layoutProjectedDiagramScene(
     layoutRef,
     mode,
     scene: {
-      elements: [...projected.containers, ...projected.nodes].map((element) => ({
+      elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
         elementId: element.elementId,
         structuralKind: element.structuralKind,
-        parentElementId: element.parentElementId,
+        parentElementId: element.structuralKind === "region" ? undefined : element.parentElementId,
         geometry: element.geometry,
         size: element.defaultSize,
         pinned: element.pinned,
         placement: element.placement,
-        shape: element.structuralKind === "container" ? "container" : element.shape,
+        shape: element.structuralKind === "container"
+          ? "container"
+          : element.structuralKind === "region" ? "region" : element.shape,
         contentInsets: element.structuralKind === "container"
           ? containerContentInsets(element.headerPosition)
           : undefined,
@@ -128,6 +131,12 @@ export async function layoutProjectedDiagramScene(
         sourceAnchor: edge.sourceAnchor,
         targetAnchor: edge.targetAnchor,
         routingPlacement: edge.routingPlacement,
+      })),
+      memberships: (projected.memberships ?? []).map((membership) => ({
+        semanticRef: membership.semanticRef,
+        containerElementId: membership.containerElementId,
+        memberElementId: membership.memberElementId,
+        regionElementId: membership.regionElementId,
       })),
     },
   }, registry);
@@ -171,6 +180,18 @@ export async function layoutProjectedDiagramScene(
     parentProvenance: container.parentProvenance,
     provenance: container.provenance,
   }));
+  const regions: SceneRegion[] = (projected.regions ?? []).map((region) => ({
+    elementId: region.elementId,
+    semanticRef: region.semanticRef,
+    structuralKind: "region",
+    label: region.label,
+    templateRef: region.templateRef,
+    geometry: layout.geometries[region.elementId]!,
+    style: region.style,
+    pinned: region.pinned,
+    placement: region.placement,
+    provenance: region.provenance,
+  }));
   const edges: SceneEdge[] = projected.edges.map((edge) => {
     const route = layout.routes[edge.elementId];
     const waypoints = edge.routingPlacement === "user" && edge.waypoints?.length
@@ -200,6 +221,11 @@ export async function layoutProjectedDiagramScene(
     height: layout.height,
     nodes,
     containers,
+    regions,
+    memberships: (projected.memberships ?? []).map((membership) => ({
+      ...membership,
+      provenance: { ...membership.provenance },
+    })),
     edges,
     diagnostics,
   };
@@ -233,6 +259,14 @@ export function remapProjectedRuleOrigins(
       provenance: remap(container.provenance)!,
       parentProvenance: remap(container.parentProvenance),
     })),
+    regions: (projected.regions ?? []).map((region) => ({
+      ...region,
+      provenance: remap(region.provenance)!,
+    })),
+    memberships: (projected.memberships ?? []).map((membership) => ({
+      ...membership,
+      provenance: remap(membership.provenance)!,
+    })),
     edges: projected.edges.map((edge) => ({
       ...edge,
       provenance: remap(edge.provenance)!,
@@ -260,6 +294,8 @@ function emptyScene(
     height: 0,
     nodes: [],
     containers: [],
+    regions: [],
+    memberships: [],
     edges: [],
     diagnostics: sortDiagnostics(diagnostics),
   };

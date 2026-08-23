@@ -3,7 +3,7 @@
 Iriographは、意味グラフをTurtleで保持し、RDF/RDFSを基底にしたcatalog規則から編集可能な図へ投影するpackageです。
 意味の正本と表示調整を分離したまま、業務フロー、関係図、アイコンを含むリッチな図を扱います。
 
-このrepositoryには、フレームワーク非依存のcore、任意導入のELK layout adapter、埋め込み用Vue editor、local mock hostがあります。
+このrepositoryには、フレームワーク非依存のcore、意味検索・安全な書込wrapper、任意導入のELK layout adapter、埋め込み用Vue editor、local mock hostがあります。
 
 ## Local mock
 
@@ -31,8 +31,9 @@ npm run verify
 ## Package境界
 
 - `@iriograph/core`: document model、Turtle parse、catalog投影、actor別controlled source write、検証、display reconciliation、semantic command preview/apply
+- `@iriograph/semantic-access`: label/comment検索、describe・近傍/subgraph、revision alias、Core commandへの安全なwrite bridge
 - `@iriograph/layout-elk`: compound graph、port、直交routingを扱う任意導入のELK Layered adapter。Worker engineをhostから注入可能
-- `@iriograph/vue-editor`: 表示overlayと意味グラフを分離し、右Inspectorのpreview→明示Applyで編集する埋め込みVue component
+- `@iriograph/vue-editor`: 表示overlayと意味グラフを分離し、context menu/detailsからpreview→明示Applyで編集する埋め込みVue component
 - `@iriograph/mock`: localStorage、workspace asset、static authoring context/IRI allocatorを接続したlocal host例
 
 `@iriograph/vue-editor`はworkspace、HTTP、認証、永続化を知りません。hostは`v-model`でdocumentを受け取り、`save` eventを任意の保存APIへ接続します。

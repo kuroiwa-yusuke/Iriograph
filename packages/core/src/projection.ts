@@ -15,14 +15,14 @@ import type {
   SceneNode,
   ViewElementOverlay,
   VisualTemplate,
-} from "./model";
-import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics";
-import { executeProjectionOperators } from "./operators";
-import { validateProfileStructure } from "./profile-validation";
-import { buildLimitedRdfsClosure } from "./rdfs-closure";
-import { parseSemanticGraph } from "./rdf";
-import { validateProjectionCatalog } from "./rule-resolution";
-import { rdfRdfsVocabulary } from "./standard-catalog";
+} from "./model.js";
+import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics.js";
+import { executeProjectionOperators } from "./operators.js";
+import { validateProfileStructure } from "./profile-validation.js";
+import { buildLimitedRdfsClosure } from "./rdfs-closure.js";
+import { parseSemanticGraph } from "./rdf.js";
+import { validateProjectionCatalog } from "./rule-resolution.js";
+import { rdfRdfsVocabulary } from "./standard-catalog.js";
 
 const { namedNode } = DataFactory;
 
@@ -312,6 +312,8 @@ function projectLegacyIriographDocument(
     height: 680,
     nodes: [...nodeRecords.values()],
     containers: [...containerRecords.values()],
+    regions: [],
+    memberships: [],
     edges,
     diagnostics,
   };
@@ -331,6 +333,8 @@ function emptyProjectedScene(
     viewId,
     nodes: [],
     containers: [],
+    regions: [],
+    memberships: [],
     edges: [],
     diagnostics: sortDiagnostics(diagnostics),
   };

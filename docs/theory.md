@@ -10,7 +10,7 @@ Iriographは「意味グラフを図として編集・検証・再利用する�
 
 一つのportable JSON documentにTurtle文字列とview情報を持たせます。意味と表示を別ファイルにすると参照整合性や配布単位が複雑になり、display自体をtripleにすると座標変更がsemantic revisionへ混入します。JSON envelope内で分離すると、同じ配布単位のままtransaction境界を保てます。
 
-display overlayが保持するのは、geometry、pin、edge routing、明示的なtemplate/icon overrideなど、catalogとlayoutから復元できない、またはユーザーが意図的に固定した情報です。色や既定iconなどの生成可能な情報はcatalogを正本にします。
+display overlayが保持するのは、geometry、pin、edge routing、明示的なtemplate/icon/style overrideなど、catalogとlayoutから復元できない、またはユーザーが意図的に固定した情報です。既定色や既定iconはcatalogを正本にし、利用者が個別に変更した安全な色・透明度・線幅等だけをsparse overrideとして保持します。任意CSSや実行可能なstyle文字列は保存しません。
 
 Turtleへ置くdomain resourceとdomain vocabularyも区別します。`rdf:type`は見た目を選ぶ印ではなく、LLM、validation、query、推論、再利用で必要な分類だけを表します。表示だけのstart/task/gateway種別は各named viewのoverlayからcatalog templateを参照し、appearanceを正当化するためだけのtypeをTurtleへ追加しません。詳細は[semantic-notation.md](./semantic-notation.md)を正本とします。
 
@@ -23,7 +23,9 @@ Turtleへ置くdomain resourceとdomain vocabularyも区別します。`rdf:type
 - edge作成ではpredicateを必須とし、直接IRI-object tripleまたはprojection capabilityが定義するgraph patchを作る。便宜的な`:relation`のような語彙を暗黙に生成しない。
 - 包含編集では`rdf:Bag`resourceと`rdfs:member`等、選択したcapabilityの意味構造を書く。nodeをcontainer内へdragするだけの操作はpresentationであり、意味的所属を暗黙に追加しない。
 
-これらの操作はサイドバーで編集draftとして組み立てます。Canvas上で空き位置をclickする、node間を接続する、containerを指定するといったgestureはdraftの初期値を作るだけで、意味を確定しません。Editorはdraftから追加・削除予定のtripleまたは構造graph patchをpreviewし、validation結果とともに提示し、ユーザーの明示適用で初めてsemantic transactionをcommitします。適用前に表示するghost node、edge、containerはephemeral UI stateであり、Scene、overlay、undo対象documentへ保存しません。
+これらの操作はCanvasの右click、選択objectの操作menu、作成paletteから意図を選び、右Inspectorまたはdialogへ編集draftを開いて組み立てます。Canvas上で空き位置をclickする、node間を接続する、領域を指定するといったgestureはdraftの初期値を作るだけで、意味を確定しません。Editorはdraftから追加・削除予定のtripleまたは構造graph patchと投影後のrich previewを生成し、validation結果とともに提示し、ユーザーの明示適用で初めてsemantic transactionをcommitします。適用前に表示するghost node、edge、containerはephemeral UI stateであり、Scene、overlay、undo対象documentへ保存しません。
+
+利用者はTurtle、RDF/RDFS、完全IRIを知らなくても操作できることをUIの前提にします。Resource、class、predicateはlabelと説明を主表示し、Canvas上の対象選択を優先します。IRIはidentity、同名候補の識別、詳細tooltip、Advanced入力に残します。属性は選択objectのdetails dialog、関係は接続gestureとpredicate card、削除は対象objectのmenuから始めます。内部command名、ordinal、capability graph patchは通常UIへ露出せず、「順序」「選択肢」「定義済み操作」の利用者語彙へ翻訳します。
 
 Resource削除は、他resourceからの参照や構造membershipが残る場合には既定で拒否します。Editorが影響するtripleを列挙してpreviewし、ユーザーがcascade削除を明示した場合だけ一括削除できます。`rdf:Seq`または`rdf:Alt`のmemberを削除する場合は、残るordinal predicateを一つのgraph patchで再採番し、欠番のある途中状態を正本にしません。Altの最低member数など、再構成後の制約を満たせなければtransaction全体を拒否します。
 
@@ -50,6 +52,8 @@ Comment、空白、改行位置、property listのまとめ方、triple記述順
 一つのsemantic graphには複数のnamed viewを持てます。ユーザーは保存済みのviewを選択し、各viewのprofile、layout、locale、overlayを独立して利用します。どのsemantic構造をcontainer、sequence、alternative等として表示するかはview profileが決めます。
 
 v1はSPARQL queryや汎用filter editorをview定義へ持ちません。編集作業中に要素を一時的に隠す操作はeditor session stateであり、semantic graphやportable documentを変更しません。永続的に異なる意味範囲を切り出す仕組みは、named viewとprofileの実利用を確認してから拡張します。
+
+包含relationは意味グラフ上で多対多になり得ます。一意parentを要求する階層container表示と、複数membershipを半透明の重なり領域として示すregion表示は別の空間文法として扱います。Node-link viewは互換な単一parentの場合だけ階層配置を使い、すべてのmembership自体は失いません。Region viewは各集合を独立した領域として置き、重なりへ配置されたresourceが複数集合に属することを表します。Geometryの重なりからsemantic membershipを推論せず、意味と見た目が食い違う場合は警告と明示修正を提示します。
 
 ## Mermaid、draw.ioとの違い
 
@@ -84,7 +88,9 @@ resolverは取得ポリシーの境界でもあります。許可scheme、origin
 
 ## LLMとの境界
 
-LLMへ渡す主対象は`semantic.source`のTurtleです。これにauthoring profileから抽出した使用可能語彙と、必要なprojection capabilityだけを付与します。TurtleにはLLMの理解・検証・再利用に必要な意味だけを置き、template選択だけのtypeやoverlayを入力へ混ぜません。Rendererは未知語彙をgeneric node/edgeとして受け入れますが、LLMはprofile外のpredicate、class、namespaceを追加できません。
+LLMへ渡す意味の正本は`semantic.source`のTurtleです。ただし毎回その全文だけをpromptへ詰めることをAPI契約にはしません。Semantic access層がTurtleをparseし、localeを考慮したlabel/comment、型、上下位property、近傍、包含、関連subgraphを索引化します。LLMは検索・説明・近傍取得で必要な範囲を読み、revisionに束縛された短いaliasを用いてstructured operationをpreview/applyできます。Aliasはidentityではなく、適用時には必ず完全IRIへ戻してCore transactionへ渡します。
+
+このaccess層にもauthoring profileから抽出した使用可能語彙と、必要なprojection capabilityだけを与えます。TurtleにはLLMの理解・検証・再利用に必要な意味だけを置き、template選択だけのtypeやoverlayを入力へ混ぜません。Rendererは未知語彙をgeneric node/edgeとして受け入れますが、LLMはprofile外のpredicate、class、namespaceを追加できません。Python MCP等はこの索引・transaction APIをtool protocolへ変換するadapterであり、別の書込み正本や独自RDF engineにはしません。
 
 LLMが返したTurtleはparse・語彙差分・構造規則を一つのsemantic transactionとして検証し、成功時だけ正本へ反映します。その後、存続IRIのユーザーoverlayを維持し、新規IRIへ決定的なlayoutを補完し、消滅IRIのoverlayを除去します。
 
@@ -95,6 +101,7 @@ Lane、順序、選択など意味構造を伴う表示要求では、view profi
 ## 安定性の判断基準
 
 - identityはIRIを優先し、label、配列index、Turtle行番号に依存しない
+- 人間とLLMの発見・理解にはlabel/commentを優先し、同名・無label時はIRIで曖昧さを解消する
 - semantic transactionとpresentation transactionを分ける
 - catalog ruleの競合を登録順で解決しない
 - 同じ入力、catalog version、layout versionから同じSceneを得る

@@ -5,26 +5,26 @@ import type {
   ProjectionDiagnostic,
   SemanticSourceUpdate,
   ViewElementOverlay,
-} from "./model";
+} from "./model.js";
 import type { Quad } from "n3";
 import {
   parseIriographSemanticSource,
   projectIriographDocument,
-} from "./projection";
-import { reconcileIriographDocumentViews } from "./reconciliation";
-import type { ProjectionRuntimeContext } from "./scene";
+} from "./projection.js";
+import { reconcileIriographDocumentViews } from "./reconciliation.js";
+import type { ProjectionRuntimeContext } from "./scene.js";
 import {
   canonicalizeTurtleSourceV1,
   serializeCanonicalTurtleV1,
   TURTLE_SERIALIZER_VERSION_V1,
   type TurtleSerializerVersion,
-} from "./serializer";
+} from "./serializer.js";
 import {
   matchesSemanticWarningConfirmation,
   validateSemanticDocument,
   type SemanticValidationTransactionOptions,
-} from "./semantic-validation";
-import { sortDiagnostics } from "./diagnostics";
+} from "./semantic-validation.js";
+import { sortDiagnostics } from "./diagnostics.js";
 
 export type CanonicalSemanticDatasetOptions = {
   serializerVersion: TurtleSerializerVersion;

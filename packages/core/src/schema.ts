@@ -3,7 +3,7 @@ import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020.
 import type {
   IriographDocumentV1,
   ProjectionCatalogV1,
-} from "./model";
+} from "./model.js";
 
 export type RuntimeValidationIssue = {
   instancePath: string;
@@ -109,7 +109,7 @@ export const iriographDocumentSchema = {
       required: ["viewId", "kind", "profileRef", "layoutRef", "overlay"],
       properties: {
         viewId: { type: "string", minLength: 1 },
-        kind: { const: "node-link" },
+        kind: { enum: ["node-link", "region"] },
         profileRef: { type: "string", format: "iri" },
         layoutRef: { type: "string", format: "iri" },
         locale: { type: "string", format: "language-tag" },
@@ -157,12 +157,38 @@ export const iriographDocumentSchema = {
         extensions: extensionProperty,
       },
     },
+    styleOverride: {
+      type: "object",
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        fill: { $ref: "#/$defs/color" },
+        stroke: { $ref: "#/$defs/color" },
+        text: { $ref: "#/$defs/color" },
+        accent: { $ref: "#/$defs/color" },
+        fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+        strokeWidth: { type: "number", minimum: 0, maximum: 20 },
+        dash: { $ref: "#/$defs/dash" },
+        extensions: extensionProperty,
+      },
+    },
+    color: {
+      type: "string",
+      pattern: "^(?:none|transparent|black|silver|gray|white|maroon|red|purple|fuchsia|green|lime|olive|yellow|navy|blue|teal|aqua|#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$",
+    },
+    dash: {
+      type: "string",
+      maxLength: 64,
+      pattern: "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[ ,]+(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?)*$",
+    },
     appearance: {
       type: "object",
       additionalProperties: false,
       properties: {
         templateRef: { type: "string", format: "iri" },
         iconRef: { type: "string", format: "iri" },
+        styleRef: { type: "string", format: "iri" },
+        style: { $ref: "#/$defs/styleOverride" },
         styleToken: { type: "string", minLength: 1 },
         extensions: extensionProperty,
       },
@@ -223,6 +249,11 @@ export const projectionCatalogSchema = {
       minProperties: 1,
       propertyNames: { type: "string", format: "iri" },
       additionalProperties: { $ref: "#/$defs/template" },
+    },
+    styles: {
+      type: "object",
+      propertyNames: { type: "string", format: "iri" },
+      additionalProperties: { $ref: "#/$defs/styleOverride" },
     },
     assets: {
       type: "object",
@@ -341,6 +372,7 @@ export const projectionCatalogSchema = {
       properties: {
         nodeTemplateRef: { type: "string", format: "iri" },
         edgeTemplateRef: { type: "string", format: "iri" },
+        regionTemplateRef: { type: "string", format: "iri" },
         layoutRef: { type: "string", format: "iri" },
         extensions: extensionProperty,
       },
@@ -351,7 +383,7 @@ export const projectionCatalogSchema = {
       required: ["templateRef", "structuralKind", "style"],
       properties: {
         templateRef: { type: "string", format: "iri" },
-        structuralKind: { enum: ["node", "edge", "container", "annotation"] },
+        structuralKind: { enum: ["node", "edge", "container", "region", "annotation"] },
         shape: { enum: ["rectangle", "rounded-rectangle", "circle", "diamond"] },
         iconRef: { type: "string", format: "iri" },
         headerPosition: { enum: ["top", "left", "none"] },
@@ -365,13 +397,39 @@ export const projectionCatalogSchema = {
       additionalProperties: false,
       required: ["fill", "stroke", "text"],
       properties: {
-        fill: { type: "string", minLength: 1 },
-        stroke: { type: "string", minLength: 1 },
-        text: { type: "string", minLength: 1 },
-        accent: { type: "string", minLength: 1 },
-        dash: { type: "string", minLength: 1 },
+        fill: { $ref: "#/$defs/color" },
+        stroke: { $ref: "#/$defs/color" },
+        text: { $ref: "#/$defs/color" },
+        accent: { $ref: "#/$defs/color" },
+        fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+        strokeWidth: { type: "number", minimum: 0, maximum: 20 },
+        dash: { $ref: "#/$defs/dash" },
         extensions: extensionProperty,
       },
+    },
+    styleOverride: {
+      type: "object",
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        fill: { $ref: "#/$defs/color" },
+        stroke: { $ref: "#/$defs/color" },
+        text: { $ref: "#/$defs/color" },
+        accent: { $ref: "#/$defs/color" },
+        fillOpacity: { type: "number", minimum: 0, maximum: 1 },
+        strokeWidth: { type: "number", minimum: 0, maximum: 20 },
+        dash: { $ref: "#/$defs/dash" },
+        extensions: extensionProperty,
+      },
+    },
+    color: {
+      type: "string",
+      pattern: "^(?:none|transparent|black|silver|gray|white|maroon|red|purple|fuchsia|green|lime|olive|yellow|navy|blue|teal|aqua|#[0-9A-Fa-f]{3,4}|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{8})$",
+    },
+    dash: {
+      type: "string",
+      maxLength: 64,
+      pattern: "^(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[ ,]+(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?)*$",
     },
     size: {
       type: "object",
@@ -389,7 +447,7 @@ export const projectionCatalogSchema = {
       required: ["assetRef", "mediaType", "url"],
       properties: {
         assetRef: { type: "string", format: "iri" },
-        mediaType: { enum: ["image/svg+xml", "image/png", "image/webp"] },
+        mediaType: { enum: ["image/svg+xml", "image/png", "image/jpeg", "image/webp"] },
         url: { type: "string", format: "iri" },
         extensions: extensionProperty,
       },
@@ -555,6 +613,22 @@ function validateCatalogReferences(catalog: ProjectionCatalogV1): RuntimeValidat
       const templateRef = catalog.defaults[key];
       if (!templateRefs.has(templateRef)) {
         issues.push(missingTemplateIssue(`/defaults/${key}`, templateRef));
+      }
+    }
+    if (catalog.defaults.regionTemplateRef) {
+      const template = catalog.templates[catalog.defaults.regionTemplateRef];
+      if (!template) {
+        issues.push(missingTemplateIssue(
+          "/defaults/regionTemplateRef",
+          catalog.defaults.regionTemplateRef,
+        ));
+      } else if (template.structuralKind !== "region") {
+        issues.push(customIssue(
+          "/defaults/regionTemplateRef",
+          "template-kind",
+          "regionTemplateRef must reference a region template",
+          { templateRef: catalog.defaults.regionTemplateRef },
+        ));
       }
     }
   }

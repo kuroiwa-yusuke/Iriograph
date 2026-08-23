@@ -31,10 +31,9 @@ export const mockProjectionRuntimeContext = createProjectionRuntimeContext([{
 export const mockResourceIriAllocator: ResourceIriAllocator = {
   allocate(request) {
     if (request.signal?.aborted) return undefined;
-    const localName = normalizeLocalName(request.suggestedLocalName)
-      || `resource-${shortHash(request.requestId)}`;
     return {
-      iri: `${DEMO_NAMESPACE}${localName}-${shortHash(request.requestId)}`,
+      // Identity remains opaque: label/comment carry meaning and may change freely.
+      iri: `${DEMO_NAMESPACE}r-${shortHash(request.requestId)}`,
       requestId: request.requestId,
       baseRevision: request.baseRevision,
       contextId: request.contextId,
@@ -60,41 +59,22 @@ export function createMockAuthoringContext(
       llmMinting: "deny",
     },
     terms: [
-      { iri: `${RDF}Bag`, kind: "structure", roles: ["type-object"], label: "Bag / Lane" },
-      { iri: `${RDF}Seq`, kind: "structure", roles: ["type-object"], label: "Sequence" },
-      { iri: `${RDF}Alt`, kind: "structure", roles: ["type-object"], label: "Alternatives" },
-      { iri: `${RDFS}label`, kind: "property", label: "Label", objectKinds: ["literal"] },
-      { iri: `${RDFS}comment`, kind: "property", label: "Comment", objectKinds: ["literal"] },
-      { iri: `${RDFS}seeAlso`, kind: "property", label: "See also", objectKinds: ["iri"] },
-      { iri: `${RDFS}member`, kind: "property", label: "Membership", objectKinds: ["iri"], structural: true },
-      { iri: `${DEMO_NAMESPACE}relatedTo`, kind: "property", label: "Related to", objectKinds: ["iri"] },
-      { iri: `${DEMO_NAMESPACE}retry`, kind: "property", label: "Retry", objectKinds: ["iri"] },
+      { iri: `${RDFS}Class`, kind: "class", roles: ["type-object"], label: "概念クラス" },
+      { iri: `${RDF}Property`, kind: "class", roles: ["type-object"], label: "関係の定義" },
+      { iri: `${RDF}Bag`, kind: "structure", roles: ["type-object"], label: "領域（順序なし）" },
+      { iri: `${RDF}Seq`, kind: "structure", roles: ["type-object"], label: "並び順" },
+      { iri: `${RDF}Alt`, kind: "structure", roles: ["type-object"], label: "分岐" },
+      { iri: `${RDFS}label`, kind: "property", label: "名前", objectKinds: ["literal"] },
+      { iri: `${RDFS}comment`, kind: "property", label: "説明", objectKinds: ["literal"] },
+      { iri: `${RDFS}seeAlso`, kind: "property", label: "参照先", objectKinds: ["iri"] },
+      { iri: `${RDFS}member`, kind: "property", label: "標準の包含", objectKinds: ["iri"], structural: true },
+      { iri: `${DEMO_NAMESPACE}p-03`, kind: "property", label: "監査対象として含む", objectKinds: ["iri"], structural: true },
+      { iri: `${DEMO_NAMESPACE}p-01`, kind: "property", label: "関連する", objectKinds: ["iri"] },
+      { iri: `${DEMO_NAMESPACE}p-02`, kind: "property", label: "再試行", objectKinds: ["iri"] },
     ],
-    capabilities: [{
-      capabilityId: "urn:iriograph:demo:capability:relate",
-      label: "Resourcesを関連付ける",
-      parameters: [
-        { name: "source", objectKinds: ["iri"], required: true },
-        { name: "target", objectKinds: ["iri"], required: true },
-      ],
-      graphPatch: {
-        add: [{
-          subject: { kind: "binding", name: "source" },
-          predicate: { kind: "iri", iri: `${DEMO_NAMESPACE}relatedTo` },
-          object: { kind: "binding", name: "target" },
-        }],
-      },
-    }],
+    capabilities: [],
     allocator: mockResourceIriAllocator,
   };
-}
-
-function normalizeLocalName(value: string | undefined): string {
-  return value?.normalize("NFKC")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+|-+$/gu, "")
-    .slice(0, 36) ?? "";
 }
 
 function shortHash(value: string): string {

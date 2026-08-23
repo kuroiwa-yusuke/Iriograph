@@ -4,9 +4,9 @@
 
 ## Scene navigator
 
-Canvasは一つの`tabindex="0"`を持つmulti-select listboxである。Node、container、edgeは同じnavigator内の`role="option"`であり、個別tab stopを持たない。Resize handle、edge label、waypoint、minimapもCanvas内の追加tab stopを作らない。ToolbarやInspectorの通常controlへはTabで移動できる。
+Canvasは一つの`tabindex="0"`を持つmulti-select listboxである。Node、container、region、edgeは同じnavigator内の`role="option"`であり、個別tab stopを持たない。Resize handle、edge label、waypoint、minimapもCanvas内の追加tab stopを作らない。ToolbarやInspectorの通常controlへはTabで移動できる。
 
-Active itemはCanvasの`aria-activedescendant`から実DOM descendantのstable IDへ参照する。順序はprojectionや現在座標に依存せず、container、node、edgeの順とし、各kind内は`elementId`のcode-point昇順とする。Range選択も同じ順序を使い、range終端をprimary selectionとする。
+Active itemはCanvasの`aria-activedescendant`から実DOM descendantのstable IDへ参照する。順序はprojectionや現在座標に依存せず、container、region、node、edgeの順とし、各kind内は`elementId`のcode-point昇順とする。Range選択も同じ順序を使い、range終端をprimary selectionとする。
 
 Scene再投影ではstable `elementId`が存続する限りfocusを維持する。Active itemが消えた場合は旧順序と同じindex、末尾を越える場合は新しい末尾、空SceneではCanvas自身へfallbackする。Pointerや公開selection APIでprimary selectionが変わった場合は、そのstable IDをactive itemにする。
 

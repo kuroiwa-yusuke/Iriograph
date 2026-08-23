@@ -74,6 +74,9 @@ export type EditorAuthoringDraft = {
   createMembershipStructureConfigKey: string;
   createMembershipContainerTypeIri: string;
   createMembershipPredicateIri: string;
+  /** Presentation seed applied only after semantic creation succeeds. */
+  createTemplateRef: string;
+  createStructuralKind: "node" | "container" | "region";
 };
 
 export type AuthoringChoice = {
@@ -165,6 +168,8 @@ export function emptyAuthoringDraft(
     createMembershipStructureConfigKey: "",
     createMembershipContainerTypeIri: "",
     createMembershipPredicateIri: "",
+    createTemplateRef: "",
+    createStructuralKind: "node",
   };
 }
 

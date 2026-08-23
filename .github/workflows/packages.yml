@@ -1,0 +1,74 @@
+name: Iriograph Packages
+
+on:
+  push:
+    tags:
+      - "packages-v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish packages to AWS CodeArtifact"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ap-northeast-1
+  AWS_ROLE_TO_ASSUME: arn:aws:iam::571179238578:role/KuroxiomPackagesPublishRole
+  CODEARTIFACT_DOMAIN: kuroxiom
+  CODEARTIFACT_DOMAIN_OWNER: "571179238578"
+  CODEARTIFACT_REPOSITORY: kuroxiom-packages
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Verify tag and package version
+        if: startsWith(github.ref, 'refs/tags/packages-v')
+        run: EXPECTED_PACKAGE_VERSION="${GITHUB_REF_NAME#packages-v}" npm run verify:package-versions
+      - run: npm run verify
+
+  publish:
+    needs: verify
+    if: >-
+      startsWith(github.ref, 'refs/tags/packages-v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Verify tag and package version
+        if: startsWith(github.ref, 'refs/tags/packages-v')
+        run: EXPECTED_PACKAGE_VERSION="${GITHUB_REF_NAME#packages-v}" npm run verify:package-versions
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Login to CodeArtifact
+        run: >-
+          aws codeartifact login
+          --tool npm
+          --domain "${CODEARTIFACT_DOMAIN}"
+          --domain-owner "${CODEARTIFACT_DOMAIN_OWNER}"
+          --repository "${CODEARTIFACT_REPOSITORY}"
+          --region "${AWS_REGION}"
+      - run: npm run publish:packages

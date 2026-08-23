@@ -15,7 +15,8 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Semantic projection、layout、rendererを分離する。Coreは非同期layout adapter契約と標準の軽量layoutを持ち、hostが同じ契約で高機能layoutへ差し替えられるようにする。
 - Asset URIは識別子であり、取得URLと同一視しない。取得は注入resolverへ委譲する。
 - ResourceのidentityにlabelやTurtleの行番号を使わない。IRIを優先する。
-- LLMへはsemantic Turtle、許可語彙、関連projection capabilityだけを公開し、view overlayを編集対象にしない。
+- 人間とLLMの発見・理解ではlabel/commentを主表示にし、完全IRIはidentity、曖昧性解消、Advanced情報として保持する。
+- LLMへはsemantic Turtleまたはそこから索引化した関連subgraph、許可語彙、関連projection capabilityだけを公開し、view overlayを編集対象にしない。
 
 ## 拡張規則
 
@@ -33,15 +34,17 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - LLM semantic transactionはresolved authoring profileなしで実行せず、unknown termの新規利用やterm mintingを黙認しない。
 - 表示要求が位置、size、routing、色、icon overrideだけならTurtleを書き換えない。意味構造を伴う場合だけprofile-guided rewriteを行う。
 - Drag、resize、waypoint変更はTurtleを変更しない。
+- 複数membershipを意味graphとして許容し、単一parentの階層container表示と、重なり可能なregion表示を別の空間文法として扱う。Geometryからmembershipを推論しない。
 - Rich editorのnode、edge、属性、包含作成はsemantic transactionとする。表示だけの仮nodeをdocumentへ保存せず、node作成時はnamed IRIと少なくとも1つのtripleを同時に確定する。
 - Edge作成はpredicateまたはprofile由来capabilityを必須にし、空欄を補うgeneric predicateを暗黙生成しない。Containerへのplain dragからmembership tripleを推測しない。
 - Human structured command、Turtle直接編集、LLM返却Turtleはcandidate graph以降のvalidation、全view projection、display reconciliationを共有する。
-- Rich editorのsemantic node、edge、属性、包含、削除は、サイドバー上のdraft、生成予定triple/graph patchのpreview、validation、明示適用の順で確定する。Canvas gestureはdraftをseedするだけで、ghost node/edgeはephemeral UI stateとしdocumentへ保存しない。
+- Rich editorのsemantic node、edge、属性、包含、削除は、Canvasのcontext menuや作成paletteから右Inspectorまたはdetails dialogへdraftを開き、生成予定triple/graph patchのpreview、validation、明示適用の順で確定する。Canvas gestureはdraftをseedするだけで、ghost node/edgeはephemeral UI stateとしdocumentへ保存しない。
 - Structured commandとLLM editの成功時は、同じdataset serializerでTurtleを決定的に再生成する。Turtle sourceの直接編集は適用された原文を保持するが、後の再serialize時にcomment、空白、triple記述順などの書式が保持されることを保証しない。
 - Resource削除は参照が残る場合に既定で拒否する。参照tripleのpreviewを伴う明示的cascadeだけを許可し、Seq/Altのordinal変更は一つのatomic patchで再採番する。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
 - 通常の自動再配置は`placement: "generated"`の要素だけを対象とし、user配置をlayout更新で移動しない。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
+- 既定appearanceはcatalogを正本とし、利用者の色・透明度・線幅等の個別調整だけを安全なsparse overlayとして保持する。任意CSSは保存しない。
 - 保存schema変更にはversion方針とtestを伴わせる。
 
 ## 文書
@@ -56,6 +59,9 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - `docs/semantic-notation.md`: 意味Turtleと表示notation、canonical serializerの境界。
 - `docs/layout-optimization.md`: 自動配置pipeline、layout adapter、性能・品質基準。
 - `docs/accessibility.md`: Canvas keyboard、focus、ARIAの規範仕様。
+- `docs/editor-interactions.md`: context menu、details dialog、appearance、意味操作の人間向けinteraction仕様。
+- `docs/spatial-membership.md`: 階層containerと多対多region membershipの空間文法。
+- `docs/semantic-access.md`: label-first索引、revision alias、LLM read/write wrapperの仕様。
 - `docs/distribution.md`: package配布、lockstep version、依存licenseの方針。
 - `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。
 
@@ -81,6 +87,12 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
    Editor UIまたはtransactionを変更した場合は`docs/testing.md`に従って`npm run verify:e2e`も実行する。local browserを用意できない場合は`Dockerfile.e2e`の固定Playwright imageを使う。
 5. `git status`とdiffを確認し、今回の変更だけをcommitする。ユーザーの未commit変更や無関係な変更を混ぜない。
 6. 通常のpushを現在のbranchへ行い、remoteへ反映されたこととworktreeの状態を確認する。
+
+Package公開と利用hostへの反映まで依頼された場合は、上記に続けて次を行う。
+
+7. 公開packageをlockstep versionへ更新し、tarball consumer検証後にprivate registryへpublishする。Tag/CIを使う場合もregistry上でexact versionを確認する。
+8. 利用hostは公開済みexact versionへ更新し、package sourceを複製しない。Host自身のtest/build/local起動を通してcommit/pushする。
+9. Deploy手順が依頼範囲なら、対象環境へdeployし、実行中commit、service health、公開画面の対象操作、browser consoleとservice logを確認する。
 
 - force push、履歴改変、破壊的なgit操作は行わない。
 - 起動、検証、commit、pushのいずれかに失敗した場合は完了と報告せず、原因を修正して再実行する。

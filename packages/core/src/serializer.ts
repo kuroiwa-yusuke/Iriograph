@@ -1,8 +1,8 @@
 import { Parser, type Quad, type Term } from "n3";
 
-import { sortDiagnostics } from "./diagnostics";
-import type { ProjectionDiagnostic } from "./model";
-import { compareCodePoints } from "./rdf";
+import { sortDiagnostics } from "./diagnostics.js";
+import type { ProjectionDiagnostic } from "./model.js";
+import { compareCodePoints } from "./rdf.js";
 
 export const TURTLE_SERIALIZER_VERSION_V1 = "iriograph-turtle-canonical-v1" as const;
 

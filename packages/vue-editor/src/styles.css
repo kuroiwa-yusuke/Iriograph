@@ -344,6 +344,29 @@
   font-size: 8px;
 }
 
+.iriograph-authoring-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.iriograph-authoring-quick-actions button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid #afc2bc;
+  border-radius: 5px;
+  background: #fff;
+  color: #315957;
+  font-size: 8px;
+}
+
+.iriograph-authoring-quick-actions button:first-child {
+  border-color: #397171;
+  background: #e9f4ef;
+  font-weight: 750;
+}
+
 .iriograph-authoring-panel > label,
 .iriograph-authoring-position label {
   display: grid;
@@ -889,7 +912,8 @@
 
 .iriograph-canvas-shell.semantic-picking .iriograph-canvas-scroll,
 .iriograph-canvas-shell.semantic-picking .iriograph-scene-node,
-.iriograph-canvas-shell.semantic-picking .iriograph-scene-container {
+.iriograph-canvas-shell.semantic-picking .iriograph-scene-container,
+.iriograph-canvas-shell.semantic-picking .iriograph-scene-region {
   cursor: crosshair;
 }
 
@@ -998,6 +1022,12 @@
   stroke-width: 5;
 }
 
+.iriograph-minimap-region {
+  fill: rgb(200 149 45 / 16%);
+  stroke: #9a772d;
+  stroke-width: 5;
+}
+
 .iriograph-minimap-edge {
   fill: none;
   stroke: #829692;
@@ -1028,25 +1058,65 @@
   touch-action: none;
 }
 
+.iriograph-scene-region {
+  position: absolute;
+  z-index: 0;
+  overflow: visible;
+  border: 1px solid;
+  border-radius: 12px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.iriograph-scene-region:active {
+  cursor: grabbing;
+}
+
+.iriograph-region-fill {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.iriograph-region-label {
+  position: absolute;
+  left: 10px;
+  top: 7px;
+  max-width: calc(100% - 20px);
+  overflow: hidden;
+  font-family: Georgia, "Yu Mincho", serif;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .iriograph-scene-container.selected,
+.iriograph-scene-region.selected,
 .iriograph-scene-node.selected {
   outline: 2px solid #c8952d;
   outline-offset: 3px;
 }
 
 .iriograph-scene-container.navigator-active,
+.iriograph-scene-region.navigator-active,
 .iriograph-scene-node.navigator-active {
   outline: 3px solid #0b5cab;
   outline-offset: 4px;
 }
 
 .iriograph-scene-container.diagnostic-error,
+.iriograph-scene-region.diagnostic-error,
 .iriograph-scene-node.diagnostic-error {
   outline: 3px solid #c34b45;
   outline-offset: 2px;
 }
 
 .iriograph-scene-container.diagnostic-warning,
+.iriograph-scene-region.diagnostic-warning,
 .iriograph-scene-node.diagnostic-warning {
   box-shadow: 0 0 0 3px #d59a32;
 }
@@ -1199,6 +1269,38 @@
 .iriograph-endpoint-anchors circle.target {
   fill: #fff1d0;
   stroke: #c18d23;
+}
+
+.iriograph-edge-interaction-layer {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.iriograph-edge-arrow-overlay {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.iriograph-edge-interaction-layer .iriograph-endpoint-anchors {
+  pointer-events: all;
+}
+
+.iriograph-endpoint-stub {
+  stroke: #fff;
+  stroke-width: 5;
+  paint-order: stroke;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.iriograph-edge-interaction-layer .iriograph-endpoint-anchors circle {
+  r: 12px;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 1px 2px rgb(25 51 50 / 32%));
 }
 
 .iriograph-endpoint-anchor-fields {
@@ -1687,6 +1789,279 @@
   background: #203d3f;
   font: 8px/1.5 "SFMono-Regular", Consolas, monospace;
   white-space: pre;
+}
+
+.iriograph-context-menu-shield {
+  position: fixed;
+  z-index: 120;
+  inset: 0;
+}
+
+.iriograph-context-menu {
+  min-width: 210px;
+  position: fixed;
+  display: grid;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid #91a6a1;
+  border-radius: 7px;
+  background: #fffefb;
+  box-shadow: 0 14px 40px rgb(20 43 42 / 25%);
+  outline: 0;
+}
+
+.iriograph-context-menu button {
+  min-height: 31px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+}
+
+.iriograph-context-menu button:hover,
+.iriograph-context-menu button:focus-visible {
+  background: #e8f1ed;
+  outline: 2px solid #397171;
+  outline-offset: -2px;
+}
+
+.iriograph-context-menu button.destructive {
+  color: #9b3935;
+}
+
+.iriograph-modal-backdrop {
+  position: absolute;
+  z-index: 110;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(18 36 37 / 48%);
+}
+
+.iriograph-resource-palette,
+.iriograph-resource-details-dialog {
+  width: min(680px, 100%);
+  max-height: 100%;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid #91a6a1;
+  border-radius: 9px;
+  background: #fffefb;
+  box-shadow: 0 18px 52px rgb(18 36 37 / 28%);
+}
+
+.iriograph-resource-palette > header,
+.iriograph-resource-details-dialog > header,
+.iriograph-resource-palette > footer,
+.iriograph-resource-details-dialog > footer,
+.iriograph-appearance-editor > header,
+.iriograph-appearance-editor > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-resource-palette > header div,
+.iriograph-resource-details-dialog > header div,
+.iriograph-appearance-editor > header div {
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-resource-palette header small,
+.iriograph-resource-details-dialog header small,
+.iriograph-appearance-editor header small {
+  color: #718482;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .1em;
+}
+
+.iriograph-resource-palette header strong,
+.iriograph-resource-details-dialog header strong,
+.iriograph-appearance-editor header strong {
+  font-family: Georgia, "Yu Mincho", serif;
+  font-size: 16px;
+}
+
+.iriograph-resource-palette label,
+.iriograph-resource-details-dialog label {
+  display: grid;
+  gap: 4px;
+}
+
+.iriograph-resource-palette input,
+.iriograph-resource-palette select,
+.iriograph-resource-details-dialog input,
+.iriograph-resource-details-dialog select,
+.iriograph-appearance-editor input,
+.iriograph-appearance-editor select {
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid #bdcbc7;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.iriograph-resource-palette button,
+.iriograph-resource-details-dialog button,
+.iriograph-appearance-editor button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid #78908c;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-resource-palette button.primary,
+.iriograph-resource-details-dialog button.primary,
+.iriograph-appearance-editor button.primary {
+  color: #fff;
+  border-color: #275c5e;
+  background: #275c5e;
+}
+
+.iriograph-palette-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.iriograph-palette-cards > button {
+  min-height: 118px;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 10px;
+  border-color: #c7d4d0;
+}
+
+.iriograph-palette-cards > button.selected {
+  border-color: #a87316;
+  box-shadow: 0 0 0 2px rgb(184 128 25 / 22%);
+}
+
+.iriograph-palette-cards > button > small {
+  color: #70827f;
+  font-size: 8px;
+}
+
+.iriograph-palette-card-preview {
+  width: 66px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 2px solid;
+}
+
+.iriograph-palette-card-preview.shape-circle {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+}
+
+.iriograph-palette-card-preview.shape-rounded-rectangle,
+.iriograph-palette-card-preview.shape-region {
+  border-radius: 10px;
+}
+
+.iriograph-palette-card-preview.shape-diamond {
+  width: 40px;
+  height: 40px;
+  transform: rotate(45deg);
+}
+
+.iriograph-palette-card-preview img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
+.iriograph-resource-palette fieldset,
+.iriograph-property-editor-row {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #d0dbd7;
+  border-radius: 6px;
+}
+
+.iriograph-property-editor-row > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.iriograph-property-editor-row fieldset {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #dde4e1;
+}
+
+.iriograph-appearance-popover {
+  width: 330px;
+  position: absolute;
+  z-index: 105;
+  right: 385px;
+  top: 92px;
+}
+
+.iriograph-appearance-editor {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #91a6a1;
+  border-radius: 8px;
+  background: #fffefb;
+  box-shadow: 0 14px 40px rgb(20 43 42 / 24%);
+}
+
+.iriograph-style-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.iriograph-style-presets button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.iriograph-style-presets button[aria-pressed="true"] {
+  border-color: #a87316;
+  background: #fff3d5;
+}
+
+.iriograph-style-presets button span {
+  width: 15px;
+  height: 15px;
+  border: 1px solid;
+  border-radius: 3px;
+}
+
+.iriograph-appearance-fields {
+  display: grid;
+  gap: 6px;
+}
+
+.iriograph-appearance-fields label {
+  display: grid;
+  grid-template-columns: 18px 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.iriograph-appearance-fields input[type="checkbox"] {
+  min-height: auto;
 }
 
 @media (max-width: 1200px) {

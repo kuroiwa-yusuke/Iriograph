@@ -12,7 +12,7 @@ import {
   StandardLightweightLayoutAdapter,
 } from "./layout";
 import type { IriographDocumentV1 } from "./model";
-import type { ProjectionRuntimeContext } from "./scene";
+import { buildIriographView, type ProjectionRuntimeContext } from "./scene";
 import { standardRdfRdfsCatalog } from "./standard-catalog";
 
 const NS = "urn:test:reconcile:";
@@ -162,6 +162,31 @@ describe("display reconciliation", () => {
     expect(result.diagnostics).toContainEqual(expect.objectContaining({
       code: "reconcile-edge-endpoints-changed",
       semanticRef: oldSequenceRef,
+    }));
+  });
+
+  it("legacy styleTokenをcatalog styleRefへ移行しsparse overrideを維持する", async () => {
+    const previous = documentFor(oldSource);
+    const styleRef = "urn:iriograph:style:region:overlap:1";
+    const node = overlayFor(previous.views[0]!.overlay, `${NS}a`)!;
+    node.appearance = {
+      styleToken: styleRef,
+      style: { fill: "#123456", strokeWidth: 3 },
+    };
+
+    const result = await applySemanticSource(previous, oldSource, runtimeContext());
+
+    expect(result.accepted).toBe(true);
+    expect(overlayFor(result.document.views[0]!.overlay, `${NS}a`)?.appearance).toEqual({
+      styleRef,
+      style: { fill: "#123456", strokeWidth: 3 },
+    });
+    const scene = await buildIriographView(result.document, "main", runtimeContext());
+    expect(scene.nodes.find((entry) => entry.semanticRef === `${NS}a`)?.style)
+      .toMatchObject({ fill: "#123456", stroke: "#7c3aed", strokeWidth: 3 });
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "reconcile-style-token-migrated",
+      semanticRef: `${NS}a`,
     }));
   });
 });

@@ -436,6 +436,182 @@ describe("LayoutAdapterRegistry", () => {
     ]));
   });
 
+  it("generated overlap regions deterministically enclose a multiply-associated member", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          { elementId: "region-a", structuralKind: "region", size: { width: 220, height: 160 } },
+          { elementId: "region-b", structuralKind: "region", size: { width: 220, height: 160 } },
+          {
+            elementId: "shared",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 300, y: 220, width: 120, height: 60 },
+          },
+        ],
+        memberships: [
+          {
+            semanticRef: "membership-a",
+            containerElementId: "region-a",
+            regionElementId: "region-a",
+            memberElementId: "shared",
+          },
+          {
+            semanticRef: "membership-b",
+            containerElementId: "region-b",
+            regionElementId: "region-b",
+            memberElementId: "shared",
+          },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(isInside(result.geometries.shared!, result.geometries["region-a"]!)).toBe(true);
+    expect(isInside(result.geometries.shared!, result.geometries["region-b"]!)).toBe(true);
+    expect(result.diagnostics.some((item) => item.code.includes("region-member"))).toBe(false);
+  });
+
+  it("manual region geometry is a hard constraint and disjoint membership is diagnostic-only", async () => {
+    const left = { x: 20, y: 20, width: 120, height: 120 };
+    const right = { x: 240, y: 20, width: 120, height: 120 };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          { elementId: "left", structuralKind: "region", placement: "user", geometry: left },
+          { elementId: "right", structuralKind: "region", pinned: true, geometry: right },
+          {
+            elementId: "shared",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 50, y: 50, width: 40, height: 30 },
+          },
+        ],
+        memberships: [
+          { semanticRef: "left-member", containerElementId: "left", regionElementId: "left", memberElementId: "shared" },
+          { semanticRef: "right-member", containerElementId: "right", regionElementId: "right", memberElementId: "shared" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries.left).toEqual(left);
+    expect(result.geometries.right).toEqual(right);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "warning",
+      code: "region-membership-intersection-empty",
+      elementId: "shared",
+    }));
+    expect(result.diagnostics.some((item) => item.severity === "error")).toBe(false);
+  });
+
+  it("keeps generated regions around members with negative user coordinates", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          {
+            elementId: "region",
+            structuralKind: "region",
+            placement: "generated",
+            size: { width: 240, height: 160 },
+          },
+          {
+            elementId: "member",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: -180, y: -90, width: 100, height: 60 },
+          },
+        ],
+        memberships: [{
+          semanticRef: "membership",
+          containerElementId: "region",
+          regionElementId: "region",
+          memberElementId: "member",
+        }],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(isInside(result.geometries.member!, result.geometries.region!)).toBe(true);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  it("completes nested generated regions from inner member to outer owner", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          { elementId: "outer", structuralKind: "region", size: { width: 240, height: 160 } },
+          { elementId: "inner", structuralKind: "region", size: { width: 240, height: 160 } },
+          {
+            elementId: "member",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 600, y: 400, width: 100, height: 60 },
+          },
+        ],
+        memberships: [
+          {
+            semanticRef: "outer-inner",
+            containerElementId: "outer",
+            regionElementId: "outer",
+            memberElementId: "inner",
+          },
+          {
+            semanticRef: "inner-member",
+            containerElementId: "inner",
+            regionElementId: "inner",
+            memberElementId: "member",
+          },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(isInside(result.geometries.member!, result.geometries.inner!)).toBe(true);
+    expect(isInside(result.geometries.inner!, result.geometries.outer!)).toBe(true);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  it("reapplies normalized endpoint anchors after generated region expansion", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          { elementId: "region", structuralKind: "region", size: { width: 240, height: 160 } },
+          {
+            elementId: "member",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 500, y: 300, width: 100, height: 60 },
+          },
+          { elementId: "target", structuralKind: "node" },
+        ],
+        memberships: [{
+          semanticRef: "region-member",
+          containerElementId: "region",
+          regionElementId: "region",
+          memberElementId: "member",
+        }],
+        edges: [{
+          elementId: "edge",
+          sourceElementId: "region",
+          targetElementId: "target",
+          sourceAnchor: { position: .25 },
+        }],
+      },
+    }, createStandardLayoutRegistry());
+
+    const region = result.geometries.region!;
+    expect(result.routes.edge?.[0]).toEqual({
+      x: region.x + region.width,
+      y: region.y + region.height / 2,
+    });
+  });
+
   it("rejects adapter routes that omit endpoint-inclusive edge paths", async () => {
     const invalid: LayoutAdapter = {
       layoutRef: "urn:test:layout:invalid-route",

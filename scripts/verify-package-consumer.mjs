@@ -22,6 +22,7 @@ try {
   await cp(fixtureSource, consumerDirectory, { recursive: true });
 
   const coreTarball = await pack("packages/core", artifactsDirectory);
+  const semanticAccessTarball = await pack("packages/semantic-access", artifactsDirectory);
   const layoutElkTarball = await pack("packages/layout-elk", artifactsDirectory);
   const editorTarball = await pack("packages/vue-editor", artifactsDirectory);
 
@@ -32,11 +33,13 @@ try {
     "--no-fund",
     "--package-lock=false",
     coreTarball,
+    semanticAccessTarball,
     layoutElkTarball,
     editorTarball,
   ], consumerDirectory);
 
   await verifyInstalledContract(consumerDirectory);
+  verifyNodeEsmImports(consumerDirectory);
   runNpm(["run", "typecheck"], consumerDirectory);
   runNpm(["run", "build"], consumerDirectory);
 
@@ -64,22 +67,46 @@ async function pack(packageDirectory, destination) {
 
 async function verifyInstalledContract(consumer) {
   const coreDirectory = join(consumer, "node_modules", "@iriograph", "core");
+  const semanticAccessDirectory = join(consumer, "node_modules", "@iriograph", "semantic-access");
   const layoutElkDirectory = join(consumer, "node_modules", "@iriograph", "layout-elk");
   const editorDirectory = join(consumer, "node_modules", "@iriograph", "vue-editor");
-  const [coreStat, layoutElkStat, editorStat, corePackage, layoutElkPackage, editorPackage] = await Promise.all([
+  const [
+    coreStat,
+    semanticAccessStat,
+    layoutElkStat,
+    editorStat,
+    corePackage,
+    semanticAccessPackage,
+    layoutElkPackage,
+    editorPackage,
+  ] = await Promise.all([
     lstat(coreDirectory),
+    lstat(semanticAccessDirectory),
     lstat(layoutElkDirectory),
     lstat(editorDirectory),
     readJson(join(coreDirectory, "package.json")),
+    readJson(join(semanticAccessDirectory, "package.json")),
     readJson(join(layoutElkDirectory, "package.json")),
     readJson(join(editorDirectory, "package.json")),
   ]);
 
-  if (coreStat.isSymbolicLink() || layoutElkStat.isSymbolicLink() || editorStat.isSymbolicLink()) {
+  if (
+    coreStat.isSymbolicLink()
+    || semanticAccessStat.isSymbolicLink()
+    || layoutElkStat.isSymbolicLink()
+    || editorStat.isSymbolicLink()
+  ) {
     throw new Error("consumer resolved a workspace symlink instead of packed packages");
   }
-  if (layoutElkPackage.version !== corePackage.version || editorPackage.version !== corePackage.version) {
+  if (
+    semanticAccessPackage.version !== corePackage.version
+    || layoutElkPackage.version !== corePackage.version
+    || editorPackage.version !== corePackage.version
+  ) {
     throw new Error("all @iriograph package versions must match");
+  }
+  if (semanticAccessPackage.dependencies?.["@iriograph/core"] !== corePackage.version) {
+    throw new Error("@iriograph/semantic-access must depend on the exact packed core version");
   }
   if (layoutElkPackage.dependencies?.["@iriograph/core"] !== corePackage.version) {
     throw new Error("@iriograph/layout-elk must depend on the exact packed core version");
@@ -102,8 +129,29 @@ async function verifyInstalledContract(consumer) {
   }
   await readFile(join(editorDirectory, cssExport), "utf8");
   await readFile(join(coreDirectory, "dist", "index.d.ts"), "utf8");
+  await readFile(join(semanticAccessDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(layoutElkDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(editorDirectory, "dist", "types", "index.d.ts"), "utf8");
+}
+
+function verifyNodeEsmImports(cwd) {
+  const program = [
+    'const core = await import("@iriograph/core");',
+    'const semantic = await import("@iriograph/semantic-access");',
+    'const layout = await import("@iriograph/layout-elk");',
+    'if (!core.standardRdfRdfsCatalog) throw new Error("core Node ESM export is missing");',
+    'if (!semantic.SemanticAccessIndex) throw new Error("semantic-access Node ESM export is missing");',
+    'if (!layout.ElkLayeredLayoutAdapter) throw new Error("layout-elk Node ESM export is missing");',
+  ].join("\n");
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", program], {
+    cwd,
+    encoding: "utf8",
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`packed Node ESM import failed with exit code ${result.status}`);
+  }
 }
 
 async function readJson(path) {

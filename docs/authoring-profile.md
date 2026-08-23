@@ -102,7 +102,7 @@ LLM semantic editを有効にするhostは、authoring profileを解決できな
 
 ## 6. Human structured authoring
 
-Rich editorはTurtle文字列の書き換えをUI独自の実装で行わず、authoring profileから解決したclass、predicate、resource namespaceと、view profile/catalogから導出したsemantic capabilityを入力候補に使います。Labelは選択用表示に使えますが、commandは必ずIRIを持ちます。
+Rich editorはTurtle文字列の書き換えをUI独自の実装で行わず、authoring profileから解決したclass、predicate、resource namespaceと、view profile/catalogから導出したsemantic capabilityを入力候補に使います。Labelとcommentは人が意味を理解するための主表示ですが、commandは必ずIRIを持ちます。Labelはrule keyでもidentityでもありません。同名labelは説明、型、近傍、compact IRIを併記して曖昧さを解消します。
 
 通常UIは完全IRIを常時入力させる必要はありません。Host注入のIRI allocatorまたは明示入力からnamed IRIを得られますが、どちらも`allowedMintNamespaces`とgraph内衝突を検証します。Allocatorが返したIRIであってもauthoring policyを迂回できません。
 
@@ -116,6 +116,7 @@ Human structured commandは次のpolicyに従います。
 - edgeはpredicateまたは明示的なsemantic capabilityの選択を必須にする。選択されたpredicateにcatalog ruleがなくても、policy上許可されたIRI-object tripleならunknown fallbackの通常矢印として表示できる
 - `:relation`等の一般的なpredicateを空欄のfallbackとして生成しない。適切な語彙がなければ、humanUnknown policyに従って警告・拒否し、または語彙整備を促す
 - 包含、順序、選択は、structure profileとprojection capabilityで許可されたgraph patchとして一括適用する。Dragをmembershipと解釈するなど、presentation gestureからsemantic tripleを暗黙生成しない
+- 一つのresourceが複数containerへ属するmembershipを許容する。階層container viewで単一parentとして描けないことをsemantic errorにせず、region view等の適合する空間文法を選ぶ。どのviewでもgeometryからmembershipを生成しない
 - `set-alternatives`では`memberIris`を最終ordinal順の正本とし、重複IRIも並び替えない。`defaultMemberIri`は`memberIris[defaultOrdinal - 1]`と一致しなければならない
 - Resource削除は参照statementが残る場合に既定で拒否する。影響statementをpreviewし人が明示したcascadeだけを許可し、Seq/Alt memberの削除では残るordinalを同じpatchで再採番する
 - `humanUnknown: warn`の操作はdiagnosticと完全IRIを提示し、人が明示確認した場合だけ再実行できる
@@ -124,7 +125,7 @@ Structured commandはRDF datasetへのgraph patchに変換した後、Turtle tex
 
 Domain validationは[semantic-validation.md](./semantic-validation.md)のhost注入portを使います。Authoring profileのunknown term warningとdomain validator warningは発生源を分けますが、いずれもcandidateを黙って確定しません。Domain warningの再実行tokenはvalidation context、exact source、安定diagnostic ID集合へ束縛します。
 
-Node、edge、属性、包含、削除の入力はサイドバー上のcommand draftです。Canvas gestureはsource/target、作成位置、候補container等をdraftへseedできますが、それだけではsemantic graphを変更しません。Editorは追加・削除予定のtripleまたは構造graph patch、完全IRI、validation結果をpreviewし、ユーザーの明示適用後にだけtransactionを開始します。適用前のghost elementはephemeral UI stateでありdocumentへ保存しません。
+Node、edge、属性、包含、削除はCanvasのcontext menu、作成palette、object detailsから開始し、右Inspectorまたはdialogのcommand draftへ必要値をseedします。Canvas gestureはsource/target、作成位置、候補container等をdraftへseedできますが、それだけではsemantic graphを変更しません。通常UIはresource・predicateのlabel/cardとCanvas上のobject選択を使い、完全IRI、内部operation名、capability graph patchはAdvanced詳細にだけ表示します。Editorは追加・削除予定のtripleまたは構造graph patch、完全IRI、validation結果と候補Sceneのrich previewを提示し、ユーザーの明示適用後にだけtransactionを開始します。適用前のghost elementはephemeral UI stateでありdocumentへ保存しません。
 
 Capability parameterは省略時をrequiredとし、`required: false`だけをoptionalとします。Optional bindingが省略された場合、そのbindingを参照するtemplate statementをadd/removeの双方で一文単位にskipします。値の推測や空文字列への置換は行いません。
 
@@ -134,7 +135,7 @@ Structured commandとLLM editが成功した場合は、candidate datasetを共�
 
 ## 7. LLMへ渡すcontext
 
-LLM semantic adapterは次だけを編集contextとして構成します。
+LLM semantic adapterは、全文編集が必要な小規模graphでは次のcontextを構成できます。
 
 1. 現在の`semantic.source`
 2. 使用可能なclassとpredicate、そのlabel/comment、上位語彙
@@ -143,6 +144,15 @@ LLM semantic adapterは次だけを編集contextとして構成します。
 5. document revisionと編集上の禁止事項
 
 LLMへportable document全体、overlay座標、waypoint、asset取得URLを渡しません。catalog JSON全体を渡す代わりに、必要なsemantic patternと表示効果だけをprojection capability summaryとして抽出します。
+
+大規模graphまたは探索的な作業では、LLMへ最初からTurtle全文を渡す必要はありません。Iriograph semantic accessはTurtleから次を決定的に索引化し、検索結果または関連subgraphだけを返します。
+
+- locale順で選ばれた`rdfs:label`と`rdfs:comment`、任意のSKOS alias
+- resourceの型、predicateのlabel、`rdfs:subClassOf`/`rdfs:subPropertyOf`関係
+- incoming/outgoing近傍、包含membership、要求depthまでのsubgraph
+- document revisionに束縛した短いresource/predicate alias
+
+LLMはlabelと説明で検索・選択し、structured operationには短いaliasを使えます。Adapterはpreview時にaliasを完全IRIへ戻し、元revision、profile、引数を再検証してCoreの`AuthoringCommand`へcompileします。Aliasはrevisionを跨いで再利用できず、label変更や同名labelでもidentityは変わりません。Raw SPARQL Updateをauthoritative write portとして公開せず、既存RDF query packageはparse/index/readの内部実装として包みます。Python MCPは同じread/write contractをtransportとして公開できますが、applyはCoreまたはCloud側のWritePortを通します。
 
 LLMには次の優先順位を明示します。
 

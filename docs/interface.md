@@ -49,7 +49,7 @@ overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
 - `pinned`と`placement`: 自動配置かユーザー固定か
-- `appearance`: template、icon、style tokenの明示override
+- `appearance`: template、icon、catalog style preset、sparse styleの明示override
 - `routing`: edge waypointとlabel offset
 
 `routing.waypoints`はsource/target attachmentを含まない、ユーザーが確定したmanual中間点だけです。
@@ -61,17 +61,25 @@ Edge routingの編集ではnode/container用の`pinned`、`placement`をedge ove
 認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
 導出する既定値、overlayの`iconRef`はユーザーが個別に選択したoverrideです。
 
+`appearance.styleRef`はcatalogの`styles`にある安定IRIを参照し、`appearance.style`は利用者が
+個別に変更した`fill`、`stroke`、`text`、`accent`、`fillOpacity`、`strokeWidth`、`dash`だけを
+sparseに保持します。`styleToken`はabsolute IRIを`styleRef`として読む旧互換fieldです。
+任意CSS、class名、URL、scriptをstyleとして保存せず、reset時はoverrideを除いてcatalog値へ戻します。
+
 ## Catalog
 
 v1 target catalogは次の宣言を持ちます。
 
 - `rules`: type、predicate、fallback patternから汎用projection operatorへの写像
 - `templates`: primitive kind、shape、既定size、style、icon参照
+- `styles`: overlayからIRI参照できる安全なsparse style preset
 - `assets`: asset IRIからresolver hintとなる取得定義への写像
 
 `AssetDefinition.url`と`mediaType`はcatalog schema互換のため保持しますが、取得結果としては信頼しません。Host resolverは自身のpolicyと取得正本から実URL、実media type、byte lengthを確認します。Workspace固有assetのようにcatalog外の`iconRef`を解決する場合、resolverへ渡すdefinitionは`undefined`です。
 
 標準catalogはRDF/RDFS IRIを`membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
+`membership-container.membershipPredicate`は限定RDFS `subPropertyOf` closureで照合し、sourceで使った
+exact predicateはmembership provenanceと`set-membership`逆編集へ保持します。
 
 現行の正規化contractは上記`rules`です。`nodeRules`、`relationRules`、`containmentRules`を持つ`DiagramCatalog`は既存hostの移行だけに残す互換APIであり、stable APIとはしません。
 
@@ -79,7 +87,11 @@ v1 target catalogは次の宣言を持ちます。
 
 `projectSemanticView(document, catalog, viewId, options)`は保存documentを変更せず、意味graphからgeometry未確定の`ProjectedScene`を同期的に返します。`layoutProjectedDiagramScene(projected, layoutRef, registry, mode)`はlayoutだけを非同期に適用し、renderer向け`Promise<DiagramScene>`を返します。`buildIriographView(document, viewId, context, mode)`はview profileに対応する解決済みcatalogを選び、両者を順に呼ぶconvenience APIです。Projectionとlayoutの公開責務は統合せず、Sceneはいずれもderived dataであり保存正本ではありません。`DiagramCatalog`を受けてgeometryまで返す同期`projectIriographDocument` overloadは移行用互換contractです。
 
-現在のprimitiveは`node`、`edge`、`container`です。`annotation`は型上予約されていますが未投影です。
+現在のprimitiveは`node`、`edge`、`container`、`region`です。`annotation`は型上予約されていますが未投影です。
+`node-link` viewは単一parentの階層配置に`container`を使い、`region` viewは複数membershipを
+重なり可能な半透明領域で表します。`ProjectedScene.memberships`/`DiagramScene.memberships`は
+viewの階層化可否にかかわらず全membershipとprovenanceを保持します。複数containerに属する要素へ
+一つの`parentElementId`を恣意的に選びません。
 
 `SceneEdge.route`はlayoutから導出されるrenderer用polylineで、source/target attachmentを含む
 2点以上の配列です。`SceneEdge.waypoints`はportable overlay由来のmanual中間点だけを表し、
@@ -176,16 +188,16 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 | `create-resource` | named resourceと初期statementを追加 | named IRIと、そのresourceをsubjectまたはobjectに含む少なくとも1tripleが同一transactionに必要。node作成UIではtarget viewでnode/containerに投影できることも検証 |
 | `set-property` | literalまたはIRI propertyを追加・置換・削除 | predicate、datatype/language、cardinalityはprofile/domain validationの対象 |
 | `connect-resources` | subjectからobjectへの関係を追加 | predicate必須。直接IRI-object tripleまたはcapability定義のgraph patchとし、generic predicateを暗黙生成しない |
-| `set-membership` | containerとmemberの所属を追加・削除 | RDF/RDFS profileでは`rdf:type rdf:Bag`と`rdfs:member`を用い、parent一意性とcycleを検証 |
+| `set-membership` | containerとmemberの所属を追加・削除 | RDF/RDFS profileでは`rdf:type rdf:Bag`と`rdfs:member`を用いる。複数membershipを許容し、container間cycleを検証 |
 | `set-sequence` | 順序付きmemberを再構成 | `rdf:Seq`と`rdf:_n`を一括更新し、連番制約を途中状態に適用しない |
 | `set-alternatives` | 選択肢と既定選択を再構成 | `memberIris`を最終ordinal順の正本として`rdf:Alt`と`rdf:_n`を一括更新。2件以上かつ`memberIris[defaultOrdinal - 1] === defaultMemberIri`を要求し、重複IRIを保持 |
 | `delete-resource` | resourceをsubjectとする記述statementとresourceを削除 | 他subjectからresourceへの参照がある場合は既定で拒否。影響statementのpreview付き明示cascadeだけを許可し、Seq/Alt member削除は同じpatchで再採番 |
 
 v1のnode作成UIはnamed IRIと、作成resourceをsubjectまたはobjectに含む少なくとも1tripleが確定するまで保存しません。作成resource自身のtype/labelに加え、既存resourceとのdirect edge、既存containerへのcatalog規定membership、初期位置を一つの`create-resource.initialStatements`と位置patchへcompileできます。任意欄を有効にしたままpredicate、相手resource、またはmembership構成が欠けている場合は部分適用せずPreviewをerrorにします。全statementと初期位置が検証を通った場合だけ一つのrevisionとして確定します。
 
-`create-resource.initialStatements`で構造predicateを一般に迂回することはできません。唯一のv1例外は、subjectが既存named resource、objectが作成resource、predicateとcontainer typeがresolved context内の同じ`membership-container`規則へexact matchする場合です。作成resourceをsubjectにした構造statement、ordinal predicate、型が一致しないcontainerは拒否し、parent一意性とcycleは最終candidate graphのprofile検証へ委ねます。作成後の包含編集は通常どおり`set-membership`を使います。Edgeはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属を暗黙変更しません。
+`create-resource.initialStatements`で構造predicateを一般に迂回することはできません。唯一のv1例外は、subjectが既存named resource、objectが作成resource、predicateとcontainer typeがresolved context内の同じ`membership-container`規則へexact matchする場合です。作成resourceをsubjectにした構造statement、ordinal predicate、型が一致しないcontainerは拒否し、cycleは最終candidate graphのprofile検証へ委ねます。作成後の包含編集は通常どおり`set-membership`を使います。Edgeはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属を暗黙変更しません。
 
-Node、edge、属性、包含、削除のauthoring UIは右Inspectorの上部に`Meaning` command draftとして置き、その下の`Display Inspector`と責務を分けます。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はlabelを主表示にし、完全IRIをoption value、tooltip、Advanced overrideとして保持します。Coreへ渡す値は常に完全IRIであり、同名labelをidentityとして使いません。
+Node、edge、属性、包含、削除は対象objectまたはCanvas背景のcontext menuと作成paletteから開始し、右Inspectorの上部に`Meaning` command draftを開きます。属性一覧は選択objectのdetails dialogでも編集でき、その下の`Display Inspector`とは責務を分けます。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はlabel、説明、形のpreviewを主表示にし、完全IRIをoption value、tooltip、Advanced overrideとして保持します。Coreへ渡す値は常に完全IRIであり、同名labelをidentityとして使いません。順序・選択肢・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
 
 主要なresource欄は明示的な「Canvasから選択」modeを持ちます。このmode中だけnode/container clickを対象fieldへseedし、通常のselection、drag、container内配置からsubject、predicate、membershipを推論しません。位置指定modeではblank canvas clickが位置だけをseedし、container背景clickは位置と、そのcontainerにexact matchするcatalog membershipをdraftへseedできます。いずれも即時commitせず、同じfieldのpicker再押下、Escape、Cancel、`readOnly`への切替、Scene交換で解除します。Picker中のnode/container clickは通常の選択・geometry gestureを開始しません。
 
@@ -255,6 +267,7 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `setSnapSettings(settings)`: grid、対象要素へのsnapをsession内で設定
 - `selectionChanged(primaryElementId)`: 既存のprimary selection通知
 - `selectionSetChanged(elementIds)`: ordered selection集合の通知
+- `pendingDraftsChanged(pending)`: 未適用のTurtleまたはstructured authoring draftの有無。hostの保存可否・離脱確認に利用
 
 公開`IriographDiagramCanvas`はedge編集時に
 `routingUpdate({ elementId, routing?: { waypoints?, labelOffset? } })`を発行します。`routing`は

@@ -5,12 +5,15 @@ import {
   generatedElementId,
   sequenceTransitionIdentity,
   statementIdentityFromQuad,
-} from "./identity";
+} from "./identity.js";
+import { resolveAppearance } from "./appearance.js";
 import type {
   DiagramView,
   ProjectedContainer,
   ProjectedEdge,
   ProjectedNode,
+  ProjectedMembership,
+  ProjectedRegion,
   ProjectedScene,
   ProjectionCatalogV1,
   ProjectionDiagnostic,
@@ -19,24 +22,24 @@ import type {
   ProjectionRule,
   ViewElementOverlay,
   VisualTemplate,
-} from "./model";
+} from "./model.js";
 import {
   collectOrdinalMembers,
   resolveNamedResourcePlans,
   type NamedResourcePlan,
-} from "./profile-validation";
-import type { RdfsClosure } from "./rdfs-closure";
+} from "./profile-validation.js";
+import type { RdfsClosure } from "./rdfs-closure.js";
 import {
   compareCodePoints,
   distinctNamedSubjects,
   isNamedNode,
   type SemanticGraph,
-} from "./rdf";
+} from "./rdf.js";
 import {
   resolveStatementRule,
   type ResolvedProjectionRule,
-} from "./rule-resolution";
-import { catalogRef, type RdfRdfsVocabulary } from "./standard-catalog";
+} from "./rule-resolution.js";
+import { catalogRef, type RdfRdfsVocabulary } from "./standard-catalog.js";
 
 type OverlayEntry = { elementId: string; overlay: ViewElementOverlay };
 type ParentBinding = {
@@ -69,14 +72,15 @@ export function executeProjectionOperators(
   const overlays = overlaysForSemantic(view, diagnostics);
   const consumed = new Set<string>();
   const candidates = new Set(distinctNamedSubjects(graph));
-  const parentByChild = new Map<string, ParentBinding>();
+  const parentsByChild = new Map<string, ParentBinding[]>();
 
   collectStructuralStatements(
     graph,
     plans,
     consumed,
     candidates,
-    parentByChild,
+    parentsByChild,
+    closure,
   );
 
   const directEdges: DirectEdgePlan[] = [];
@@ -100,6 +104,7 @@ export function executeProjectionOperators(
 
   const nodes = new Map<string, ProjectedNode>();
   const containers = new Map<string, ProjectedContainer>();
+  const regions = new Map<string, ProjectedRegion>();
   const semanticToElement = new Map<string, string>();
   for (const semanticRef of [...candidates].sort(compareCodePoints)) {
     const plan = plans.get(semanticRef) ?? {
@@ -119,10 +124,19 @@ export function executeProjectionOperators(
     if (!element) continue;
     semanticToElement.set(semanticRef, element.elementId);
     if (element.structuralKind === "container") containers.set(semanticRef, element);
+    else if (element.structuralKind === "region") regions.set(semanticRef, element);
     else nodes.set(semanticRef, element);
   }
 
-  applyParentBindings(nodes, containers, semanticToElement, parentByChild);
+  const memberships = applyMembershipBindings(
+    view,
+    nodes,
+    containers,
+    regions,
+    semanticToElement,
+    parentsByChild,
+    diagnostics,
+  );
 
   const edges: ProjectedEdge[] = [];
   for (const plan of directEdges) {
@@ -154,6 +168,8 @@ export function executeProjectionOperators(
     viewId: view.viewId,
     nodes: [...nodes.values()].sort(compareElements),
     containers: [...containers.values()].sort(compareElements),
+    regions: [...regions.values()].sort(compareElements),
+    memberships,
     edges: edges.sort(compareElements),
     diagnostics,
   };
@@ -164,7 +180,8 @@ function collectStructuralStatements(
   plans: ReadonlyMap<string, NamedResourcePlan>,
   consumed: Set<string>,
   candidates: Set<string>,
-  parentByChild: Map<string, ParentBinding>,
+  parentsByChild: Map<string, ParentBinding[]>,
+  closure: RdfsClosure,
 ): void {
   for (const plan of plans.values()) {
     const resolved = plan.resolved;
@@ -172,20 +189,23 @@ function collectStructuralStatements(
     if (!resolved || !operator) continue;
     if (operator.operator === "membership-container") {
       candidates.add(plan.semanticRef);
-      for (const quad of graph.store.getQuads(
-        plan.semanticRef,
-        operator.membershipPredicate,
-        null,
-        null,
-      )) {
+      for (const quad of graph.store.getQuads(plan.semanticRef, null, null, null).filter((candidate) => (
+        isNamedNode(candidate.predicate)
+        && closure.subpropertyDistance(
+          candidate.predicate.value,
+          operator.membershipPredicate,
+        ) !== undefined
+      ))) {
         consumed.add(statementIdentityFromQuad(quad));
         if (!isNamedNode(quad.object)) continue;
         candidates.add(quad.object.value);
-        parentByChild.set(quad.object.value, {
+        const bindings = parentsByChild.get(quad.object.value) ?? [];
+        bindings.push({
           parentIri: plan.semanticRef,
           quad,
           rule: resolved,
         });
+        parentsByChild.set(quad.object.value, bindings);
       }
     } else if (operator.operator === "ordinal-sequence" || operator.operator === "alternative") {
       if (operator.operator === "alternative") candidates.add(plan.semanticRef);
@@ -210,18 +230,31 @@ function projectResource(
   overlayEntry: OverlayEntry | undefined,
   diagnostics: ProjectionDiagnostic[],
   options: ProjectionOptions | undefined,
-): ProjectedNode | ProjectedContainer | undefined {
+): ProjectedNode | ProjectedContainer | ProjectedRegion | undefined {
   const operator = plan.resolved?.rule.project;
   if (operator?.operator === "ordinal-sequence" || operator?.operator === "suppress") return undefined;
   const structuralKind = operator?.operator === "membership-container"
-    ? "container"
+    ? view.kind === "region" ? "region" : "container"
     : operator?.operator === "resource"
       ? operator.structuralKind
       : "node";
   const defaultTemplateRef = structuralKind === "node"
     ? catalog.defaults!.nodeTemplateRef
-    : plan.resolved?.rule.templateRef ?? catalog.defaults!.nodeTemplateRef;
-  const ruleTemplateRef = plan.resolved?.rule.templateRef ?? defaultTemplateRef;
+    : structuralKind === "region"
+      ? catalog.defaults?.regionTemplateRef
+      : plan.resolved?.rule.templateRef ?? catalog.defaults!.nodeTemplateRef;
+  if (!defaultTemplateRef) {
+    diagnostics.push({
+      severity: "error",
+      code: "region-template-unresolved",
+      message: `region viewに必要なdefault region templateがありません: ${plan.semanticRef}`,
+      semanticRef: plan.semanticRef,
+    });
+    return undefined;
+  }
+  const ruleTemplateRef = structuralKind === "region"
+    ? defaultTemplateRef
+    : plan.resolved?.rule.templateRef ?? defaultTemplateRef;
   const template = selectTemplate(
     catalog,
     overlayEntry?.overlay.appearance?.templateRef ?? ruleTemplateRef,
@@ -237,11 +270,17 @@ function projectResource(
     semanticRef: plan.semanticRef,
     label: selectLabel(graph, plan.semanticRef, vocabulary.labelPredicate, view.locale),
     templateRef: template.templateRef,
-    defaultSize: template.defaultSize ?? (structuralKind === "container"
-      ? { width: 720, height: 220 }
+    defaultSize: template.defaultSize ?? (structuralKind === "container" || structuralKind === "region"
+      ? { width: 360, height: 220 }
       : { width: 164, height: 72 }),
     geometry: overlayEntry?.overlay.geometry,
-    style: template.style,
+    style: resolveAppearance(
+      template.style,
+      overlayEntry?.overlay.appearance,
+      catalog,
+      plan.semanticRef,
+      diagnostics,
+    ).style,
     pinned: overlayEntry?.overlay.pinned ?? false,
     placement: overlayEntry?.overlay.placement ?? "generated",
     provenance: resourceProvenance(graph, plan, vocabulary),
@@ -254,6 +293,8 @@ function projectResource(
       headerPosition: template.headerPosition ?? "top",
     };
   }
+
+  if (structuralKind === "region") return { ...common, structuralKind };
 
   const iconRef = overlayEntry?.overlay.appearance?.iconRef ?? template.iconRef;
   return {
@@ -314,7 +355,13 @@ function projectDirectEdge(
     sourceElementId,
     targetElementId,
     templateRef: template.templateRef,
-    style: template.style,
+    style: resolveAppearance(
+      template.style,
+      overlay?.overlay.appearance,
+      catalog,
+      semanticRef,
+      diagnostics,
+    ).style,
     waypoints: manualWaypoints,
     labelOffset: overlay?.overlay.routing?.labelOffset,
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
@@ -486,7 +533,13 @@ function projectDerivedEdge(
     sourceElementId,
     targetElementId,
     templateRef: template.templateRef,
-    style: template.style,
+    style: resolveAppearance(
+      template.style,
+      overlay?.overlay.appearance,
+      catalog,
+      semanticRef,
+      diagnostics,
+    ).style,
     waypoints: manualWaypoints,
     labelOffset: overlay?.overlay.routing?.labelOffset,
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
@@ -497,18 +550,68 @@ function projectDerivedEdge(
   };
 }
 
-function applyParentBindings(
+function applyMembershipBindings(
+  view: DiagramView,
   nodes: Map<string, ProjectedNode>,
   containers: Map<string, ProjectedContainer>,
+  regions: Map<string, ProjectedRegion>,
   semanticToElement: ReadonlyMap<string, string>,
-  parentByChild: ReadonlyMap<string, ParentBinding>,
-): void {
-  for (const [childIri, binding] of parentByChild) {
-    const child = nodes.get(childIri) ?? containers.get(childIri);
-    const parentElementId = semanticToElement.get(binding.parentIri);
-    if (!child || !parentElementId) continue;
+  parentsByChild: ReadonlyMap<string, ParentBinding[]>,
+  diagnostics: ProjectionDiagnostic[],
+): ProjectedMembership[] {
+  const memberships: ProjectedMembership[] = [];
+  for (const [childIri, unsortedBindings] of [...parentsByChild.entries()].sort(([left], [right]) => (
+    compareCodePoints(left, right)
+  ))) {
+    const child = nodes.get(childIri) ?? containers.get(childIri) ?? regions.get(childIri);
+    if (!child) continue;
+    const bindings = [...unsortedBindings].sort((left, right) => (
+      compareCodePoints(left.parentIri, right.parentIri)
+      || compareCodePoints(statementIdentityFromQuad(left.quad), statementIdentityFromQuad(right.quad))
+    ));
+    const visible = bindings.flatMap((binding) => {
+      const parentElementId = semanticToElement.get(binding.parentIri);
+      return parentElementId ? [{ binding, parentElementId }] : [];
+    });
+    for (const { binding, parentElementId } of visible) {
+      const provenance = membershipProvenance(childIri, binding);
+      memberships.push({
+        semanticRef: statementIdentityFromQuad(binding.quad),
+        containerElementId: parentElementId,
+        memberElementId: child.elementId,
+        ...(view.kind === "region" ? { regionElementId: parentElementId } : {}),
+        provenance,
+      });
+    }
+    const parentBindings = new Map<string, ParentBinding>();
+    for (const entry of visible) {
+      if (!parentBindings.has(entry.parentElementId)) {
+        parentBindings.set(entry.parentElementId, entry.binding);
+      }
+    }
+    if (view.kind !== "node-link" || parentBindings.size === 0) continue;
+    if (parentBindings.size > 1) {
+      diagnostics.push({
+        severity: "warning",
+        code: "multiple-container-memberships-not-hierarchical",
+        message: `${childIri}の${parentBindings.size}件のcontainer membershipはhierarchy parentへ縮約せず保持します。`,
+        semanticRef: childIri,
+      });
+      continue;
+    }
+    if (child.structuralKind === "region") continue;
+    const [parentElementId, binding] = [...parentBindings.entries()][0]!;
     child.parentElementId = parentElementId;
-    child.parentProvenance = {
+    child.parentProvenance = membershipProvenance(childIri, binding);
+  }
+  return memberships.sort((left, right) => compareCodePoints(left.semanticRef, right.semanticRef));
+}
+
+function membershipProvenance(
+  childIri: string,
+  binding: ParentBinding,
+): ProjectionProvenance {
+  return {
       sourceStatementRefs: [statementIdentityFromQuad(binding.quad)],
       operator: "membership-container",
       rule: ruleReference(binding.rule),
@@ -522,8 +625,7 @@ function applyParentBindings(
             predicate: binding.quad.predicate.value,
           }
         : undefined,
-    };
-  }
+  };
 }
 
 function resourceProvenance(
@@ -571,7 +673,7 @@ function overlaysForSemantic(
 function selectTemplate(
   catalog: ProjectionCatalogV1,
   requestedRef: string,
-  expectedKind: "node" | "container" | "edge",
+  expectedKind: "node" | "container" | "region" | "edge",
   semanticRef: string,
   diagnostics: ProjectionDiagnostic[],
   fallbackRef: string,

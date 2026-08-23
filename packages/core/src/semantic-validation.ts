@@ -1,7 +1,7 @@
-import type { IriographDocument, ProjectionDiagnostic } from "./model";
-import { statementIdentityFromQuad } from "./identity";
-import { canonicalQuad, canonicalTerm, parseSemanticGraph } from "./rdf";
-import { sortDiagnostics } from "./diagnostics";
+import type { IriographDocument, ProjectionDiagnostic } from "./model.js";
+import { statementIdentityFromQuad } from "./identity.js";
+import { canonicalQuad, canonicalTerm, parseSemanticGraph } from "./rdf.js";
+import { sortDiagnostics } from "./diagnostics.js";
 import type { Term } from "n3";
 
 export type SemanticValidationTerm = {

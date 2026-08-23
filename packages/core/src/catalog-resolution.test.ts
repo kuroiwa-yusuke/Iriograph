@@ -22,6 +22,8 @@ describe("resolveProjectionCatalogImports", () => {
       templateRef: "urn:test:template:domain",
       assetRef: "urn:test:asset:domain",
     });
+    base.styles = { "urn:test:style:base": { fill: "#ffffff" } };
+    domain.styles = { "urn:test:style:domain": { stroke: "#000000" } };
     const sources = new Map<string, CatalogRawSource>([
       ["urn:test:catalog:base@1", JSON.stringify(base)],
       ["urn:test:catalog:domain@2", new TextEncoder().encode(JSON.stringify(domain))],
@@ -55,6 +57,10 @@ describe("resolveProjectionCatalogImports", () => {
       "urn:test:template:domain",
     ]);
     expect(Object.keys(merged.catalog.assets)).toEqual(["urn:test:asset:domain"]);
+    expect(Object.keys(merged.catalog.styles ?? {})).toEqual([
+      "urn:test:style:base",
+      "urn:test:style:domain",
+    ]);
     expect(merged.ruleOrigins).toEqual(merged.catalog.rules.map((rule, index) => ({
       qualifiedRuleId: rule.ruleId,
       catalogRef: calls[index],
@@ -239,6 +245,8 @@ describe("resolveProjectionCatalogImports", () => {
       assetRef: "urn:test:asset:collision",
       defaults: true,
     });
+    first.styles = { "urn:test:style:collision": { fill: "#ffffff" } };
+    second.styles = { "urn:test:style:collision": { fill: "#000000" } };
     const result = await resolveProjectionCatalogImports([
       { catalogRef: "urn:test:catalog:second@1" },
       { catalogRef: "urn:test:catalog:first@1" },
@@ -253,6 +261,7 @@ describe("resolveProjectionCatalogImports", () => {
         "catalog-asset-conflict",
         "catalog-defaults-conflict",
         "catalog-rule-id-conflict",
+        "catalog-style-conflict",
         "catalog-template-conflict",
       ]);
     }

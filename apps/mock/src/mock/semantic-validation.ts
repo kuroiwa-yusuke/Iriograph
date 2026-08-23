@@ -10,6 +10,7 @@ const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_BAG = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag";
 const RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label";
 const RDFS_MEMBER = "http://www.w3.org/2000/01/rdf-schema#member";
+const DEMO_AUDIT_MEMBER = `${DEMO}p-03`;
 
 /** Static fixture adapter: demonstrates the port without adding a SHACL engine dependency. */
 export const mockSemanticValidationContext: ResolvedSemanticValidationContext = {
@@ -34,7 +35,7 @@ function validateRequiredLabels(request: SemanticValidationRequest): SemanticVal
       && statement.object.value === RDF_BAG
     ) labelRequired.add(statement.subject.value);
     if (
-      statement.predicate.value === RDFS_MEMBER
+      (statement.predicate.value === RDFS_MEMBER || statement.predicate.value === DEMO_AUDIT_MEMBER)
       && statement.object.termType === "NamedNode"
       && statement.object.value.startsWith(DEMO)
     ) labelRequired.add(statement.object.value);
@@ -53,7 +54,7 @@ function validateRequiredLabels(request: SemanticValidationRequest): SemanticVal
       findingId: `required-label:${semanticRef}`,
       severity: "error",
       code: "demo-visible-resource-label-required",
-      message: "Mockのlaneと直接memberには空でないrdfs:labelが必要です。",
+      message: "Mockの領域と包含memberには空でないrdfs:labelが必要です。",
       semanticRef,
       sourceRange,
     }];

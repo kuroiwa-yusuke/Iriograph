@@ -1469,6 +1469,51 @@ ex:b rdfs:label "B" .
     expect(cascadeGraph.countQuads(`${NS}seq`, `${NS}ordinal-01`, null, null)).toBe(1);
   });
 
+  it("rdfs:memberのdomain subpropertyをmembership authoringとprovenanceでexact保持する", async () => {
+    const source = `${baseSource}
+<${NS}contains> <http://www.w3.org/2000/01/rdf-schema#subPropertyOf> <${RDFS_MEMBER}> ;
+  <${RDFS_LABEL}> "Contains" .
+<${NS}lane> <${RDF_TYPE}> <${RDF_BAG}> ; <${RDFS_LABEL}> "Lane" .
+`;
+    const document = documentFor(source);
+    const baseContext = contextFor("revision-domain-membership");
+    const context: ResolvedAuthoringContext = {
+      ...baseContext,
+      documentRevision: "revision-domain-membership",
+      terms: [...baseContext.terms, {
+        iri: `${NS}contains`,
+        kind: "property",
+        label: "Contains",
+        objectKinds: ["iri"],
+        structural: true,
+      }],
+    };
+    const preview = await previewAuthoringCommands(document, [{
+      type: "set-membership",
+      commandId: "domain-membership",
+      containerIri: `${NS}lane`,
+      memberIri: `${NS}a`,
+      enabled: true,
+      containerTypeIri: RDF_BAG,
+      predicateIri: `${NS}contains`,
+    }], context);
+
+    expect(preview.valid).toBe(true);
+    expect(preview.patch.added).toContainEqual(expect.objectContaining({
+      predicateIri: `${NS}contains`,
+    }));
+    const applied = await applyAuthoringPreview(document, preview, context, {
+      confirmationId: preview.confirmationId,
+    });
+    expect(applied.accepted).toBe(true);
+    const scene = await buildIriographView(applied.document, "main", context.runtime);
+    expect(scene.memberships).toContainEqual(expect.objectContaining({
+      provenance: expect.objectContaining({
+        editCapability: expect.objectContaining({ predicate: `${NS}contains` }),
+      }),
+    }));
+  });
+
   it("AltはmemberIrisを最終ordinal順の正本として重複IRIも保持する", async () => {
     const document = documentFor(baseSource);
     const context = contextFor("revision-1");

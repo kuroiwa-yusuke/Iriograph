@@ -5,7 +5,8 @@
 | Package | 責務 | 持たない責務 |
 |---|---|---|
 | `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、human semantic commandのatomic graph patch/preview/apply、非同期layout adapter契約と標準軽量layout、asset lease/policy検証 | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
-| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、右Inspectorのstructured semantic authoring | 語彙判定、永続化、認証、catalog取得 |
+| `@iriograph/semantic-access` | Turtle由来のlabel/comment/構造索引、検索・describe・近傍/subgraph、revision alias、Core commandへcompileする注入WritePort | LLM provider、MCP transport、overlay、永続化、認証 |
+| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、context menu/details dialogから右Inspectorへ繋ぐstructured semantic authoring | 語彙判定、永続化、認証、catalog取得 |
 | `@iriograph/layout-elk` | ELK.js Layeredへのoptional adapter、compound hierarchy、直交route、host engine/Worker注入 | semantic解釈、document内のengine固有option、hard pinの近似 |
 | `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocator例 | 投影規則、editor内部state |
 
@@ -15,7 +16,7 @@
 2. RDF/RDFSベースプロファイルの構造制約を検証する
 3. 明示された`rdfs:subClassOf`と`rdfs:subPropertyOf`からrule matching用の限定的なclosureを作る
 4. catalog ruleをpriorityとspecificityで一意に解決する
-5. `membership-container`、`ordinal-sequence`、`alternative`等の汎用operatorでgeometry未確定のScene構造とedit provenanceを導出する
+5. `membership-container`、`ordinal-sequence`、`alternative`等の汎用operatorでgeometry未確定のScene構造とedit provenanceを導出する。Membershipは多対多の全組を保持し、node-linkの単一parent階層とregionの重なり表現をviewごとに選ぶ
 6. 消費されていないIRI-object tripleをfallback edgeへ投影する
 7. view overlayをsemanticRefで照合し、user geometry、appearance、manual routingを制約として構成する
 8. `layoutRef`に対応する非同期layout adapterを呼び、generated elementのgeometryとendpoint込みrouteを決定する
@@ -109,6 +110,14 @@ Delete cascadeはresourceをsubject、object、predicateに含むexact statement
 Mockではstatic context fixtureを使います。Profile/vocabulary URIの取得、version・cache・integrity解決はP2-01まで実装せず、editor/coreからresolverへ逆依存させません。
 
 Domain validationのrequest/response、diagnostic identity、warning confirmation、abort、P1-08 cache identityは[semantic-validation.md](./semantic-validation.md)を正本とします。Validation requestはparse済みdatasetをserializable statement snapshotへ変換し、Core内部のN3 `Store`をadapterへ公開しません。Loaded documentのdomain errorはprojectionを止めずScene annotationとして重ね、candidate transactionのdomain errorだけをatomic rollbackします。
+
+## Semantic access
+
+`@iriograph/semantic-access`はportable documentを別形式の正本へ変換せず、対象revisionのTurtleからread modelを構築します。Index entryは完全IRI、locale別label/comment、型、class/property hierarchy、incoming/outgoing statement、membershipを持ちます。検索順位と同順位のsortは入力triple順や実行環境localeへ依存させません。
+
+Resource/predicateの短いaliasは一つのindex revision内だけで有効です。LLM adapterはlabelで候補を検索し、aliasでdescribe/subgraph/writeを要求できますが、semantic-accessは適用前にaliasを完全IRIへ解決し、revision一致を検証します。Writeはstructured operationをCore `AuthoringCommand`へcompileし、host注入のpreview/apply portへ委譲します。確認済みpreview、authoring context、workspace revisionの照合はwrite port側のCore transactionを通り、semantic-accessはraw SPARQL Updateやoverlay mutationを提供しません。
+
+Browser、Node、Python MCP、AgentCore等は同じAPIへtransportを被せるhost adapterです。MCP serverをPythonで実装しても、RDFの別正本、IRIとは別のidentity、検証を迂回する書込み経路を作りません。詳細は[semantic-access.md](./semantic-access.md)を正本とします。
 
 ## Named viewとsession表示状態
 

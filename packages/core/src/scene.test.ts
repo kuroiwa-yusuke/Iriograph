@@ -125,7 +125,51 @@ describe("ProjectedScene conversion", () => {
     expect(scene.nodes).toHaveLength(2);
     expect(scene.diagnostics).toEqual([]);
   });
+
+  it("region viewで多対多membershipを重なり領域としてend-to-end投影する", async () => {
+    const document = documentFor({});
+    document.views[0]!.kind = "region";
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :left a rdf:Bag ; rdfs:label "Left" ; rdfs:member :a, :shared .
+      :right a rdf:Bag ; rdfs:label "Right" ; rdfs:member :shared, :b .
+      :a rdfs:label "A" .
+      :shared rdfs:label "Shared" .
+      :b rdfs:label "B" .
+    `;
+
+    const scene = await buildIriographView(document, "main", {
+      catalogsByProfile: new Map([[
+        standardRdfRdfsCatalog.profileRef,
+        { catalog: standardRdfRdfsCatalog },
+      ]]),
+      layouts: createStandardLayoutRegistry(),
+    });
+
+    expect(scene.regions).toHaveLength(2);
+    expect(scene.containers).toEqual([]);
+    expect(scene.memberships).toHaveLength(4);
+    expect(scene.memberships?.filter((entry) => (
+      entry.memberElementId === scene.nodes.find((node) => node.semanticRef.endsWith(":shared"))?.elementId
+    ))).toHaveLength(2);
+    const shared = scene.nodes.find((node) => node.semanticRef.endsWith(":shared"))!;
+    const containingRegions = scene.regions!.filter((region) => containsCenter(region.geometry, shared.geometry));
+    expect(containingRegions).toHaveLength(2);
+    expect(scene.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
 });
+
+function containsCenter(
+  outer: { x: number; y: number; width: number; height: number },
+  inner: { x: number; y: number; width: number; height: number },
+): boolean {
+  const x = inner.x + inner.width / 2;
+  const y = inner.y + inner.height / 2;
+  return x >= outer.x && x <= outer.x + outer.width
+    && y >= outer.y && y <= outer.y + outer.height;
+}
 
 function documentFor(
   overlay: IriographDocumentV1["views"][number]["overlay"],

@@ -1,5 +1,6 @@
-import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics";
-import { isValidEdgeEndpointAnchor } from "./endpoint-anchor";
+import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics.js";
+import { isSafeVisualStyleOverride } from "./appearance.js";
+import { isValidEdgeEndpointAnchor } from "./endpoint-anchor.js";
 import type {
   DiagramScene,
   DiagramView,
@@ -7,22 +8,24 @@ import type {
   ProjectedContainer,
   ProjectedEdge,
   ProjectedNode,
+  ProjectedRegion,
   ProjectionCatalogV1,
   ProjectionDiagnostic,
   SceneContainer,
   SceneEdge,
   SceneNode,
+  SceneRegion,
   ViewElementOverlay,
-} from "./model";
-import { projectSemanticView } from "./projection";
+} from "./model.js";
+import { projectSemanticView } from "./projection.js";
 import {
   buildIriographView,
   type ProjectionRuntimeContext,
-} from "./scene";
+} from "./scene.js";
 
-type GeometryElement = ProjectedNode | ProjectedContainer;
+type GeometryElement = ProjectedNode | ProjectedContainer | ProjectedRegion;
 type ProjectedElement = GeometryElement | ProjectedEdge;
-type SceneElement = SceneNode | SceneContainer | SceneEdge;
+type SceneElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 
 export type DisplayReconciliationResult = {
   accepted: boolean;
@@ -103,6 +106,7 @@ function reconcileViewOverlay(
   projected: {
     nodes: ProjectedNode[];
     containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
     edges: ProjectedEdge[];
   },
   catalog: ProjectionCatalogV1,
@@ -112,6 +116,7 @@ function reconcileViewOverlay(
   const previousElements = new Map<string, SceneElement>([
     ...previousScene.nodes,
     ...previousScene.containers,
+    ...(previousScene.regions ?? []),
     ...previousScene.edges,
   ].map((element) => [element.semanticRef, element]));
   const previousSemanticByElementId = new Map(
@@ -119,6 +124,7 @@ function reconcileViewOverlay(
   );
   const nextElements = [
     ...projected.containers,
+    ...(projected.regions ?? []),
     ...projected.nodes,
     ...projected.edges,
   ];
@@ -269,6 +275,34 @@ function compatibleAppearance(
     });
     delete result.iconRef;
   }
+  if (!result.styleRef && result.styleToken && catalog.styles?.[result.styleToken]) {
+    result.styleRef = result.styleToken;
+    delete result.styleToken;
+    diagnostics.push({
+      severity: "info",
+      code: "reconcile-style-token-migrated",
+      message: `${next.semanticRef}のlegacy styleTokenをstyleRefへ移行しました。`,
+      semanticRef: next.semanticRef,
+    });
+  }
+  if (result.styleRef && !catalog.styles?.[result.styleRef]) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}の未解決styleRefを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.styleRef;
+  }
+  if (result.style && !isSafeVisualStyleOverride(result.style)) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}の安全でないstyle overrideを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.style;
+  }
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
@@ -283,7 +317,7 @@ function persistLayoutGeometry(
     ]),
   );
   const overlay: Record<string, ViewElementOverlay> = {};
-  for (const element of [...scene.containers, ...scene.nodes]) {
+  for (const element of [...scene.containers, ...(scene.regions ?? []), ...scene.nodes]) {
     const previous = bySemantic.get(element.semanticRef);
     const elementId = previous?.elementId ?? element.elementId;
     overlay[elementId] = {

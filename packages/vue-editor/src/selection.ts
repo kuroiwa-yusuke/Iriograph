@@ -5,9 +5,10 @@ import {
   type Point,
   type SceneContainer,
   type SceneNode,
+  type SceneRegion,
 } from "@iriograph/core";
 
-export type GeometryElement = SceneNode | SceneContainer;
+export type GeometryElement = SceneNode | SceneContainer | SceneRegion;
 
 export type GeometryChange = {
   elementId: string;
@@ -76,6 +77,7 @@ export function normalizeDiagramSnapSettings(
 export function sceneElementIds(scene: DiagramScene): string[] {
   return [
     ...scene.containers.map((element) => element.elementId),
+    ...(scene.regions ?? []).map((element) => element.elementId),
     ...scene.nodes.map((element) => element.elementId),
     ...scene.edges.map((element) => element.elementId),
   ];
@@ -136,11 +138,11 @@ export function resizeGeometryElement(
   const index = geometryIndex(scene);
   const element = index.get(elementId);
   if (!element) return undefined;
-  const minimumBase = element.structuralKind === "container"
+  const minimumBase = element.structuralKind === "container" || element.structuralKind === "region"
     ? { width: 240, height: 120 }
     : { width: 44, height: 36 };
   const children = element.structuralKind === "container"
-    ? [...index.values()].filter((candidate) => candidate.parentElementId === element.elementId)
+    ? [...index.values()].filter((candidate) => parentElementId(candidate) === element.elementId)
     : [];
   const minimum = {
     width: Math.max(
@@ -156,7 +158,8 @@ export function resizeGeometryElement(
       )),
     ),
   };
-  const parent = element.parentElementId ? index.get(element.parentElementId) : undefined;
+  const elementParentId = parentElementId(element);
+  const parent = elementParentId ? index.get(elementParentId) : undefined;
   const outer = parent?.structuralKind === "container"
     ? diagramContainerContentBounds(parent)
     : {
@@ -308,7 +311,8 @@ function constrainCommonTranslation(
   let maximumY = Number.POSITIVE_INFINITY;
 
   for (const element of participants) {
-    const parent = element.parentElementId ? index.get(element.parentElementId) : undefined;
+    const elementParentId = parentElementId(element);
+    const parent = elementParentId ? index.get(elementParentId) : undefined;
     if (parent?.structuralKind === "container" && !movingIds.has(parent.elementId)) {
       const content = diagramContainerContentBounds(parent);
       if (element.geometry.width > content.width || element.geometry.height > content.height) {
@@ -333,7 +337,7 @@ function constrainCommonTranslation(
 }
 
 function geometryElements(scene: DiagramScene): GeometryElement[] {
-  return [...scene.containers, ...scene.nodes];
+  return [...scene.containers, ...(scene.regions ?? []), ...scene.nodes];
 }
 
 function geometryIndex(scene: DiagramScene): Map<string, GeometryElement> {
@@ -357,11 +361,11 @@ function hasSelectedAncestor(
   selected: ReadonlySet<string>,
 ): boolean {
   const visited = new Set<string>();
-  let parentId = index.get(elementId)?.parentElementId;
+  let parentId = parentElementId(index.get(elementId));
   while (parentId && !visited.has(parentId)) {
     if (selected.has(parentId)) return true;
     visited.add(parentId);
-    parentId = index.get(parentId)?.parentElementId;
+    parentId = parentElementId(index.get(parentId));
   }
   return false;
 }
@@ -377,6 +381,10 @@ function expandRootGroups(
       || hasSelectedAncestor(index, element.elementId, rootsSet)
     ))
     .sort((left, right) => compareText(left.elementId, right.elementId));
+}
+
+function parentElementId(element: GeometryElement | undefined): string | undefined {
+  return element && "parentElementId" in element ? element.parentElementId : undefined;
 }
 
 function boundsInsideScene(

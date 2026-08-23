@@ -1,6 +1,6 @@
 import { Parser, Store, type NamedNode, type Quad, type Term } from "n3";
 
-import type { IriographDocument } from "./model";
+import type { IriographDocument } from "./model.js";
 
 export type SemanticGraph = {
   readonly quads: readonly Quad[];

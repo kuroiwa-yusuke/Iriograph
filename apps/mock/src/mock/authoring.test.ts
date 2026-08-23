@@ -35,7 +35,7 @@ describe("mock authoring host", () => {
 
     expect(first.valid).toBe(true);
     expect(first.commands[0]).toMatchObject({
-      resourceIri: expect.stringMatching(/^urn:iriograph:demo:review-task-/u),
+      resourceIri: expect.stringMatching(/^urn:iriograph:demo:r-[a-z0-9]+$/u),
     });
     expect(second.confirmationId).toBe(first.confirmationId);
   });

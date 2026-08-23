@@ -8,10 +8,10 @@ import type {
   AuthoringTermRole,
   ResolvedAuthoringContext,
   ResolvedAuthoringTerm,
-} from "./authoring-model";
-import { statementIdentityFromQuad } from "./identity";
-import type { IriographDocument, ProjectionDiagnostic } from "./model";
-import { canonicalQuad, compareCodePoints, isNamedNode } from "./rdf";
+} from "./authoring-model.js";
+import { statementIdentityFromQuad } from "./identity.js";
+import type { IriographDocument, ProjectionDiagnostic } from "./model.js";
+import { canonicalQuad, compareCodePoints, isNamedNode } from "./rdf.js";
 
 export const RDF_NAMESPACE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 export const RDFS_NAMESPACE = "http://www.w3.org/2000/01/rdf-schema#";

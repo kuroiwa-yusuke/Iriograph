@@ -28,32 +28,33 @@ describe("normalized RDF/RDFS mock", () => {
       .toBe(mockProjectionCatalog.rules.length);
   });
 
-  it("Bag/Seq/Alt/seeAlsoからcontainer・node・derived edgeを投影する", () => {
+  it("Bag/Seq/Alt/label付きpredicateからnode-linkと重なりregionを投影する", () => {
     const document = sampleDocument();
     const projected = projectSemanticView(document, mockProjectionCatalog);
 
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    expect(projected.containers).toHaveLength(2);
-    expect(projected.nodes).toHaveLength(8);
-    expect(projected.edges).toHaveLength(10);
-    expect(projected.containers.map((item) => item.semanticRef)).toEqual([
-      "urn:iriograph:demo:operationsLane",
-      "urn:iriograph:demo:requesterLane",
+    expect(projected.containers).toHaveLength(3);
+    expect(projected.nodes).toHaveLength(12);
+    expect(projected.edges).toHaveLength(11);
+    expect(projected.containers.map((item) => item.semanticRef).sort(compareText)).toEqual([
+      "urn:iriograph:demo:g-01",
+      "urn:iriograph:demo:g-02",
+      "urn:iriograph:demo:g-03",
     ]);
-    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:approvalPolicy"))
+    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-04"))
       .toMatchObject({
         templateRef: "urn:iriograph:template:reference:1",
         iconRef: "urn:iriograph:mock-workspace:asset:approval-policy",
       });
-    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:start"))
+    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-01"))
       .toMatchObject({ templateRef: "urn:iriograph:template:start-event:1" });
-    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:gateway"))
+    expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:c-01"))
       .toMatchObject({ templateRef: "urn:iriograph:template:gateway:1" });
     expect(projected.edges.some((edge) => edge.provenance.operator === "alternative")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "ordinal-sequence")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "direct-edge")).toBe(true);
-    const review = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:review")!;
-    const policy = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:approvalPolicy")!;
+    const review = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-03")!;
+    const policy = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-04")!;
     expect(projected.edges.filter((edge) => (
       edge.sourceElementId === review.elementId && edge.targetElementId === policy.elementId
     ))).toHaveLength(2);
@@ -61,11 +62,33 @@ describe("normalized RDF/RDFS mock", () => {
       edge.sourceElementId === review.elementId && edge.targetElementId === review.elementId
     ))).toHaveLength(1);
 
-    const topDown = projectSemanticView(document, mockProjectionCatalog, "top-down");
-    expect(topDown.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    expect(topDown.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:register"))
+    expect(projected.edges.find((edge) => edge.label === "関連する"))
+      .toMatchObject({ fallback: true });
+    expect(projected.edges.find((edge) => edge.label === "再試行"))
+      .toMatchObject({ fallback: true });
+    const reviewMemberships = (projected.memberships ?? []).filter((membership) => (
+      membership.memberElementId === review.elementId
+    ));
+    expect(reviewMemberships).toHaveLength(2);
+    expect(review.parentElementId).toBeUndefined();
+    expect(reviewMemberships.map((membership) => membership.provenance.editCapability))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ predicate: "http://www.w3.org/2000/01/rdf-schema#member" }),
+        expect.objectContaining({ predicate: "urn:iriograph:demo:p-03" }),
+      ]));
+
+    const regions = projectSemanticView(document, mockProjectionCatalog, "regions");
+    expect(regions.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(regions.containers).toEqual([]);
+    expect(regions.regions ?? []).toHaveLength(3);
+    expect((regions.memberships ?? []).filter((membership) => (
+      membership.memberElementId === regions.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-03")?.elementId
+    ))).toHaveLength(2);
+    expect(regions.regions?.find((item) => item.semanticRef === "urn:iriograph:demo:g-03")?.style)
+      .toMatchObject({ fill: "#ede9fe", fillOpacity: 0.2 });
+    expect(regions.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-05"))
       .toMatchObject({ templateRef: "urn:iriograph:template:service-task:1" });
-    expect(topDown.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:end"))
+    expect(regions.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-07"))
       .toMatchObject({ templateRef: "urn:iriograph:template:end-event:1" });
   });
 
@@ -90,8 +113,11 @@ describe("normalized RDF/RDFS mock", () => {
     expect(source).toContain("a rdf:Seq");
     expect(source).toContain("a rdf:Alt");
     expect(source).toContain("rdfs:seeAlso");
-    expect(source).toContain("wf:relatedTo");
-    expect(source).toContain("wf:retry");
+    expect(source).toContain("wf:p-01");
+    expect(source).toContain("wf:p-02");
+    expect(source).toContain("wf:p-03 rdfs:subPropertyOf rdfs:member");
+    expect(source).toContain('rdfs:label "関連する"@ja');
+    expect(source).toContain('rdfs:comment "標準の包含を特殊化し、元predicateを保持する業務語彙"@ja');
   });
 });
 

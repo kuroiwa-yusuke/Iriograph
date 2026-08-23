@@ -19,10 +19,12 @@ import type {
   SceneContainer,
   SceneEdge,
   SceneNode,
+  SceneRegion,
 } from "@iriograph/core";
 import {
   diagnosticTargetsSceneElement,
   edgeEndpointAnchorFromPoint,
+  edgeEndpointAnchorHaloGeometry,
   edgeEndpointAnchorPoint,
 } from "@iriograph/core";
 
@@ -70,6 +72,10 @@ import {
   type GeometryChange,
   type GeometryElement,
 } from "../selection";
+import type {
+  DiagramContextMenuRequest,
+  DiagramContextTargetKind,
+} from "../context-actions";
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;
@@ -116,6 +122,7 @@ const emit = defineEmits<{
   /** Explicit picker mode only; normal selection and drag never emit this. */
   semanticResourceRequest: [semanticRef: string];
   semanticPickCancel: [];
+  contextMenuRequest: [request: DiagramContextMenuRequest];
   /** @deprecated Use routingUpdate for the complete sparse routing value. */
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
@@ -158,10 +165,11 @@ type KeyboardGesture = {
 };
 
 const originalEndpointElementsById = computed(() => new Map(
-  [...props.scene.containers, ...props.scene.nodes].map((element) => [element.elementId, element]),
+  [...props.scene.containers, ...(props.scene.regions ?? []), ...props.scene.nodes]
+    .map((element) => [element.elementId, element]),
 ));
 const endpointElementsById = computed(() => new Map(
-  [...props.scene.containers, ...props.scene.nodes].map((element) => [
+  [...props.scene.containers, ...(props.scene.regions ?? []), ...props.scene.nodes].map((element) => [
     element.elementId,
     { ...element, geometry: geometryFor(element) },
   ]),
@@ -191,11 +199,15 @@ const viewportLabel = computed(() => [
   `y ${Math.round(minimapViewport.value.y)}`,
 ].join(" · "));
 
-type DiagnosticElement = SceneNode | SceneContainer | SceneEdge;
+type DiagnosticElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 
 function diagnosticsForElement(element: DiagnosticElement): ProjectionDiagnostic[] {
   return props.scene.diagnostics.filter((diagnostic) => (
-    diagnosticTargetsSceneElement(diagnostic, element)
+    element.structuralKind === "region"
+      ? diagnostic.semanticRef === element.semanticRef
+        || Boolean(diagnostic.statementRef
+          && element.provenance?.sourceStatementRefs.includes(diagnostic.statementRef))
+      : diagnosticTargetsSceneElement(diagnostic, element)
   ));
 }
 
@@ -354,8 +366,10 @@ function previewedDerivedRoute(edge: SceneEdge): Point[] {
   );
 }
 
-function endpointElementShape(element: SceneNode | SceneContainer): EdgeEndpointShape {
-  return element.structuralKind === "container" ? "container" : element.shape;
+function endpointElementShape(element: SceneNode | SceneContainer | SceneRegion): EdgeEndpointShape {
+  if (element.structuralKind === "container") return "container";
+  if (element.structuralKind === "region") return "region";
+  return element.shape;
 }
 
 function endpointAnchorHandlePoint(
@@ -366,6 +380,35 @@ function endpointAnchorHandlePoint(
   return endpoint === "source"
     ? route[0] ?? { x: 0, y: 0 }
     : route.at(-1) ?? { x: 0, y: 0 };
+}
+
+function endpointAnchorHalo(
+  edge: SceneEdge,
+  endpoint: "source" | "target",
+) {
+  const elementId = endpoint === "source" ? edge.sourceElementId : edge.targetElementId;
+  const element = endpointElementsById.value.get(elementId);
+  if (!element) return undefined;
+  const routePoint = endpointAnchorHandlePoint(edge, endpoint);
+  const preview = previewRouting.value[edge.elementId];
+  const stored = preview === undefined
+    ? endpoint === "source" ? edge.sourceAnchor : edge.targetAnchor
+    : endpoint === "source" ? preview?.sourceAnchor : preview?.targetAnchor;
+  const anchor = stored ?? edgeEndpointAnchorFromPoint(element.geometry, routePoint);
+  return edgeEndpointAnchorHaloGeometry(
+    element.geometry,
+    endpointElementShape(element),
+    anchor,
+    18,
+    14,
+  );
+}
+
+function arrowOverlayPath(edge: SceneEdge): string {
+  const route = renderedRoute(edge);
+  const from = route.at(-2);
+  const to = route.at(-1);
+  return from && to ? polylinePath([from, to]) : "";
 }
 
 function polylinePath(points: readonly Point[]): string {
@@ -394,8 +437,7 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
     event.stopPropagation();
     if (
       !props.readOnly
-      && element.structuralKind === "container"
-      && event.target === event.currentTarget
+      && (element.structuralKind === "container" || element.structuralKind === "region")
     ) {
       const position = semanticPositionAt(event);
       if (position) emit("semanticPositionRequest", position, element.semanticRef);
@@ -619,6 +661,10 @@ function handleLabelKeydown(event: KeyboardEvent, edge: SceneEdge): void {
 }
 
 function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
+  if (isContextMenuKey(event)) {
+    requestKeyboardContextMenu(event, edge.elementId);
+    return;
+  }
   if (event.key === "Enter" || event.key === " ") {
     event.preventDefault();
     requestSelection({ elementId: edge.elementId, mode: "replace" });
@@ -632,6 +678,10 @@ function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
 }
 
 function handleGeometrySemanticKeydown(event: KeyboardEvent, elementId: string): void {
+  if (isContextMenuKey(event)) {
+    requestKeyboardContextMenu(event, elementId);
+    return;
+  }
   if (event.key !== "Delete" && event.key !== "Backspace") return;
   event.preventDefault();
   event.stopPropagation();
@@ -769,6 +819,10 @@ function semanticPositionAt(event: PointerEvent): Point | undefined {
 
 function handleViewportKeydown(event: KeyboardEvent): void {
   if (event.target !== scrollElement.value) return;
+  if (isContextMenuKey(event)) {
+    requestKeyboardContextMenu(event, activeNavigatorElementId.value);
+    return;
+  }
   const command = resolveCanvasKeyboardCommand(event, {
     editableTarget: isEditableEventTarget(event.target),
     compositionActive: compositionActive.value,
@@ -977,7 +1031,7 @@ function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): vo
     return;
   }
 
-  const element = [...props.scene.containers, ...props.scene.nodes]
+  const element = [...props.scene.containers, ...(props.scene.regions ?? []), ...props.scene.nodes]
     .find((candidate) => candidate.elementId === activeId);
   if (!element) return;
   if (!selectedElementIdsSet.value.has(activeId)) {
@@ -986,7 +1040,7 @@ function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): vo
   const gesture = beginKeyboardGesture("resize", element.elementId, event.key);
   gesture.delta.x += movement.x;
   gesture.delta.y += movement.y;
-  const initial = [...gesture.initialScene.containers, ...gesture.initialScene.nodes]
+  const initial = [...gesture.initialScene.containers, ...(gesture.initialScene.regions ?? []), ...gesture.initialScene.nodes]
     .find((candidate) => candidate.elementId === element.elementId);
   if (!initial) return;
   const change = resizeGeometryElement(gesture.initialScene, element.elementId, {
@@ -1273,6 +1327,7 @@ function elementBounds(elementId: string): ElementGeometry | undefined {
   const geometryElement = [
     ...props.scene.nodes,
     ...props.scene.containers,
+    ...(props.scene.regions ?? []),
   ].find((element) => element.elementId === elementId);
   if (geometryElement) return geometryElement.geometry;
   const edge = props.scene.edges.find((candidate) => candidate.elementId === elementId);
@@ -1296,11 +1351,57 @@ function isBlankCanvasTarget(target: EventTarget | null): boolean {
   return !target.closest([
     ".iriograph-scene-node",
     ".iriograph-scene-container",
+    ".iriograph-scene-region",
     ".iriograph-edge-group",
     ".iriograph-waypoints",
     ".iriograph-endpoint-anchors",
     ".iriograph-resize-handle",
   ].join(","));
+}
+
+function requestPointerContextMenu(
+  event: MouseEvent,
+  kind: DiagramContextTargetKind,
+  elementId?: string,
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  if (elementId) requestSelection({ elementId, mode: "replace" });
+  else requestSelection({ elementId: "", mode: "replace" });
+  emit("contextMenuRequest", {
+    kind,
+    elementId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    canvasPosition: canvasPoint(event),
+  });
+}
+
+function requestBlankContextMenu(event: MouseEvent): void {
+  if (!isBlankCanvasTarget(event.target)) return;
+  requestPointerContextMenu(event, "blank");
+}
+
+function requestKeyboardContextMenu(event: KeyboardEvent, requestedElementId: string): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const item = navigatorItems.value.find((candidate) => candidate.elementId === requestedElementId);
+  const elementId = item?.elementId;
+  if (elementId) requestSelection({ elementId, mode: "replace" });
+  const target = elementId ? document.getElementById(navigatorDomId(elementId)) : scrollElement.value;
+  const bounds = target?.getBoundingClientRect();
+  const geometry = elementId ? elementBounds(elementId) : undefined;
+  emit("contextMenuRequest", {
+    kind: item?.kind ?? "blank",
+    elementId,
+    clientX: bounds ? bounds.left + Math.min(bounds.width, 24) : 24,
+    clientY: bounds ? bounds.top + Math.min(bounds.height, 24) : 24,
+    canvasPosition: geometry ? centerOf(geometry) : undefined,
+  });
+}
+
+function isContextMenuKey(event: KeyboardEvent): boolean {
+  return event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
 }
 
 function trackPointer(
@@ -1369,6 +1470,10 @@ function snapshotScene(scene: DiagramScene): DiagramScene {
     containers: scene.containers.map((container) => ({
       ...container,
       geometry: { ...container.geometry },
+    })),
+    regions: scene.regions?.map((region) => ({
+      ...region,
+      geometry: { ...region.geometry },
     })),
     edges: scene.edges.map((edge) => ({
       ...edge,
@@ -1444,6 +1549,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             height: `${scene.height}px`,
             transform: `scale(${zoom})`,
           }"
+          @contextmenu="requestBlankContextMenu"
         >
           <div class="iriograph-canvas-grid" />
           <span
@@ -1452,6 +1558,38 @@ defineExpose<DiagramCanvasNavigationApi>({
             aria-label="Semantic draft position"
             :style="{ left: `${semanticDraftPosition.x}px`, top: `${semanticDraftPosition.y}px` }"
           />
+
+          <div
+            v-for="region in scene.regions ?? []"
+            :key="region.elementId"
+            :id="navigatorDomId(region.elementId)"
+            class="iriograph-scene-region"
+            :class="[{ selected: selectedElementIdsSet.has(region.elementId), 'navigator-active': activeNavigatorElementId === region.elementId }, diagnosticClass(region)]"
+            role="option"
+            tabindex="-1"
+            :data-element-id="region.elementId"
+            :aria-label="`${navigatorAriaLabel(region.elementId, region.label, 'region')}${diagnosticAriaSuffix(region)}`"
+            :aria-selected="selectedElementIdsSet.has(region.elementId)"
+            :aria-posinset="navigatorPosition(region.elementId)"
+            :aria-setsize="navigatorItems.length"
+            :style="{
+              left: `${geometryFor(region).x}px`,
+              top: `${geometryFor(region).y}px`,
+              width: `${geometryFor(region).width}px`,
+              height: `${geometryFor(region).height}px`,
+              borderColor: region.style.stroke,
+              borderWidth: `${region.style.strokeWidth ?? 1}px`,
+              borderStyle: region.style.dash && region.style.dash !== '0' ? 'dashed' : 'solid',
+              color: region.style.text,
+            }"
+            @pointerdown="startMove($event, region)"
+            @keydown="handleGeometrySemanticKeydown($event, region.elementId)"
+            @contextmenu="requestPointerContextMenu($event, 'region', region.elementId)"
+          >
+            <span class="iriograph-region-fill" :style="{ background: region.style.fill, opacity: region.style.fillOpacity ?? 0.28 }" />
+            <span class="iriograph-region-label">{{ region.label }}</span>
+            <span v-if="selectedElementIdsSet.size === 1 && selectedElementId === region.elementId && !readOnly" class="iriograph-resize-handle" title="領域サイズを変更" @pointerdown="startResize($event, region)" />
+          </div>
 
           <div
             v-for="container in scene.containers"
@@ -1484,10 +1622,13 @@ defineExpose<DiagramCanvasNavigationApi>({
               height: `${geometryFor(container).height}px`,
               background: container.style.fill,
               borderColor: container.style.stroke,
+              borderWidth: `${container.style.strokeWidth ?? 1}px`,
+              borderStyle: container.style.dash && container.style.dash !== '0' ? 'dashed' : 'solid',
               color: container.style.text,
             }"
             @pointerdown="startMove($event, container)"
             @keydown="handleGeometrySemanticKeydown($event, container.elementId)"
+            @contextmenu="requestPointerContextMenu($event, 'container', container.elementId)"
           >
             <span
               class="iriograph-container-header"
@@ -1543,6 +1684,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               @click.stop="selectEdge($event, edge)"
               @keydown="handleEdgeKeydown($event, edge)"
               @dblclick.stop="addWaypointAtPointer($event, edge)"
+              @contextmenu="requestPointerContextMenu($event, 'edge', edge.elementId)"
             >
               <path class="iriograph-edge-hitarea" :d="pathFor(edge)" />
               <path
@@ -1550,6 +1692,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :d="pathFor(edge)"
                 :stroke="edge.style.stroke"
                 :stroke-dasharray="edge.style.dash"
+                :stroke-width="edge.style.strokeWidth"
                 :marker-end="`url(#${arrowMarkerId})`"
               />
               <text
@@ -1583,28 +1726,6 @@ defineExpose<DiagramCanvasNavigationApi>({
                 @pointerdown="startWaypointMove($event, selectedEdge, index)"
                 @keydown="handleWaypointKeydown($event, selectedEdge, index)"
               />
-            </g>
-            <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors" aria-hidden="true">
-              <circle
-                class="source"
-                :cx="endpointAnchorHandlePoint(selectedEdge, 'source').x"
-                :cy="endpointAnchorHandlePoint(selectedEdge, 'source').y"
-                r="8"
-                tabindex="-1"
-                @pointerdown="startEndpointAnchorMove($event, selectedEdge, 'source')"
-              >
-                <title>Source endpoint anchor</title>
-              </circle>
-              <circle
-                class="target"
-                :cx="endpointAnchorHandlePoint(selectedEdge, 'target').x"
-                :cy="endpointAnchorHandlePoint(selectedEdge, 'target').y"
-                r="8"
-                tabindex="-1"
-                @pointerdown="startEndpointAnchorMove($event, selectedEdge, 'target')"
-              >
-                <title>Target endpoint anchor</title>
-              </circle>
             </g>
           </svg>
 
@@ -1643,6 +1764,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               height: `${geometryFor(node).height}px`,
               background: node.style.fill,
               borderColor: node.style.stroke,
+              borderWidth: `${node.style.strokeWidth ?? 1}px`,
+              borderStyle: node.style.dash && node.style.dash !== '0' ? 'dashed' : 'solid',
               color: node.style.text,
               '--iriograph-node-accent': node.style.accent ?? node.style.stroke,
             }"
@@ -1652,6 +1775,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             :aria-setsize="navigatorItems.length"
             @pointerdown="startMove($event, node)"
             @keydown="handleGeometrySemanticKeydown($event, node.elementId)"
+            @contextmenu="requestPointerContextMenu($event, 'node', node.elementId)"
           >
             <span class="iriograph-node-content">
               <img v-if="node.iconUrl" class="iriograph-node-icon" :src="node.iconUrl" alt="" draggable="false" />
@@ -1666,6 +1790,38 @@ defineExpose<DiagramCanvasNavigationApi>({
               @pointerdown="startResize($event, node)"
             />
           </div>
+
+          <svg class="iriograph-edge-interaction-layer" :width="scene.width" :height="scene.height" :viewBox="`0 0 ${scene.width} ${scene.height}`" aria-hidden="true">
+            <path
+              v-for="edge in scene.edges"
+              :key="`arrow:${edge.elementId}`"
+              class="iriograph-edge-arrow-overlay"
+              :d="arrowOverlayPath(edge)"
+              :stroke="edge.style.stroke"
+              :stroke-width="edge.style.strokeWidth"
+              :marker-end="`url(#${arrowMarkerId})`"
+            />
+            <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors">
+              <template v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
+                <line
+                  v-if="endpointAnchorHalo(selectedEdge, endpoint)"
+                  class="iriograph-endpoint-stub"
+                  :x1="endpointAnchorHalo(selectedEdge, endpoint)!.stub.from.x"
+                  :y1="endpointAnchorHalo(selectedEdge, endpoint)!.stub.from.y"
+                  :x2="endpointAnchorHalo(selectedEdge, endpoint)!.stub.to.x"
+                  :y2="endpointAnchorHalo(selectedEdge, endpoint)!.stub.to.y"
+                />
+                <circle
+                  v-if="endpointAnchorHalo(selectedEdge, endpoint)"
+                  :class="endpoint"
+                  :cx="endpointAnchorHalo(selectedEdge, endpoint)!.haloPoint.x"
+                  :cy="endpointAnchorHalo(selectedEdge, endpoint)!.haloPoint.y"
+                  r="12"
+                  @pointerdown="startEndpointAnchorMove($event, selectedEdge, endpoint)"
+                ><title>{{ endpoint }} endpoint anchor</title></circle>
+              </template>
+            </g>
+          </svg>
         </div>
       </div>
     </div>
@@ -1689,6 +1845,15 @@ defineExpose<DiagramCanvasNavigationApi>({
           :y="geometryFor(container).y"
           :width="geometryFor(container).width"
           :height="geometryFor(container).height"
+        />
+        <rect
+          v-for="region in scene.regions ?? []"
+          :key="region.elementId"
+          class="iriograph-minimap-region"
+          :x="geometryFor(region).x"
+          :y="geometryFor(region).y"
+          :width="geometryFor(region).width"
+          :height="geometryFor(region).height"
         />
         <path
           v-for="edge in scene.edges"

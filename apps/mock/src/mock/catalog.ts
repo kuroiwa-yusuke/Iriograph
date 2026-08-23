@@ -59,6 +59,7 @@ function mergeCatalogs(
       ruleId: `${origin}#${rule.ruleId}`,
     })),
     templates: mergeRecords<VisualTemplate>(standard.templates, domain.templates),
+    styles: mergeRecords(standard.styles ?? {}, domain.styles ?? {}),
     assets: mergeRecords<AssetDefinition>(standard.assets, domain.assets),
   };
 }

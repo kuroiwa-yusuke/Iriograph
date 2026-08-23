@@ -88,6 +88,35 @@ describe("resolveDiagramSceneAssets", () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it("host policyが許可したJPEG workspace iconを解決する", async () => {
+    const release = vi.fn();
+    const batch = await resolveDiagramSceneAssets(
+      sceneWithIcons(ICON_REF),
+      {},
+      {
+        resolver: {
+          async resolve() {
+            return resolvedLease(release, {
+              url: "https://assets.example/icon.jpg",
+              mediaType: "image/jpeg",
+            });
+          },
+        },
+        policy: {
+          ...POLICY,
+          allowedMediaTypes: [...POLICY.allowedMediaTypes, "image/jpeg"],
+        },
+        revision: "jpeg-1",
+      },
+      new AbortController().signal,
+    );
+
+    expect(batch.scene.nodes[0]?.iconUrl).toBe("https://assets.example/icon.jpg");
+    expect(batch.diagnostics).toEqual([]);
+    batch.release();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["asset-media-type-disallowed", { mediaType: "image/webp" as const }],
     ["asset-byte-limit-exceeded", { byteLength: 1025 }],

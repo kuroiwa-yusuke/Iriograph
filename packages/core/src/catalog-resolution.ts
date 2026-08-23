@@ -4,9 +4,10 @@ import type {
   CatalogImport,
   ProjectionCatalogV1,
   ProjectionRule,
+  VisualStyleOverride,
   VisualTemplate,
-} from "./model";
-import { parseProjectionCatalogV1 } from "./schema";
+} from "./model.js";
+import { parseProjectionCatalogV1 } from "./schema.js";
 
 export type CatalogRawSource = string | Uint8Array | ArrayBuffer;
 
@@ -30,6 +31,7 @@ export type CatalogResolutionDiagnostic = {
     | "catalog-duplicate-identity"
     | "catalog-rule-id-conflict"
     | "catalog-template-conflict"
+    | "catalog-style-conflict"
     | "catalog-asset-conflict"
     | "catalog-defaults-missing"
     | "catalog-defaults-conflict";
@@ -338,6 +340,12 @@ function mergeConflicts(entries: readonly LoadedCatalog[]): CatalogResolutionDia
   ));
   diagnostics.push(...keyConflicts(
     entries,
+    "catalog-style-conflict",
+    (entry) => Object.keys(entry.catalog.styles ?? {}),
+    "styleRef",
+  ));
+  diagnostics.push(...keyConflicts(
+    entries,
     "catalog-template-conflict",
     (entry) => Object.keys(entry.catalog.templates),
     "templateRef",
@@ -372,7 +380,7 @@ function mergeConflicts(entries: readonly LoadedCatalog[]): CatalogResolutionDia
 
 function keyConflicts(
   entries: readonly LoadedCatalog[],
-  code: "catalog-rule-id-conflict" | "catalog-template-conflict" | "catalog-asset-conflict",
+  code: "catalog-rule-id-conflict" | "catalog-template-conflict" | "catalog-style-conflict" | "catalog-asset-conflict",
   keysFor: (entry: LoadedCatalog) => string[],
   keyName: string,
 ): CatalogResolutionDiagnostic[] {
@@ -402,6 +410,7 @@ function mergeProfile(profileRef: string, entries: readonly LoadedCatalog[]): Me
   const rules: ProjectionRule[] = [];
   const ruleOrigins: ProjectionRuleOrigin[] = [];
   const templates: Record<string, VisualTemplate> = {};
+  const styles: Record<string, VisualStyleOverride> = {};
   const assets: Record<string, AssetDefinition> = {};
   let defaults: CatalogDefaults | undefined;
 
@@ -414,6 +423,10 @@ function mergeProfile(profileRef: string, entries: readonly LoadedCatalog[]): Me
     for (const key of Object.keys(entry.catalog.templates).sort(compareText)) {
       const template = entry.catalog.templates[key];
       if (template) templates[key] = clone(template);
+    }
+    for (const key of Object.keys(entry.catalog.styles ?? {}).sort(compareText)) {
+      const style = entry.catalog.styles?.[key];
+      if (style) styles[key] = clone(style);
     }
     for (const key of Object.keys(entry.catalog.assets).sort(compareText)) {
       const asset = entry.catalog.assets[key];
@@ -430,6 +443,7 @@ function mergeProfile(profileRef: string, entries: readonly LoadedCatalog[]): Me
     profileRef,
     rules,
     templates,
+    ...(Object.keys(styles).length > 0 ? { styles } : {}),
     assets,
     ...(defaults ? { defaults } : {}),
   };

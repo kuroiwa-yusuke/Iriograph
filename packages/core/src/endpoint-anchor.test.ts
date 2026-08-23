@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   edgeEndpointAnchorFromPoint,
+  edgeEndpointAnchorHaloGeometry,
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
 } from "./endpoint-anchor";
@@ -43,5 +44,53 @@ describe("edge endpoint anchors", () => {
     expect(isValidEdgeEndpointAnchor({ position: 1 })).toBe(false);
     expect(isValidEdgeEndpointAnchor({ position: Number.NaN })).toBe(false);
     expect(() => edgeEndpointAnchorPoint(geometry, "rectangle", { position: 1 })).toThrow(RangeError);
+  });
+
+  it("derives shape-aware outward halo points and stubs without changing the anchor", () => {
+    const rectangle = edgeEndpointAnchorHaloGeometry(
+      geometry,
+      "rectangle",
+      { position: .25 },
+      16,
+      8,
+    );
+    expect(rectangle).toEqual({
+      boundaryPoint: { x: 110, y: 60 },
+      normal: { x: 1, y: 0 },
+      haloPoint: { x: 126, y: 60 },
+      stub: { from: { x: 110, y: 60 }, to: { x: 118, y: 60 } },
+    });
+
+    const ellipse = edgeEndpointAnchorHaloGeometry(
+      geometry,
+      "circle",
+      { position: .125 },
+      12,
+    );
+    expect(Math.hypot(ellipse.normal.x, ellipse.normal.y)).toBeCloseTo(1, 10);
+    expect(ellipse.normal.x).toBeGreaterThan(0);
+    expect(ellipse.normal.y).toBeLessThan(0);
+    expect(ellipse.stub.to).toEqual(ellipse.haloPoint);
+    expect(ellipse.boundaryPoint).toEqual(edgeEndpointAnchorPoint(
+      geometry,
+      "circle",
+      { position: .125 },
+    ));
+
+    expect(edgeEndpointAnchorHaloGeometry(
+      geometry,
+      "diamond",
+      { position: 0 },
+      10,
+    ).normal).toEqual({ x: 0, y: -1 });
+  });
+
+  it("rejects renderer distances that are negative or non-finite", () => {
+    expect(() => edgeEndpointAnchorHaloGeometry(
+      geometry,
+      "diamond",
+      { position: 0 },
+      -1,
+    )).toThrow(RangeError);
   });
 });

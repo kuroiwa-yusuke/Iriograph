@@ -1,6 +1,6 @@
-import type { SemanticGraph } from "./rdf";
-import { compareCodePoints, isNamedNode } from "./rdf";
-import type { RdfRdfsVocabulary } from "./standard-catalog";
+import type { SemanticGraph } from "./rdf.js";
+import { compareCodePoints, isNamedNode } from "./rdf.js";
+import type { RdfRdfsVocabulary } from "./standard-catalog.js";
 
 export type RdfsClosure = {
   subclassDistance(child: string, ancestor: string): number | undefined;

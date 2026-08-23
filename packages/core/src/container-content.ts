@@ -1,4 +1,4 @@
-import type { ElementGeometry, VisualTemplate } from "./model";
+import type { ElementGeometry, VisualTemplate } from "./model.js";
 
 export type ContainerContentInsets = {
   top: number;

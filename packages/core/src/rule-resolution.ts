@@ -3,10 +3,11 @@ import type {
   ProjectionDiagnostic,
   ProjectionRule,
   VisualTemplate,
-} from "./model";
-import type { RdfsClosure } from "./rdfs-closure";
-import { compareCodePoints } from "./rdf";
-import { catalogRef } from "./standard-catalog";
+} from "./model.js";
+import { isSafeVisualStyleOverride } from "./appearance.js";
+import type { RdfsClosure } from "./rdfs-closure.js";
+import { compareCodePoints } from "./rdf.js";
+import { catalogRef } from "./standard-catalog.js";
 
 export type ResolvedProjectionRule = {
   catalogRef: string;
@@ -81,6 +82,25 @@ export function validateProjectionCatalog(
   const diagnostics: ProjectionDiagnostic[] = [];
   const seenRuleIds = new Set<string>();
 
+  for (const [templateRef, template] of Object.entries(catalog.templates)) {
+    if (isSafeVisualStyleOverride(template.style)) continue;
+    diagnostics.push({
+      severity: "error",
+      code: "unsafe-template-style",
+      message: `templateに安全でないstyle値があります: ${templateRef}`,
+      catalogRef: ref,
+    });
+  }
+  for (const [styleRef, style] of Object.entries(catalog.styles ?? {})) {
+    if (isSafeVisualStyleOverride(style)) continue;
+    diagnostics.push({
+      severity: "error",
+      code: "unsafe-style-preset",
+      message: `catalog style presetに安全でない値があります: ${styleRef}`,
+      catalogRef: ref,
+    });
+  }
+
   for (const rule of catalog.rules) {
     if (seenRuleIds.has(rule.ruleId)) {
       diagnostics.push(ruleDiagnostic(
@@ -142,6 +162,9 @@ export function validateProjectionCatalog(
   } else {
     validateDefaultTemplate(catalog, catalog.defaults.nodeTemplateRef, "node", diagnostics);
     validateDefaultTemplate(catalog, catalog.defaults.edgeTemplateRef, "edge", diagnostics);
+    if (catalog.defaults.regionTemplateRef) {
+      validateDefaultTemplate(catalog, catalog.defaults.regionTemplateRef, "region", diagnostics);
+    }
   }
   return diagnostics;
 }
@@ -303,7 +326,7 @@ function validateTemplateReference(
 function validateDefaultTemplate(
   catalog: ProjectionCatalogV1,
   templateRef: string,
-  expectedKind: "node" | "edge",
+  expectedKind: "node" | "edge" | "region",
   diagnostics: ProjectionDiagnostic[],
 ): void {
   const template = catalog.templates[templateRef];

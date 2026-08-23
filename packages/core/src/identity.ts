@@ -1,6 +1,6 @@
 import type { Quad, Term } from "n3";
 
-import { canonicalTerm } from "./rdf";
+import { canonicalTerm } from "./rdf.js";
 
 const IDENTITY_NAMESPACE = "urn:iriograph:semantic-ref:v1:";
 
@@ -44,7 +44,7 @@ export function alternativeBranchIdentity(
 }
 
 export function generatedElementId(
-  structuralKind: "node" | "container" | "edge",
+  structuralKind: "node" | "container" | "region" | "edge",
   semanticRef: string,
 ): string {
   return `${structuralKind}:${encodeURIComponent(semanticRef)}`;

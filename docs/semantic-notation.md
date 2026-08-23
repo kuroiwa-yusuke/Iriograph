@@ -10,6 +10,8 @@
 
 Domain resource IRIは、業務上の対象や出来事を識別します。たとえば`ex:review`、`ex:approvalPolicy`はresourceであり、subjectまたはobjectとして関係、label、構造membershipを持ちます。
 
+Resource IRIのlocal nameに人間が読める意味語を入れることは必須ではありません。IRIはrenameに耐える安定identityであり、人間とLLMが理解する名前・説明は`rdfs:label`と`rdfs:comment`を主に使います。Labelが欠落する場合の最終fallbackとしてcompact IRIを表示しますが、IRIの綴りをclass、relation、構造として推論しません。
+
 Domain vocabulary IRIは、graphを解釈する語彙です。主に次の位置に現れます。
 
 - predicate
@@ -18,6 +20,8 @@ Domain vocabulary IRIは、graphを解釈する語彙です。主に次の位置
 - `rdfs:subClassOf`、`rdfs:subPropertyOf`等の語彙関係
 
 両者をnamespace、local nameの大文字・小文字、labelから推測しません。同じIRIが複数の役割を持てるRDFの性質は維持しますが、authoring profileは実際に使うroleを明示します。
+
+Predicateも同じくIRIでidentityを持ち、predicate resource自身の`rdfs:label`/`rdfs:comment`を関係名と説明に使います。Editorとsemantic access toolは「承認する」「参照する」等のlabelで候補を探せますが、保存・検索結果・write commandは選択したpredicate IRIを保持します。同名の関係は型、説明、上下位property、IRIを併記して区別します。
 
 ## 3. Turtleへ入れる判断
 
@@ -30,6 +34,8 @@ Domain vocabulary IRIは、graphを解釈する語彙です。主に次の位置
 - domain間で意味を保って再利用する
 
 `rdf:Bag`/`rdfs:member`の包含、`rdf:Seq`/`rdf:_n`の順序、`rdf:Alt`の選択は、配置だけでなくgraphの構造として検証・再利用するためTurtleに残します。`rdfs:label`、`rdfs:seeAlso`、意味のある`relatedTo`や`retry`も同様です。
+
+単に「集合のmemberである」ことだけが必要なら`rdfs:member`で十分です。所属の種類そのものに業務意味がある場合は、domain predicateを`rdfs:subPropertyOf rdfs:member`として自己記述し、そのpredicateへlabel/commentを付けます。個々の所属statementごとに根拠、役割、期間等を説明する必要がある場合だけrelation resourceまたはRDF-star等の別profileを選び、すべての包含を独自relation resourceへ一般化しません。
 
 一方、次の用途しかない情報はpresentationです。
 

@@ -1,12 +1,12 @@
 import type {
   ProjectionDiagnostic,
   SemanticSourceUpdate,
-} from "./model";
-import type { ProjectionRuntimeContext } from "./scene";
+} from "./model.js";
+import type { ProjectionRuntimeContext } from "./scene.js";
 import type {
   ResolvedSemanticValidationContext,
   SemanticWarningConfirmation,
-} from "./semantic-validation";
+} from "./semantic-validation.js";
 
 export type AuthoringTermPolicy = {
   existingUnknown: "preserve" | "reject";

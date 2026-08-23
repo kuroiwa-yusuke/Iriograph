@@ -1,15 +1,15 @@
-import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics";
+import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics.js";
 import type {
   DiagramView,
   IriographDocument,
   ProjectionDiagnostic,
-} from "./model";
-import { reconcileIriographDocumentViews } from "./reconciliation";
-import { isBcp47LanguageTag } from "./schema";
+} from "./model.js";
+import { reconcileIriographDocumentViews } from "./reconciliation.js";
+import { isBcp47LanguageTag } from "./schema.js";
 import {
   buildIriographView,
   type ProjectionRuntimeContext,
-} from "./scene";
+} from "./scene.js";
 
 export type AddViewCommand = {
   command: "add";

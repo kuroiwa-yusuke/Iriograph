@@ -10,37 +10,37 @@ import type {
   PreviewAuthoringOptions,
   ProvenanceAuthoringInput,
   ResolvedAuthoringContext,
-} from "./authoring-model";
+} from "./authoring-model.js";
 import {
   compileAuthoringCommands,
   type AuthoringPositionApplication,
-} from "./authoring-patch";
-import { sortDiagnostics } from "./diagnostics";
+} from "./authoring-patch.js";
+import { sortDiagnostics } from "./diagnostics.js";
 import {
   applyCanonicalSemanticDataset,
   applyCanonicalSemanticSource,
   applySemanticSource,
-} from "./document";
+} from "./document.js";
 import type {
   IriographDocument,
   ProjectionDiagnostic,
   SceneContainer,
   SemanticEditCapability,
   SemanticSourceUpdate,
-} from "./model";
-import { statementIdentityFromQuad } from "./identity";
-import { buildIriographView } from "./scene";
+} from "./model.js";
+import { statementIdentityFromQuad } from "./identity.js";
+import { buildIriographView } from "./scene.js";
 import {
   RDF_TYPE,
   validateAuthoringGraphPolicy,
   validateResolvedAuthoringContext,
-} from "./authoring-validation";
+} from "./authoring-validation.js";
 import {
   canonicalizeTurtleSourceV1,
   serializeCanonicalTurtleV1,
   TURTLE_SERIALIZER_VERSION_V1,
-} from "./serializer";
-import { containerContentBounds as boundsForContainer } from "./container-content";
+} from "./serializer.js";
+import { containerContentBounds as boundsForContainer } from "./container-content.js";
 
 export async function previewAuthoringCommands(
   document: IriographDocument,
@@ -334,7 +334,7 @@ export function authoringDocumentFingerprint(document: IriographDocument): strin
 }
 
 type PreviewInternalOptions = PreviewAuthoringOptions & {
-  semanticWarningConfirmation?: import("./semantic-validation").SemanticWarningConfirmation;
+  semanticWarningConfirmation?: import("./semantic-validation.js").SemanticWarningConfirmation;
 };
 
 async function previewInternal(

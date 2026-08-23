@@ -3,8 +3,8 @@ import type {
   SceneContainer,
   SceneEdge,
   SceneNode,
-} from "./model";
-import { compareCodePoints } from "./rdf";
+} from "./model.js";
+import { compareCodePoints } from "./rdf.js";
 
 const severityOrder: Record<ProjectionDiagnostic["severity"], number> = {
   error: 0,

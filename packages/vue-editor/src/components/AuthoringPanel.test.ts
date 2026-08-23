@@ -52,8 +52,8 @@ describe("AuthoringPanel", () => {
 
     expect(wrapper.text()).toContain("警告を確認して適用");
     expect(wrapper.text()).toContain("unknown-term-introduced");
-    expect(wrapper.text()).toContain("削除 1 triple");
-    expect(wrapper.text()).toContain("追加 1 triple");
+    expect(wrapper.text()).toContain("削除する関係 1件");
+    expect(wrapper.text()).toContain("追加する関係 1件");
     expect(wrapper.text()).toContain("Resourceを削除");
     expect(wrapper.text()).toContain("削除対象");
     expect(wrapper.text()).toContain("A");

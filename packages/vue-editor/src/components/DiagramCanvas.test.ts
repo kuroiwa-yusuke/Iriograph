@@ -131,7 +131,7 @@ describe("DiagramCanvas pointer gestures", () => {
     dispatchPointer("pointermove", 80, 20);
     await flushPreview();
     expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cx")).toBe("80");
-    expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cy")).toBe("40");
+    expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cy")).toBe("22");
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
     dispatchPointer("pointerup", 80, 20);
 
@@ -850,6 +850,64 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     dispatchPointer("pointerup", 100, 80);
     expect(wrapper.emitted("semanticPositionRequest")).toBeUndefined();
+  });
+
+  it("pointerとShift+F10のcontext menu要求を対象種別と位置付きで通知する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture() },
+    });
+    await wrapper.get(".iriograph-scene-node").trigger("contextmenu", {
+      clientX: 120,
+      clientY: 90,
+    });
+    expect(wrapper.emitted("contextMenuRequest")?.at(-1)?.[0]).toMatchObject({
+      kind: "node",
+      elementId: "node-a",
+      clientX: 120,
+      clientY: 90,
+    });
+
+    await wrapper.get(".iriograph-scene-node").trigger("keydown", {
+      key: "F10",
+      shiftKey: true,
+    });
+    expect(wrapper.emitted("contextMenuRequest")?.at(-1)?.[0]).toMatchObject({
+      kind: "node",
+      elementId: "node-a",
+    });
+  });
+
+  it("region選択中の位置指定はregion IRIを包含候補として通知する", async () => {
+    const scene = sceneFixture();
+    scene.regions = [{
+      elementId: "region-a",
+      semanticRef: "urn:test:canvas:region-a",
+      structuralKind: "region",
+      label: "Region A",
+      templateRef: "urn:test:template:region",
+      style: { fill: "#eeeeee", stroke: "#555555", text: "#111111", fillOpacity: .25 },
+      geometry: { x: 40, y: 30, width: 300, height: 200 },
+      pinned: false,
+      placement: "generated",
+    }];
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene, semanticPositionPicking: true },
+    });
+    wrapper.get<HTMLElement>(".iriograph-canvas-stage").element.getBoundingClientRect = () => ({
+      x: 10, y: 20, left: 10, top: 20, right: 810, bottom: 520,
+      width: 800, height: 500, toJSON: () => undefined,
+    });
+    await wrapper.get(".iriograph-scene-region").trigger("pointerdown", {
+      button: 0,
+      clientX: 160,
+      clientY: 140,
+    });
+    expect(wrapper.emitted("semanticPositionRequest")?.at(-1)).toEqual([
+      { x: 150, y: 120 },
+      "urn:test:canvas:region-a",
+    ]);
   });
 
   it("複数instanceでSVG arrow marker idを衝突させない", () => {

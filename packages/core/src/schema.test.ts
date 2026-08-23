@@ -49,6 +49,30 @@ describe("Iriograph document v1 schema", () => {
     expect(validateIriographDocumentV1(source)).toMatchObject({ valid: true, value: source });
   });
 
+  it("accepts region views and safe sparse style overrides while rejecting CSS injection", () => {
+    const source = structuredClone(fixture("document.valid.json")) as {
+      views: Array<{ kind: string; overlay: Record<string, unknown> }>;
+    };
+    source.views[0]!.kind = "region";
+    source.views[0]!.overlay.region = {
+      semanticRef: "urn:test:region",
+      appearance: {
+        styleRef: "urn:test:style:calm",
+        style: { fill: "#abcdef80", fillOpacity: 0.25, strokeWidth: 3, dash: "6 4" },
+      },
+    };
+    expect(validateIriographDocumentV1(source).valid).toBe(true);
+
+    (source.views[0]!.overlay.region as { appearance: { style: { fill: string } } })
+      .appearance.style.fill = "url(javascript:alert(1))";
+    const unsafe = validateIriographDocumentV1(source);
+    expect(unsafe.valid).toBe(false);
+    if (!unsafe.valid) expect(unsafe.issues).toContainEqual(expect.objectContaining({
+      instancePath: "/views/0/overlay/region/appearance/style/fill",
+      keyword: "pattern",
+    }));
+  });
+
   it.each([-0.01, 1, Number.POSITIVE_INFINITY])(
     "rejects invalid endpoint anchor position %s",
     (position) => {
@@ -141,6 +165,24 @@ describe("normalized projection catalog v1 schema", () => {
       issues: [],
     });
     expect(parseProjectionCatalogV1(source).rules).toHaveLength(7);
+  });
+
+  it("accepts IRI-keyed style presets and a region default template", () => {
+    const result = validateProjectionCatalogV1(standardRdfRdfsCatalog);
+    expect(result).toMatchObject({ valid: true });
+    expect(standardRdfRdfsCatalog.defaults?.regionTemplateRef).toBe(
+      "urn:iriograph:template:region:overlap:1",
+    );
+  });
+
+  it("accepts JPEG catalog assets", () => {
+    const source = structuredClone(fixture("catalog.valid.json")) as {
+      assets: Record<string, { mediaType: string }>;
+    };
+    const asset = Object.values(source.assets)[0]!;
+    asset.mediaType = "image/jpeg";
+
+    expect(validateProjectionCatalogV1(source)).toMatchObject({ valid: true });
   });
 
   it("accepts the standard RDF/RDFS catalog with the default edge template for ordinal sequences", () => {

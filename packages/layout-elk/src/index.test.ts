@@ -201,6 +201,77 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: "elk-fixed-overlap" }));
   });
 
+  test("completes generated overlap regions around shared members after ELK layout", async () => {
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:regions", "LR", {
+      engine: new RecordingEngine(),
+    });
+    const layoutRequest = request([
+      element("left", "region", undefined, { width: 240, height: 160 }),
+      element("right", "region", undefined, { width: 240, height: 160 }),
+      element("a"),
+      element("shared"),
+      element("b"),
+    ], [], "urn:test:regions");
+    layoutRequest.scene.memberships = [
+      membership("left-a", "left", "a"),
+      membership("left-shared", "left", "shared"),
+      membership("right-shared", "right", "shared"),
+      membership("right-b", "right", "b"),
+    ];
+
+    const result = await layoutProjectedScene(
+      layoutRequest,
+      new LayoutAdapterRegistry([adapter]),
+    );
+
+    expect(Object.keys(result.geometries).sort()).toEqual(["a", "b", "left", "right", "shared"]);
+    expect(containsCenter(result.geometries.left!, result.geometries.shared!)).toBe(true);
+    expect(containsCenter(result.geometries.right!, result.geometries.shared!)).toBe(true);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  test("preserves user region geometry and only diagnoses an empty intersection", async () => {
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:manual-regions", "LR", {
+      engine: { layout: vi.fn<ElkLayoutEngine["layout"]>() },
+    });
+    const left = {
+      ...element("left", "region"),
+      pinned: true,
+      placement: "user" as const,
+      geometry: { x: 10, y: 10, width: 180, height: 140 },
+    };
+    const right = {
+      ...element("right", "region"),
+      pinned: true,
+      placement: "user" as const,
+      geometry: { x: 500, y: 10, width: 180, height: 140 },
+    };
+    const shared = {
+      ...element("shared"),
+      pinned: true,
+      placement: "user" as const,
+      geometry: { x: 40, y: 40, width: 100, height: 60 },
+    };
+    const layoutRequest = request([left, right, shared], [], "urn:test:manual-regions");
+    layoutRequest.scene.memberships = [
+      membership("left-shared", "left", "shared"),
+      membership("right-shared", "right", "shared"),
+    ];
+
+    const result = await layoutProjectedScene(
+      layoutRequest,
+      new LayoutAdapterRegistry([adapter]),
+    );
+
+    expect(result.geometries.left).toEqual(left.geometry);
+    expect(result.geometries.right).toEqual(right.geometry);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "region-membership-intersection-empty",
+      severity: "warning",
+    }));
+    expect(result.diagnostics.some((item) => item.code === "layout-result-invalid")).toBe(false);
+  });
+
   test("diagnoses invalid engine output and still passes Core result validation", async () => {
     const adapter = new ElkLayeredLayoutAdapter("urn:test:invalid-output", "LR", {
       engine: {
@@ -301,6 +372,25 @@ function edge(elementId: string, sourceElementId: string, targetElementId: strin
     targetElementId,
     routingPlacement: "generated",
   };
+}
+
+function membership(semanticRef: string, regionElementId: string, memberElementId: string) {
+  return {
+    semanticRef,
+    containerElementId: regionElementId,
+    regionElementId,
+    memberElementId,
+  };
+}
+
+function containsCenter(
+  outer: { x: number; y: number; width: number; height: number },
+  inner: { x: number; y: number; width: number; height: number },
+): boolean {
+  const x = inner.x + inner.width / 2;
+  const y = inner.y + inner.height / 2;
+  return x >= outer.x && x <= outer.x + outer.width
+    && y >= outer.y && y <= outer.y + outer.height;
 }
 
 function fakeLayout(

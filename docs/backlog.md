@@ -4,9 +4,13 @@
 
 ## 現在の基準点
 
-Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとcompact serializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。Core/editorは0.1.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、edge endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。Human semantic authoringは右Inspectorでresource・属性・edge・包含・Seq/Alt・削除をlabel-first draft、rich preview、明示Applyのatomic transactionとして扱い、作成時のedge/membership、Canvas resource picker、display/semantic containment不一致警告を備えます。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
+Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとcompact serializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。
 
-Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq、Alt、seeAlsoを使う購入承認例です。Domain語彙はこれらの標準構造を置き換えずnode等のappearanceを選択し、標準catalogとdefaultsを持たないdomain extension catalogを決定的に結合しています。
+Vue editorは右クリックの対象別操作、見た目を確認できる作成palette、label-firstのdetails dialog、関係削除draft、Canvasからの関係・包含対象選択を備え、利用者がTurtleやIRIを通常操作で入力しない境界を基準にします。色、透明度、線、style presetは安全なsparse appearance overlayとして編集し、edge接点はnode外側のhaloとstubから周囲を連続的に調整できます。単一parentのnode-linkと、多対多membershipを交差する半透明領域として示すregion viewは別の空間文法として実装済みです。Domain membership predicateは限定RDFSの`subPropertyOf rdfs:member`で包含へ投影しつつ、元statement/predicateを逆編集用provenanceに保持します。
+
+`@iriograph/semantic-access`はlabel/comment中心の検索、describe、neighbor、subgraph、membership索引、revisionに束縛した決定的alias、Core authoring transactionへ委譲するwrite facadeを提供します。これはLLM tool transportそのものではなく、host/MCP adapterが認証、actor policy、revision conflictを接続するためのpackage境界です。Core/editorは0.1.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
+
+Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認例です。意味を名前へ埋め込まないopaque寄りIRI、label/comment付きpredicate、Bag、Seq、Alt、seeAlso、標準包含を特殊化したdomain predicate、二領域に属する共有memberを含み、同じ意味graphをnode-link viewとregion viewで切り替えられます。Workspace treeの画像asset IRIをicon overlayから参照する例も維持します。Domain catalogは標準構造を置き換えず、標準catalogと決定的に結合します。
 
 ## 優先度
 
@@ -26,6 +30,7 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq�
 | P2-05 | catalog/vocabulary/asset registry adapter | P0-05、P0-09、P2-01 | tenant/organization固有URIを認証付き取得先へ解決し、cache/integrityを検証する |
 | P2-06 | semantic diffとpresentation diff | P0-08 | review画面でTurtle変更とoverlay変更を別々に説明・承認できる |
 | P2-07 | import/export adapter | P0-01、P1-04 | plain Turtle、JSON-LD、必要な外部図形式との変換でloss reportを返す |
+| P2-08 | LLM tool transport adapter | semantic-access、P2-01、P2-02 | search、describe、subgraph、membership、alias-based writeをMCP等から提供し、認証主体、authoring profile、revision conflict、監査情報をhost境界で接続する |
 
 ## P3 — 表現拡張
 

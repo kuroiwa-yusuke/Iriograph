@@ -10,6 +10,7 @@ import {
   ELK_LAYOUT_REFS,
   ElkLayeredLayoutAdapter,
 } from "@iriograph/layout-elk";
+import { SemanticAccessIndex } from "@iriograph/semantic-access";
 import { IriographEditor } from "@iriograph/vue-editor";
 
 const catalog: ProjectionCatalogV1 = standardRdfRdfsCatalog;
@@ -41,6 +42,12 @@ const document = ref<IriographDocumentV1>({
     overlay: {},
   }],
 });
+const semanticIndex = new SemanticAccessIndex(document.value, "packed-consumer-revision", {
+  locales: ["en"],
+});
+if (semanticIndex.searchResources("Packed").length !== 1) {
+  throw new Error("packed semantic access contract is invalid");
+}
 </script>
 
 <template>

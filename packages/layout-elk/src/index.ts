@@ -648,14 +648,18 @@ function applyExplicitEndpointAnchors(
   if (sourceGeometry && isValidEdgeEndpointAnchor(edge.sourceAnchor)) {
     result[0] = edgeEndpointAnchorPoint(
       sourceGeometry,
-      sourceElement?.shape ?? (sourceElement?.structuralKind === "container" ? "container" : "rectangle"),
+      sourceElement?.shape ?? (sourceElement?.structuralKind === "container"
+        ? "container"
+        : sourceElement?.structuralKind === "region" ? "region" : "rectangle"),
       edge.sourceAnchor,
     );
   }
   if (targetGeometry && isValidEdgeEndpointAnchor(edge.targetAnchor)) {
     result[result.length - 1] = edgeEndpointAnchorPoint(
       targetGeometry,
-      targetElement?.shape ?? (targetElement?.structuralKind === "container" ? "container" : "rectangle"),
+      targetElement?.shape ?? (targetElement?.structuralKind === "container"
+        ? "container"
+        : targetElement?.structuralKind === "region" ? "region" : "rectangle"),
       edge.targetAnchor,
     );
   }
@@ -675,6 +679,7 @@ function fixedSiblingOverlapDiagnostics(
     const left = valid[leftIndex]!;
     for (let rightIndex = leftIndex + 1; rightIndex < valid.length; rightIndex += 1) {
       const right = valid[rightIndex]!;
+      if (left.structuralKind === "region" || right.structuralKind === "region") continue;
       if ((left.parentElementId ?? "") !== (right.parentElementId ?? "")) continue;
       if (!intersects(left.geometry, right.geometry)) continue;
       diagnostics.push({

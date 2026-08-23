@@ -53,6 +53,7 @@ export function sceneWithTemporaryHiddenElements(
   const geometryIds = new Set([
     ...source.nodes.map((node) => node.elementId),
     ...source.containers.map((container) => container.elementId),
+    ...(source.regions ?? []).map((region) => region.elementId),
   ]);
   for (const elementId of requestedIds) {
     if (geometryIds.has(elementId)) hideGeometry(elementId);
@@ -67,6 +68,7 @@ export function sceneWithTemporaryHiddenElements(
     ...source,
     nodes: source.nodes.filter((node) => !hiddenGeometryIds.has(node.elementId)),
     containers: source.containers.filter((container) => !hiddenGeometryIds.has(container.elementId)),
+    regions: source.regions?.filter((region) => !hiddenGeometryIds.has(region.elementId)),
     edges,
   };
 }

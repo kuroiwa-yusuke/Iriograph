@@ -22,6 +22,7 @@ import "@iriograph/vue-editor/styles.css";
   :authoring-context="resolvedAuthoringContext"
   :semantic-validation-context="resolvedSemanticValidationContext"
   :resource-iri-allocator="resourceIriAllocator"
+  @pending-drafts-changed="hasPendingDrafts = $event"
   @save="saveToHost"
 />
 ```
@@ -38,6 +39,11 @@ Canvasの空白clickで指定する新規resource位置は適用前にはephemer
 保存前にTurtle draftを確定する場合はcomponent refの`flushPendingEdits()`を`await`してください。
 未確認のstructured draftは自動適用されず、flushは`false`を返します。Workspace、HTTP、認証、
 永続化はhostの責務です。
+
+`pendingDraftsChanged(pending)`は、未適用のTurtle draftまたはstructured authoring draftが
+生じた時点で`true`、適用・破棄・外部`modelValue`への置換で解消した時点で`false`を通知します。
+Mount時にも現在値を通知するため、hostはこのeventをSave buttonや離脱確認の状態へそのまま接続できます。
+`v-model`の更新だけでは未適用Turtle draftを観測できないため、dirty判定にはこのeventも含めてください。
 
 Domain constraintはhost解決済み`ResolvedSemanticValidationContext`を注入します。
 SHACL等のengineはhost adapterの選択であり、Editorはengine-independentなdiagnosticだけを扱います。
@@ -77,6 +83,13 @@ Advanced入力を提供します。Canvas resource pickerは明示中だけnode/
 Resource作成時はlabel/type、既存resourceとのdirect edge、catalog規定container membership、初期位置を
 一つのPreview/Applyへまとめられます。通常dragからmembershipは推論せず、表示領域と意味上のparentが
 食い違う要素には警告と、semantic draftまたはpresentation-only修正の選択肢を表示します。
+
+Canvasのコンテキストメニュー、catalog-driven creation palette、details/property dialog、
+appearanceのlive preview、endpoint haloも既存のtransaction境界を共有します。Meaning actionと破壊操作は
+draftを開いて`Preview → Apply`へ進み、表示調整は一つのgestureまたは確定操作を一つのpresentation
+history itemとして保存します。操作名はhuman labelを主表示にし、完全IRIはidentity、tooltip、
+`Advanced`入力として保持します。Region上へのplain dragからmembershipは生成しません。
+利用者操作とhostの注入責務は[Editor interaction guide](../../docs/editor-interactions.md)を参照してください。
 
 ## Keyboard and accessibility
 

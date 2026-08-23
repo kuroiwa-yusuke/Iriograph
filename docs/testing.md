@@ -10,7 +10,7 @@ Iriographはpureなgraph処理、DOM event contract、editor transaction、実br
 - Semantic validation portのsnapshot/fingerprint、adapter fail-closed、warning confirmation、abort、全write入口共通化のunit test
 - Vue editorのasset lease session test
 - happy-dom上の`DiagramCanvas` pointer/keyboard component test。dragのzoom換算、multi-selection、group preview/batch、container clamp、resize minimum、endpoint込みroute、source/target anchor、generated bend seed、waypoint追加・削除・移動、label offset、parallel/self-loop選択、single-tab-stop navigator、`aria-activedescendant`、決定的focus/range、key repeat previewとkeyup/blur commit、Escape cancel、readOnly/IME除外、pan競合、fit、minimap、selection revealとgesture境界を確認する
-- happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routingとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、label-first semantic authoring、Canvas resource picker、resource＋edge＋membership作成、display/semantic containment警告と明示修正、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
+- happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routing/appearanceとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、対象別context menu、作成palette、details dialog、label-first semantic authoring、Canvas resource picker、resource＋edge＋複数membership作成、display/semantic containment警告と明示修正、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
 - Core/View editorのnamed view test。target-only atomic command、immutable/unique ID、locale-only exact overlay、invalid view delete、last-view guard、controlled/uncontrolled active view、view別selection/viewport/temporary hideを確認する
 - 全workspaceのtypecheck/buildと、packed tarballを使う外部consumer検証
 
@@ -41,7 +41,7 @@ docker build -f Dockerfile.e2e -t iriograph-e2e .
 docker run --rm --ipc=host iriograph-e2e
 ```
 
-E2Eはmock fixtureのnamed view切替・追加・複製・設定・削除・overlay reset・temporary hide、node drag、multi-select、group drag、grid snap、整列、等間隔、undo/redo、resize、edge waypoint追加・移動・削除、label drag/reset、parallel/self-loop個別選択、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、presentation操作後のTurtle不変、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
+E2Eはmock fixtureのnode-link/region named view切替・追加・複製・設定・削除・overlay reset・temporary hide、重なりregionと共有member、node drag、multi-select、group drag、grid snap、整列、等間隔、undo/redo、resize、右クリックmenu、label-first作成palette/details dialog、色・透明度appearance、関係削除draft、node外側endpoint halo drag、edge waypoint追加・移動・削除、label drag/reset、parallel/self-loop個別選択、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、presentation操作後のTurtle不変、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
 
 ## Test追加規則
 
@@ -70,5 +70,8 @@ E2Eはmock fixtureのnamed view切替・追加・複製・設定・削除・over
 - Temporary hide testではexact ID、container descendant closure、incident edgeだけが除かれ、document/overlay/historyへ保存されないことを確認する
 - Canvas作成位置testではblank clickがephemeral draft markerだけを更新し、bounds clamp後の位置がApply成功時だけsemantic作成と一つのhistory itemへcommitされることを確認する
 - Containment consistency testではheaderを除くcontent、nested/overlap/cycleを決定的に扱い、plain dragがTurtleを変更せず、semantic修正はdraftだけをseedし、presentation修正はoverlayだけを更新することを確認する
+- Region testでは一つのmemberが複数membershipを保持すること、交差領域が透過表示されること、region geometryからmembershipを推論しないこと、domain subpropertyの元predicateを逆編集時も保持することを確認する
+- Context action testではblank/node/edge/container/regionごとのメニュー、右クリック時のselection、details/palette初期focus、Escapeとfocus return、edge削除が即時変更ではなくpreview draftになることを確認する
+- Appearance/endpoint testではcatalog既定を複製せず変更fieldだけをoverlayへ保存し、preview/cancel/apply/undo、色・透明度のsafe範囲、node外側halo/stubの可視性と周囲anchor dragを確認する
 - 保存testでは`save` eventだけでなく、その前にpending editがacceptまたはrejectされた結果を確認する
 - Browser smokeのsample件数へ依存するassertionを変更する場合は、workspace fixture変更と同じcommitで更新する

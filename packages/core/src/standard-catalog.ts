@@ -1,4 +1,4 @@
-import type { ProjectionCatalogV1 } from "./model";
+import type { ProjectionCatalogV1 } from "./model.js";
 
 export type RdfRdfsVocabulary = {
   typePredicate: string;
@@ -28,6 +28,7 @@ export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
   defaults: {
     nodeTemplateRef: "urn:iriograph:template:node:generic:1",
     edgeTemplateRef: "urn:iriograph:template:edge:generic:1",
+    regionTemplateRef: "urn:iriograph:template:region:overlap:1",
     layoutRef: "urn:iriograph:layout:hierarchical-lr:1",
   },
   rules: [
@@ -152,6 +153,18 @@ export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
       style: { fill: "#f8fafc", stroke: "#64748b", text: "#0f172a" },
       defaultSize: { width: 720, height: 220 },
     },
+    "urn:iriograph:template:region:overlap:1": {
+      templateRef: "urn:iriograph:template:region:overlap:1",
+      structuralKind: "region",
+      style: {
+        fill: "#dbeafe",
+        stroke: "#2563eb",
+        text: "#1e3a8a",
+        fillOpacity: 0.18,
+        strokeWidth: 2,
+      },
+      defaultSize: { width: 360, height: 220 },
+    },
     "urn:iriograph:template:edge:generic:1": {
       templateRef: "urn:iriograph:template:edge:generic:1",
       structuralKind: "edge",
@@ -171,6 +184,16 @@ export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
       templateRef: "urn:iriograph:template:edge:ontology:1",
       structuralKind: "edge",
       style: { fill: "none", stroke: "#7c3aed", text: "#5b21b6" },
+    },
+  },
+  styles: {
+    "urn:iriograph:style:region:overlap:1": {
+      fill: "#ede9fe",
+      stroke: "#7c3aed",
+      text: "#4c1d95",
+      fillOpacity: 0.2,
+      strokeWidth: 2,
+      dash: "6 4",
     },
   },
   assets: {},

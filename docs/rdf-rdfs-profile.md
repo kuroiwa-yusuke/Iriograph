@@ -37,8 +37,8 @@ Iriograph documentは次の三層を分離します。
 | `rdf:type` | resourceの意味上の分類 | classが存在する場合はtemplate ruleと構造ruleの照合に使い、edgeとしては表示しない |
 | `rdfs:label` | 人向け表示名 | node、container、edgeのlabel候補 |
 | `rdfs:comment` | 説明 | metadataとして保持し、v1のScene elementは生成しない |
-| `rdf:Bag` | 順不同の包含領域 | `container`として表示する |
-| `rdfs:member` | containerからmemberへの所属 | `rdf:Bag`のparent-child関係として消費する |
+| `rdf:Bag` | 順不同の包含集合 | node-link viewでは階層`container`、region viewでは重なり可能な`region`として表示する |
+| `rdfs:member` | containerからmemberへの所属 | 全membershipを保持し、選択した空間文法で包含または領域所属として表示する |
 | `rdf:Seq` | 順序付きresource列 | resource自体は既定で非表示とし、連続member間に有向edgeを導出する |
 | `rdf:Alt` | 選択肢の集合 | 選択nodeと各選択肢へのbranch edgeを導出する |
 | `rdf:_1`、`rdf:_2`、… | `rdf:Seq`または`rdf:Alt`の順序付きmember | ordinal membershipとして消費する |
@@ -46,6 +46,11 @@ Iriograph documentは次の三層を分離します。
 | `rdfs:isDefinedBy` | 定義元resourceへの参照 | definition reference edgeとして表示する |
 
 `rdfs:member`の向きはcontainerをsubject、memberをobjectとします。
+
+Domain上の所属種別が必要な場合は、predicateを`rdfs:subPropertyOf rdfs:member`で宣言し、
+label/commentを付けられます。限定RDFS closureで一致したsubpropertyは同じmembership構造として
+投影・検証しますが、Scene provenanceと逆編集commandにはsourceで使ったexact predicateを保持します。
+これにより「担当として所属」「参照集合に所属」等を検索可能にしつつ、Coreへ個別predicate分岐を追加しません。
 
 `rdf:Seq`、`rdf:Bag`、`rdf:Alt`はRDF Schema上ではcontainerです。順序、選択、既定選択といった標準上の慣例を作図に利用し、後述の連番制約をIriograph profileとして追加します。
 
@@ -83,11 +88,13 @@ literalをobjectに持つ未登録predicateは意味グラフには保持しま�
 ### 4.2 Bagと包含
 
 - `rdf:Bag`は0個以上の`rdfs:member`を持てます。
-- 可視memberは、一つのviewで高々一つの可視container parentを持てます。複数parentは投影errorです。
 - 可視containerの包含関係にcycleがあってはなりません。
 - `rdf:Bag`のmember順は表示意味を持ちません。配置順はlayoutまたはoverlayが決めます。
+- 同じmemberが複数の`rdf:Bag`へ属することを許容し、各membershipを失わずScene provenanceへ残します。
 
-RDF container自体はopenな構造ですが、Iriographは表示parentを一意にするため上記制約を追加します。これはRDFの意味を変更するものではなく、当該viewがベースプロファイルへ適合するための条件です。
+Node-link viewの階層containerはDOM/layout上のparentを一つしか持てないため、memberの可視containerが一つの場合だけ互換`parentElementId`を設定します。複数membershipを一つへ勝手に優先付けせず、memberは階層外へ置き、すべてのmembershipを保持して適合viewへの切替を案内します。
+
+Region viewは各Bagを独立した半透明領域として投影し、複数Bagに属するmemberを領域の交差へ配置できます。領域の重なりはmembershipを説明する表示文法であり、重なっているというgeometryだけからTurtleを変更してはなりません。固定geometryでsemantic membershipと領域内外が食い違う場合はdiagnosticを返し、意味側または表示側をどちらか明示的に修正させます。
 
 ### 4.3 Seqと順序
 
@@ -150,7 +157,7 @@ profileはTurtleの利用制約を定義し、catalogはsemantic patternをScene
 |---|---|---|
 | `resource` | named resource | `node`または`container` |
 | `direct-edge` | IRI-object triple | `edge` |
-| `membership-container` | container typeとmembership predicate | `container`とparent-child |
+| `membership-container` | container typeとmembership predicate | 全membership、およびviewに応じた`container`/`region` |
 | `ordinal-sequence` | container typeとordinal predicate pattern | member間のderived `edge` |
 | `alternative` | container typeとordinal predicate pattern | choice `node`とbranch `edge` |
 | `suppress` | typeまたはpredicate | Scene生成を抑止しmetadataとして消費 |

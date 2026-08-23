@@ -1,14 +1,14 @@
 import {
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
-} from "./endpoint-anchor";
+} from "./endpoint-anchor.js";
 import type {
   EdgeEndpointAnchor,
   EdgeEndpointShape,
   ElementGeometry,
   Point,
-} from "./model";
-import type { ContainerContentInsets } from "./container-content";
+} from "./model.js";
+import type { ContainerContentInsets } from "./container-content.js";
 
 export const STANDARD_LAYOUT_REFS = {
   hierarchicalLr: "urn:iriograph:layout:hierarchical-lr:1",
@@ -20,7 +20,7 @@ export type LayoutMode = "incremental" | "full";
 
 export type LayoutElement = {
   elementId: string;
-  structuralKind: "node" | "container";
+  structuralKind: "node" | "container" | "region";
   parentElementId?: string;
   geometry?: ElementGeometry;
   size?: { width: number; height: number };
@@ -30,6 +30,13 @@ export type LayoutElement = {
   shape?: EdgeEndpointShape;
   /** Content rectangle reserved inside a container by its visual template. */
   contentInsets?: ContainerContentInsets;
+};
+
+export type LayoutMembership = {
+  semanticRef: string;
+  containerElementId: string;
+  memberElementId: string;
+  regionElementId?: string;
 };
 
 export type LayoutEdge = {
@@ -52,6 +59,7 @@ export type LayoutProjectedScene<
 > = {
   elements: readonly TElement[];
   edges: readonly TEdge[];
+  memberships?: readonly LayoutMembership[];
 };
 
 export type LayoutSpacing = {
@@ -152,10 +160,11 @@ export async function layoutProjectedScene(
   if (!resolution.resolved) return emptyResult(request.layoutRef, resolution.diagnostics);
   try {
     const result = await resolution.adapter.layout(request);
-    const invalid = validateAdapterResult(request, result);
+    const completed = completeRegionLayout(request, result);
+    const invalid = validateAdapterResult(request, completed);
     return invalid.length > 0
-      ? emptyResult(request.layoutRef, [...result.diagnostics, ...invalid])
-      : result;
+      ? emptyResult(request.layoutRef, [...completed.diagnostics, ...invalid])
+      : completed;
   } catch (cause) {
     return emptyResult(request.layoutRef, [{
       severity: "error",
@@ -164,6 +173,213 @@ export async function layoutProjectedScene(
       layoutRef: request.layoutRef,
     }]);
   }
+}
+
+/**
+ * Completes the adapter result with overlap-region geometry. Regions are not
+ * hierarchy parents: each generated region encloses all of its visible
+ * members, so a multiply-associated member lies in the geometric intersection.
+ * User/pinned region geometry is a hard constraint and is only diagnosed.
+ */
+export function completeRegionLayout(
+  request: LayoutRequest,
+  candidate: LayoutResult,
+): LayoutResult {
+  const regionCandidates = request.scene.elements
+    .filter((element) => element.structuralKind === "region")
+    .sort((left, right) => compareText(left.elementId, right.elementId));
+  if (regionCandidates.length === 0) return candidate;
+  const geometries = Object.fromEntries(Object.entries(candidate.geometries).map(([id, geometry]) => [
+    id,
+    copyGeometry(geometry),
+  ]));
+  const diagnostics = [...candidate.diagnostics];
+  const memberships = [...(request.scene.memberships ?? [])]
+    .filter((membership) => membership.regionElementId)
+    .sort((left, right) => compareText(left.semanticRef, right.semanticRef));
+  const regions = regionCompletionOrder(regionCandidates, memberships);
+  const spacing = { ...DEFAULT_SPACING, ...request.spacing };
+
+  for (const region of regions) {
+    if (isFixed(region)) {
+      if (region.geometry) geometries[region.elementId] = copyGeometry(region.geometry);
+      continue;
+    }
+    const members = memberships
+      .filter((membership) => membership.regionElementId === region.elementId)
+      .map((membership) => geometries[membership.memberElementId])
+      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+    if (members.length === 0) continue;
+    const padding = spacing.containerPadding;
+    const header = spacing.containerHeader;
+    const left = Math.min(...members.map((geometry) => geometry.x)) - padding;
+    const top = Math.min(...members.map((geometry) => geometry.y)) - padding - header;
+    const right = Math.max(...members.map((geometry) => geometry.x + geometry.width)) + padding;
+    const bottom = Math.max(...members.map((geometry) => geometry.y + geometry.height)) + padding;
+    const minimum = region.size ?? region.geometry ?? { width: 240, height: 160 };
+    const natural = { x: left, y: top, width: right - left, height: bottom - top };
+    const width = Math.max(minimum.width, natural.width);
+    const height = Math.max(minimum.height, natural.height);
+    geometries[region.elementId] = {
+      x: natural.x - (width - natural.width) / 2,
+      y: natural.y - (height - natural.height) / 2,
+      width,
+      height,
+    };
+  }
+
+  validateRegionMembershipGeometry(request, geometries, memberships, diagnostics);
+  const routes = adjustRegionRouteEndpoints(request, candidate.routes, geometries);
+  const bounds = sceneBounds(
+    Object.values(geometries),
+    Object.values(routes).flat(),
+    spacing.margin,
+  );
+  return {
+    ...candidate,
+    geometries,
+    routes,
+    width: bounds.width,
+    height: bounds.height,
+    diagnostics,
+  };
+}
+
+/** Orders nested regions from member to owner; profile validation rejects cycles. */
+function regionCompletionOrder(
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+): LayoutElement[] {
+  const byId = new Map(regions.map((region) => [region.elementId, region]));
+  const dependencies = new Map<string, string[]>();
+  for (const membership of memberships) {
+    if (!membership.regionElementId || !byId.has(membership.memberElementId)) continue;
+    const values = dependencies.get(membership.regionElementId) ?? [];
+    values.push(membership.memberElementId);
+    dependencies.set(membership.regionElementId, values);
+  }
+  for (const [regionId, values] of dependencies) {
+    dependencies.set(regionId, [...new Set(values)].sort(compareText));
+  }
+  const ordered: LayoutElement[] = [];
+  const visited = new Set<string>();
+  const active = new Set<string>();
+  const visit = (regionId: string): void => {
+    if (visited.has(regionId) || active.has(regionId)) return;
+    active.add(regionId);
+    for (const dependency of dependencies.get(regionId) ?? []) visit(dependency);
+    active.delete(regionId);
+    visited.add(regionId);
+    ordered.push(byId.get(regionId)!);
+  };
+  for (const region of regions) visit(region.elementId);
+  return ordered;
+}
+
+function validateRegionMembershipGeometry(
+  request: LayoutRequest,
+  geometries: Readonly<Record<string, ElementGeometry>>,
+  memberships: readonly LayoutMembership[],
+  diagnostics: LayoutDiagnostic[],
+): void {
+  const byMember = new Map<string, LayoutMembership[]>();
+  for (const membership of memberships) {
+    if (!membership.regionElementId || !geometries[membership.regionElementId]) {
+      diagnostics.push({
+        severity: "warning",
+        code: "layout-region-membership-unresolved",
+        message: `region membership endpoint is not present: ${membership.semanticRef}`,
+        layoutRef: request.layoutRef,
+        elementId: membership.memberElementId,
+      });
+      continue;
+    }
+    const entries = byMember.get(membership.memberElementId) ?? [];
+    entries.push(membership);
+    byMember.set(membership.memberElementId, entries);
+  }
+  for (const [memberId, entries] of [...byMember.entries()].sort(([left], [right]) => (
+    compareText(left, right)
+  ))) {
+    const member = geometries[memberId];
+    if (!member) continue;
+    const regionGeometries = entries.flatMap((entry) => {
+      const geometry = entry.regionElementId ? geometries[entry.regionElementId] : undefined;
+      return geometry ? [geometry] : [];
+    });
+    if (regionGeometries.length === 0) continue;
+    const intersection = geometryIntersection(regionGeometries);
+    if (!intersection) {
+      diagnostics.push({
+        severity: "warning",
+        code: "region-membership-intersection-empty",
+        message: `${memberId}が属するregionに共通の交差領域がありません。`,
+        layoutRef: request.layoutRef,
+        elementId: memberId,
+      });
+      continue;
+    }
+    const center = centerOf(member);
+    if (!containsPoint(intersection, center)) {
+      diagnostics.push({
+        severity: "warning",
+        code: regionGeometries.length > 1
+          ? "region-member-outside-intersection"
+          : "region-member-outside",
+        message: `${memberId}の中心がmembership region${regionGeometries.length > 1 ? "の交差" : ""}内にありません。`,
+        layoutRef: request.layoutRef,
+        elementId: memberId,
+      });
+    }
+  }
+}
+
+function geometryIntersection(values: readonly ElementGeometry[]): ElementGeometry | undefined {
+  const left = Math.max(...values.map((value) => value.x));
+  const top = Math.max(...values.map((value) => value.y));
+  const right = Math.min(...values.map((value) => value.x + value.width));
+  const bottom = Math.min(...values.map((value) => value.y + value.height));
+  return right > left && bottom > top
+    ? { x: left, y: top, width: right - left, height: bottom - top }
+    : undefined;
+}
+
+function containsPoint(geometry: ElementGeometry, point: Point): boolean {
+  return point.x >= geometry.x
+    && point.x <= geometry.x + geometry.width
+    && point.y >= geometry.y
+    && point.y <= geometry.y + geometry.height;
+}
+
+function adjustRegionRouteEndpoints(
+  request: LayoutRequest,
+  input: Readonly<Record<string, Point[]>>,
+  geometries: Readonly<Record<string, ElementGeometry>>,
+): Record<string, Point[]> {
+  const regions = new Set(request.scene.elements
+    .filter((element) => element.structuralKind === "region")
+    .map((element) => element.elementId));
+  const result = Object.fromEntries(Object.entries(input).map(([id, points]) => [
+    id,
+    points.map(copyPoint),
+  ]));
+  for (const edge of request.scene.edges) {
+    const points = result[edge.elementId];
+    if (!points || points.length < 2) continue;
+    const source = geometries[edge.sourceElementId];
+    const target = geometries[edge.targetElementId];
+    if (source && regions.has(edge.sourceElementId)) {
+      points[0] = isValidEdgeEndpointAnchor(edge.sourceAnchor)
+        ? edgeEndpointAnchorPoint(source, "region", edge.sourceAnchor)
+        : rectangleBoundaryPoint(source, points[1]!);
+    }
+    if (target && regions.has(edge.targetElementId)) {
+      points[points.length - 1] = isValidEdgeEndpointAnchor(edge.targetAnchor)
+        ? edgeEndpointAnchorPoint(target, "region", edge.targetAnchor)
+        : rectangleBoundaryPoint(target, points.at(-2)!);
+    }
+  }
+  return result;
 }
 
 function validateAdapterResult(request: LayoutRequest, result: LayoutResult): LayoutDiagnostic[] {
@@ -815,7 +1031,9 @@ function applyEndpointAnchors(
 }
 
 function layoutElementShape(element: LayoutElement | undefined): EdgeEndpointShape {
-  return element?.shape ?? (element?.structuralKind === "container" ? "container" : "rectangle");
+  return element?.shape ?? (element?.structuralKind === "container"
+    ? "container"
+    : element?.structuralKind === "region" ? "region" : "rectangle");
 }
 
 function manualWaypoints(edge: LayoutEdge): Point[] | undefined {

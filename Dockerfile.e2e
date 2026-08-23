@@ -5,6 +5,7 @@ WORKDIR /workspace
 COPY package.json package-lock.json ./
 COPY apps/mock/package.json apps/mock/package.json
 COPY packages/core/package.json packages/core/package.json
+COPY packages/semantic-access/package.json packages/semantic-access/package.json
 COPY packages/layout-elk/package.json packages/layout-elk/package.json
 COPY packages/vue-editor/package.json packages/vue-editor/package.json
 
