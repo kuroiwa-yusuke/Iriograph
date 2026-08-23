@@ -5,7 +5,14 @@ import { describe, expect, it } from "vitest";
 import { statementIdentity } from "./identity";
 import type { IriographDocumentV1, ProjectionCatalogV1 } from "./model";
 import { projectSemanticView } from "./projection";
-import { standardRdfRdfsCatalog } from "./standard-catalog";
+import {
+  catalogRef,
+  createStandardRdfRdfsCatalog,
+  rdfRdfsProfileRefs,
+  standardRdfRdfsCatalog,
+  standardRdfRdfsClassificationRegionCatalog,
+  standardRdfRdfsInstanceFlowCatalog,
+} from "./standard-catalog";
 
 const workflowSource = readFileSync(
   new URL("./fixtures/rdf-rdfs.valid-workflow.ttl", import.meta.url),
@@ -333,9 +340,107 @@ describe("RDF/RDFS standard projection", () => {
       code: "ambiguous-projection-rule",
     }));
   });
+
+  it("full profileのidentityと投影を維持したまま標準presetを生成する", () => {
+    const rebuilt = createStandardRdfRdfsCatalog();
+
+    expect(rebuilt).toEqual(standardRdfRdfsCatalog);
+    expect(catalogRef(rebuilt)).toBe("urn:iriograph:catalog:rdf-rdfs@1");
+    expect(rebuilt.profileRef).toBe(rdfRdfsProfileRefs.full);
+    expect(standardRdfRdfsInstanceFlowCatalog).toMatchObject({
+      catalogId: "urn:iriograph:catalog:rdf-rdfs-instance-flow",
+      catalogVersion: "1",
+      profileRef: rdfRdfsProfileRefs.instanceFlow,
+    });
+    expect(standardRdfRdfsClassificationRegionCatalog).toMatchObject({
+      catalogId: "urn:iriograph:catalog:rdf-rdfs-classification-region",
+      catalogVersion: "1",
+      profileRef: rdfRdfsProfileRefs.classificationRegion,
+    });
+  });
+
+  it("instance-flowは語彙定義を隠しinstance・構造・独自predicate利用を維持する", () => {
+    const source = vocabularyAndInstanceSource();
+    const document = documentFor(source, standardRdfRdfsInstanceFlowCatalog);
+    const scene = projectSemanticView(document, standardRdfRdfsInstanceFlowCatalog);
+
+    expect(scene.diagnostics).toEqual([]);
+    expect(scene.nodes.map((value) => value.semanticRef)).toEqual([
+      "urn:test:profile:alice",
+      "urn:test:profile:task",
+    ]);
+    expect(scene.containers.map((value) => value.semanticRef)).toEqual([
+      "urn:test:profile:team",
+    ]);
+    expect(scene.edges).toHaveLength(2);
+    expect(scene.edges.map((value) => value.provenance.operator).sort()).toEqual([
+      "direct-edge",
+      "ordinal-sequence",
+    ]);
+    const taskElementId = scene.nodes.find((value) => value.semanticRef.endsWith(":task"))!.elementId;
+    const aliceElementId = scene.nodes.find((value) => value.semanticRef.endsWith(":alice"))!.elementId;
+    expect(scene.edges.find((value) => value.label === "担当者")).toMatchObject({
+      sourceElementId: taskElementId,
+      targetElementId: aliceElementId,
+    });
+    expect(scene.nodes.some((value) => value.semanticRef.endsWith("WorkItem"))).toBe(false);
+    expect(scene.nodes.some((value) => value.semanticRef.endsWith("assignedTo"))).toBe(false);
+    expect(document.semantic.source).toBe(source);
+  });
+
+  it("classification-regionはclass membershipを維持しpropertyとschema edgeを隠す", () => {
+    const source = vocabularyAndInstanceSource();
+    const document = documentFor(source, standardRdfRdfsClassificationRegionCatalog);
+    document.views[0]!.kind = "region";
+    const scene = projectSemanticView(document, standardRdfRdfsClassificationRegionCatalog);
+
+    expect(scene.diagnostics).toEqual([]);
+    expect(scene.regions?.map((value) => value.semanticRef)).toEqual([
+      "urn:test:profile:Person",
+      "urn:test:profile:Task",
+      "urn:test:profile:WorkItem",
+      "urn:test:profile:team",
+    ]);
+    expect(scene.memberships).toHaveLength(3);
+    expect(scene.nodes.map((value) => value.semanticRef)).toEqual([
+      "urn:test:profile:alice",
+      "urn:test:profile:task",
+    ]);
+    expect(scene.nodes.some((value) => value.semanticRef.endsWith("assignedTo"))).toBe(false);
+    expect(scene.edges).toHaveLength(2);
+    expect(scene.edges.some((value) => (
+      value.label === "subClassOf"
+      || value.label === "subPropertyOf"
+      || value.label === "domain"
+      || value.label === "range"
+    ))).toBe(false);
+    expect(document.semantic.source).toBe(source);
+  });
+
+  it("suppressされたresourceを構造edgeが参照してもendpoint warningを出さない", () => {
+    const document = documentFor(`
+      @prefix : <urn:test:suppressed-member:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :Vocabulary a rdfs:Class ; :describes :metadataOnly .
+      :task rdfs:label "Task" .
+      :flow a rdf:Seq ; rdf:_1 :task ; rdf:_2 :Vocabulary .
+    `, standardRdfRdfsInstanceFlowCatalog);
+    const scene = projectSemanticView(document, standardRdfRdfsInstanceFlowCatalog);
+
+    expect(scene.edges).toEqual([]);
+    expect(scene.nodes.some((value) => value.semanticRef.endsWith(":metadataOnly"))).toBe(false);
+    expect(scene.diagnostics.some((value) => (
+      value.code === "edge-endpoint-not-visible"
+      || value.code === "derived-edge-endpoint-not-visible"
+    ))).toBe(false);
+  });
 });
 
-function documentFor(source: string): IriographDocumentV1 {
+function documentFor(
+  source: string,
+  catalog: ProjectionCatalogV1 = standardRdfRdfsCatalog,
+): IriographDocumentV1 {
   return {
     schemaVersion: "1",
     kind: "iriograph.document",
@@ -346,16 +451,39 @@ function documentFor(source: string): IriographDocumentV1 {
       authoringProfileRef: "urn:test:authoring-profile:1",
       source,
     },
-    imports: [{ catalogRef: "urn:iriograph:catalog:rdf-rdfs@1" }],
+    imports: [{ catalogRef: catalogRef(catalog) }],
     views: [{
       viewId: "main",
       kind: "node-link",
-      profileRef: standardRdfRdfsCatalog.profileRef,
-      layoutRef: standardRdfRdfsCatalog.defaults!.layoutRef,
+      profileRef: catalog.profileRef,
+      layoutRef: catalog.defaults!.layoutRef,
       locale: "ja-JP",
       overlay: {},
     }],
   };
+}
+
+function vocabularyAndInstanceSource(): string {
+  return `
+    @prefix : <urn:test:profile:> .
+    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+    @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+    :WorkItem a rdfs:Class ; rdfs:label "Work item" .
+    :Task a rdfs:Class ; rdfs:subClassOf :WorkItem ; rdfs:label "Task class" .
+    :Person a rdfs:Class ; rdfs:label "Person class" .
+    :relatedTo a rdf:Property ; rdfs:label "Related" .
+    :assignedTo a rdf:Property ;
+      rdfs:subPropertyOf :relatedTo ;
+      rdfs:domain :WorkItem ;
+      rdfs:range :Person ;
+      rdfs:label "担当者" .
+
+    :task a :Task ; rdfs:label "Task" ; :assignedTo :alice .
+    :alice a :Person ; rdfs:label "Alice" .
+    :team a rdf:Bag ; rdfs:label "Team" ; rdfs:member :task .
+    :flow a rdf:Seq ; rdf:_1 :task ; rdf:_2 :alice .
+  `;
 }
 
 function catalogWithRules(rules: ProjectionCatalogV1["rules"]): ProjectionCatalogV1 {

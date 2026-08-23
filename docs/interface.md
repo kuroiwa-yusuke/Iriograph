@@ -39,6 +39,16 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、選択集合とprimary selection、snap設定、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
 
+標準RDF/RDFS catalogの公開presetは次のとおりです。
+
+| Export | `profileRef` | 用途 |
+|---|---|---|
+| `standardRdfRdfsCatalog` | `urn:iriograph:profile:rdf-rdfs:1` | 既存互換のfull ontology/instance view |
+| `standardRdfRdfsInstanceFlowCatalog` | `urn:iriograph:profile:rdf-rdfs:instance-flow:1` | 語彙定義を除いた業務instance・flow view |
+| `standardRdfRdfsClassificationRegionCatalog` | `urn:iriograph:profile:rdf-rdfs:classification-region:1` | class membershipを領域で示すregion view |
+
+`createStandardRdfRdfsCatalog("full" | "instance-flow" | "classification-region")`でも同じcatalogを生成できます。Hostはdocumentのimport参照を解決し、viewの`profileRef`と一致するcatalogをruntime contextへ登録します。Presetによる非表示はprojection結果だけへ作用し、`semantic.source`と語彙索引は完全なまま保持します。
+
 Viewの永続変更は`applyViewCommand`の`add`、`duplicate`、`configure`、`delete`、
 `reset-overlay`だけを使います。`viewId`はimmutableで、duplicateはoverlayをexact cloneしながら
 新IDを割り当てます。configureは対象viewだけを再照合し、locale-only変更はoverlayをexactに
@@ -83,6 +93,8 @@ v1 target catalogは次の宣言を持ちます。
 標準catalogはRDF/RDFS IRIを`membership-container`、`membership-region`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
 `membership-container.membershipPredicate`は限定RDFS `subPropertyOf` closureで照合し、sourceで使った
 exact predicateはmembership provenanceと`set-membership`逆編集へ保持します。
+
+`instance-flow`は`rdfs:Class` / `rdf:Property` resourceとschema定義edgeをcatalog ruleで`suppress`しますが、非表示property IRIを可視instance間のpredicateとして使うdirect edgeは保持します。`classification-region`はclassの`membership-region` ruleを維持し、property resourceとschema定義edgeだけを`suppress`します。個別IRI、namespace、labelに依存するfilterではありません。
 
 現行の正規化contractは上記`rules`です。`nodeRules`、`relationRules`、`containmentRules`を持つ`DiagramCatalog`は既存hostの移行だけに残す互換APIであり、stable APIとはしません。
 

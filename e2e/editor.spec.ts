@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-const INITIAL_NODE_COUNT = 14;
-const REGION_VIEW_NODE_COUNT = 12;
+const INITIAL_NODE_COUNT = 8;
+const REGION_VIEW_NODE_COUNT = 8;
 
 test("editorのpointer操作、history、Turtle rollback、保存flushがbrowserで連携する", async ({ page }) => {
   const consoleErrors: string[] = [];

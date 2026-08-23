@@ -25,6 +25,13 @@ localeだけの変更とduplicateではoverlayをbyte-equivalentなJSON値とし
 Semantic transactionはこの最適化を使わず、従来どおり全viewを一つのatomic transactionとして
 再投影・検証します。一つでも失敗すればTurtleと全overlayをrollbackします。
 
+標準RDF/RDFS profileは投影目的別に`full`、`instance-flow`、
+`classification-region`のpresetを持ちます。業務フローは`instance-flow`、class分類の交差を
+表示するregion viewは`classification-region`、ontology定義自体を確認するviewは`full`を
+選びます。各presetは同じsemantic graphから可視構造を導出するだけで、非表示の語彙定義を
+Turtleから削除しません。Profileを切り替えて一つのoverlayを使い回すより、目的ごとにnamed
+viewを作り、geometryやroutingをview別に保持することを推奨します。
+
 ## Active viewとsession
 
 Active viewはportable documentへ保存しません。Vue editorは`activeViewId` /

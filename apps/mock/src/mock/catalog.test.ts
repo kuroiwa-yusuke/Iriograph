@@ -9,7 +9,11 @@ import {
 
 import {
   mockProjectionCatalog,
+  mockClassificationRegionProjectionCatalog,
+  mockInstanceFlowProjectionCatalog,
+  workflowClassificationRegionDomainCatalog,
   workflowDomainCatalog,
+  workflowInstanceFlowDomainCatalog,
 } from "./catalog";
 
 describe("normalized RDF/RDFS mock", () => {
@@ -26,16 +30,22 @@ describe("normalized RDF/RDFS mock", () => {
     );
     expect(new Set(mockProjectionCatalog.rules.map((rule) => rule.ruleId)).size)
       .toBe(mockProjectionCatalog.rules.length);
+    expect(mockInstanceFlowProjectionCatalog.profileRef)
+      .toBe("urn:iriograph:profile:rdf-rdfs:instance-flow:1");
+    expect(mockClassificationRegionProjectionCatalog.profileRef)
+      .toBe("urn:iriograph:profile:rdf-rdfs:classification-region:1");
+    expect(workflowInstanceFlowDomainCatalog.defaults).toBeUndefined();
+    expect(workflowClassificationRegionDomainCatalog.defaults).toBeUndefined();
   });
 
   it("Bag/Seq/Alt/label付きpredicateからnode-linkと重なりregionを投影する", () => {
     const document = sampleDocument();
-    const projected = projectSemanticView(document, mockProjectionCatalog);
+    const projected = projectSemanticView(document, mockInstanceFlowProjectionCatalog);
 
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(projected.containers).toHaveLength(3);
-    expect(projected.nodes).toHaveLength(14);
-    expect(projected.edges).toHaveLength(11);
+    expect(projected.nodes).toHaveLength(8);
+    expect(projected.edges).toHaveLength(10);
     expect(projected.containers.map((item) => item.semanticRef).sort(compareText)).toEqual([
       "urn:iriograph:demo:g-01",
       "urn:iriograph:demo:g-02",
@@ -77,7 +87,11 @@ describe("normalized RDF/RDFS mock", () => {
         expect.objectContaining({ predicate: "urn:iriograph:demo:p-03" }),
       ]));
 
-    const regions = projectSemanticView(document, mockProjectionCatalog, "regions");
+    const regions = projectSemanticView(
+      document,
+      mockClassificationRegionProjectionCatalog,
+      "regions",
+    );
     expect(regions.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(regions.containers).toEqual([]);
     expect(regions.regions ?? []).toHaveLength(5);

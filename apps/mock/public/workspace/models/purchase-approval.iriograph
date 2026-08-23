@@ -9,14 +9,16 @@
     "source": "@prefix wf: <urn:iriograph:demo:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\nwf:HumanStep a rdfs:Class ;\n  rdfs:label \"人が行う工程\"@ja ;\n  rdfs:comment \"担当者が判断または入力する業務項目\"@ja .\n\nwf:AuditedStep a rdfs:Class ;\n  rdfs:label \"監査対象工程\"@ja ;\n  rdfs:comment \"実行記録を監査対象として扱う業務項目\"@ja .\n\nwf:g-01 a rdf:Bag ;\n  rdfs:label \"申請者\"@ja ;\n  rdfs:comment \"申請を開始し提出する担当領域\"@ja ;\n  rdfs:member wf:n-01, wf:n-02 .\n\nwf:g-02 a rdf:Bag ;\n  rdfs:label \"業務オペレーション\"@ja ;\n  rdfs:comment \"審査から登録までを担当する領域\"@ja ;\n  rdfs:member wf:n-03, wf:n-04, wf:c-01, wf:n-05, wf:n-06, wf:n-07 .\n\nwf:g-03 a rdf:Bag ;\n  rdfs:label \"監査対象\"@ja ;\n  rdfs:comment \"業務領域と直交して監査対象をまとめる領域\"@ja ;\n  wf:p-03 wf:n-03, wf:n-04 .\n\nwf:p-03 a rdf:Property ;\n  rdfs:subPropertyOf rdfs:member ;\n  rdfs:label \"監査対象として含む\"@ja ;\n  rdfs:comment \"標準の包含を特殊化し、元predicateを保持する業務語彙\"@ja .\n\nwf:p-01 a rdf:Property ;\n  rdfs:label \"関連する\"@ja ;\n  rdfs:comment \"業務要素間の一般的な関連\"@ja .\n\nwf:p-02 a rdf:Property ;\n  rdfs:label \"再試行\"@ja ;\n  rdfs:comment \"同じ処理へ戻ってやり直す関係\"@ja .\n\nwf:s-01 a rdf:Seq ;\n  rdfs:label \"購入申請フロー\"@ja ;\n  rdf:_1 wf:n-01 ;\n  rdf:_2 wf:n-02 ;\n  rdf:_3 wf:n-03 ;\n  rdf:_4 wf:c-01 .\n\nwf:c-01 a rdf:Alt ;\n  rdfs:label \"承認？\"@ja ;\n  rdf:_1 wf:s-02 ;\n  rdf:_2 wf:s-03 .\n\nwf:s-02 a rdf:Seq ;\n  rdfs:label \"承認\"@ja ;\n  rdf:_1 wf:n-05 ;\n  rdf:_2 wf:n-07 .\n\nwf:s-03 a rdf:Seq ;\n  rdfs:label \"差戻し\"@ja ;\n  rdf:_1 wf:n-06 ;\n  rdf:_2 wf:n-03 .\n\nwf:n-01 rdfs:label \"開始\"@ja .\n\nwf:n-02 a wf:HumanStep ;\n  rdfs:label \"申請を提出\"@ja .\n\nwf:n-03 a wf:HumanStep, wf:AuditedStep ;\n  rdfs:label \"内容を審査\"@ja, \"Review request\"@en ;\n  rdfs:comment \"購入内容と承認条件を確認し\\n必要な場合は申請者へ差し戻す\"@ja ;\n  rdfs:seeAlso wf:n-04 ;\n  wf:p-01 wf:n-04 ;\n  wf:p-02 wf:n-03 .\n\nwf:n-04 a wf:AuditedStep ;\n  rdfs:label \"承認ポリシー\"@ja .\n\nwf:n-05 a wf:AuditedStep ;\n  rdfs:label \"承認結果を登録\"@ja .\n\nwf:n-06 a wf:HumanStep ;\n  rdfs:label \"内容を修正\"@ja .\n\nwf:n-07 rdfs:label \"完了\"@ja .\n"
   },
   "imports": [
-    { "catalogRef": "urn:iriograph:catalog:rdf-rdfs@1" },
-    { "catalogRef": "urn:iriograph:catalog:workflow-mock@1" }
+    { "catalogRef": "urn:iriograph:catalog:rdf-rdfs-instance-flow@1" },
+    { "catalogRef": "urn:iriograph:catalog:workflow-mock-instance-flow@1" },
+    { "catalogRef": "urn:iriograph:catalog:rdf-rdfs-classification-region@1" },
+    { "catalogRef": "urn:iriograph:catalog:workflow-mock-classification-region@1" }
   ],
   "views": [
     {
       "viewId": "main",
       "kind": "node-link",
-      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:instance-flow:1",
       "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
       "locale": "ja",
       "overlay": {
@@ -105,7 +107,7 @@
     {
       "viewId": "regions",
       "kind": "region",
-      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:classification-region:1",
       "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
       "locale": "ja",
       "overlay": {

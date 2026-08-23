@@ -15,7 +15,7 @@ import {
   type AssetPickResult,
 } from "@iriograph/vue-editor";
 
-import { mockProjectionCatalog } from "./mock/catalog";
+import { mockInstanceFlowProjectionCatalog } from "./mock/catalog";
 import {
   createMockAuthoringContext,
   mockProjectionRuntimeContext,
@@ -40,7 +40,7 @@ import {
 
 const STORAGE_PREFIX = "iriograph.mock.workspace:";
 
-const catalog: ProjectionCatalogV1 = mockProjectionCatalog;
+const catalog: ProjectionCatalogV1 = mockInstanceFlowProjectionCatalog;
 const editor = ref<InstanceType<typeof IriographEditor> | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
 const workspace = ref<MockWorkspaceManifest>();

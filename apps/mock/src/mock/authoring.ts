@@ -16,7 +16,11 @@ import {
 } from "@iriograph/layout-elk";
 import { standardPredicateTermsJa } from "@iriograph/semantic-access";
 
-import { mockProjectionCatalog } from "./catalog";
+import {
+  mockClassificationRegionProjectionCatalog,
+  mockInstanceFlowProjectionCatalog,
+  mockProjectionCatalog,
+} from "./catalog";
 
 const DEMO_NAMESPACE = "urn:iriograph:demo:";
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -31,12 +35,16 @@ const mockLayoutRegistry = createStandardLayoutRegistry();
 mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR"));
 mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredTb, "TB"));
 
-export const mockProjectionRuntimeContext = createProjectionRuntimeContext([{
-  profileRef: mockProjectionCatalog.profileRef,
-  sourceCatalogRefs: [catalogRef(mockProjectionCatalog)],
-  catalog: mockProjectionCatalog,
+export const mockProjectionRuntimeContext = createProjectionRuntimeContext([
+  mockProjectionCatalog,
+  mockInstanceFlowProjectionCatalog,
+  mockClassificationRegionProjectionCatalog,
+].map((catalog) => ({
+  profileRef: catalog.profileRef,
+  sourceCatalogRefs: [catalogRef(catalog)],
+  catalog,
   ruleOrigins: [],
-}], mockLayoutRegistry);
+})), mockLayoutRegistry);
 
 export const mockResourceIriAllocator: ResourceIriAllocator = {
   allocate(request) {

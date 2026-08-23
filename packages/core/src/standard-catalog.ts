@@ -1,5 +1,7 @@
 import type { ProjectionCatalogV1 } from "./model.js";
 
+export type RdfRdfsCatalogPreset = "full" | "instance-flow" | "classification-region";
+
 export type RdfRdfsVocabulary = {
   typePredicate: string;
   labelPredicate: string;
@@ -19,12 +21,18 @@ export const rdfRdfsVocabulary: RdfRdfsVocabulary = Object.freeze({
   subPropertyOfPredicate: `${RDFS}subPropertyOf`,
 });
 
-export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
+export const rdfRdfsProfileRefs = Object.freeze({
+  full: "urn:iriograph:profile:rdf-rdfs:1",
+  instanceFlow: "urn:iriograph:profile:rdf-rdfs:instance-flow:1",
+  classificationRegion: "urn:iriograph:profile:rdf-rdfs:classification-region:1",
+});
+
+const baseRdfRdfsCatalog: ProjectionCatalogV1 = {
   schemaVersion: "1",
   kind: "iriograph.catalog",
   catalogId: "urn:iriograph:catalog:rdf-rdfs",
   catalogVersion: "1",
-  profileRef: "urn:iriograph:profile:rdf-rdfs:1",
+  profileRef: rdfRdfsProfileRefs.full,
   defaults: {
     nodeTemplateRef: "urn:iriograph:template:node:generic:1",
     edgeTemplateRef: "urn:iriograph:template:edge:generic:1",
@@ -206,6 +214,97 @@ export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
   },
   assets: {},
 };
+
+const profileDefinitions: Record<RdfRdfsCatalogPreset, {
+  catalogId: string;
+  profileRef: string;
+}> = {
+  full: {
+    catalogId: "urn:iriograph:catalog:rdf-rdfs",
+    profileRef: rdfRdfsProfileRefs.full,
+  },
+  "instance-flow": {
+    catalogId: "urn:iriograph:catalog:rdf-rdfs-instance-flow",
+    profileRef: rdfRdfsProfileRefs.instanceFlow,
+  },
+  "classification-region": {
+    catalogId: "urn:iriograph:catalog:rdf-rdfs-classification-region",
+    profileRef: rdfRdfsProfileRefs.classificationRegion,
+  },
+};
+
+const schemaPredicateSuppressRules: ProjectionCatalogV1["rules"] = [
+  ["rdfs-sub-class-of-definition", `${RDFS}subClassOf`],
+  ["rdfs-sub-property-of-definition", `${RDFS}subPropertyOf`],
+  ["rdfs-domain-definition", `${RDFS}domain`],
+  ["rdfs-range-definition", `${RDFS}range`],
+].map(([ruleId, iri]) => ({
+  ruleId: `profile-suppress-${ruleId!}`,
+  priority: 200,
+  match: {
+    kind: "predicate" as const,
+    iri: iri!,
+    entailment: "rdfs-subproperty" as const,
+  },
+  project: { operator: "suppress" as const },
+}));
+
+/**
+ * Builds one of the standard RDF/RDFS projection profiles without changing the
+ * full ontology-oriented profile used by existing documents.
+ */
+export function createStandardRdfRdfsCatalog(
+  preset: RdfRdfsCatalogPreset = "full",
+): ProjectionCatalogV1 {
+  const definition = profileDefinitions[preset];
+  const resourceSuppressRules: ProjectionCatalogV1["rules"] = preset === "instance-flow"
+    ? [
+        {
+          ruleId: "profile-suppress-rdfs-class-definition",
+          priority: 220,
+          match: { kind: "type", iri: `${RDFS}Class`, entailment: "rdfs-subclass" },
+          project: { operator: "suppress" },
+        },
+        {
+          ruleId: "profile-suppress-rdf-property-definition",
+          priority: 210,
+          match: { kind: "type", iri: `${RDF}Property`, entailment: "rdfs-subclass" },
+          project: { operator: "suppress" },
+        },
+      ]
+    : preset === "classification-region"
+      ? [{
+          ruleId: "profile-suppress-rdf-property-definition",
+          priority: 210,
+          match: { kind: "type", iri: `${RDF}Property`, entailment: "rdfs-subclass" },
+          project: { operator: "suppress" },
+        }]
+      : [];
+  const profileRules = preset === "full"
+    ? []
+    : [...resourceSuppressRules, ...schemaPredicateSuppressRules];
+
+  return {
+    ...baseRdfRdfsCatalog,
+    catalogId: definition.catalogId,
+    profileRef: definition.profileRef,
+    rules: [...profileRules, ...baseRdfRdfsCatalog.rules],
+    templates: { ...baseRdfRdfsCatalog.templates },
+    styles: { ...baseRdfRdfsCatalog.styles },
+    assets: { ...baseRdfRdfsCatalog.assets },
+  };
+}
+
+/** Full RDF/RDFS ontology and instance projection retained for compatibility. */
+export const standardRdfRdfsCatalog = createStandardRdfRdfsCatalog("full");
+
+/** Instance and workflow projection without vocabulary-definition resources. */
+export const standardRdfRdfsInstanceFlowCatalog = createStandardRdfRdfsCatalog("instance-flow");
+
+/** Region projection that keeps class membership but hides property/schema definitions. */
+export const standardRdfRdfsClassificationRegionCatalog = createStandardRdfRdfsCatalog(
+  "classification-region",
+);
 
 export function catalogRef(catalog: ProjectionCatalogV1): string {
   return `${catalog.catalogId}@${catalog.catalogVersion}`;

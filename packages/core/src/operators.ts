@@ -70,6 +70,11 @@ export function executeProjectionOperators(
   const resourceResolution = resolveNamedResourcePlans(graph, catalog, closure, vocabulary);
   diagnostics.push(...resourceResolution.diagnostics);
   const plans = resourceResolution.plans;
+  const suppressedResources = new Set(
+    [...plans.values()]
+      .filter((plan) => plan.resolved?.rule.project.operator === "suppress")
+      .map((plan) => plan.semanticRef),
+  );
   const overlays = overlaysForSemantic(view, diagnostics);
   const consumed = new Set<string>();
   const candidates = new Set(distinctNamedSubjects(graph));
@@ -99,6 +104,9 @@ export function executeProjectionOperators(
     diagnostics.push(...resolution.diagnostics);
     if (resolution.resolved?.rule.project.operator === "suppress") continue;
     if (resolution.resolved && resolution.resolved.rule.project.operator !== "direct-edge") continue;
+    if (suppressedResources.has(quad.subject.value) || suppressedResources.has(quad.object.value)) {
+      continue;
+    }
     directEdges.push({ quad, resolved: resolution.resolved });
     candidates.add(quad.subject.value);
     candidates.add(quad.object.value);
@@ -164,6 +172,7 @@ export function executeProjectionOperators(
     overlays,
     edges,
     diagnostics,
+    suppressedResources,
   );
 
   return {
@@ -438,6 +447,7 @@ function projectDerivedEdges(
   overlays: ReadonlyMap<string, OverlayEntry>,
   edges: ProjectedEdge[],
   diagnostics: ProjectionDiagnostic[],
+  suppressedResources: ReadonlySet<string>,
 ): void {
   for (const plan of plans.values()) {
     const resolved = plan.resolved;
@@ -493,6 +503,7 @@ function projectDerivedEdges(
           },
           diagnostics,
           resolved.rule.templateRef,
+          suppressedResources,
         );
         if (edge) edges.push(edge);
       }
@@ -567,6 +578,8 @@ function projectDerivedEdges(
               : undefined,
           },
           diagnostics,
+          undefined,
+          suppressedResources,
         );
         if (edge) edges.push(edge);
       }
@@ -587,10 +600,12 @@ function projectDerivedEdge(
   provenance: ProjectionProvenance,
   diagnostics: ProjectionDiagnostic[],
   requestedTemplateRef?: string,
+  suppressedResources: ReadonlySet<string> = new Set(),
 ): ProjectedEdge | undefined {
   const sourceElementId = semanticToElement.get(sourceIri);
   const targetElementId = semanticToElement.get(targetIri);
   if (!sourceElementId || !targetElementId) {
+    if (suppressedResources.has(sourceIri) || suppressedResources.has(targetIri)) return undefined;
     diagnostics.push({
       severity: "warning",
       code: "derived-edge-endpoint-not-visible",

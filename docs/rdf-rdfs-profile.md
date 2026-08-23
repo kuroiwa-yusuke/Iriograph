@@ -6,7 +6,7 @@
 
 本文の「MUST」「MUST NOT」「SHOULD」「MAY」は、それぞれ必須、禁止、推奨、任意を表します。
 
-ベースプロファイルの識別子は`urn:iriograph:profile:rdf-rdfs:1`、標準catalogの参照は`urn:iriograph:catalog:rdf-rdfs@1`とします。
+ベースとなるfullプロファイルの識別子は`urn:iriograph:profile:rdf-rdfs:1`、標準catalogの参照は`urn:iriograph:catalog:rdf-rdfs@1`とします。意味graphを変更せず投影目的を限定する標準presetとして、`instance-flow`と`classification-region`も定義します。これらの識別子と使い分けは6.3節を正本とします。
 
 ## 2. 設計原則
 
@@ -65,7 +65,7 @@ label/commentを付けられます。限定RDFS closureで一致したsubpropert
 | `rdfs:domain` | propertyのsubject側class | domain edgeとして表示する |
 | `rdfs:range` | propertyのobject/value側class | range edgeとして表示する |
 
-これらは業務フローで必須ではありません。ontology自体を同じ意味グラフで扱う場合にも独自語彙を増やさないため、ベースcatalogが表示形式を提供します。v1は汎用filter式を持たず、instance中心等の構造選択が必要なら別のnamed viewとview profileを使用します。
+これらは業務フローで必須ではありません。ontology自体を同じ意味グラフで扱う場合にも独自語彙を増やさないため、full catalogが表示形式を提供します。v1は汎用filter式を持たず、instance中心、class分類領域、ontology全体という構造選択は別のnamed viewと標準profile presetを使用します。Profileによる非表示はScene投影だけへ作用し、語彙定義tripleを`semantic.source`から削除してはなりません。
 
 ### 3.3 自由なdomain語彙
 
@@ -138,6 +138,7 @@ Region viewは各Bagを独立した半透明領域として投影し、複数Bag
 Region view profileがclass membershipを明示的にbindする場合は例外として、`rdfs:Class` resourceをregion、`resource rdf:type class`をmembershipへ投影できます。ClassはBagではなく、元statementのpredicateと向きを保持した汎用membership projectionです。複数typeはregionの交差として表示し、交差自体をsemantic resourceへしません。
 
 直接tripleは、predicate ruleが`direct-edge`を選び、かつsubject/objectの両方が可視候補である場合にedgeになります。`suppress`されたpredicateからfallback edgeを生成してはなりません。
+Type ruleでresource自体が`suppress`された場合、そのresourceをendpointとするdirect/derived edgeもそのviewでは生成せず、意図した非表示についてendpoint warningを返しません。Predicate resourceが`suppress`されていても、そのIRIをpredicateとして可視instance間で使うtripleは別のstatement ruleで評価し、通常edgeまたはfallback edgeとして保持します。
 
 ## 5. Label選択
 
@@ -234,6 +235,18 @@ catalogのprojection部分は、現行prototypeの`nodeRules`、`relationRules`�
 | `any-iri-object` | `direct-edge` | generic arrow |
 
 `rdfs:Class`、`rdf:Property`および追加domain classはtype appearance ruleとしてnode templateを選べます。type appearance ruleがないresourceはgeneric nodeになります。
+
+標準packageは同じbase rule/templateから次のcatalog presetを生成します。
+
+| Preset | Profile / catalog | 投影目的 |
+|---|---|---|
+| `full` | `urn:iriograph:profile:rdf-rdfs:1` / `urn:iriograph:catalog:rdf-rdfs@1` | 既存互換。class/property resourceと`subClassOf`、`subPropertyOf`、`domain`、`range`を含むontology・instance全体を表示する |
+| `instance-flow` | `urn:iriograph:profile:rdf-rdfs:instance-flow:1` / `urn:iriograph:catalog:rdf-rdfs-instance-flow@1` | `rdfs:Class`・`rdf:Property`として自己宣言された語彙resourceとschema定義edgeを抑止し、instance、Bag/Seq/Alt、domain predicateの利用edgeを表示する |
+| `classification-region` | `urn:iriograph:profile:rdf-rdfs:classification-region:1` / `urn:iriograph:catalog:rdf-rdfs-classification-region@1` | region viewでclassを領域、`rdf:type`をmembershipとして維持し、property resourceとschema定義edgeを抑止する |
+
+`classification-region`は`kind: "region"`のnamed viewで使用します。Class領域を必要としないregion viewは`instance-flow`を使い、Bag等のmembershipだけを領域へ投影します。語彙roleの判定をlabel、namespace、IRIの単語へ依存させず、v1 authoring profileが要求する`a rdfs:Class` / `a rdf:Property`の自己宣言と限定RDFS closureだけを使います。
+
+Coreは`createStandardRdfRdfsCatalog(preset)`、`standardRdfRdfsCatalog`、`standardRdfRdfsInstanceFlowCatalog`、`standardRdfRdfsClassificationRegionCatalog`を公開します。既存の`standardRdfRdfsCatalog`は`full`のidentityと投影を維持します。
 
 `rdf:_n` tripleは一致した`ordinal-sequence`または`alternative` operatorが消費し、fallback対象にしません。対応する構造型を持たないresource上の`rdf:_n`はprofile validation errorです。
 

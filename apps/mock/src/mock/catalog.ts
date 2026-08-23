@@ -1,7 +1,9 @@
 import {
   catalogRef,
   parseProjectionCatalogV1,
+  standardRdfRdfsClassificationRegionCatalog,
   standardRdfRdfsCatalog,
+  standardRdfRdfsInstanceFlowCatalog,
   type AssetDefinition,
   type ProjectionCatalogV1,
   type ProjectionRule,
@@ -15,6 +17,28 @@ export const workflowDomainCatalog = parseProjectionCatalogV1(rawDomainCatalog);
 export const mockProjectionCatalog: ProjectionCatalogV1 = mergeCatalogs(
   standardRdfRdfsCatalog,
   workflowDomainCatalog,
+);
+
+export const workflowInstanceFlowDomainCatalog = specializeDomainCatalog(
+  workflowDomainCatalog,
+  "instance-flow",
+  standardRdfRdfsInstanceFlowCatalog.profileRef,
+);
+
+export const workflowClassificationRegionDomainCatalog = specializeDomainCatalog(
+  workflowDomainCatalog,
+  "classification-region",
+  standardRdfRdfsClassificationRegionCatalog.profileRef,
+);
+
+export const mockInstanceFlowProjectionCatalog: ProjectionCatalogV1 = mergeCatalogs(
+  standardRdfRdfsInstanceFlowCatalog,
+  workflowInstanceFlowDomainCatalog,
+);
+
+export const mockClassificationRegionProjectionCatalog: ProjectionCatalogV1 = mergeCatalogs(
+  standardRdfRdfsClassificationRegionCatalog,
+  workflowClassificationRegionDomainCatalog,
 );
 
 function mergeCatalogs(
@@ -50,7 +74,7 @@ function mergeCatalogs(
   return {
     schemaVersion: "1",
     kind: "iriograph.catalog",
-    catalogId: "urn:iriograph:catalog:workflow-mock-resolved",
+    catalogId: `urn:iriograph:catalog:workflow-mock-resolved:${profileSuffix(standard.profileRef)}`,
     catalogVersion: "1",
     profileRef: standard.profileRef,
     defaults: clone(standard.defaults),
@@ -62,6 +86,23 @@ function mergeCatalogs(
     styles: mergeRecords(standard.styles ?? {}, domain.styles ?? {}),
     assets: mergeRecords<AssetDefinition>(standard.assets, domain.assets),
   };
+}
+
+function specializeDomainCatalog(
+  domain: ProjectionCatalogV1,
+  suffix: string,
+  profileRef: string,
+): ProjectionCatalogV1 {
+  return {
+    ...clone(domain),
+    catalogId: `${domain.catalogId}-${suffix}`,
+    profileRef,
+  };
+}
+
+function profileSuffix(profileRef: string): string {
+  const match = profileRef.match(/rdf-rdfs(?::([^:]+))?:1$/u);
+  return match?.[1] ?? "full";
 }
 
 function mergeRecords<T>(
