@@ -50,6 +50,18 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   await page.getByRole("button", { name: /Diagram/ }).click();
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(9);
 
+  await page.getByRole("button", { name: /Turtle/ }).click();
+  const domainInvalidSource = `${acceptedSource}\n<urn:iriograph:demo:e2e-invalid> a <urn:iriograph:demo:UserTask> .\n`;
+  await textarea.fill(domainInvalidSource);
+  await page.getByRole("button", { name: "検証して適用" }).click();
+  await expect(page.locator(".iriograph-diagnostics").getByText("demo-label-required")).toBeVisible();
+  await page.getByRole("button", { name: "Source" }).click();
+  await expect.poll(() => textarea.evaluate((element) => (
+    (element as HTMLTextAreaElement).selectionStart
+  ))).toBe(domainInvalidSource.indexOf("<urn:iriograph:demo:e2e-invalid>"));
+  await page.getByRole("button", { name: /Diagram/ }).click();
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(9);
+
   expect(consoleErrors).toEqual([]);
 });
 

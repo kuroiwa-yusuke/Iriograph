@@ -3,6 +3,10 @@ import type {
   SemanticSourceUpdate,
 } from "./model";
 import type { ProjectionRuntimeContext } from "./scene";
+import type {
+  ResolvedSemanticValidationContext,
+  SemanticWarningConfirmation,
+} from "./semantic-validation";
 
 export type AuthoringTermPolicy = {
   existingUnknown: "preserve" | "reject";
@@ -109,6 +113,8 @@ export type ResolvedAuthoringContext = {
   terms: readonly ResolvedAuthoringTerm[];
   capabilities: readonly ResolvedAuthoringCapability[];
   allocator?: ResourceIriAllocator;
+  /** Optional host-resolved domain validation context shared by all write entries. */
+  semanticValidation?: ResolvedSemanticValidationContext;
 };
 
 export type CreatedResourceReference = { kind: "created-resource" };
@@ -257,6 +263,7 @@ export type AuthoringPreview = {
   candidateSource?: string;
   patch: AuthoringGraphPatch;
   diagnostics: ProjectionDiagnostic[];
+  semanticWarningConfirmation?: SemanticWarningConfirmation;
 };
 
 export type PreviewAuthoringOptions = {
@@ -274,6 +281,7 @@ export type AuthoringActor = "human" | "llm";
 export type ApplyAuthoringSourceOptions = {
   actor: AuthoringActor;
   signal?: AbortSignal;
+  warningConfirmation?: SemanticWarningConfirmation;
 };
 
 export type AuthoringApplyResult = SemanticSourceUpdate;

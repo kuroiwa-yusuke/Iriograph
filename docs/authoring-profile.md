@@ -122,6 +122,8 @@ Human structured commandは次のpolicyに従います。
 
 Structured commandはRDF datasetへのgraph patchに変換した後、Turtle textareaの候補sourceおよびLLMが返した候補sourceと同じパイプラインへ合流します。Actor policyは差分検証時に適用し、その後の構造検証、domain validation、全viewの再投影、display reconciliationはactor間で共通にします。
 
+Domain validationは[semantic-validation.md](./semantic-validation.md)のhost注入portを使います。Authoring profileのunknown term warningとdomain validator warningは発生源を分けますが、いずれもcandidateを黙って確定しません。Domain warningの再実行tokenはvalidation context、exact source、安定diagnostic ID集合へ束縛します。
+
 Node、edge、属性、包含、削除の入力はサイドバー上のcommand draftです。Canvas gestureはsource/target、作成位置、候補container等をdraftへseedできますが、それだけではsemantic graphを変更しません。Editorは追加・削除予定のtripleまたは構造graph patch、完全IRI、validation結果をpreviewし、ユーザーの明示適用後にだけtransactionを開始します。適用前のghost elementはephemeral UI stateでありdocumentへ保存しません。
 
 Capability parameterは省略時をrequiredとし、`required: false`だけをoptionalとします。Optional bindingが省略された場合、そのbindingを参照するtemplate statementをadd/removeの双方で一文単位にskipします。値の推測や空文字列への置換は行いません。

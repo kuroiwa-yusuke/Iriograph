@@ -825,6 +825,27 @@
   outline-offset: 3px;
 }
 
+.iriograph-scene-container.diagnostic-error,
+.iriograph-scene-node.diagnostic-error {
+  outline: 3px solid #c34b45;
+  outline-offset: 2px;
+}
+
+.iriograph-scene-container.diagnostic-warning,
+.iriograph-scene-node.diagnostic-warning {
+  box-shadow: 0 0 0 3px #d59a32;
+}
+
+.iriograph-edge-group.diagnostic-error .iriograph-edge-path {
+  stroke: #c34b45;
+  stroke-width: 3;
+}
+
+.iriograph-edge-group.diagnostic-warning .iriograph-edge-path {
+  stroke: #d59a32;
+  stroke-width: 3;
+}
+
 .iriograph-container-header {
   position: absolute;
   display: flex;
@@ -1139,6 +1160,43 @@
 
 .iriograph-diagnostics li.error {
   color: #9c3c38;
+}
+
+.iriograph-diagnostics li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-diagnostic-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.iriograph-diagnostic-actions button,
+.iriograph-element-diagnostics button {
+  padding: 2px 5px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  font-size: 8px;
+}
+
+.iriograph-element-diagnostics article {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 7px;
+  border-left: 3px solid #d59a32;
+  background: #fff8e8;
+  font-size: 9px;
+}
+
+.iriograph-element-diagnostics article.error {
+  border-left-color: #c34b45;
+  background: #fff0ef;
 }
 
 .iriograph-inspector > header {

@@ -136,6 +136,8 @@ Resolved resultはabsolute URL、実media type、実byte lengthとidempotentな`
 
 `applySemanticSource(document, source, context)`は、authoring policyを伴わない互換用semantic source APIです。Controlled writeは`applyAuthoringSource(document, source, resolvedAuthoringContext, { actor, signal })`を使い、Turtleをparseしてactor policy、RDF/RDFS構造、全viewの非同期layoutを検証した`Promise<SemanticSourceUpdate>`を返します。`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Human structured authoringにも、hostが解決済み語彙・policy・元revisionを束ねた`ResolvedAuthoringContext`を注入します。Profile URIからこのcontextを取得するresolverはP2-01の責務です。
 
+Domain constraintは任意の`ResolvedSemanticValidationContext`としてhostが注入します。`applySemanticSource`、canonical source/dataset、`ResolvedAuthoringContext.semanticValidation`は[semantic-validation.md](./semantic-validation.md)の同じ非同期portへ合流します。Portable documentへvalidator設定や結果を保存せず、SHACL engineへ直接依存しません。`SemanticSourceUpdate`は通常の`accepted/document/diagnostics`に加え、control flowとしての`aborted`と、domain warning再確認用`warningConfirmation`を返す場合があります。
+
 - 失敗: `accepted: false`とdiagnosticsを返し、元documentを維持
 - 成功: `accepted: true`とreconcile済みdocumentを返す
 
@@ -227,6 +229,7 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `assetAccess`: 非同期resolver、media/size/URL policy、host revision
 - `pickAsset(request)`: workspace pickerを開き、選択時はassetRefだけを返すhost callback
 - `authoringContext`: hostが解決した語彙・capability・policy・projection runtime
+- `semanticValidationContext`: hostが解決したdomain validation identity/revision/port。省略時は`authoringContext.semanticValidation`を利用可能
 - `resourceIriAllocator`: resource IRI省略時の同期または非同期allocator。返却IRIはCoreが再検証する
 - `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映する。未確認のstructured draftは自動適用せず保存を拒否する
 - `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作

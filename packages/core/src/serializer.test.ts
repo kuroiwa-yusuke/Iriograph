@@ -103,6 +103,7 @@ describe("canonical Turtle serializer v1", () => {
     expect(invalidA.document).toEqual(document);
     expect(invalidA.diagnostics).toEqual([{
       severity: "error",
+      category: "syntax",
       code: "canonical-turtle-parse-failed",
       message: "Candidate Turtle could not be parsed.",
     }]);

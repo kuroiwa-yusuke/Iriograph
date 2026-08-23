@@ -19,6 +19,7 @@ import "@iriograph/vue-editor/styles.css";
   v-model="document"
   :catalog="catalog"
   :authoring-context="resolvedAuthoringContext"
+  :semantic-validation-context="resolvedSemanticValidationContext"
   :resource-iri-allocator="resourceIriAllocator"
   @save="saveToHost"
 />
@@ -35,6 +36,10 @@ Canvasの空白clickで指定する新規resource位置は適用前にはephemer
 保存前にTurtle draftを確定する場合はcomponent refの`flushPendingEdits()`を`await`してください。
 未確認のstructured draftは自動適用されず、flushは`false`を返します。Workspace、HTTP、認証、
 永続化はhostの責務です。
+
+Domain constraintはhost解決済み`ResolvedSemanticValidationContext`を注入します。
+SHACL等のengineはhost adapterの選択であり、Editorはengine-independentなdiagnosticだけを扱います。
+Loaded domain errorはSceneへannotationし、candidate errorはrollbackします。
 
 Component refは`panBy()`、`zoomTo()`、`fitToView()`、`revealSelection()`、
 `focusElement(elementId)`も公開します。Pan、zoom、minimap、selection revealはeditor session

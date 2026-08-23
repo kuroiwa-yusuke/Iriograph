@@ -20,9 +20,13 @@ import {
   LayoutAdapterRegistry,
   type Point,
   type ResolvedAuthoringContext,
+  type ResolvedSemanticValidationContext,
   type ResourceIriAllocation,
   type ResourceIriAllocationRequest,
   type ResourceIriAllocator,
+  type SemanticValidationFinding,
+  type SemanticValidationRequest,
+  type SemanticValidationResponse,
   StandardLightweightLayoutAdapter,
 } from "@iriograph/core";
 
@@ -185,6 +189,175 @@ describe("IriographEditor transaction regression", () => {
     expect(latestDocument(wrapper).semantic.source).toBe(candidate);
     expect(wrapper.text()).toContain("Turtle valid");
     await waitUntil(() => summaryNodeCount(wrapper!) === 3);
+  });
+
+  it("loaded domain errorをSceneへannotationしSource/Scene navigationをfingerprint-boundにする", async () => {
+    const context = validationContext((request) => {
+      const startOffset = request.source.lastIndexOf(":b");
+      return [{
+        findingId: "loaded:b",
+        severity: "error",
+        code: "domain-loaded-b",
+        message: "B requires review.",
+        semanticRef: `${NS}b`,
+        sourceRange: { startOffset, endOffset: startOffset + 2 },
+      }];
+    });
+    wrapper = await mountEditor({ semanticValidationContext: context });
+    await waitUntil(() => wrapper!.find(".iriograph-scene-node.diagnostic-error").exists());
+
+    expect(summaryNodeCount(wrapper)).toBe(2);
+    expect(wrapper.text()).not.toContain("図を表示できません");
+    await openTurtlePanel(wrapper);
+    const sourceButton = wrapper.get<HTMLButtonElement>(".iriograph-diagnostic-actions button");
+    await sourceButton.trigger("click");
+    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    expect(textarea.element.selectionStart).toBe(initialSource.lastIndexOf(":b"));
+
+    await textarea.setValue(`${initialSource}\n`);
+    expect(wrapper.find(".iriograph-diagnostic-actions button").exists()).toBe(true);
+    expect(wrapper.findAll(".iriograph-diagnostic-actions button").some((button) => button.text() === "Source"))
+      .toBe(false);
+    const sceneButton = wrapper.findAll(".iriograph-diagnostic-actions button")
+      .find((button) => button.text() === "Scene")!;
+    await sceneButton.trigger("click");
+    expect(wrapper.find(".iriograph-scene-node.diagnostic-error.selected").exists()).toBe(true);
+  });
+
+  it("candidate domain errorをrollbackし、source locationへ移動できる", async () => {
+    const context = validationContext((request) => {
+      const resource = request.dataset.statements.find((statement) => (
+        statement.subject.value === `${NS}c`
+      ));
+      if (!resource) return [];
+      const startOffset = request.source.lastIndexOf(":c");
+      return [{
+        findingId: "candidate:c",
+        severity: "error",
+        code: "domain-c-rejected",
+        message: "C is not allowed.",
+        semanticRef: `${NS}c`,
+        sourceRange: { startOffset, endOffset: startOffset + 2 },
+      }];
+    });
+    wrapper = await mountEditor({ semanticValidationContext: context });
+    const candidate = `${initialSource}\n:c rdfs:label "C" .\n`;
+    await openTurtlePanel(wrapper);
+    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    await textarea.setValue(candidate);
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("domain-c-rejected"));
+
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(summaryNodeCount(wrapper)).toBe(2);
+    await wrapper.get<HTMLButtonElement>(".iriograph-diagnostic-actions button").trigger("click");
+    expect(textarea.element.selectionStart).toBe(candidate.lastIndexOf(":c"));
+  });
+
+  it("domain warningをsource/context-bound confirmationで再適用する", async () => {
+    const context = validationContext((request) => request.dataset.statements.some((statement) => (
+      statement.subject.value === `${NS}c`
+    )) ? [{
+      findingId: "candidate-warning:c",
+      severity: "warning",
+      code: "domain-c-review",
+      message: "C requires review.",
+      semanticRef: `${NS}c`,
+    }] : []);
+    wrapper = await mountEditor({ semanticValidationContext: context });
+    const candidate = `${initialSource}\n:c rdfs:label "C" .\n`;
+    await openTurtlePanel(wrapper);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]').setValue(candidate);
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("警告を確認して適用"));
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await wrapper.setProps({
+      semanticValidationContext: { ...context, contextRevision: "2" },
+    });
+    await settle();
+    expect(wrapper.text()).not.toContain("警告を確認して適用");
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("警告を確認して適用"));
+    await buttonWithText(wrapper, "警告を確認して適用").trigger("click");
+    await waitUntil(() => Boolean(wrapper!.emitted("update:modelValue")?.length));
+    expect(latestDocument(wrapper).semantic.source).toBe(candidate);
+  });
+
+  it("authoringContext内validation変更で旧loaded requestをabortし再検証する", async () => {
+    const fixture = documentFixture();
+    const baseAuthoring = testAuthoringContext(fixture);
+    const initial = validationContext(() => []);
+    wrapper = await mountEditor({
+      authoringContext: { ...baseAuthoring, semanticValidation: initial },
+    });
+
+    let resolveStale: ((response: SemanticValidationResponse) => void) | undefined;
+    let staleRequest: SemanticValidationRequest | undefined;
+    let staleSignal: AbortSignal | undefined;
+    const stale = validationContext((request, signal) => new Promise((resolve) => {
+      staleRequest = request;
+      staleSignal = signal;
+      resolveStale = (response) => resolve(response.findings);
+    }), "2");
+    await wrapper.setProps({
+      authoringContext: { ...baseAuthoring, semanticValidation: stale },
+    });
+    await waitUntil(() => Boolean(staleRequest));
+
+    const current = validationContext(() => [{
+      findingId: "current:b",
+      severity: "warning",
+      code: "domain-current",
+      message: "Current validation.",
+      semanticRef: `${NS}b`,
+    }], "3");
+    await wrapper.setProps({
+      authoringContext: { ...baseAuthoring, semanticValidation: current },
+    });
+    await waitUntil(() => wrapper!.find(".iriograph-scene-node.diagnostic-warning").exists());
+    expect(staleSignal?.aborted).toBe(true);
+    resolveStale?.(validationResponse(staleRequest!, [{
+      findingId: "stale:a",
+      severity: "error",
+      code: "domain-stale",
+      message: "Stale validation.",
+      semanticRef: `${NS}a`,
+    }]));
+    await settle();
+    expect(wrapper.text()).not.toContain("domain-stale");
+  });
+
+  it("authoring documentRevisionだけの更新ではloaded validationを二重実行しない", async () => {
+    const fixture = documentFixture();
+    const baseAuthoring = testAuthoringContext(fixture);
+    let calls = 0;
+    const validation = validationContext(() => {
+      calls += 1;
+      return [];
+    });
+    wrapper = await mountEditor({
+      authoringContext: { ...baseAuthoring, semanticValidation: validation },
+    });
+    expect(calls).toBe(1);
+
+    await wrapper.setProps({
+      authoringContext: {
+        ...baseAuthoring,
+        documentRevision: `${baseAuthoring.documentRevision}:next`,
+        semanticValidation: validation,
+      },
+    });
+    await settle();
+    expect(calls).toBe(1);
+
+    await wrapper.setProps({
+      authoringContext: {
+        ...baseAuthoring,
+        semanticValidation: { ...validation, contextRevision: "2" },
+      },
+    });
+    await waitUntil(() => calls === 2);
   });
 
   it("invalid Turtleをrollbackしてdocument正本とSceneを維持する", async () => {
@@ -1041,6 +1214,37 @@ function testAuthoringContext(document: IriographDocumentV1): ResolvedAuthoringC
       { iri: `${NS}rel`, kind: "property", label: "Rel", objectKinds: ["iri"] },
     ],
     capabilities: [],
+  };
+}
+
+function validationContext(
+  findings: (
+    request: SemanticValidationRequest,
+    signal: AbortSignal,
+  ) => readonly SemanticValidationFinding[] | Promise<readonly SemanticValidationFinding[]>,
+  contextRevision = "1",
+): ResolvedSemanticValidationContext {
+  return {
+    contextId: "urn:test:editor:semantic-validation",
+    contextRevision,
+    validator: {
+      async validate(request, signal) {
+        return validationResponse(request, await findings(request, signal));
+      },
+    },
+  };
+}
+
+function validationResponse(
+  request: SemanticValidationRequest,
+  findings: readonly SemanticValidationFinding[],
+): SemanticValidationResponse {
+  return {
+    contextId: request.contextId,
+    contextRevision: request.contextRevision,
+    sourceFingerprint: request.sourceFingerprint,
+    datasetFingerprint: request.datasetFingerprint,
+    findings,
   };
 }
 

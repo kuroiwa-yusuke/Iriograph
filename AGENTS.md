@@ -49,6 +49,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - `docs/theory.md`: 設計思想と判断基準。
 - `docs/rdf-rdfs-profile.md`: semantic base vocabulary、構造制約、catalog bindingの規範仕様。
 - `docs/authoring-profile.md`: actor別の語彙統制とprofile-guided semantic rewriteの規範仕様。
+- `docs/semantic-validation.md`: domain validation port、diagnostic identity、warning確認、cache identityの規範仕様。
 - `docs/interface.md`: document、catalog、Sceneの公開契約。
 - `docs/implementation.md`: package境界と投影処理。
 - `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。

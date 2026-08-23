@@ -423,11 +423,23 @@ export type SceneEdge = {
 };
 
 export type ProjectionDiagnostic = {
+  /** Stable semantic identity. Source formatting and source ranges are excluded. */
+  diagnosticId?: string;
   severity: "info" | "warning" | "error";
+  category?: "syntax" | "structure" | "profile" | "domain" | "projection" | "layout" | "asset" | "internal";
   code: string;
   message: string;
   semanticRef?: string;
   statementRef?: string;
+  sourceFingerprint?: string;
+  sourceLocation?: {
+    startOffset: number;
+    endOffset: number;
+    startLine: number;
+    startColumn: number;
+    endLine: number;
+    endColumn: number;
+  };
   catalogRef?: string;
   ruleId?: string;
   assetRef?: string;
@@ -435,6 +447,10 @@ export type ProjectionDiagnostic = {
 
 export type SemanticSourceUpdate = {
   accepted: boolean;
+  /** Cancellation is control flow and is intentionally absent from diagnostics. */
+  aborted?: boolean;
   document: IriographDocument;
   diagnostics: ProjectionDiagnostic[];
+  /** Present when domain warnings require an explicit, source-bound retry. */
+  warningConfirmation?: import("./semantic-validation").SemanticWarningConfirmation;
 };

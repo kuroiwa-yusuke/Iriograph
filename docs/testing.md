@@ -7,6 +7,7 @@ Iriographはpureなgraph処理、DOM event contract、editor transaction、実br
 `npm run verify`は次を実行し、headless browserのdownloadを要求しません。
 
 - Coreのparse、validation、projection、layout、reconciliation、serializer、asset policyのunit test
+- Semantic validation portのsnapshot/fingerprint、adapter fail-closed、warning confirmation、abort、全write入口共通化のunit test
 - Vue editorのasset lease session test
 - happy-dom上の`DiagramCanvas` pointer component test。dragのzoom換算、multi-selection、group preview/batch、container clamp、resize minimum、endpoint込みroute、generated bend seed、waypoint追加・削除・移動、label offset、parallel/self-loop選択、ARIA/keyboard、pan競合、fit、minimap、selection revealとgesture境界を確認する
 - happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routingとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
@@ -44,6 +45,7 @@ E2Eはmock fixtureのnode drag、multi-select、group drag、grid snap、整列�
 - Routing testではderived routeとmanual waypointを混同せず、nearest segment追加、最後の削除によるautomatic復帰、label arc-length base、empty waypoint非保存、edgeへのgeometry/pinned/placement非混入、parallel/self-loopの個別hit areaを確認する
 - 一つのgesture内で複数のmove eventが発生してもhistory itemは一つであることを維持する
 - Semantic candidateの失敗testでは、sourceだけでなくSceneと最後にacceptされたdocumentが不変であることを確認する
+- Domain validation testではloaded invalid documentのScene保持、candidate errorのrollback、provenance annotation、fingerprint-bound source navigation、context変更時のabort/stale破棄を分けて確認する
 - Structured authoring testでは、previewしたadded/removed statement、candidate Turtle、confirmation IDが決定的であり、document・context・command・warning承認の改変またはstaleでApplyが拒否されることを確認する
 - Resource作成testではallocatorの成功、cancel、error、許可namespace外、graph全termとの衝突を分け、指定position込みの成功が`update:modelValue`一回、history一件になることを確認する
 - Property testでは完全置換、空配列による削除、IRI/literal、language/datatype相互排他、object kind・datatype・language・cardinality constraint、human unknown warning確認を検証する

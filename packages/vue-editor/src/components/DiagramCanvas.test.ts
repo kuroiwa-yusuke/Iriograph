@@ -16,6 +16,27 @@ describe("DiagramCanvas pointer gestures", () => {
     document.body.innerHTML = "";
   });
 
+  it("semantic/provenance statement diagnosticをScene elementへannotationする", () => {
+    const scene = sceneFixture();
+    scene.nodes[0]!.provenance = {
+      sourceStatementRefs: ["urn:test:statement:node-a"],
+      operator: "resource",
+      derivation: "resource",
+    };
+    scene.diagnostics = [{
+      severity: "error",
+      category: "domain",
+      code: "domain-node-a",
+      message: "Node A is invalid.",
+      statementRef: "urn:test:statement:node-a",
+    }];
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+
+    const node = wrapper.findAll(".iriograph-scene-node")[0]!;
+    expect(node.classes()).toContain("diagnostic-error");
+    expect(node.attributes("aria-label")).toContain("診断1件");
+  });
+
   it("zoomを考慮したnode dragを一つのgestureとして通知する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,

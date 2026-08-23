@@ -60,6 +60,7 @@ export async function buildIriographView(
   if (!view) {
     return emptyScene(viewId, [{
       severity: "error",
+      category: "projection",
       code: "view-unresolved",
       message: `viewが存在しません: ${viewId}`,
     }]);
@@ -68,6 +69,7 @@ export async function buildIriographView(
   if (!profile) {
     return emptyScene(viewId, [{
       severity: "error",
+      category: "profile",
       code: "profile-catalog-unresolved",
       message: `profileの解決済みcatalogがありません: ${view.profileRef}`,
       semanticRef: viewId,
@@ -232,6 +234,7 @@ export function remapProjectedRuleOrigins(
 function layoutDiagnostic(diagnostic: LayoutDiagnostic): ProjectionDiagnostic {
   return {
     severity: diagnostic.severity,
+    category: "layout",
     code: diagnostic.code,
     message: diagnostic.message,
     semanticRef: diagnostic.elementId ?? diagnostic.edgeId,

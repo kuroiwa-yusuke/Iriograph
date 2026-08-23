@@ -62,10 +62,12 @@ export function projectSemanticView(
 ): ProjectedScene {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
   if (!view) throw new Error(`viewが存在しません: ${viewId ?? "<undefined>"}`);
-  const diagnostics = validateProjectionCatalog(catalog);
+  const diagnostics: ProjectionDiagnostic[] = validateProjectionCatalog(catalog)
+    .map((diagnostic) => ({ ...diagnostic, category: "profile" as const }));
   if (view.profileRef !== catalog.profileRef) {
     diagnostics.push({
       severity: "error",
+      category: "profile",
       code: "profile-mismatch",
       message: `view ${view.viewId}のprofileRefをcatalogが提供していません。`,
       semanticRef: view.viewId,
@@ -77,6 +79,7 @@ export function projectSemanticView(
   } catch (cause) {
     diagnostics.push({
       severity: "error",
+      category: "syntax",
       code: "invalid-turtle",
       message: cause instanceof Error ? cause.message : String(cause),
     });
@@ -88,7 +91,7 @@ export function projectSemanticView(
     catalog,
     closure,
     rdfRdfsVocabulary,
-  ));
+  ).map((diagnostic) => ({ ...diagnostic, category: "structure" as const })));
   if (hasBlockingDiagnostics(diagnostics)) {
     return emptyProjectedScene(view.viewId, diagnostics);
   }
@@ -100,7 +103,13 @@ export function projectSemanticView(
     vocabulary: rdfRdfsVocabulary,
     options,
   });
-  const allDiagnostics = sortDiagnostics([...diagnostics, ...projected.diagnostics]);
+  const allDiagnostics = sortDiagnostics([
+    ...diagnostics,
+    ...projected.diagnostics.map((diagnostic) => ({
+      ...diagnostic,
+      category: diagnostic.category ?? "projection" as const,
+    })),
+  ]);
   return hasBlockingDiagnostics(allDiagnostics)
     ? emptyProjectedScene(view.viewId, allDiagnostics)
     : { ...projected, diagnostics: allDiagnostics };
@@ -331,6 +340,7 @@ function parseSemanticSource(document: IriographDocument, diagnostics: Projectio
   } catch (cause) {
     diagnostics.push({
       severity: "error",
+      category: "syntax",
       code: "invalid-turtle",
       message: cause instanceof Error ? cause.message : String(cause),
     });

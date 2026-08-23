@@ -79,5 +79,10 @@ const llmUpdate = await applyAuthoringSource(
 
 Human textarea入力は妥当な原文を保持し、LLM sourceとstructured commandはversioned serializerで決定的に再生成します。どちらも同じ語彙・namespace・構造・全view検証を通り、不明actorは拒否されます。
 
+Domain constraintは`ResolvedSemanticValidationContext`の非同期portとして注入できます。
+Direct Turtle、structured dataset、LLM sourceは同じportを通り、engine固有のStoreやSHACL型を
+public contractへ公開しません。Warningの明示確認、stable diagnostic identity、abort、cache keyの
+契約はrepositoryの`docs/semantic-validation.md`を参照してください。
+
 保存documentの`schemaVersion`とcatalogのversionはpackage versionとは独立した契約です。
 詳細はrepositoryの設計文書を参照してください。

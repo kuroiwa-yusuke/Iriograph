@@ -14,8 +14,12 @@ import type {
   DiagramScene,
   ElementGeometry,
   Point,
+  ProjectionDiagnostic,
+  SceneContainer,
   SceneEdge,
+  SceneNode,
 } from "@iriograph/core";
+import { diagnosticTargetsSceneElement } from "@iriograph/core";
 
 import {
   derivedEdgeRoute,
@@ -130,6 +134,27 @@ const viewportLabel = computed(() => [
   `x ${Math.round(minimapViewport.value.x)}`,
   `y ${Math.round(minimapViewport.value.y)}`,
 ].join(" · "));
+
+type DiagnosticElement = SceneNode | SceneContainer | SceneEdge;
+
+function diagnosticsForElement(element: DiagnosticElement): ProjectionDiagnostic[] {
+  return props.scene.diagnostics.filter((diagnostic) => (
+    diagnosticTargetsSceneElement(diagnostic, element)
+  ));
+}
+
+function diagnosticClass(element: DiagnosticElement): Record<string, boolean> {
+  const diagnostics = diagnosticsForElement(element);
+  return {
+    "diagnostic-error": diagnostics.some((diagnostic) => diagnostic.severity === "error"),
+    "diagnostic-warning": diagnostics.some((diagnostic) => diagnostic.severity === "warning"),
+  };
+}
+
+function diagnosticAriaSuffix(element: DiagnosticElement): string {
+  const diagnostics = diagnosticsForElement(element);
+  return diagnostics.length > 0 ? `、診断${diagnostics.length}件` : "";
+}
 
 onMounted(() => {
   updateViewportMetrics();
@@ -814,7 +839,8 @@ defineExpose<DiagramCanvasNavigationApi>({
             :data-element-id="container.elementId"
             :data-parent-element-id="container.parentElementId ?? ''"
             :data-header-position="container.headerPosition"
-            :class="{ selected: selectedElementIdsSet.has(container.elementId) }"
+            :class="[{ selected: selectedElementIdsSet.has(container.elementId) }, diagnosticClass(container)]"
+            :aria-label="`${container.label}を選択${diagnosticAriaSuffix(container)}`"
             :style="{
               left: `${geometryFor(container).x}px`,
               top: `${geometryFor(container).y}px`,
@@ -858,11 +884,11 @@ defineExpose<DiagramCanvasNavigationApi>({
               v-for="edge in scene.edges"
               :key="edge.elementId"
               class="iriograph-edge-group"
-              :class="{ selected: selectedElementIdsSet.has(edge.elementId), fallback: edge.fallback }"
+              :class="[{ selected: selectedElementIdsSet.has(edge.elementId), fallback: edge.fallback }, diagnosticClass(edge)]"
               :data-element-id="edge.elementId"
               tabindex="0"
               role="button"
-              :aria-label="edgeAriaLabel(edge)"
+              :aria-label="`${edgeAriaLabel(edge)}${diagnosticAriaSuffix(edge)}`"
               :aria-selected="selectedElementIdsSet.has(edge.elementId)"
               @click.stop="selectEdge($event, edge)"
               @keydown="handleEdgeKeydown($event, edge)"
@@ -923,6 +949,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               {
                 selected: selectedElementIdsSet.has(node.elementId),
                 'user-placed': node.placement === 'user',
+                ...diagnosticClass(node),
               },
             ]"
             :style="{
@@ -935,7 +962,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               color: node.style.text,
               '--iriograph-node-accent': node.style.accent ?? node.style.stroke,
             }"
-            :aria-label="`${node.label}を選択`"
+            :aria-label="`${node.label}を選択${diagnosticAriaSuffix(node)}`"
             @pointerdown="startMove($event, node)"
             @keydown="handleGeometrySemanticKeydown($event, node.elementId)"
           >

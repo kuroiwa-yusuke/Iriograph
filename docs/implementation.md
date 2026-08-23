@@ -70,14 +70,13 @@ Rich editorのnode、属性、edge、包含、順序、選択編集は次のパ�
 2. Canvas gestureまたはサイドバー操作からcommand draftを作る。Canvasはsource/target、候補container、作成位置等をseedするだけでsemantic transactionを開始しない
 3. 解決済みauthoring contextとprojection capabilityから選択できるclass、predicate、構造操作を提示し、追加・削除予定triple/graph patchとvalidationをサイドバーでpreviewする
 4. ユーザーの明示適用後、Coreが一つのUI操作に含まれるstructured command群をRDF datasetのatomic graph patchへ変換する。`create-resource`はnamed IRIと少なくとも1triple、`connect-resources`はpredicateを必須にする
-5. Graph patchからcandidate datasetを構成し、Turtle直接編集やLLM返却Turtleと同じcandidate graph入力に合流する
-6. Parse、authoring profileの差分検証、RDF/RDFS構造検証、domain validationを行う
-7. 影響する全viewを個別のprofile、catalog、layoutで投影し、blockingな構造・projection errorがないことを確認する。Asset未解決等のfallback可能な表示diagnosticはsemantic transactionをrollbackしない
-8. 旧Sceneと新Sceneをstable identityで照合し、存続user overlay、新規elementのgenerated geometry、消滅・非互換overlayをviewごとにreconcileする
-9. Structured commandまたはLLM editではcandidate datasetをversioned serializerで決定的なTurtleへ再生成し、Turtle直接編集では妥当な入力原文を保持する
-10. Candidate Turtleとreconcile済みoverlayを一つのdocument revisionとして確定し、semantic diffとpresentation diffを別々に返す
+5. Graph patchからcandidate datasetを構成する。Structured commandまたはLLM editはversioned serializerで決定的なcandidate Turtleへ再生成し、Turtle直接編集は入力原文をcandidate sourceとして保持してprepared pipelineへ合流する
+6. Parse、authoring profileの差分検証、RDF/RDFS構造検証を行う
+7. 影響する全viewを個別のprofile、catalog、layoutで投影し、旧Sceneと新Sceneをstable identityで照合する。存続user overlay、新規elementのgenerated geometry、消滅・非互換overlayをviewごとにcandidate上でreconcileする
+8. Reconcile済みcandidate datasetをhost注入のengine-independent portでdomain validationする。Domain errorまたはadapter contract errorならcandidate全体をrollbackする
+9. Candidate Turtleとreconcile済みoverlayを一つのdocument revisionとして確定し、semantic diffとpresentation diffを別々に返す
 
-Step 8で新規geometryを保存する場合は`placement: "generated"`とし、userがdrag、resize、作成位置指定をした後の`placement: "user"`と区別します。Template、style、iconなどcatalog由来のappearanceはSceneへ導出し、overlayには複製しません。
+Step 7で新規geometryを保存する場合は`placement: "generated"`とし、userがdrag、resize、作成位置指定をした後の`placement: "user"`と区別します。Template、style、iconなどcatalog由来のappearanceはSceneへ導出し、overlayには複製しません。P1-08でprepared pipeline内のparse結果共有やvalidation/projection順を最適化しても、phase別diagnostic、domain error時のatomic rollback、warning確認、最終documentの結果契約は変えません。
 
 再serializeはprefixとbase IRIを有効な範囲で再利用しますが、comment、空白、property list、source上のtriple順は保持保証しません。同じparse済みdataset（blank node IDを含む）、保持したprefix/base context、serializer versionから、quadの入力順に依存せず同じsourceを得ます。v1はRDF Dataset Canonicalizationを実装せず、構造的に区別できないblank node間では入力IDをtie-breakに使います。
 
@@ -96,6 +95,8 @@ Delete cascadeはresourceをsubject、object、predicateに含むexact statement
 `set-property`は値集合の完全置換で、空配列だけを削除とします。空文字列literalとIRI/literal複数値を区別し、参照を外したことで孤立するblank-node closureを推測削除しません。Capability optional bindingは参照するtemplate statement単位でadd/remove双方からskipします。`set-alternatives`は`memberIris`を最終ordinal順として重複を保ち、default ordinal slotとの一致を検証します。
 
 Mockではstatic context fixtureを使います。Profile/vocabulary URIの取得、version・cache・integrity解決はP2-01まで実装せず、editor/coreからresolverへ逆依存させません。
+
+Domain validationのrequest/response、diagnostic identity、warning confirmation、abort、P1-08 cache identityは[semantic-validation.md](./semantic-validation.md)を正本とします。Validation requestはparse済みdatasetをserializable statement snapshotへ変換し、Core内部のN3 `Store`をadapterへ公開しません。Loaded documentのdomain errorはprojectionを止めずScene annotationとして重ね、candidate transactionのdomain errorだけをatomic rollbackします。
 
 ## Named viewとsession表示状態
 

@@ -77,6 +77,7 @@ export async function applyAuthoringPreview(
   // preview is evidence for confirmation, never trusted as an executable patch.
   const current = await previewInternal(document, preview.commands, context, {
     signal: options.signal,
+    semanticWarningConfirmation: preview.semanticWarningConfirmation,
   });
   if (!current.preview.valid || !current.update?.accepted) {
     return rejected(document, current.preview.diagnostics);
@@ -168,13 +169,25 @@ export async function applyAuthoringSource(
   }
   if (hasErrors(diagnostics)) return rejected(document, diagnostics);
   const update = actor === "human"
-    ? await applySemanticSource(document, source, context.runtime)
+    ? await applySemanticSource(document, source, context.runtime, {
+        validationContext: context.semanticValidation,
+        warningConfirmation: options.warningConfirmation,
+        signal: options.signal,
+      })
     : await applyCanonicalSemanticSource(document, source, context.runtime, {
         serializerVersion: TURTLE_SERIALIZER_VERSION_V1,
+        validationContext: context.semanticValidation,
+        warningConfirmation: options.warningConfirmation,
+        signal: options.signal,
       });
   if (options?.signal?.aborted) return rejected(document, [...diagnostics, abortedDiagnostic()]);
   diagnostics = uniqueDiagnostics(sortDiagnostics([...diagnostics, ...update.diagnostics]));
-  if (!update.accepted || hasErrors(diagnostics)) return rejected(document, diagnostics);
+  if (!update.accepted || hasErrors(diagnostics)) {
+    return {
+      ...rejected(document, diagnostics),
+      warningConfirmation: update.warningConfirmation,
+    };
+  }
   return {
     accepted: true,
     document: clone(update.document),
@@ -319,11 +332,15 @@ export function authoringDocumentFingerprint(document: IriographDocument): strin
   return `urn:iriograph:document-fingerprint:v1:${hash(stableJson(document))}`;
 }
 
+type PreviewInternalOptions = PreviewAuthoringOptions & {
+  semanticWarningConfirmation?: import("./semantic-validation").SemanticWarningConfirmation;
+};
+
 async function previewInternal(
   document: IriographDocument,
   commands: readonly AuthoringCommand[],
   context: ResolvedAuthoringContext,
-  options: PreviewAuthoringOptions,
+  options: PreviewInternalOptions,
 ): Promise<{ preview: AuthoringPreview; update?: SemanticSourceUpdate }> {
   const compilation = await compileAuthoringCommands(document, commands, context, options);
   let diagnostics = [...compilation.diagnostics];
@@ -344,16 +361,36 @@ async function previewInternal(
       diagnostics.push(...serialized.diagnostics);
     } else {
       candidateSource = serialized.source;
+      const datasetOptions = {
+        serializerVersion: TURTLE_SERIALIZER_VERSION_V1,
+        baseIri: document.semantic.baseIri,
+        prefixes: compilation.prefixes,
+        validationContext: context.semanticValidation,
+        warningConfirmation: options.semanticWarningConfirmation,
+        signal: options.signal,
+      } as const;
       update = await applyCanonicalSemanticDataset(
         document,
         compilation.quads,
         context.runtime,
-        {
-          serializerVersion: TURTLE_SERIALIZER_VERSION_V1,
-          baseIri: document.semantic.baseIri,
-          prefixes: compilation.prefixes,
-        },
+        datasetOptions,
       );
+      // Preview needs the reconciled candidate for geometry/diff, but does not
+      // commit it. Bind the validator-issued warning token and rerun the exact
+      // candidate; applyAuthoringPreview will independently do this again.
+      if (
+        !update.accepted
+        && update.warningConfirmation
+        && !update.diagnostics.some((diagnostic) => diagnostic.severity === "error")
+        && !options.semanticWarningConfirmation
+      ) {
+        update = await applyCanonicalSemanticDataset(
+          document,
+          compilation.quads,
+          context.runtime,
+          { ...datasetOptions, warningConfirmation: update.warningConfirmation },
+        );
+      }
       diagnostics.push(...update.diagnostics);
       if (options.signal?.aborted) diagnostics.push(abortedDiagnostic());
       if (update.accepted && !hasErrors(diagnostics)) {
@@ -383,6 +420,7 @@ async function previewInternal(
     candidateSource,
     patch: clone(compilation.patch),
     diagnostics,
+    semanticWarningConfirmation: update?.warningConfirmation,
   };
   const confirmationId = confirmationFor(core);
   const preview: AuthoringPreview = {
@@ -619,6 +657,7 @@ function parseTurtle(
       quads: [],
       diagnostics: [{
         severity: "error",
+        category: "syntax",
         code: "invalid-turtle",
         message: cause instanceof Error ? cause.message : "The semantic source is invalid Turtle.",
       }],

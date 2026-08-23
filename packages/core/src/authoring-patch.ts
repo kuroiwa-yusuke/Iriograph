@@ -890,10 +890,13 @@ function parseSource(document: IriographDocument): {
     return {
       quads: [],
       prefixes,
-      diagnostics: [error(
-        "invalid-turtle",
-        cause instanceof Error ? cause.message : "The semantic source is invalid Turtle.",
-      )],
+      diagnostics: [{
+        ...error(
+          "invalid-turtle",
+          cause instanceof Error ? cause.message : "The semantic source is invalid Turtle.",
+        ),
+        category: "syntax",
+      }],
     };
   }
 }

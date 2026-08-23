@@ -19,12 +19,18 @@ import {
   TURTLE_SERIALIZER_VERSION_V1,
   type TurtleSerializerVersion,
 } from "./serializer";
+import {
+  matchesSemanticWarningConfirmation,
+  validateSemanticDocument,
+  type SemanticValidationTransactionOptions,
+} from "./semantic-validation";
+import { sortDiagnostics } from "./diagnostics";
 
 export type CanonicalSemanticDatasetOptions = {
   serializerVersion: TurtleSerializerVersion;
   baseIri?: string;
   prefixes?: Readonly<Record<string, string>>;
-};
+} & SemanticValidationTransactionOptions;
 
 /**
  * Turtleの変更を一つのsemantic transactionとして適用します。
@@ -34,6 +40,7 @@ export function applySemanticSource(
   document: IriographDocument,
   source: string,
   context: ProjectionRuntimeContext,
+  options?: SemanticValidationTransactionOptions,
 ): Promise<SemanticSourceUpdate>;
 export function applySemanticSource(
   document: IriographDocument,
@@ -44,9 +51,10 @@ export function applySemanticSource(
   document: IriographDocument,
   source: string,
   context: ProjectionRuntimeContext | DiagramCatalog,
+  options: SemanticValidationTransactionOptions = {},
 ): Promise<SemanticSourceUpdate> | SemanticSourceUpdate {
   if (isProjectionRuntimeContext(context)) {
-    return applySemanticSourceTarget(document, source, context);
+    return applySemanticSourceTarget(document, source, context, options);
   }
   return applySemanticSourceLegacy(document, source, context);
 }
@@ -55,8 +63,9 @@ async function applySemanticSourceTarget(
   document: IriographDocument,
   source: string,
   context: ProjectionRuntimeContext,
+  options: SemanticValidationTransactionOptions,
 ): Promise<SemanticSourceUpdate> {
-  return applyPreparedSemanticSourceTarget(document, source, context);
+  return applyPreparedSemanticSourceTarget(document, source, context, options);
 }
 
 /**
@@ -67,7 +76,9 @@ export async function applyCanonicalSemanticSource(
   document: IriographDocument,
   candidateSource: string,
   context: ProjectionRuntimeContext,
-  options: Pick<CanonicalSemanticDatasetOptions, "serializerVersion">,
+  options: Pick<CanonicalSemanticDatasetOptions,
+    "serializerVersion" | "validationContext" | "warningConfirmation" | "signal"
+  >,
 ): Promise<SemanticSourceUpdate> {
   if (options.serializerVersion !== TURTLE_SERIALIZER_VERSION_V1) {
     return {
@@ -88,10 +99,10 @@ export async function applyCanonicalSemanticSource(
     return {
       accepted: false,
       document: clone(document),
-      diagnostics: serialized.diagnostics,
+      diagnostics: categorizePipelineDiagnostics(serialized.diagnostics),
     };
   }
-  return applyPreparedSemanticSourceTarget(document, serialized.source, context);
+  return applyPreparedSemanticSourceTarget(document, serialized.source, context, options);
 }
 
 /** Structured graph-patch entry after the candidate RDF dataset is assembled. */
@@ -111,27 +122,99 @@ export async function applyCanonicalSemanticDataset(
     return {
       accepted: false,
       document: clone(document),
-      diagnostics: serialized.diagnostics,
+      diagnostics: categorizePipelineDiagnostics(serialized.diagnostics),
     };
   }
-  return applyPreparedSemanticSourceTarget(document, serialized.source, context);
+  return applyPreparedSemanticSourceTarget(document, serialized.source, context, options);
 }
 
 async function applyPreparedSemanticSourceTarget(
   document: IriographDocument,
   source: string,
   context: ProjectionRuntimeContext,
+  options: SemanticValidationTransactionOptions,
 ): Promise<SemanticSourceUpdate> {
   const candidate = clone(document);
   // Direct source editing keeps the user's exact accepted Turtle text. Rich
   // command canonical serialization is a separate authoring concern.
   candidate.semantic.source = source;
   const result = await reconcileIriographDocumentViews(document, candidate, context);
+  const categorized = categorizePipelineDiagnostics(result.diagnostics);
+  if (!result.accepted) {
+    return {
+      accepted: false,
+      document: result.document,
+      diagnostics: categorized,
+    };
+  }
+  const validation = await validateSemanticDocument(result.document, options.validationContext, {
+    signal: options.signal,
+  });
+  const diagnostics = sortAndUniqueDiagnostics([...categorized, ...validation.diagnostics]);
+  if (validation.aborted) {
+    return { accepted: false, aborted: true, document: clone(document), diagnostics };
+  }
+  if (validation.diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return {
+      accepted: false,
+      document: clone(document),
+      diagnostics,
+      warningConfirmation: validation.warningConfirmation,
+    };
+  }
+  if (
+    validation.warningConfirmation
+    && !matchesSemanticWarningConfirmation(
+      validation.warningConfirmation,
+      options.warningConfirmation,
+    )
+  ) {
+    return {
+      accepted: false,
+      document: clone(document),
+      diagnostics,
+      warningConfirmation: validation.warningConfirmation,
+    };
+  }
   return {
-    accepted: result.accepted,
+    accepted: true,
     document: result.document,
-    diagnostics: result.diagnostics,
+    diagnostics,
+    warningConfirmation: validation.warningConfirmation,
   };
+}
+
+function categorizePipelineDiagnostics(
+  diagnostics: readonly ProjectionDiagnostic[],
+): ProjectionDiagnostic[] {
+  return diagnostics.map((diagnostic) => {
+    if (diagnostic.category) return diagnostic;
+    if (diagnostic.code === "invalid-turtle" || /turtle.*parse|parse.*turtle/u.test(diagnostic.code)) {
+      return { ...diagnostic, category: "syntax" };
+    }
+    if (/profile|catalog|rule|template/u.test(diagnostic.code)) {
+      return { ...diagnostic, category: "profile" };
+    }
+    if (/layout|geometry|routing/u.test(diagnostic.code)) {
+      return { ...diagnostic, category: "layout" };
+    }
+    if (/container|containment|membership|sequence|alternative|ordinal|structure/u.test(diagnostic.code)) {
+      return { ...diagnostic, category: "structure" };
+    }
+    return { ...diagnostic, category: "projection" };
+  });
+}
+
+function sortAndUniqueDiagnostics(
+  diagnostics: readonly ProjectionDiagnostic[],
+): ProjectionDiagnostic[] {
+  const seen = new Set<string>();
+  return sortDiagnostics(diagnostics.filter((diagnostic) => {
+    const key = JSON.stringify(diagnostic);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
 }
 
 function applySemanticSourceLegacy(

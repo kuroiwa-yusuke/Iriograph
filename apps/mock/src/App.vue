@@ -20,6 +20,7 @@ import {
   createMockAuthoringContext,
   mockResourceIriAllocator,
 } from "./mock/authoring";
+import { mockSemanticValidationContext } from "./mock/semantic-validation";
 import {
   createMockAssetHost,
   workspaceAssetPickResult,
@@ -416,6 +417,7 @@ function emptyDocument(): IriographDocumentV1 {
           :asset-access="assetAccess"
           :pick-asset="pickWorkspaceAsset"
           :authoring-context="authoringContext"
+          :semantic-validation-context="mockSemanticValidationContext"
           :resource-iri-allocator="mockResourceIriAllocator"
           @save="saveDocument"
           @validation-changed="diagnostics = $event"

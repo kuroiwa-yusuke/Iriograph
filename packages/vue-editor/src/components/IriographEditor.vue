@@ -8,8 +8,11 @@ import {
   buildIriographView,
   createProjectionRuntimeContext,
   createStandardLayoutRegistry,
+  diagnosticTargetsSceneElement,
   previewAuthoringCommands,
   seedAuthoringCommandFromProvenance,
+  semanticSourceFingerprint,
+  validateSemanticDocument,
   validateIriographDocumentV1,
   validateProjectionCatalogV1,
   type AuthoringPreview,
@@ -25,10 +28,12 @@ import {
   type ProjectionDiagnostic,
   type ProjectionRuntimeContext,
   type ResolvedAuthoringContext,
+  type ResolvedSemanticValidationContext,
   type ResourceIriAllocator,
   type RuntimeValidationIssue,
   type SemanticEditCapability,
   type SemanticSourceUpdate,
+  type SemanticWarningConfirmation,
   type SceneContainer,
   type SceneEdge,
   type SceneNode,
@@ -102,6 +107,7 @@ const props = withDefaults(defineProps<{
   pickAsset?: AssetPicker;
   snapSettings?: DiagramSnapSettingsInput;
   authoringContext?: ResolvedAuthoringContext;
+  semanticValidationContext?: ResolvedSemanticValidationContext;
   resourceIriAllocator?: ResourceIriAllocator;
 }>(), {
   title: "",
@@ -117,6 +123,7 @@ const props = withDefaults(defineProps<{
   layoutRegistry: undefined,
   snapSettings: undefined,
   authoringContext: undefined,
+  semanticValidationContext: undefined,
   resourceIriAllocator: undefined,
 });
 
@@ -136,6 +143,7 @@ const selectedElementIds = ref<string[]>([]);
 const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
 const zoom = ref(1);
 const diagramCanvas = ref<DiagramCanvasNavigationApi>();
+const turtleTextarea = ref<HTMLTextAreaElement>();
 const history = ref<IriographDocument[]>([]);
 const future = ref<IriographDocument[]>([]);
 const schemaDiagnostics = ref<ProjectionDiagnostic[]>([]);
@@ -143,6 +151,7 @@ const applyDiagnostics = ref<ProjectionDiagnostic[]>([]);
 const scene = ref<DiagramScene>(emptyScene(draft.value.views[0]?.viewId ?? ""));
 const sceneLoading = ref(true);
 const applyingTurtle = ref(false);
+const semanticWarningConfirmation = ref<SemanticWarningConfirmation>();
 const authoringDraft = ref<EditorAuthoringDraft>(emptyAuthoringDraft());
 const authoringPreview = ref<AuthoringPreview>();
 const authoringBusy = ref(false);
@@ -152,6 +161,7 @@ const assetSceneSession = new AssetSceneSession();
 let lastEmittedJson = "";
 let gestureBefore: IriographDocument | undefined;
 let sceneRequestToken = 0;
+let sceneValidationAbortController: AbortController | undefined;
 let semanticRequestToken = 0;
 let semanticAbortController: AbortController | undefined;
 let authoringRequestToken = 0;
@@ -182,10 +192,16 @@ const diagnostics = computed(() => [
   ...applyDiagnostics.value,
   ...scene.value.diagnostics,
 ].filter(uniqueDiagnostic()));
+const semanticValidationContext = computed<ResolvedSemanticValidationContext | undefined>(() => {
+  const source = props.semanticValidationContext ?? props.authoringContext?.semanticValidation;
+  if (!source) return undefined;
+  const raw = toRaw(source);
+  return { ...raw, validator: toRaw(raw.validator) };
+});
 const sceneError = computed(() => [
   ...schemaDiagnostics.value,
   ...scene.value.diagnostics,
-].find((item) => item.severity === "error"));
+].find((item) => item.severity === "error" && item.category !== "domain"));
 const errorCount = computed(() => diagnostics.value.filter((item) => item.severity === "error").length);
 const warningCount = computed(() => diagnostics.value.filter((item) => item.severity === "warning").length);
 const turtlePending = computed(() => turtleDraft.value !== draft.value.semantic.source);
@@ -207,6 +223,7 @@ const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
         : undefined,
     },
     allocator: toRaw(props.resourceIriAllocator ?? source.allocator),
+    semanticValidation: semanticValidationContext.value,
   };
 });
 const authoringBlockedReason = computed(() => {
@@ -420,6 +437,10 @@ const nodeTemplateRefs = computed(() => Object.values(props.catalog.templates)
   .filter((template) => template.structuralKind === selectedElement.value?.structuralKind)
   .map((template) => template.templateRef));
 const assetRefs = computed(() => Object.keys(props.catalog.assets));
+const selectedElementDiagnostics = computed(() => {
+  const element = selectedElement.value;
+  return element ? diagnostics.value.filter((diagnostic) => diagnosticTargetsElement(diagnostic, element)) : [];
+});
 
 watch(
   () => props.modelValue,
@@ -485,6 +506,30 @@ watch(
 );
 
 watch(
+  [
+    () => (props.semanticValidationContext ?? props.authoringContext?.semanticValidation)?.contextId,
+    () => (props.semanticValidationContext ?? props.authoringContext?.semanticValidation)?.contextRevision,
+    () => toRaw(
+      (props.semanticValidationContext ?? props.authoringContext?.semanticValidation)?.validator,
+    ),
+  ],
+  () => {
+    cancelSemanticRequest();
+    applyDiagnostics.value = [];
+    semanticWarningConfirmation.value = undefined;
+    invalidateAuthoringPreview();
+    void refreshScene();
+  },
+);
+
+watch(
+  turtleDraft,
+  () => {
+    semanticWarningConfirmation.value = undefined;
+  },
+);
+
+watch(
   () => props.snapSettings,
   (value) => {
     snapSettings.value = normalizeDiagramSnapSettings(value);
@@ -504,15 +549,20 @@ onBeforeUnmount(() => {
   cancelAssetPicker();
   cancelSemanticRequest();
   cancelAuthoringRequest();
+  sceneValidationAbortController?.abort();
   assetSceneSession.dispose();
 });
 
 async function refreshScene(): Promise<void> {
   const requestToken = ++sceneRequestToken;
+  sceneValidationAbortController?.abort();
+  const validationController = new AbortController();
+  sceneValidationAbortController = validationController;
   const assetRequest = assetSceneSession.begin();
   const document = clone(draft.value);
   const catalog = clone(props.catalog);
   const assetAccess = props.assetAccess;
+  const validationContext = semanticValidationContext.value;
   const viewId = document.views[0]?.viewId ?? "";
   sceneLoading.value = true;
   schemaDiagnostics.value = schemaDiagnosticsFor(document, catalog);
@@ -537,12 +587,21 @@ async function refreshScene(): Promise<void> {
       projectionContext(catalog),
       "incremental",
     );
+    const semanticValidation = validationContext
+      ? await validateSemanticDocument(document, validationContext, {
+          signal: validationController.signal,
+        })
+      : { diagnostics: [] };
     if (requestToken !== sceneRequestToken) return;
     const result = assetAccess
       ? await assetSceneSession.enrich(assetRequest, projected, catalog.assets, assetAccess)
       : assetSceneSession.commitWithoutAssets(assetRequest, projected);
     if (requestToken !== sceneRequestToken || !result.accepted) return;
-    scene.value = result.scene;
+    scene.value = {
+      ...result.scene,
+      diagnostics: [...result.scene.diagnostics, ...semanticValidation.diagnostics]
+        .filter(uniqueDiagnostic()),
+    };
   } catch (cause) {
     if (requestToken !== sceneRequestToken) return;
     const committed = assetSceneSession.commitWithoutAssets(assetRequest, emptyScene(viewId, [{
@@ -554,6 +613,9 @@ async function refreshScene(): Promise<void> {
     scene.value = committed.scene;
   } finally {
     if (requestToken === sceneRequestToken) {
+      if (sceneValidationAbortController === validationController) {
+        sceneValidationAbortController = undefined;
+      }
       sceneLoading.value = false;
       clearMissingSelection(scene.value);
     }
@@ -1261,11 +1323,17 @@ async function applyTurtleDraft(): Promise<boolean> {
       ? await applyAuthoringSource(previous, turtleDraft.value, context, {
           actor: "human",
           signal: controller.signal,
+          warningConfirmation: semanticWarningConfirmation.value,
         })
       : await applySemanticSource(
           previous,
           turtleDraft.value,
           projectionContext(catalog),
+          {
+            validationContext: semanticValidationContext.value,
+            warningConfirmation: semanticWarningConfirmation.value,
+            signal: controller.signal,
+          },
         );
   } catch (cause) {
     if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
@@ -1291,9 +1359,15 @@ async function applyTurtleDraft(): Promise<boolean> {
     return false;
   }
   applyDiagnostics.value = result.diagnostics;
-  if (!result.accepted) return false;
+  if (!result.accepted) {
+    semanticWarningConfirmation.value = result.diagnostics.some((item) => item.severity === "error")
+      ? undefined
+      : result.warningConfirmation;
+    return false;
+  }
   if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
   publish(result.document, true);
+  semanticWarningConfirmation.value = undefined;
   turtleDraft.value = result.document.semantic.source;
   return true;
 }
@@ -1308,6 +1382,7 @@ function cancelSemanticRequest(): void {
 function revertTurtleDraft(): void {
   turtleDraft.value = draft.value.semantic.source;
   applyDiagnostics.value = [];
+  semanticWarningConfirmation.value = undefined;
   schemaDiagnostics.value = schemaDiagnosticsFor(draft.value, props.catalog);
 }
 
@@ -1491,6 +1566,39 @@ async function focusElement(elementId: string): Promise<boolean> {
   if (!exists) return false;
   selectElement(elementId);
   return revealSelection();
+}
+
+function diagnosticTargetsElement(
+  diagnostic: ProjectionDiagnostic,
+  element: SelectedElement,
+): boolean {
+  return diagnosticTargetsSceneElement(diagnostic, element);
+}
+
+function sceneElementForDiagnostic(diagnostic: ProjectionDiagnostic): SelectedElement | undefined {
+  return [...scene.value.containers, ...scene.value.nodes, ...scene.value.edges]
+    .find((element) => diagnosticTargetsElement(diagnostic, element));
+}
+
+async function navigateDiagnosticToScene(diagnostic: ProjectionDiagnostic): Promise<void> {
+  const element = sceneElementForDiagnostic(diagnostic);
+  if (element) await focusElement(element.elementId);
+}
+
+async function navigateDiagnosticToSource(diagnostic: ProjectionDiagnostic): Promise<void> {
+  const location = diagnostic.sourceLocation;
+  if (!location || !canNavigateDiagnosticToSource(diagnostic)) return;
+  panel.value = "turtle";
+  await nextTick();
+  const textarea = turtleTextarea.value;
+  if (!textarea) return;
+  textarea.focus();
+  textarea.setSelectionRange(location.startOffset, location.endOffset);
+}
+
+function canNavigateDiagnosticToSource(diagnostic: ProjectionDiagnostic): boolean {
+  return diagnostic.sourceLocation !== undefined
+    && diagnostic.sourceFingerprint === semanticSourceFingerprint(turtleDraft.value);
 }
 
 function roundGeometry(geometry: ElementGeometry): ElementGeometry {
@@ -1781,6 +1889,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           </header>
           <template v-if="panel === 'turtle'">
             <textarea
+              ref="turtleTextarea"
               v-model="turtleDraft"
               :readonly="readOnly || structuredAuthoringPending"
               spellcheck="false"
@@ -1795,13 +1904,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <div>
                 <button type="button" :disabled="!turtlePending" @click="revertTurtleDraft">元に戻す</button>
                 <button type="button" class="primary" :disabled="!turtlePending || readOnly || applyingTurtle || structuredAuthoringPending" @click="applyTurtleDraft">
-                  {{ applyingTurtle ? "適用中…" : "検証して適用" }}
+                  {{ applyingTurtle ? "適用中…" : semanticWarningConfirmation ? "警告を確認して適用" : "検証して適用" }}
                 </button>
               </div>
             </footer>
             <ul v-if="diagnostics.length" class="iriograph-diagnostics">
-              <li v-for="(diagnostic, index) in diagnostics" :key="`${diagnostic.code}:${index}`" :class="diagnostic.severity">
-                <b>{{ diagnostic.code }}</b> {{ diagnostic.message }}
+              <li v-for="(diagnostic, index) in diagnostics" :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`" :class="diagnostic.severity">
+                <span><b>{{ diagnostic.code }}</b> {{ diagnostic.message }}</span>
+                <span class="iriograph-diagnostic-actions">
+                  <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Source</button>
+                  <button v-if="sceneElementForDiagnostic(diagnostic)" type="button" @click="navigateDiagnosticToScene(diagnostic)">Scene</button>
+                </span>
               </li>
             </ul>
           </template>
@@ -1825,6 +1938,18 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || authoringBusy || turtlePending"
               @click="seedParentRemoval"
             >包含から外す</button>
+          </section>
+          <section v-if="selectedElementDiagnostics.length" class="iriograph-element-diagnostics">
+            <label>Diagnostics</label>
+            <article
+              v-for="(diagnostic, index) in selectedElementDiagnostics"
+              :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`"
+              :class="diagnostic.severity"
+            >
+              <b>{{ diagnostic.code }}</b>
+              <span>{{ diagnostic.message }}</span>
+              <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Sourceへ移動</button>
+            </article>
           </section>
           <section>
             <label>Template</label>
