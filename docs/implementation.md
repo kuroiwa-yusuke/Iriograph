@@ -27,6 +27,10 @@ drag、resize、waypoint変更、template/icon overrideはpresentation transacti
 
 Turtle textareaは未適用draftを持ちます。「検証して適用」または保存前の`flushPendingEdits()`でsemantic transactionを開始します。parse error時はdraftを残してdocument正本を変更しません。
 
+Target semantic transactionはactorを`human`または`llm`として受け取り、元graphとの差分にauthoring profileを適用します。Rendererのfallback投影はunknown termを許容しますが、LLM transactionはprofile外term、新規semantic term、許可外namespaceを拒否します。
+
+表示要求をLLMへ接続するhostは、まずpresentationだけで達成できるか判定します。意味構造が必要な場合だけ、view profile/catalogからprojection capability summaryを導出し、許可語彙とともにLLM adapterへ渡します。分類、検証、失敗時rollbackは[authoring-profile.md](./authoring-profile.md)に従います。
+
 ## 現在のlocal mock
 
 購入承認フローを例に、lane containment、開始・終了event、user/service task、gateway、relation resourceによるsequence flow、未登録predicateのfallback edgeを一画面に表示します。

@@ -20,7 +20,7 @@ Iriograph documentは次の三層を分離します。
 
 ベースプロファイルは次を必須方針とします。
 
-- Turtle内の構造表現にはRDF/RDFSの標準語彙を使い、Iriograph固有の業務語彙を要求しません。
+- 包含、順序、選択、参照をspecial projectionしたい場合はRDF/RDFSの標準語彙を優先し、Iriograph固有の業務語彙を要求しません。ただし標準構造の利用は任意です。
 - IriographはRDF/RDFS語彙を再定義しません。決定的な作図に必要な追加制約だけをapplication profileとして定めます。
 - Turtleは任意のdomain IRIをclass、predicate、resourceとして利用できます。ベースプロファイルに未登録のIRI-object tripleも拒否しません。
 - 自然言語labelをclass判定、構造判定、rule matchingに使ってはなりません。
@@ -304,12 +304,14 @@ overlayにlabelを複製しません。既定template、shape、色、iconもcat
 
 ## 9. Extension方針
 
-1. domain標準語彙で表せる意味は、そのIRIをTurtleで使い、独立catalogで表示へ結びます。
+1. domain標準語彙で自然に表せる意味は、そのIRIを優先し、独立catalogで表示へ結びます。
 2. domain固有語彙が必要なら、利用側namespaceで定義し、`rdfs:Class`、`rdf:Property`、`rdfs:subClassOf`、`rdfs:subPropertyOf`、`rdfs:label`等で自己記述することを推奨します。
 3. 新しいclassやpredicateの追加だけでcore operatorを増やしてはなりません。既存operatorとtemplateのcatalog ruleを追加します。
 4. 新しい空間文法が必要な場合だけoperatorまたはScene primitiveを追加し、domain IRIとは分離します。
 5. OWL、PROV-O、SKOS、SHACL等は任意のimport/profileとして追加できます。ベースプロファイルの利用条件にはしません。
 6. LLMへはcatalogやoverlayではなくTurtleを主入力として渡します。LLMが返したTurtleは本プロファイルの構造検証を通した後にだけ採用します。
+
+未知語彙をgeneric node/edgeとして投影できることは、その語彙をLLMが自由に生成できることを意味しません。人間・LLMのsemantic write policyと表示要求からのrewriteは[authoring-profile.md](./authoring-profile.md)に従います。
 
 ## 10. v1で扱わない事項
 

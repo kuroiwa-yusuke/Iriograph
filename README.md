@@ -34,4 +34,4 @@ npm run verify
 
 `@iriograph/vue-editor`はworkspace、HTTP、認証、永続化を知りません。hostは`v-model`でdocumentを受け取り、`save` eventを任意の保存APIへ接続します。
 
-詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[バックログ](./docs/backlog.md)を参照してください。
+詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[Semantic Authoring Profile仕様](./docs/authoring-profile.md)、[バックログ](./docs/backlog.md)を参照してください。

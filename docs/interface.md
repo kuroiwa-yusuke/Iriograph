@@ -12,6 +12,7 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
   "semantic": {
     "format": "text/turtle",
     "baseIri": "urn:example:purchase:",
+    "authoringProfileRef": "urn:example:authoring-profile:purchase@1",
     "source": "@prefix : <urn:example:purchase:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n:lane a rdf:Bag ; rdfs:label \"申請者\"@ja ; rdfs:member :submit ."
   },
   "imports": [
@@ -31,6 +32,8 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 ```
 
 `semantic.source`は意味の正本です。`views[].overlay`のkeyはview内element ID、各entryの`semanticRef`はIRIまたはstatement identityです。
+
+`semantic.authoringProfileRef`はtarget contractで、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。現行TypeScript modelへの追加はP0-01で行います。
 
 `views[].locale`はtarget contractの任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。現行TypeScript modelへの追加はP0-01で行います。
 
@@ -61,10 +64,12 @@ v1 target catalogは次の宣言を持ちます。
 
 ## Semantic transaction
 
-`applySemanticSource(document, source, catalog)`は、Turtleをparseしてから意味変更を適用します。
+Targetの`applySemanticSource(document, source, context)`は、Turtleをparseしてから意味変更を適用します。`context`はresolved catalog、view profile、authoring profile、actor、元revisionを含みます。
 
 - 失敗: `accepted: false`とdiagnosticsを返し、元documentを維持
 - 成功: `accepted: true`とreconcile済みdocumentを返す
+
+`actor`は少なくとも`human`または`llm`です。LLM transactionではauthoring profile未解決、unknown term追加、term minting、許可外resource namespaceをerrorとして扱います。現行の`applySemanticSource(document, source, catalog)`は移行前contractです。
 
 reconcileは存続`semanticRef`のoverlayを維持し、新規表示要素へ初期geometryを補完し、消滅した要素を除去します。
 
@@ -107,4 +112,6 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 
 ## LLM adapter
 
-LLMへは`document.semantic.source`を抽出して渡します。返却Turtleは`applySemanticSource`へ入力します。portable document全体やoverlayをLLMの自由編集対象にしません。
+LLMへは`document.semantic.source`、authoring profileから抽出した語彙ガイド、関連projection capability summaryを渡します。返却Turtleは`actor: "llm"`のsemantic transactionへ入力します。portable document全体やoverlayをLLMの自由編集対象にしません。
+
+位置、size、routing、色、icon overrideはpresentation requestとして処理します。Lane、順序、選択、domain typeなど意味を伴う表示要求だけをprofile-guided semantic rewriteの候補にします。詳細は[authoring-profile.md](./authoring-profile.md)を参照します。

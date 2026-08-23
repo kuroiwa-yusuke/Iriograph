@@ -19,7 +19,7 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 
 | ID | 項目 | 依存 | 完了条件 |
 |---|---|---|---|
-| P0-01 | Documentと正規化catalogのJSON Schema/runtime validation | 規範仕様、現行TypeScript model | 不明field方針、必須値、IRI、version、operator別parameterを検証し、invalid fixtureのtestがある |
+| P0-01 | Documentと正規化catalogのJSON Schema/runtime validation | 規範仕様、現行TypeScript model | `authoringProfileRef`を含む必須値、不明field方針、IRI、version、operator別parameterを検証し、invalid fixtureのtestがある |
 | P0-02 | 汎用projection operatorとRDF/RDFS標準catalog | P0-01 | `membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`を業務IRI分岐なしで実装し、mock Turtleから独自workflow構造語彙を除去する |
 | P0-03 | RDF/RDFS profile構造validation | P0-01、P0-02 | named IRI、Bag parent、container cycle、Seq/Altの連番・個数・重複型をvalid/invalid fixtureで検証する |
 | P0-04 | 限定RDFS closureとrule競合解決 | P0-01、P0-02 | `subClassOf`/`subPropertyOf`の推移閉包、priority、specificityを登録順非依存で解決し、同順位競合を投影前errorにする |
@@ -38,7 +38,7 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 | P1-01 | pan、fit、minimap、選択への移動 | P0-07、P0-11 | 大きい図をmouse/keyboardで移動でき、選択elementをviewportへ表示できる |
 | P1-02 | multi-select、整列、等間隔、snap | P0-11 | 一括移動を一transactionでundoでき、container境界を破らない |
 | P1-03 | edge routing編集の完成 | P0-07、P0-11 | waypoint追加・削除、label位置、self-loop、parallel edgeを編集・保存できる |
-| P1-04 | semantic authoring commands | P0-06、P0-08 | node/edge/containment/sequence/alternativeの追加・変更・削除をTurtle graph transactionとして実行し、文字列置換に依存しない |
+| P1-04 | human semantic authoring commands | P0-06、P0-08 | actor=`human`でnode/edge/containment/sequence/alternativeをTurtle graph transactionとして編集し、unknown term policyのwarningを扱える |
 | P1-05 | SHACL等のsemantic validation port | P0-01 | syntax errorとdomain constraintを分け、semanticRef付きdiagnosticをSceneとsourceへ対応付ける |
 | P1-06 | 複数view、locale、filterとview管理 | P0-08 | 同じTurtleに異なるprofile/layout/locale/filter/overlayを追加・複製・削除できる |
 | P1-07 | accessibilityとkeyboard編集 | P0-11、P1-01〜03 | focus順、選択、移動、resize、routingの主要操作をkeyboardで完結できる |
@@ -48,11 +48,13 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 
 | ID | 項目 | 依存 | 完了条件 |
 |---|---|---|---|
-| P2-01 | LLM semantic adapter | P0-08、P1-05 | Turtle抽出、revision付き変更要求、validation、reconcile、失敗時rollbackを一つのAPIで扱う |
-| P2-02 | kuroxiom-cloud host adapter | P0-10、P2-01 | workspace fileのload/save、revision conflict、権限、agent変更後reloadをeditor外で接続する |
-| P2-03 | catalog/asset registry adapter | P0-05、P0-09 | tenant/organization固有URIを認証付き取得先へ解決し、cache/integrityを検証する |
-| P2-04 | semantic diffとpresentation diff | P0-08 | review画面でTurtle変更とoverlay変更を別々に説明・承認できる |
-| P2-05 | import/export adapter | P0-01、P1-04 | plain Turtle、JSON-LD、必要な外部図形式との変換でloss reportを返す |
+| P2-01 | authoring profile/vocabulary resolver | P0-01、P0-05 | versioned profileとvocabulary indexを解決し、known class/predicate、resource namespace、actor policyを決定的に取得できる |
+| P2-02 | controlled LLM semantic adapter | P0-08、P1-05、P2-01 | Turtle、許可語彙、revisionを入力し、unknown term、term minting、namespace、構造を検証して失敗時rollbackする |
+| P2-03 | 表示要求分類とprofile-guided rewrite | P0-08、P2-02 | presentation要求はoverlayへ送り、意味構造を伴う要求だけをprojection capability summary付きでrewriteし、再投影結果を検証する |
+| P2-04 | kuroxiom-cloud host adapter | P0-10、P2-02 | workspace fileのload/save、revision conflict、権限、agent変更後reloadをeditor外で接続する |
+| P2-05 | catalog/vocabulary/asset registry adapter | P0-05、P0-09、P2-01 | tenant/organization固有URIを認証付き取得先へ解決し、cache/integrityを検証する |
+| P2-06 | semantic diffとpresentation diff | P0-08 | review画面でTurtle変更とoverlay変更を別々に説明・承認できる |
+| P2-07 | import/export adapter | P0-01、P1-04 | plain Turtle、JSON-LD、必要な外部図形式との変換でloss reportを返す |
 
 ## P3 — 表現拡張
 

@@ -7,18 +7,19 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 
 - `semantic.source`は意味情報の正本とする。座標、色、icon、viewportを混ぜない。
 - ベースsemantic profileは`docs/rdf-rdfs-profile.md`を正本とし、包含、順序、選択、参照には定義済みのRDF/RDFS語彙を優先する。
+- Semantic write policyは`docs/authoring-profile.md`を正本とし、rendererのunknown fallbackとLLMのterm生成許可を分ける。
 - Catalogは意味から構造的な表示primitiveへの宣言的な写像を持つ。
 - Sceneの構造名は`node`、`edge`、`container`、`annotation`など表示・編集上の性質で付ける。
 - View overlayはgeometry、pin、manual routeなど、catalogから復元できない表示情報だけを持つ。
 - Vue、DOM、workspace、HTTP、権限をcoreへ入れない。
 - Asset URIは識別子であり、取得URLと同一視しない。取得は注入resolverへ委譲する。
 - ResourceのidentityにlabelやTurtleの行番号を使わない。IRIを優先する。
-- LLMへはsemantic Turtleだけを公開し、view overlayを編集対象にしない。
+- LLMへはsemantic Turtle、許可語彙、関連projection capabilityだけを公開し、view overlayを編集対象にしない。
 
 ## 拡張規則
 
 - 業務classやpredicateごとの分岐をrendererやprojection処理へ直書きしない。
-- 標準語彙で表せる意味にIriograph固有のsemantic語彙を追加しない。
+- 標準語彙で自然に表せる共通構造では標準語彙を優先するが、その他のdomain語彙はgeneric node/edgeとして受け入れる。
 - domain固有語彙が必要な場合は利用domainのnamespaceで自己記述し、template、icon、projection bindingをcatalog正本へ追加する。
 - `rdfs:label`の文字列をclass、構造、rule matchingに使わない。
 - 未登録のIRI-object tripleは、core fallbackで通常矢印として表示できる状態を保つ。
@@ -28,6 +29,8 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 ## 編集規則
 
 - Semantic transactionとPresentation transactionを分ける。
+- LLM semantic transactionはresolved authoring profileなしで実行せず、unknown termの新規利用やterm mintingを黙認しない。
+- 表示要求が位置、size、routing、色、icon overrideだけならTurtleを書き換えない。意味構造を伴う場合だけprofile-guided rewriteを行う。
 - Drag、resize、waypoint変更はTurtleを変更しない。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
@@ -37,6 +40,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 
 - `docs/theory.md`: 設計思想と判断基準。
 - `docs/rdf-rdfs-profile.md`: semantic base vocabulary、構造制約、catalog bindingの規範仕様。
+- `docs/authoring-profile.md`: actor別の語彙統制とprofile-guided semantic rewriteの規範仕様。
 - `docs/interface.md`: document、catalog、Sceneの公開契約。
 - `docs/implementation.md`: package境界と投影処理。
 - `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。

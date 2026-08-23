@@ -26,7 +26,7 @@ primitiveを増やす基準は、新しい業務領域ではなく新しい空�
 
 ## RDF/RDFSを基底にする理由
 
-ベースプロファイルは、包含に`rdf:Bag`と`rdfs:member`、順序に`rdf:Seq`と`rdf:_n`、選択に`rdf:Alt`、参照に`rdfs:seeAlso`または`rdfs:isDefinedBy`を使います。Iriograph固有の`Lane`、`SequenceFlow`、`from`、`to`を意味層の必須語彙にはしません。
+ベースプロファイルは、包含に`rdf:Bag`と`rdfs:member`、順序に`rdf:Seq`と`rdf:_n`、選択に`rdf:Alt`、参照に`rdfs:seeAlso`または`rdfs:isDefinedBy`を利用できるようにします。これらはspecial projectionへopt-inする共通構造であり、すべての業務graphに使用を強制しません。その他のdomain語彙はgeneric node/edgeとして成立します。
 
 RDF/RDFSだけでBPMNの全概念を表すのではなく、RDF/RDFSの共通構造だけを制約付きで使う方針です。user taskとservice taskの違いなどdomain固有の意味が必要なら、既存のdomain ontologyまたは利用側が自己記述した語彙を追加catalogへ結びます。標準語彙がないために独自語彙を導入する場合も、Iriograph coreのnamespaceではなく利用domainのnamespaceに置きます。
 
@@ -45,9 +45,13 @@ resolverは取得ポリシーの境界でもあります。許可scheme、origin
 
 ## LLMとの境界
 
-LLMへ渡す主対象は`semantic.source`のTurtleです。LLMが返したTurtleはparse・規則検証を一つのsemantic transactionとして通し、成功時だけ正本へ反映します。その後、存続IRIのユーザーoverlayを維持し、新規IRIへ決定的なlayoutを補完し、消滅IRIのoverlayを除去します。
+LLMへ渡す主対象は`semantic.source`のTurtleです。これにauthoring profileから抽出した使用可能語彙と、必要なprojection capabilityだけを付与します。Rendererは未知語彙をgeneric node/edgeとして受け入れますが、LLMはprofile外のpredicate、class、namespaceを追加できません。
+
+LLMが返したTurtleはparse・語彙差分・構造規則を一つのsemantic transactionとして検証し、成功時だけ正本へ反映します。その後、存続IRIのユーザーoverlayを維持し、新規IRIへ決定的なlayoutを補完し、消滅IRIのoverlayを除去します。
 
 LLMに座標調整を求めません。人が調整したoverlayをプロンプトへ混ぜないことで、意味変更とレイアウト変更の競合を避けます。
+
+Lane、順序、選択など意味構造を伴う表示要求では、view profileとcatalogから関連capabilityを抽出し、authoring profileの範囲内でTurtleを書き直すことができます。位置、色、routing、icon overrideだけの要求はpresentation transactionで扱い、表示都合だけでsemantic graphを変更しません。詳細は[authoring-profile.md](./authoring-profile.md)を正本とします。
 
 ## 安定性の判断基準
 
@@ -55,7 +59,8 @@ LLMに座標調整を求めません。人が調整したoverlayをプロンプ�
 - semantic transactionとpresentation transactionを分ける
 - catalog ruleの競合を登録順で解決しない
 - 同じ入力、catalog version、layout versionから同じSceneを得る
-- 標準語彙で表せる意味にIriograph固有のsemantic語彙を作らない
+- 標準語彙で自然に表せる共通構造では標準語彙を優先する
 - labelをsemantic classや構造ruleの代用にしない
+- Rendererのunknown fallbackをLLMの語彙生成許可とみなさない
 - host固有の保存、権限、asset取得をcoreへ入れない
 - 保存schemaの変更はversionとmigration testを伴う
