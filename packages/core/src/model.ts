@@ -226,14 +226,17 @@ export type VisualTemplate = {
   extensions?: IriographExtensions;
 };
 
+export type AssetMediaType = "image/svg+xml" | "image/png" | "image/webp";
+
 export type AssetDefinition = {
   assetRef: string;
-  mediaType: "image/svg+xml" | "image/png" | "image/webp";
+  mediaType: AssetMediaType;
   url: string;
   extensions?: IriographExtensions;
 };
 
 export type ProjectionOptions = {
+  /** @deprecated Legacy DiagramCatalog projection only. */
   resolveAssetUrl?: (
     assetRef: string,
     definition: AssetDefinition | undefined,
@@ -415,6 +418,7 @@ export type ProjectionDiagnostic = {
   statementRef?: string;
   catalogRef?: string;
   ruleId?: string;
+  assetRef?: string;
 };
 
 export type SemanticSourceUpdate = {

@@ -6,12 +6,25 @@ import type {
   SemanticSourceUpdate,
   ViewElementOverlay,
 } from "./model";
+import type { Quad } from "n3";
 import {
   parseIriographSemanticSource,
   projectIriographDocument,
 } from "./projection";
 import { reconcileIriographDocumentViews } from "./reconciliation";
 import type { ProjectionRuntimeContext } from "./scene";
+import {
+  canonicalizeTurtleSourceV1,
+  serializeCanonicalTurtleV1,
+  TURTLE_SERIALIZER_VERSION_V1,
+  type TurtleSerializerVersion,
+} from "./serializer";
+
+export type CanonicalSemanticDatasetOptions = {
+  serializerVersion: TurtleSerializerVersion;
+  baseIri?: string;
+  prefixes?: Readonly<Record<string, string>>;
+};
 
 /**
  * Turtleの変更を一つのsemantic transactionとして適用します。
@@ -39,6 +52,72 @@ export function applySemanticSource(
 }
 
 async function applySemanticSourceTarget(
+  document: IriographDocument,
+  source: string,
+  context: ProjectionRuntimeContext,
+): Promise<SemanticSourceUpdate> {
+  return applyPreparedSemanticSourceTarget(document, source, context);
+}
+
+/**
+ * Structured/LLM source entry: parse to a dataset, canonicalize with the
+ * versioned serializer, then use the same all-view reconciliation pipeline.
+ */
+export async function applyCanonicalSemanticSource(
+  document: IriographDocument,
+  candidateSource: string,
+  context: ProjectionRuntimeContext,
+  options: Pick<CanonicalSemanticDatasetOptions, "serializerVersion">,
+): Promise<SemanticSourceUpdate> {
+  if (options.serializerVersion !== TURTLE_SERIALIZER_VERSION_V1) {
+    return {
+      accepted: false,
+      document: clone(document),
+      diagnostics: [{
+        severity: "error",
+        code: "serializer-version-unsupported",
+        message: "Unsupported Turtle serializer version.",
+      }],
+    };
+  }
+  const serialized = canonicalizeTurtleSourceV1(
+    candidateSource,
+    document.semantic.baseIri,
+  );
+  if (!serialized.accepted) {
+    return {
+      accepted: false,
+      document: clone(document),
+      diagnostics: serialized.diagnostics,
+    };
+  }
+  return applyPreparedSemanticSourceTarget(document, serialized.source, context);
+}
+
+/** Structured graph-patch entry after the candidate RDF dataset is assembled. */
+export async function applyCanonicalSemanticDataset(
+  document: IriographDocument,
+  quads: readonly Quad[],
+  context: ProjectionRuntimeContext,
+  options: CanonicalSemanticDatasetOptions,
+): Promise<SemanticSourceUpdate> {
+  const serialized = serializeCanonicalTurtleV1({
+    serializerVersion: options.serializerVersion,
+    quads,
+    baseIri: options.baseIri ?? document.semantic.baseIri,
+    prefixes: options.prefixes,
+  });
+  if (!serialized.accepted) {
+    return {
+      accepted: false,
+      document: clone(document),
+      diagnostics: serialized.diagnostics,
+    };
+  }
+  return applyPreparedSemanticSourceTarget(document, serialized.source, context);
+}
+
+async function applyPreparedSemanticSourceTarget(
   document: IriographDocument,
   source: string,
   context: ProjectionRuntimeContext,

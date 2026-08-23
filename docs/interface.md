@@ -56,7 +56,9 @@ v1 target catalogは次の宣言を持ちます。
 
 - `rules`: type、predicate、fallback patternから汎用projection operatorへの写像
 - `templates`: primitive kind、shape、既定size、style、icon参照
-- `assets`: asset IRIから取得定義への写像
+- `assets`: asset IRIからresolver hintとなる取得定義への写像
+
+`AssetDefinition.url`と`mediaType`はcatalog schema互換のため保持しますが、取得結果としては信頼しません。Host resolverは自身のpolicyと取得正本から実URL、実media type、byte lengthを確認します。Workspace固有assetのようにcatalog外の`iconRef`を解決する場合、resolverへ渡すdefinitionは`undefined`です。
 
 標準catalogはRDF/RDFS IRIを`membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
 
@@ -91,6 +93,34 @@ export interface LayoutAdapter {
 Coreはnode-link、LR/TB階層、Bag container、pinned geometryを扱う決定的な標準軽量adapterを提供し、Vue editorはこれをdefaultとして利用します。Hostがlayout adapterを明示注入した場合は同じinterfaceでworkerを使う高機能adapter等へ差し替えます。Adapter未解決、失敗、結果不正はdiagnosticとし、異なるlayoutへ黙ってfallbackしません。
 
 Re-layoutの通常対象は`placement: "generated"`かつ`pinned !== true`の要素だけです。`placement: "user"`または`pinned: true`のgeometryは固定制約としてadapterへ渡します。明示的な「自動配置へ戻す」presentation commandによってplacementをgenerated、pinnedをfalseへ戻した場合に限り、次のlayoutで再配置できます。
+
+### Asset resolver
+
+Projectionとlayoutは`iconRef`までを導出し、URLを取得しません。`resolveDiagramSceneAssets(scene, definitions, access, signal)`は完成したSceneに含まれる一意なicon IRIをhost注入の非同期resolverへ渡し、policy検証済みの`iconUrl`をScene cloneへ補完します。入力Sceneとportable documentは変更しません。
+
+```ts
+type AssetAccess = {
+  resolver: AssetResolver;
+  policy: {
+    allowedMediaTypes: readonly AssetMediaType[];
+    maxBytes: number;
+    allowedSchemes: readonly string[];
+    allowedOrigins: readonly string[];
+  };
+  revision: string;
+};
+
+interface AssetResolver {
+  resolve(request: {
+    assetRef: string;
+    definition?: AssetDefinition;
+    revision: string;
+    signal: AbortSignal;
+  }): Promise<AssetResolveResult>;
+}
+```
+
+Resolved resultはabsolute URL、実media type、実byte lengthとidempotentな`release()`を持つleaseです。Coreはcatalog宣言とのmedia type一致、byte上限、許可scheme・originを検証します。未解決、移動、削除、取得失敗、policy違反はwarningとしてiconなし表示へfallbackし、semantic transactionをrollbackしません。返されるScene batchの`release()`は採用しなかったstale result、Scene交換、editor破棄時に呼びます。Blob URLの生成・cache・revokeとworkspace revisionの更新はhost責務です。
 
 ## Semantic transaction
 
@@ -155,7 +185,8 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
     :catalog="catalog"
     :dirty="dirty"
     :saving="saving"
-    :resolve-asset-url="resolveAssetUrl"
+    :asset-access="assetAccess"
+    :pick-asset="pickWorkspaceAsset"
     @save="saveToWorkspace"
   />
 </template>
@@ -167,7 +198,8 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `catalog`: hostが解決済みのprojection catalog
 - `save`: packageは永続化せずhostへ保存要求を通知
 - `validationChanged`: semantic/project diagnostics
-- `resolveAssetUrl(assetRef, definition)`: IRIから表示URLへのhost注入境界
+- `assetAccess`: 非同期resolver、media/size/URL policy、host revision
+- `pickAsset(request)`: workspace pickerを開き、選択時はassetRefだけを返すhost callback
 - `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映
 
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
@@ -181,12 +213,9 @@ source参照・presentation編集の許可まで失わせません。
 
 P1のcontractではこれを`ResolvedAuthoringContext`として先に型定義し、authoring profile、vocabulary index、capability、resource policyが解決済みであることを要求します。Resource IRIを自動生成する場合は、host注入の同期または非同期allocatorが完全IRIを返し、Coreがnamespaceと衝突を再検証します。Mockはstatic fixtureのcontextとallocatorを利用します。`authoringProfileRef`やvocabulary URIからcontextを取得するresolver、cache、integrity検証はP2-01の責務であり、P1 editorへ取得処理を入れません。
 
-Target asset contractでは、hostがworkspace tree由来のasset pickerと非同期resolverを
-editorへ注入します。pickerは`assetRef`と表示用metadataを返し、resolverは`assetRef`から
-一時URLを取得します。ファイル移動後も維持できるopaque IDを優先し、pathしか持たない
-hostは移動時の参照更新を担います。未解決・権限拒否・unsupported mediaは図全体を
-失敗させずfallback表示とdiagnosticにします。現行の同期`resolveAssetUrl`は、この境界を
-確認するprototypeです。
+Host asset pickerは選択したabsolute asset IRIだけを返し、Editorは`appearance.iconRef`のpresentation transactionとして保存します。URLやbytesをpicker resultへ含めません。Cancel、stale response、不正IRIではdocumentを変更しません。
+
+ファイル移動後も維持できるopaque IRIを優先します。同じIRIを維持できる移動はhost mappingの更新だけで透過的に解決し、path由来IRI等で維持できない場合は`moved`とreplacement IRIをdiagnosticにします。Editorは自動置換せず、削除・not-foundと同様にユーザーの再選択を待ちます。同期`ProjectionOptions.resolveAssetUrl`はlegacy `DiagramCatalog`投影だけに残すdeprecated APIであり、正規化projectionとVue editorは使用しません。
 
 ## LLM adapter
 

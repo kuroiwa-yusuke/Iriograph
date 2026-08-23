@@ -1,18 +1,27 @@
 {
   "name": "iriograph-workspace",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git"
+  },
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
+    "build:packages": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/vue-editor",
+    "predev": "npm run build:packages",
     "dev": "npm run dev --workspace @iriograph/mock",
     "build": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/vue-editor && npm run build --workspace @iriograph/mock",
+    "pretest": "npm run build:packages",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "verify": "npm run test && npm run typecheck && npm run build"
+    "verify": "npm run test && npm run typecheck && npm run build && npm run verify:package-consumer",
+    "verify:package-consumer": "npm run build:packages && node scripts/verify-package-consumer.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

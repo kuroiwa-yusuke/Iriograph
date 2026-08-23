@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 
 import {
   applySemanticSource,
@@ -8,7 +8,8 @@ import {
   createStandardLayoutRegistry,
   validateIriographDocumentV1,
   validateProjectionCatalogV1,
-  type AssetDefinition,
+  type AssetAccess,
+  type AssetMediaType,
   type DiagramScene,
   type ElementGeometry,
   type IriographDocument,
@@ -26,6 +27,11 @@ import {
 } from "@iriograph/core";
 
 import DiagramCanvas from "./DiagramCanvas.vue";
+import {
+  AssetSceneSession,
+  normalizePickedAssetRef,
+  type AssetPicker,
+} from "../asset-session";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneEdge;
@@ -42,10 +48,8 @@ const props = withDefaults(defineProps<{
   canSave?: boolean;
   readOnly?: boolean;
   hideHeader?: boolean;
-  resolveAssetUrl?: (
-    assetRef: string,
-    definition: AssetDefinition | undefined,
-  ) => string | undefined;
+  assetAccess?: AssetAccess;
+  pickAsset?: AssetPicker;
 }>(), {
   title: "",
   filePath: "",
@@ -55,7 +59,8 @@ const props = withDefaults(defineProps<{
   canSave: true,
   readOnly: false,
   hideHeader: false,
-  resolveAssetUrl: undefined,
+  assetAccess: undefined,
+  pickAsset: undefined,
   layoutRegistry: undefined,
 });
 
@@ -78,11 +83,15 @@ const applyDiagnostics = ref<ProjectionDiagnostic[]>([]);
 const scene = ref<DiagramScene>(emptyScene(draft.value.views[0]?.viewId ?? ""));
 const sceneLoading = ref(true);
 const applyingTurtle = ref(false);
+const pickingAsset = ref(false);
 const defaultLayoutRegistry = createStandardLayoutRegistry();
+const assetSceneSession = new AssetSceneSession();
 let lastEmittedJson = "";
 let gestureBefore: IriographDocument | undefined;
 let sceneRequestToken = 0;
 let semanticRequestToken = 0;
+let pickerRequestToken = 0;
+let pickerAbortController: AbortController | undefined;
 
 const activeView = computed(() => draft.value.views[0]);
 const selectedElement = computed<SelectedElement | undefined>(() => [
@@ -125,6 +134,7 @@ const assetRefs = computed(() => Object.keys(props.catalog.assets));
 watch(
   () => props.modelValue,
   (value) => {
+    cancelAssetPicker();
     const nextJson = JSON.stringify(value);
     if (nextJson === lastEmittedJson) {
       lastEmittedJson = "";
@@ -145,7 +155,9 @@ watch(
   [
     () => props.catalog,
     () => props.layoutRegistry,
-    () => props.resolveAssetUrl,
+    () => props.assetAccess?.resolver,
+    () => props.assetAccess?.policy,
+    () => props.assetAccess?.revision,
   ],
   () => {
     applyDiagnostics.value = [];
@@ -162,38 +174,56 @@ watch(
 
 void refreshScene();
 
+onBeforeUnmount(() => {
+  cancelAssetPicker();
+  assetSceneSession.dispose();
+});
+
 async function refreshScene(): Promise<void> {
   const requestToken = ++sceneRequestToken;
+  const assetRequest = assetSceneSession.begin();
   const document = clone(draft.value);
   const catalog = clone(props.catalog);
+  const assetAccess = props.assetAccess;
   const viewId = document.views[0]?.viewId ?? "";
   sceneLoading.value = true;
   schemaDiagnostics.value = schemaDiagnosticsFor(document, catalog);
 
   if (schemaDiagnostics.value.some((item) => item.severity === "error")) {
     if (requestToken !== sceneRequestToken) return;
-    scene.value = emptyScene(viewId, schemaDiagnostics.value);
+    const committed = assetSceneSession.commitWithoutAssets(
+      assetRequest,
+      emptyScene(viewId, schemaDiagnostics.value),
+    );
+    if (!committed.accepted) return;
+    scene.value = committed.scene;
     sceneLoading.value = false;
     clearMissingSelection(scene.value);
     return;
   }
 
   try {
-    const result = await buildIriographView(
+    const projected = await buildIriographView(
       document,
       viewId,
       projectionContext(catalog),
       "incremental",
     );
     if (requestToken !== sceneRequestToken) return;
-    scene.value = result;
+    const result = assetAccess
+      ? await assetSceneSession.enrich(assetRequest, projected, catalog.assets, assetAccess)
+      : assetSceneSession.commitWithoutAssets(assetRequest, projected);
+    if (requestToken !== sceneRequestToken || !result.accepted) return;
+    scene.value = result.scene;
   } catch (cause) {
     if (requestToken !== sceneRequestToken) return;
-    scene.value = emptyScene(viewId, [{
+    const committed = assetSceneSession.commitWithoutAssets(assetRequest, emptyScene(viewId, [{
       severity: "error",
       code: "scene-build-failed",
       message: cause instanceof Error ? cause.message : String(cause),
-    }]);
+    }]));
+    if (!committed.accepted) return;
+    scene.value = committed.scene;
   } finally {
     if (requestToken === sceneRequestToken) {
       sceneLoading.value = false;
@@ -209,9 +239,7 @@ function projectionContext(catalog: ProjectionCatalogV1): ProjectionRuntimeConte
     sourceCatalogRefs: [catalogRef],
     catalog,
     ruleOrigins: [],
-  }], props.layoutRegistry ?? defaultLayoutRegistry, {
-    resolveAssetUrl: props.resolveAssetUrl,
-  });
+  }], props.layoutRegistry ?? defaultLayoutRegistry);
 }
 
 function schemaDiagnosticsFor(
@@ -245,6 +273,7 @@ function clearMissingSelection(nextScene: DiagramScene): void {
 }
 
 function selectElement(elementId: string): void {
+  if (elementId !== selectedElementId.value) cancelAssetPicker();
   selectedElementId.value = elementId;
   emit("selectionChanged", elementId);
 }
@@ -312,8 +341,86 @@ function updateTemplate(event: Event): void {
 }
 
 function updateIcon(event: Event): void {
-  const value = (event.target as HTMLInputElement).value.trim();
-  updateAppearance("iconRef", value || undefined);
+  const element = selectedElement.value;
+  const value = (event.target as HTMLInputElement).value;
+  if (!value.trim()) {
+    updateAppearance("iconRef", undefined);
+    return;
+  }
+  const assetRef = normalizePickedAssetRef(value);
+  if (!assetRef) {
+    (event.target as HTMLInputElement).value = element?.structuralKind === "node"
+      ? element.iconRef ?? ""
+      : "";
+    rejectInvalidAssetRef("入力されたicon refがabsolute IRIではありません。");
+    return;
+  }
+  updateAppearance("iconRef", assetRef);
+}
+
+async function chooseAssetIcon(): Promise<void> {
+  const picker = props.pickAsset;
+  const element = selectedElement.value;
+  if (!picker || !element || element.structuralKind !== "node" || props.readOnly) return;
+  cancelAssetPicker();
+  const requestToken = ++pickerRequestToken;
+  const controller = new AbortController();
+  pickerAbortController = controller;
+  pickingAsset.value = true;
+  const elementId = element.elementId;
+  try {
+    const result = await picker({
+      currentAssetRef: element.iconRef,
+      semanticRef: element.semanticRef,
+      allowedMediaTypes: props.assetAccess?.policy.allowedMediaTypes
+        ?? (["image/svg+xml", "image/png", "image/webp"] satisfies AssetMediaType[]),
+      signal: controller.signal,
+    });
+    if (
+      requestToken !== pickerRequestToken
+      || controller.signal.aborted
+      || selectedElementId.value !== elementId
+      || result.status === "cancelled"
+    ) return;
+    const assetRef = normalizePickedAssetRef(result.assetRef);
+    if (!assetRef) {
+      rejectInvalidAssetRef("asset pickerがabsolute IRIを返しませんでした。", element.semanticRef);
+      return;
+    }
+    updateAppearance("iconRef", assetRef);
+  } catch (cause) {
+    if (requestToken !== pickerRequestToken || controller.signal.aborted) return;
+    applyDiagnostics.value = [{
+      severity: "warning",
+      code: "asset-picker-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+      semanticRef: element.semanticRef,
+    }];
+  } finally {
+    if (requestToken === pickerRequestToken) {
+      pickerAbortController = undefined;
+      pickingAsset.value = false;
+    }
+  }
+}
+
+function rejectInvalidAssetRef(
+  message: string,
+  semanticRef = selectedElement.value?.semanticRef,
+): void {
+  applyDiagnostics.value = [{
+    severity: "warning",
+    code: "asset-ref-invalid",
+    message,
+    semanticRef,
+  }];
+}
+
+function cancelAssetPicker(): void {
+  pickerRequestToken += 1;
+  pickerAbortController?.abort();
+  pickerAbortController = undefined;
+  pickingAsset.value = false;
 }
 
 function updateAppearance(
@@ -322,6 +429,11 @@ function updateAppearance(
 ): void {
   const element = selectedElement.value;
   if (!element || element.structuralKind === "edge") return;
+  if (field === "iconRef") {
+    applyDiagnostics.value = applyDiagnostics.value.filter(
+      (diagnostic) => diagnostic.code !== "asset-ref-invalid",
+    );
+  }
   mutateDocument((document) => {
     const view = document.views[0];
     if (!view) return;
@@ -577,6 +689,7 @@ function uniqueDiagnostic(): (diagnostic: ProjectionDiagnostic) => boolean {
       diagnostic.statementRef,
       diagnostic.catalogRef,
       diagnostic.ruleId,
+      diagnostic.assetRef,
     ]);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -776,6 +889,15 @@ defineExpose({
             <datalist id="iriograph-asset-refs">
               <option v-for="assetRef in assetRefs" :key="assetRef" :value="assetRef" />
             </datalist>
+            <button
+              v-if="pickAsset"
+              type="button"
+              class="iriograph-wide-button"
+              :disabled="readOnly || pickingAsset"
+              @click="chooseAssetIcon"
+            >
+              {{ pickingAsset ? "assetを選択中…" : "Workspace assetを選択" }}
+            </button>
           </section>
           <section v-if="'geometry' in selectedElement">
             <div class="iriograph-section-heading">

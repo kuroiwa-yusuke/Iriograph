@@ -261,10 +261,6 @@ function projectResource(
     structuralKind,
     shape: template.shape ?? "rounded-rectangle",
     iconRef,
-    iconUrl: iconRef
-      ? options?.resolveAssetUrl?.(iconRef, catalog.assets[iconRef])
-        ?? catalog.assets[iconRef]?.url
-      : undefined,
   };
 }
 

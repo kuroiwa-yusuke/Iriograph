@@ -15,6 +15,7 @@ export function sortDiagnostics(
       || compareOptional(left.code, right.code)
       || compareOptional(left.catalogRef, right.catalogRef)
       || compareOptional(left.ruleId, right.ruleId)
+      || compareOptional(left.assetRef, right.assetRef)
       || compareOptional(left.semanticRef, right.semanticRef)
       || compareOptional(left.statementRef, right.statementRef)
       || compareOptional(left.message, right.message);

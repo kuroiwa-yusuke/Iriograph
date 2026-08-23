@@ -14,3 +14,5 @@ export * from "./catalog-resolution";
 export * from "./layout";
 export * from "./scene";
 export * from "./reconciliation";
+export * from "./serializer";
+export * from "./assets";

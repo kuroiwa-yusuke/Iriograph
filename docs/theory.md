@@ -33,7 +33,7 @@ semantic transaction成功後は、全viewをそれぞれのprofile、catalog、
 
 ## Turtleの再serialize
 
-Turtle sourceを直接編集してsemantic transactionを適用した場合は、ユーザーが入力した妥当な原文をそのまま`semantic.source`へ保持します。一方、structured commandとLLM editはRDF datasetへのgraph patchとして検証した後、共通serializerでTurtleを決定的に再生成します。同じdataset、保持したprefix/base context、serializer versionからは同じsourceを得るものとし、prefixとbase IRIは有効な範囲で再利用します。
+Turtle sourceを直接編集してsemantic transactionを適用した場合は、ユーザーが入力した妥当な原文をそのまま`semantic.source`へ保持します。一方、structured commandとLLM editはRDF datasetへのgraph patchとして検証した後、共通serializerでTurtleを決定的に再生成します。同じparse済みdataset（blank node IDを含む）、保持したprefix/base context、serializer versionからはquadの入力順に依存せず同じsourceを得るものとし、prefixとbase IRIは有効な範囲で再利用します。v1は完全なRDF Dataset Canonicalizationをcontractに含めません。
 
 Comment、空白、改行位置、property listのまとめ方、triple記述順などはRDF graphの意味ではありません。直接編集直後には残りますが、structured commandまたはLLM editによる再serializeを一度でも通した後の保持は保証しません。Source reviewは文字列diffだけに依存せず、RDF term単位のsemantic diffも利用します。
 

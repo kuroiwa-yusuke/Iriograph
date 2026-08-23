@@ -1,28 +1,56 @@
 {
   "name": "@iriograph/core",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Framework-independent semantic graph projection and validation for Iriograph.",
   "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/kuroiwa-yusuke/Iriograph#readme",
+  "bugs": {
+    "url": "https://github.com/kuroiwa-yusuke/Iriograph/issues"
+  },
+  "keywords": [
+    "rdf",
+    "rdfs",
+    "turtle",
+    "diagram",
+    "semantic-graph"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepack": "npm run build"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "development": "./src/index.ts",
-      "import": "./dist/index.js"
-    }
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19"
   },
   "dependencies": {
+    "@types/n3": "^1.26.0",
     "ajv": "^8.20.0",
     "n3": "^1.26.0"
-  },
-  "devDependencies": {
-    "@types/n3": "^1.26.0"
   }
 }

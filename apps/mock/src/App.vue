@@ -1,16 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 
 import type {
-  AssetDefinition,
+  AssetAccess,
+  AssetMediaType,
   IriographDocumentV1,
   ProjectionCatalogV1,
   ProjectionDiagnostic,
 } from "@iriograph/core";
 import { parseIriographDocumentV1 } from "@iriograph/core";
-import { IriographEditor } from "@iriograph/vue-editor";
+import {
+  IriographEditor,
+  type AssetPicker,
+  type AssetPickResult,
+} from "@iriograph/vue-editor";
 
 import { mockProjectionCatalog } from "./mock/catalog";
+import {
+  createMockAssetHost,
+  workspaceAssetPickResult,
+  type MockAssetHost,
+} from "./mock/assets";
 import {
   buildWorkspaceTreeRows,
   loadMockWorkspace,
@@ -31,12 +41,24 @@ const workspaceReady = ref(false);
 const workspaceError = ref("");
 const activeFilePath = ref("");
 const selectedAssetRef = ref("");
+const assetAccess = shallowRef<AssetAccess>();
+const assetPickPending = ref(false);
 const document = ref<IriographDocumentV1>(emptyDocument());
 const savedJson = ref("");
 const saving = ref(false);
 const saveMessage = ref("");
 const diagnostics = ref<ProjectionDiagnostic[]>([]);
 let saveMessageTimer: number | undefined;
+let assetHost: MockAssetHost | undefined;
+let componentDisposed = false;
+let pendingAssetPick: PendingAssetPick | undefined;
+
+type PendingAssetPick = {
+  allowedMediaTypes: readonly AssetMediaType[];
+  signal: AbortSignal;
+  abort: () => void;
+  resolve: (result: AssetPickResult) => void;
+};
 
 const dirty = computed(() => workspaceReady.value
   && JSON.stringify(document.value) !== savedJson.value);
@@ -55,26 +77,45 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  componentDisposed = true;
   window.removeEventListener("keydown", handleGlobalKeydown, true);
   if (saveMessageTimer !== undefined) window.clearTimeout(saveMessageTimer);
+  settleAssetPick({ status: "cancelled" });
+  assetHost?.dispose();
+  assetHost = undefined;
+  assetAccess.value = undefined;
 });
 
 async function initializeWorkspace(): Promise<void> {
   workspaceReady.value = false;
   workspaceError.value = "";
+  let nextAssetHost: MockAssetHost | undefined;
   try {
-    workspace.value = await loadMockWorkspace();
-    const entry = workspace.value.entries.find(
+    const nextWorkspace = await loadMockWorkspace();
+    const entry = nextWorkspace.entries.find(
       (candidate) => candidate.kind === "iriograph-document"
-        && candidate.path === workspace.value?.defaultDocumentPath,
+        && candidate.path === nextWorkspace.defaultDocumentPath,
     );
     if (!entry) throw new Error("default Iriograph documentがworkspaceにありません。");
+
+    nextAssetHost = createMockAssetHost(nextWorkspace, {
+      baseUrl: window.location.href,
+    });
+    workspace.value = nextWorkspace;
     await openWorkspaceDocument(entry, true);
+    if (workspaceError.value) throw new Error(workspaceError.value);
+    if (componentDisposed) return;
+
+    assetHost?.dispose();
+    assetHost = nextAssetHost;
+    nextAssetHost = undefined;
+    assetAccess.value = assetHost.access;
   } catch (cause) {
     workspaceError.value = cause instanceof Error
       ? cause.message
       : "Workspaceの読み込みに失敗しました。";
   } finally {
+    nextAssetHost?.dispose();
     workspaceReady.value = !workspaceError.value;
   }
 }
@@ -145,24 +186,18 @@ async function resetMock(): Promise<void> {
   showSaveMessage("repositoryのサンプルへ戻しました");
 }
 
-function resolveAssetUrl(
-  assetRef: string,
-  definition: AssetDefinition | undefined,
-): string | undefined {
-  // workspace assetの取得先はportable documentではなくhost manifestから解決します。
-  const workspaceAsset = workspace.value?.entries.find(
-    (entry) => entry.kind === "asset" && entry.assetRef === assetRef,
-  );
-  if (workspaceAsset) return workspaceAsset.url;
-  if (definition) return definition.url;
-  if (assetRef.startsWith("https://") || assetRef.startsWith("data:image/")) return assetRef;
-  return undefined;
-}
-
 async function selectWorkspaceRow(row: MockWorkspaceTreeRow): Promise<void> {
   if (!row.entry) return;
   if (row.entry.kind === "asset") {
     selectedAssetRef.value = row.entry.assetRef ?? "";
+    if (pendingAssetPick) {
+      const result = workspaceAssetPickResult(
+        row.entry,
+        pendingAssetPick.allowedMediaTypes,
+      );
+      if (result) settleAssetPick(result);
+      else showSaveMessage("このassetのmedia typeは選択できません");
+    }
     return;
   }
   if (row.path === activeFilePath.value) return;
@@ -171,6 +206,36 @@ async function selectWorkspaceRow(row: MockWorkspaceTreeRow): Promise<void> {
     return;
   }
   await openWorkspaceDocument(row.entry, true);
+}
+
+const pickWorkspaceAsset: AssetPicker = (request) => {
+  settleAssetPick({ status: "cancelled" });
+  if (request.signal.aborted) return Promise.resolve({ status: "cancelled" });
+  assetPickPending.value = true;
+  return new Promise<AssetPickResult>((resolve) => {
+    const pending: PendingAssetPick = {
+      allowedMediaTypes: request.allowedMediaTypes,
+      signal: request.signal,
+      abort: () => finishAssetPick(pending, { status: "cancelled" }),
+      resolve,
+    };
+    pendingAssetPick = pending;
+    request.signal.addEventListener("abort", pending.abort, { once: true });
+  });
+};
+
+function settleAssetPick(result: AssetPickResult): void {
+  const pending = pendingAssetPick;
+  if (!pending) return;
+  finishAssetPick(pending, result);
+}
+
+function finishAssetPick(pending: PendingAssetPick, result: AssetPickResult): void {
+  if (pendingAssetPick !== pending) return;
+  pending.signal.removeEventListener("abort", pending.abort);
+  pendingAssetPick = undefined;
+  assetPickPending.value = false;
+  pending.resolve(result);
 }
 
 async function openWorkspaceDocument(
@@ -315,9 +380,13 @@ function emptyDocument(): IriographDocumentV1 {
             <span>{{ row.name }}</span>
           </button>
         </nav>
+        <section v-if="assetPickPending" class="workspace-picker-prompt" role="status">
+          <strong>アイコンを選択</strong>
+          <p>tree内の画像assetをクリックしてください。</p>
+          <button type="button" @click="settleAssetPick({ status: 'cancelled' })">キャンセル</button>
+        </section>
         <section v-if="activeAsset" class="workspace-asset-preview">
           <small>ASSET REFERENCE</small>
-          <img :src="activeAsset.url" :alt="activeAsset.path" />
           <strong>{{ activeAsset.path.split("/").at(-1) }}</strong>
           <code>{{ activeAsset.assetRef }}</code>
           <button type="button" @click="copyAssetRef">IRIをコピー</button>
@@ -339,7 +408,8 @@ function emptyDocument(): IriographDocumentV1 {
           :dirty="dirty"
           :saving="saving"
           :save-message="saveMessage"
-          :resolve-asset-url="resolveAssetUrl"
+          :asset-access="assetAccess"
+          :pick-asset="pickWorkspaceAsset"
           @save="saveDocument"
           @validation-changed="diagnostics = $event"
         />

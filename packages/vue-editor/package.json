@@ -1,28 +1,59 @@
 {
   "name": "@iriograph/vue-editor",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Embeddable Vue editor for Iriograph semantic diagrams.",
   "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
+    "directory": "packages/vue-editor"
+  },
+  "homepage": "https://github.com/kuroiwa-yusuke/Iriograph#readme",
+  "bugs": {
+    "url": "https://github.com/kuroiwa-yusuke/Iriograph/issues"
+  },
+  "keywords": [
+    "vue",
+    "rdf",
+    "turtle",
+    "diagram",
+    "editor"
+  ],
+  "main": "./dist/iriograph-vue-editor.js",
+  "module": "./dist/iriograph-vue-editor.js",
+  "types": "./dist/types/index.d.ts",
+  "sideEffects": [
+    "**/*.css"
+  ],
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "build": "vite build && vue-tsc -p tsconfig.build.json",
-    "typecheck": "vue-tsc -p tsconfig.json --noEmit --pretty false"
+    "typecheck": "vue-tsc -p tsconfig.json --noEmit --pretty false",
+    "prepack": "npm run build"
   },
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
-      "development": "./src/index.ts",
-      "import": "./dist/iriograph-vue-editor.js"
+      "import": "./dist/iriograph-vue-editor.js",
+      "default": "./dist/iriograph-vue-editor.js"
     },
     "./styles.css": {
-      "development": "./src/styles.css",
       "default": "./dist/iriograph-vue-editor.css"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19"
   },
   "dependencies": {
-    "@iriograph/core": "0.0.0"
+    "@iriograph/core": "0.1.0"
   },
   "peerDependencies": {
     "vue": "^3.5.0"
