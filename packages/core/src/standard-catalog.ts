@@ -1,0 +1,181 @@
+import type { ProjectionCatalogV1 } from "./model";
+
+export type RdfRdfsVocabulary = {
+  typePredicate: string;
+  labelPredicate: string;
+  commentPredicate: string;
+  subClassOfPredicate: string;
+  subPropertyOfPredicate: string;
+};
+
+const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
+const RDFS = "http://www.w3.org/2000/01/rdf-schema#";
+
+export const rdfRdfsVocabulary: RdfRdfsVocabulary = Object.freeze({
+  typePredicate: `${RDF}type`,
+  labelPredicate: `${RDFS}label`,
+  commentPredicate: `${RDFS}comment`,
+  subClassOfPredicate: `${RDFS}subClassOf`,
+  subPropertyOfPredicate: `${RDFS}subPropertyOf`,
+});
+
+export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
+  schemaVersion: "1",
+  kind: "iriograph.catalog",
+  catalogId: "urn:iriograph:catalog:rdf-rdfs",
+  catalogVersion: "1",
+  profileRef: "urn:iriograph:profile:rdf-rdfs:1",
+  defaults: {
+    nodeTemplateRef: "urn:iriograph:template:node:generic:1",
+    edgeTemplateRef: "urn:iriograph:template:edge:generic:1",
+    layoutRef: "urn:iriograph:layout:hierarchical-lr:1",
+  },
+  rules: [
+    {
+      ruleId: "rdf-bag-container",
+      priority: 100,
+      match: { kind: "type", iri: `${RDF}Bag`, entailment: "rdfs-subclass" },
+      project: {
+        operator: "membership-container",
+        membershipPredicate: `${RDFS}member`,
+      },
+      templateRef: "urn:iriograph:template:container:region:1",
+    },
+    {
+      ruleId: "rdf-seq",
+      priority: 100,
+      match: { kind: "type", iri: `${RDF}Seq`, entailment: "rdfs-subclass" },
+      project: {
+        operator: "ordinal-sequence",
+        ordinalPredicatePrefix: `${RDF}_`,
+      },
+    },
+    {
+      ruleId: "rdf-alt",
+      priority: 100,
+      match: { kind: "type", iri: `${RDF}Alt`, entailment: "rdfs-subclass" },
+      project: {
+        operator: "alternative",
+        ordinalPredicatePrefix: `${RDF}_`,
+        defaultOrdinal: 1,
+      },
+      templateRef: "urn:iriograph:template:node:choice:1",
+    },
+    {
+      ruleId: "rdfs-class",
+      priority: 20,
+      match: { kind: "type", iri: `${RDFS}Class`, entailment: "rdfs-subclass" },
+      project: { operator: "resource", structuralKind: "node" },
+      templateRef: "urn:iriograph:template:node:class:1",
+    },
+    {
+      ruleId: "rdf-property",
+      priority: 20,
+      match: { kind: "type", iri: `${RDF}Property`, entailment: "rdfs-subclass" },
+      project: { operator: "resource", structuralKind: "node" },
+      templateRef: "urn:iriograph:template:node:property:1",
+    },
+    ...[
+      ["rdfs-see-also", `${RDFS}seeAlso`, "urn:iriograph:template:edge:reference:1"],
+      ["rdfs-is-defined-by", `${RDFS}isDefinedBy`, "urn:iriograph:template:edge:reference:1"],
+      ["rdfs-sub-class-of", `${RDFS}subClassOf`, "urn:iriograph:template:edge:specialization:1"],
+      ["rdfs-sub-property-of", `${RDFS}subPropertyOf`, "urn:iriograph:template:edge:specialization:1"],
+      ["rdfs-domain", `${RDFS}domain`, "urn:iriograph:template:edge:ontology:1"],
+      ["rdfs-range", `${RDFS}range`, "urn:iriograph:template:edge:ontology:1"],
+    ].map(([ruleId, iri, templateRef]) => ({
+      ruleId: ruleId!,
+      priority: 50,
+      match: {
+        kind: "predicate" as const,
+        iri: iri!,
+        entailment: "rdfs-subproperty" as const,
+      },
+      project: { operator: "direct-edge" as const },
+      templateRef: templateRef!,
+    })),
+    ...[
+      ["rdf-type-metadata", `${RDF}type`],
+      ["rdfs-label-metadata", `${RDFS}label`],
+      ["rdfs-comment-metadata", `${RDFS}comment`],
+      ["rdfs-member-structure", `${RDFS}member`],
+    ].map(([ruleId, iri]) => ({
+      ruleId: ruleId!,
+      priority: 100,
+      match: {
+        kind: "predicate" as const,
+        iri: iri!,
+        entailment: "exact" as const,
+      },
+      project: { operator: "suppress" as const },
+    })),
+    {
+      ruleId: "iri-object-fallback",
+      priority: -100,
+      match: { kind: "any-iri-object" },
+      project: { operator: "direct-edge" },
+      templateRef: "urn:iriograph:template:edge:generic:1",
+    },
+  ],
+  templates: {
+    "urn:iriograph:template:node:generic:1": {
+      templateRef: "urn:iriograph:template:node:generic:1",
+      structuralKind: "node",
+      shape: "rounded-rectangle",
+      style: { fill: "#ffffff", stroke: "#334155", text: "#0f172a" },
+      defaultSize: { width: 164, height: 72 },
+    },
+    "urn:iriograph:template:node:choice:1": {
+      templateRef: "urn:iriograph:template:node:choice:1",
+      structuralKind: "node",
+      shape: "diamond",
+      style: { fill: "#fff7ed", stroke: "#c2410c", text: "#7c2d12" },
+      defaultSize: { width: 104, height: 104 },
+    },
+    "urn:iriograph:template:node:class:1": {
+      templateRef: "urn:iriograph:template:node:class:1",
+      structuralKind: "node",
+      shape: "rectangle",
+      style: { fill: "#eff6ff", stroke: "#2563eb", text: "#1e3a8a" },
+      defaultSize: { width: 176, height: 72 },
+    },
+    "urn:iriograph:template:node:property:1": {
+      templateRef: "urn:iriograph:template:node:property:1",
+      structuralKind: "node",
+      shape: "rounded-rectangle",
+      style: { fill: "#f5f3ff", stroke: "#7c3aed", text: "#4c1d95" },
+      defaultSize: { width: 176, height: 72 },
+    },
+    "urn:iriograph:template:container:region:1": {
+      templateRef: "urn:iriograph:template:container:region:1",
+      structuralKind: "container",
+      headerPosition: "left",
+      style: { fill: "#f8fafc", stroke: "#64748b", text: "#0f172a" },
+      defaultSize: { width: 720, height: 220 },
+    },
+    "urn:iriograph:template:edge:generic:1": {
+      templateRef: "urn:iriograph:template:edge:generic:1",
+      structuralKind: "edge",
+      style: { fill: "none", stroke: "#475569", text: "#334155" },
+    },
+    "urn:iriograph:template:edge:reference:1": {
+      templateRef: "urn:iriograph:template:edge:reference:1",
+      structuralKind: "edge",
+      style: { fill: "none", stroke: "#64748b", text: "#475569", dash: "6 4" },
+    },
+    "urn:iriograph:template:edge:specialization:1": {
+      templateRef: "urn:iriograph:template:edge:specialization:1",
+      structuralKind: "edge",
+      style: { fill: "none", stroke: "#2563eb", text: "#1e40af" },
+    },
+    "urn:iriograph:template:edge:ontology:1": {
+      templateRef: "urn:iriograph:template:edge:ontology:1",
+      structuralKind: "edge",
+      style: { fill: "none", stroke: "#7c3aed", text: "#5b21b6" },
+    },
+  },
+  assets: {},
+};
+
+export function catalogRef(catalog: ProjectionCatalogV1): string {
+  return `${catalog.catalogId}@${catalog.catalogVersion}`;
+}

@@ -1,4 +1,7 @@
-import type { IriographDocument } from "@iriograph/core";
+import {
+  parseIriographDocumentV1,
+  type IriographDocumentV1,
+} from "@iriograph/core";
 
 export type MockWorkspaceEntry = {
   kind: "iriograph-document" | "asset";
@@ -37,7 +40,7 @@ export async function loadMockWorkspace(): Promise<MockWorkspaceManifest> {
 
 export async function readIriographDocument(
   entry: MockWorkspaceEntry,
-): Promise<IriographDocument> {
+): Promise<IriographDocumentV1> {
   if (entry.kind !== "iriograph-document") {
     throw new Error(`${entry.path}はIriograph documentではありません。`);
   }
@@ -46,10 +49,27 @@ export async function readIriographDocument(
     throw new Error(`${entry.path}の取得に失敗しました: ${response.status}`);
   }
   const value = await response.json() as unknown;
-  if (!isIriographDocument(value)) {
-    throw new Error(`${entry.path}はIriograph document schema v1ではありません。`);
+  try {
+    return parseIriographDocumentV1(value);
+  } catch (cause) {
+    const detail = cause instanceof Error ? `: ${cause.message}` : "";
+    throw new Error(`${entry.path}はIriograph document schema v1ではありません${detail}`);
   }
-  return value;
+}
+
+/**
+ * localStorageは過去versionのmockが残り得るため、schema v1を満たすcopyだけを採用します。
+ * 不正値はrepository上の正本へfallbackできるようundefinedとして扱います。
+ */
+export function parseMockWorkingCopy(
+  source: string | null,
+): IriographDocumentV1 | undefined {
+  if (!source) return undefined;
+  try {
+    return parseIriographDocumentV1(JSON.parse(source) as unknown);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -118,17 +138,6 @@ function isMockWorkspaceEntry(value: unknown): value is MockWorkspaceEntry {
     && typeof value.mediaType === "string"
     && typeof value.url === "string"
     && (value.assetRef === undefined || typeof value.assetRef === "string");
-}
-
-function isIriographDocument(value: unknown): value is IriographDocument {
-  if (!isRecord(value) || !isRecord(value.semantic)) return false;
-  return value.kind === "iriograph.document"
-    && value.schemaVersion === "1"
-    && typeof value.documentId === "string"
-    && value.semantic.format === "text/turtle"
-    && typeof value.semantic.baseIri === "string"
-    && typeof value.semantic.source === "string"
-    && Array.isArray(value.views);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

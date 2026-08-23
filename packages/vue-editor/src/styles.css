@@ -333,6 +333,31 @@
   background: #fff;
 }
 
+.iriograph-scene-status {
+  min-height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  color: #536f70;
+  border-bottom: 1px solid #cad8d4;
+  background: #f5faf8;
+  font-size: 9px;
+}
+
+.iriograph-scene-status.error {
+  color: #923c38;
+  border-bottom-color: #e1b9b6;
+  background: #fff2f1;
+}
+
+.iriograph-scene-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .iriograph-history-actions,
 .iriograph-zoom-actions {
   display: flex;

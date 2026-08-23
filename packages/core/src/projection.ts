@@ -8,12 +8,21 @@ import type {
   IriographDocument,
   ProjectionDiagnostic,
   ProjectionOptions,
+  ProjectedScene,
+  ProjectionCatalogV1,
   SceneContainer,
   SceneEdge,
   SceneNode,
   ViewElementOverlay,
   VisualTemplate,
 } from "./model";
+import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics";
+import { executeProjectionOperators } from "./operators";
+import { validateProfileStructure } from "./profile-validation";
+import { buildLimitedRdfsClosure } from "./rdfs-closure";
+import { parseSemanticGraph } from "./rdf";
+import { validateProjectionCatalog } from "./rule-resolution";
+import { rdfRdfsVocabulary } from "./standard-catalog";
 
 const { namedNode } = DataFactory;
 
@@ -22,6 +31,82 @@ const RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label";
 const SKOS_PREF_LABEL = "http://www.w3.org/2004/02/skos/core#prefLabel";
 
 export function projectIriographDocument(
+  document: IriographDocument,
+  catalog: ProjectionCatalogV1,
+  viewId?: string,
+  options?: ProjectionOptions,
+): ProjectedScene;
+export function projectIriographDocument(
+  document: IriographDocument,
+  catalog: DiagramCatalog,
+  viewId?: string,
+  options?: ProjectionOptions,
+): DiagramScene;
+export function projectIriographDocument(
+  document: IriographDocument,
+  catalog: ProjectionCatalogV1 | DiagramCatalog,
+  viewId = document.views[0]?.viewId,
+  options: ProjectionOptions = {},
+): ProjectedScene | DiagramScene {
+  return isProjectionCatalogV1(catalog)
+    ? projectSemanticView(document, catalog, viewId, options)
+    : projectLegacyIriographDocument(document, catalog, viewId, options);
+}
+
+/** Projects semantic structure only. Missing geometry is supplied by LayoutAdapter later. */
+export function projectSemanticView(
+  document: IriographDocument,
+  catalog: ProjectionCatalogV1,
+  viewId = document.views[0]?.viewId,
+  options: ProjectionOptions = {},
+): ProjectedScene {
+  const view = document.views.find((candidate) => candidate.viewId === viewId);
+  if (!view) throw new Error(`viewが存在しません: ${viewId ?? "<undefined>"}`);
+  const diagnostics = validateProjectionCatalog(catalog);
+  if (view.profileRef !== catalog.profileRef) {
+    diagnostics.push({
+      severity: "error",
+      code: "profile-mismatch",
+      message: `view ${view.viewId}のprofileRefをcatalogが提供していません。`,
+      semanticRef: view.viewId,
+    });
+  }
+  let graph;
+  try {
+    graph = parseSemanticGraph(document);
+  } catch (cause) {
+    diagnostics.push({
+      severity: "error",
+      code: "invalid-turtle",
+      message: cause instanceof Error ? cause.message : String(cause),
+    });
+    return emptyProjectedScene(view.viewId, diagnostics);
+  }
+  const closure = buildLimitedRdfsClosure(graph, rdfRdfsVocabulary);
+  diagnostics.push(...validateProfileStructure(
+    graph,
+    catalog,
+    closure,
+    rdfRdfsVocabulary,
+  ));
+  if (hasBlockingDiagnostics(diagnostics)) {
+    return emptyProjectedScene(view.viewId, diagnostics);
+  }
+  const projected = executeProjectionOperators({
+    graph,
+    view,
+    catalog,
+    closure,
+    vocabulary: rdfRdfsVocabulary,
+    options,
+  });
+  const allDiagnostics = sortDiagnostics([...diagnostics, ...projected.diagnostics]);
+  return hasBlockingDiagnostics(allDiagnostics)
+    ? emptyProjectedScene(view.viewId, allDiagnostics)
+    : { ...projected, diagnostics: allDiagnostics };
+}
+
+function projectLegacyIriographDocument(
   document: IriographDocument,
   catalog: DiagramCatalog,
   viewId = document.views[0]?.viewId,
@@ -214,6 +299,25 @@ export function projectIriographDocument(
     containers: [...containerRecords.values()],
     edges,
     diagnostics,
+  };
+}
+
+function isProjectionCatalogV1(
+  catalog: ProjectionCatalogV1 | DiagramCatalog,
+): catalog is ProjectionCatalogV1 {
+  return "rules" in catalog && catalog.kind === "iriograph.catalog";
+}
+
+function emptyProjectedScene(
+  viewId: string,
+  diagnostics: readonly ProjectionDiagnostic[],
+): ProjectedScene {
+  return {
+    viewId,
+    nodes: [],
+    containers: [],
+    edges: [],
+    diagnostics: sortDiagnostics(diagnostics),
   };
 }
 

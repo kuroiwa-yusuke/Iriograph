@@ -1,0 +1,21 @@
+@prefix : <urn:test:invalid:> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+:bagA a rdf:Bag ; rdfs:member :child, :bagB .
+:bagB a rdf:Bag ; rdfs:member :child, :bagA .
+
+:brokenSequence a rdf:Seq ;
+  rdf:_1 :child ;
+  rdf:_3 :other .
+
+:brokenAlternative a rdf:Alt ;
+  rdf:_1 :child .
+
+:multiple a rdf:Bag, rdf:Seq ;
+  rdf:_1 :child .
+
+[] a rdf:Bag ; rdfs:member :child .
+
+:notAContainer rdf:_1 :child .
+:notABag rdfs:member :child .

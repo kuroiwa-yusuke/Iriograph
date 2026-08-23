@@ -5,9 +5,13 @@
   "semantic": {
     "format": "text/turtle",
     "baseIri": "urn:iriograph:demo:",
-    "source": "@prefix wf: <urn:iriograph:demo:> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\nwf:requesterLane a wf:Lane ;\n  rdfs:label \"申請者\" .\n\nwf:operationsLane a wf:Lane ;\n  rdfs:label \"業務オペレーション\" .\n\nwf:start a wf:StartEvent ;\n  rdfs:label \"開始\" ;\n  wf:inLane wf:requesterLane .\n\nwf:submit a wf:UserTask ;\n  rdfs:label \"申請を提出\" ;\n  wf:inLane wf:requesterLane .\n\nwf:review a wf:UserTask ;\n  rdfs:label \"内容を審査\" ;\n  wf:inLane wf:operationsLane ;\n  wf:uses wf:approvalPolicy .\n\nwf:approvalPolicy a wf:Reference ;\n  rdfs:label \"承認ポリシー\" ;\n  wf:inLane wf:operationsLane .\n\nwf:gateway a wf:ExclusiveGateway ;\n  rdfs:label \"承認？\" ;\n  wf:inLane wf:operationsLane .\n\nwf:register a wf:ServiceTask ;\n  rdfs:label \"承認結果を登録\" ;\n  wf:inLane wf:operationsLane .\n\nwf:rework a wf:UserTask ;\n  rdfs:label \"内容を修正\" ;\n  wf:inLane wf:operationsLane .\n\nwf:end a wf:EndEvent ;\n  rdfs:label \"完了\" ;\n  wf:inLane wf:operationsLane .\n\nwf:flow1 a wf:SequenceFlow ; wf:from wf:start ; wf:to wf:submit .\nwf:flow2 a wf:SequenceFlow ; wf:from wf:submit ; wf:to wf:review .\nwf:flow3 a wf:SequenceFlow ; wf:from wf:review ; wf:to wf:gateway .\nwf:flow4 a wf:SequenceFlow ; wf:from wf:gateway ; wf:to wf:register ; rdfs:label \"承認\" .\nwf:flow5 a wf:SequenceFlow ; wf:from wf:gateway ; wf:to wf:rework ; rdfs:label \"差戻し\" .\nwf:flow6 a wf:SequenceFlow ; wf:from wf:rework ; wf:to wf:review .\nwf:flow7 a wf:SequenceFlow ; wf:from wf:register ; wf:to wf:end .\n"
+    "authoringProfileRef": "urn:iriograph:authoring-profile:workflow-mock@1",
+    "source": "@prefix wf: <urn:iriograph:demo:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\nwf:requesterLane a rdf:Bag ;\n  rdfs:label \"申請者\"@ja ;\n  rdfs:member wf:start, wf:submit .\n\nwf:operationsLane a rdf:Bag ;\n  rdfs:label \"業務オペレーション\"@ja ;\n  rdfs:member wf:review, wf:approvalPolicy, wf:gateway, wf:register, wf:rework, wf:end .\n\nwf:mainFlow a rdf:Seq ;\n  rdfs:label \"購入申請フロー\"@ja ;\n  rdf:_1 wf:start ;\n  rdf:_2 wf:submit ;\n  rdf:_3 wf:review ;\n  rdf:_4 wf:gateway .\n\nwf:gateway a rdf:Alt, wf:ExclusiveGateway ;\n  rdfs:label \"承認？\"@ja ;\n  rdf:_1 wf:approvedPath ;\n  rdf:_2 wf:reworkPath .\n\nwf:approvedPath a rdf:Seq ;\n  rdfs:label \"承認\"@ja ;\n  rdf:_1 wf:register ;\n  rdf:_2 wf:end .\n\nwf:reworkPath a rdf:Seq ;\n  rdfs:label \"差戻し\"@ja ;\n  rdf:_1 wf:rework ;\n  rdf:_2 wf:review .\n\nwf:start a wf:StartEvent ;\n  rdfs:label \"開始\"@ja .\n\nwf:submit a wf:UserTask ;\n  rdfs:label \"申請を提出\"@ja .\n\nwf:review a wf:UserTask ;\n  rdfs:label \"内容を審査\"@ja ;\n  rdfs:seeAlso wf:approvalPolicy .\n\nwf:approvalPolicy a wf:Reference ;\n  rdfs:label \"承認ポリシー\"@ja .\n\nwf:register a wf:ServiceTask ;\n  rdfs:label \"承認結果を登録\"@ja .\n\nwf:rework a wf:UserTask ;\n  rdfs:label \"内容を修正\"@ja .\n\nwf:end a wf:EndEvent ;\n  rdfs:label \"完了\"@ja .\n"
   },
   "imports": [
+    {
+      "catalogRef": "urn:iriograph:catalog:rdf-rdfs@1"
+    },
     {
       "catalogRef": "urn:iriograph:catalog:workflow-mock@1"
     }
@@ -16,20 +20,27 @@
     {
       "viewId": "main",
       "kind": "node-link",
-      "profileRef": "urn:iriograph:profile:bpmn-like:1",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
       "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "locale": "ja",
       "overlay": {
         "lane:requester": {
           "semanticRef": "urn:iriograph:demo:requesterLane",
           "geometry": { "x": 42, "y": 44, "width": 1036, "height": 196 },
           "pinned": true,
-          "placement": "generated"
+          "placement": "generated",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:lane:1"
+          }
         },
         "lane:operations": {
           "semanticRef": "urn:iriograph:demo:operationsLane",
           "geometry": { "x": 42, "y": 258, "width": 1036, "height": 364 },
           "pinned": true,
-          "placement": "generated"
+          "placement": "generated",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:lane:1"
+          }
         },
         "node:start": {
           "semanticRef": "urn:iriograph:demo:start",

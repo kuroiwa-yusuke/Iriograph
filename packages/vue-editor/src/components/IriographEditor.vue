@@ -3,15 +3,22 @@ import { computed, ref, watch } from "vue";
 
 import {
   applySemanticSource,
-  projectIriographDocument,
-  validateIriographDocument,
+  buildIriographView,
+  createProjectionRuntimeContext,
+  createStandardLayoutRegistry,
+  validateIriographDocumentV1,
+  validateProjectionCatalogV1,
   type AssetDefinition,
-  type DiagramCatalog,
   type DiagramScene,
   type ElementGeometry,
   type IriographDocument,
+  type LayoutAdapterRegistry,
   type Point,
+  type ProjectionCatalogV1,
   type ProjectionDiagnostic,
+  type ProjectionRuntimeContext,
+  type RuntimeValidationIssue,
+  type SemanticSourceUpdate,
   type SceneContainer,
   type SceneEdge,
   type SceneNode,
@@ -25,7 +32,8 @@ type SelectedElement = SceneNode | SceneContainer | SceneEdge;
 
 const props = withDefaults(defineProps<{
   modelValue: IriographDocument;
-  catalog: DiagramCatalog;
+  catalog: ProjectionCatalogV1;
+  layoutRegistry?: LayoutAdapterRegistry;
   title?: string;
   filePath?: string;
   dirty?: boolean;
@@ -48,6 +56,7 @@ const props = withDefaults(defineProps<{
   readOnly: false,
   hideHeader: false,
   resolveAssetUrl: undefined,
+  layoutRegistry: undefined,
 });
 
 const emit = defineEmits<{
@@ -64,16 +73,17 @@ const selectedElementId = ref("");
 const zoom = ref(1);
 const history = ref<IriographDocument[]>([]);
 const future = ref<IriographDocument[]>([]);
-const semanticDiagnostics = ref<ProjectionDiagnostic[]>([]);
+const schemaDiagnostics = ref<ProjectionDiagnostic[]>([]);
+const applyDiagnostics = ref<ProjectionDiagnostic[]>([]);
+const scene = ref<DiagramScene>(emptyScene(draft.value.views[0]?.viewId ?? ""));
+const sceneLoading = ref(true);
+const applyingTurtle = ref(false);
+const defaultLayoutRegistry = createStandardLayoutRegistry();
 let lastEmittedJson = "";
 let gestureBefore: IriographDocument | undefined;
+let sceneRequestToken = 0;
+let semanticRequestToken = 0;
 
-const scene = computed<DiagramScene>(() => projectIriographDocument(
-  draft.value,
-  props.catalog,
-  undefined,
-  { resolveAssetUrl: props.resolveAssetUrl },
-));
 const activeView = computed(() => draft.value.views[0]);
 const selectedElement = computed<SelectedElement | undefined>(() => [
   ...scene.value.nodes,
@@ -85,9 +95,14 @@ const selectedOverlay = computed<ViewElementOverlay | undefined>(() => {
   return activeView.value.overlay[selectedElementId.value];
 });
 const diagnostics = computed(() => [
-  ...semanticDiagnostics.value,
+  ...schemaDiagnostics.value,
+  ...applyDiagnostics.value,
   ...scene.value.diagnostics,
-]);
+].filter(uniqueDiagnostic()));
+const sceneError = computed(() => [
+  ...schemaDiagnostics.value,
+  ...scene.value.diagnostics,
+].find((item) => item.severity === "error"));
 const errorCount = computed(() => diagnostics.value.filter((item) => item.severity === "error").length);
 const warningCount = computed(() => diagnostics.value.filter((item) => item.severity === "warning").length);
 const turtlePending = computed(() => turtleDraft.value !== draft.value.semantic.source);
@@ -120,7 +135,21 @@ watch(
     turtleDraft.value = value.semantic.source;
     history.value = [];
     future.value = [];
-    semanticDiagnostics.value = validateIriographDocument(value, props.catalog);
+    applyDiagnostics.value = [];
+    void refreshScene();
+  },
+  { deep: true },
+);
+
+watch(
+  [
+    () => props.catalog,
+    () => props.layoutRegistry,
+    () => props.resolveAssetUrl,
+  ],
+  () => {
+    applyDiagnostics.value = [];
+    void refreshScene();
   },
   { deep: true },
 );
@@ -130,6 +159,90 @@ watch(
   (value) => emit("validationChanged", clone(value)),
   { immediate: true },
 );
+
+void refreshScene();
+
+async function refreshScene(): Promise<void> {
+  const requestToken = ++sceneRequestToken;
+  const document = clone(draft.value);
+  const catalog = clone(props.catalog);
+  const viewId = document.views[0]?.viewId ?? "";
+  sceneLoading.value = true;
+  schemaDiagnostics.value = schemaDiagnosticsFor(document, catalog);
+
+  if (schemaDiagnostics.value.some((item) => item.severity === "error")) {
+    if (requestToken !== sceneRequestToken) return;
+    scene.value = emptyScene(viewId, schemaDiagnostics.value);
+    sceneLoading.value = false;
+    clearMissingSelection(scene.value);
+    return;
+  }
+
+  try {
+    const result = await buildIriographView(
+      document,
+      viewId,
+      projectionContext(catalog),
+      "incremental",
+    );
+    if (requestToken !== sceneRequestToken) return;
+    scene.value = result;
+  } catch (cause) {
+    if (requestToken !== sceneRequestToken) return;
+    scene.value = emptyScene(viewId, [{
+      severity: "error",
+      code: "scene-build-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    }]);
+  } finally {
+    if (requestToken === sceneRequestToken) {
+      sceneLoading.value = false;
+      clearMissingSelection(scene.value);
+    }
+  }
+}
+
+function projectionContext(catalog: ProjectionCatalogV1): ProjectionRuntimeContext {
+  const catalogRef = `${catalog.catalogId}@${catalog.catalogVersion}`;
+  return createProjectionRuntimeContext([{
+    profileRef: catalog.profileRef,
+    sourceCatalogRefs: [catalogRef],
+    catalog,
+    ruleOrigins: [],
+  }], props.layoutRegistry ?? defaultLayoutRegistry, {
+    resolveAssetUrl: props.resolveAssetUrl,
+  });
+}
+
+function schemaDiagnosticsFor(
+  document: IriographDocument,
+  catalog: ProjectionCatalogV1,
+): ProjectionDiagnostic[] {
+  const documentResult = validateIriographDocumentV1(document);
+  const catalogResult = validateProjectionCatalogV1(catalog);
+  return [
+    ...(documentResult.valid ? [] : documentResult.issues.map((issue) => schemaDiagnostic("document", issue))),
+    ...(catalogResult.valid ? [] : catalogResult.issues.map((issue) => schemaDiagnostic("catalog", issue))),
+  ];
+}
+
+function schemaDiagnostic(scope: "document" | "catalog", issue: RuntimeValidationIssue): ProjectionDiagnostic {
+  return {
+    severity: "error",
+    code: `${scope}-schema-${issue.keyword}`,
+    message: `${scope}${issue.instancePath || "/"}: ${issue.message}`,
+  };
+}
+
+function clearMissingSelection(nextScene: DiagramScene): void {
+  if (!selectedElementId.value) return;
+  const exists = [
+    ...nextScene.nodes,
+    ...nextScene.containers,
+    ...nextScene.edges,
+  ].some((element) => element.elementId === selectedElementId.value);
+  if (!exists) selectElement("");
+}
 
 function selectElement(elementId: string): void {
   selectedElementId.value = elementId;
@@ -235,26 +348,55 @@ function clearSelectedOverride(): void {
   });
 }
 
-function applyTurtleDraft(): boolean {
+async function applyTurtleDraft(): Promise<boolean> {
   if (!turtlePending.value) return true;
-  const result = applySemanticSource(draft.value, turtleDraft.value, props.catalog);
-  semanticDiagnostics.value = result.diagnostics;
+  if (applyingTurtle.value) return false;
+  const requestToken = ++semanticRequestToken;
+  const previous = clone(draft.value);
+  const previousJson = JSON.stringify(previous);
+  const catalog = clone(props.catalog);
+  schemaDiagnostics.value = schemaDiagnosticsFor(previous, catalog);
+  if (schemaDiagnostics.value.some((item) => item.severity === "error")) return false;
+
+  applyingTurtle.value = true;
+  let result: SemanticSourceUpdate;
+  try {
+    result = await applySemanticSource(
+      previous,
+      turtleDraft.value,
+      projectionContext(catalog),
+    );
+  } catch (cause) {
+    if (requestToken !== semanticRequestToken) return false;
+    applyDiagnostics.value = [{
+      severity: "error",
+      code: "semantic-transaction-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    }];
+    return false;
+  } finally {
+    if (requestToken === semanticRequestToken) applyingTurtle.value = false;
+  }
+  if (requestToken !== semanticRequestToken) return false;
+  if (JSON.stringify(draft.value) !== previousJson) {
+    applyDiagnostics.value = [{
+      severity: "error",
+      code: "semantic-transaction-stale",
+      message: "編集中にdocumentが変更されたためTurtle transactionを適用しませんでした。",
+    }];
+    return false;
+  }
+  applyDiagnostics.value = result.diagnostics;
   if (!result.accepted) return false;
   publish(result.document, true);
   turtleDraft.value = result.document.semantic.source;
-  if (selectedElementId.value && ![
-    ...scene.value.nodes,
-    ...scene.value.containers,
-    ...scene.value.edges,
-  ].some((element) => element.elementId === selectedElementId.value)) {
-    selectElement("");
-  }
   return true;
 }
 
 function revertTurtleDraft(): void {
   turtleDraft.value = draft.value.semantic.source;
-  semanticDiagnostics.value = validateIriographDocument(draft.value, props.catalog);
+  applyDiagnostics.value = [];
+  schemaDiagnostics.value = schemaDiagnosticsFor(draft.value, props.catalog);
 }
 
 function undo(): void {
@@ -262,7 +404,7 @@ function undo(): void {
   if (!previous) return;
   history.value.pop();
   future.value.push(clone(draft.value));
-  replaceDraft(previous);
+  replaceDraft(previous, turtlePending.value);
 }
 
 function redo(): void {
@@ -270,23 +412,26 @@ function redo(): void {
   if (!next) return;
   future.value.pop();
   history.value.push(clone(draft.value));
-  replaceDraft(next);
+  replaceDraft(next, turtlePending.value);
 }
 
-function requestSave(): void {
-  if (!flushPendingEdits() || !props.canSave || props.saving) return;
+async function requestSave(): Promise<void> {
+  if (!props.canSave || props.saving || !await flushPendingEdits()) return;
   emit("save");
 }
 
-function flushPendingEdits(): boolean {
-  return applyTurtleDraft();
+async function flushPendingEdits(): Promise<boolean> {
+  if (turtlePending.value) return applyTurtleDraft();
+  await refreshScene();
+  return !schemaDiagnostics.value.some((item) => item.severity === "error")
+    && !scene.value.diagnostics.some((item) => item.severity === "error");
 }
 
 function handleKeydown(event: KeyboardEvent): void {
   const command = event.ctrlKey || event.metaKey;
   if (command && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    requestSave();
+    void requestSave();
     return;
   }
   if (isTextInput(event.target)) return;
@@ -339,14 +484,17 @@ function publish(next: IriographDocument, recordHistory: boolean): void {
   draft.value = clone(next);
   lastEmittedJson = JSON.stringify(draft.value);
   emit("update:modelValue", clone(draft.value));
+  void refreshScene();
 }
 
-function replaceDraft(next: IriographDocument): void {
+function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): void {
+  const pendingTurtle = turtleDraft.value;
   draft.value = clone(next);
-  turtleDraft.value = next.semantic.source;
-  semanticDiagnostics.value = validateIriographDocument(next, props.catalog);
+  turtleDraft.value = preserveTurtleDraft ? pendingTurtle : next.semantic.source;
+  applyDiagnostics.value = [];
   lastEmittedJson = JSON.stringify(draft.value);
   emit("update:modelValue", clone(draft.value));
+  void refreshScene();
 }
 
 function setGeometry(
@@ -403,6 +551,39 @@ function isTextInput(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement;
 }
 
+function emptyScene(
+  viewId: string,
+  diagnostics: ProjectionDiagnostic[] = [],
+): DiagramScene {
+  return {
+    viewId,
+    width: 1120,
+    height: 680,
+    nodes: [],
+    containers: [],
+    edges: [],
+    diagnostics,
+  };
+}
+
+function uniqueDiagnostic(): (diagnostic: ProjectionDiagnostic) => boolean {
+  const seen = new Set<string>();
+  return (diagnostic) => {
+    const key = JSON.stringify([
+      diagnostic.severity,
+      diagnostic.code,
+      diagnostic.message,
+      diagnostic.semanticRef,
+      diagnostic.statementRef,
+      diagnostic.catalogRef,
+      diagnostic.ruleId,
+    ]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
+}
+
 function clone<T>(value: T): T {
   // v-modelから受け取る値はVue Proxyになり得ます。documentはJSON contractなので、
   // cloneと同時にplain dataへ戻してeditor内部へProxyを持ち込みません。
@@ -429,7 +610,7 @@ defineExpose({
         <span :class="['iriograph-validation-pill', { error: errorCount > 0 }]">
           {{ errorCount > 0 ? `${errorCount} errors` : "Turtle valid" }}
         </span>
-        <button type="button" :disabled="!canSave || saving" @click="requestSave">
+        <button type="button" :disabled="!canSave || saving || applyingTurtle" @click="requestSave">
           {{ saving ? "保存中…" : "保存" }}
         </button>
       </div>
@@ -496,11 +677,21 @@ defineExpose({
               <button type="button" aria-label="拡大" @click="setZoom(zoom + 0.1)">＋</button>
             </div>
           </div>
+          <div
+            v-if="sceneLoading || sceneError"
+            class="iriograph-scene-status"
+            :class="{ error: !sceneLoading && sceneError }"
+            role="status"
+            aria-live="polite"
+          >
+            <b>{{ sceneLoading ? "図を更新中…" : "図を表示できません" }}</b>
+            <span v-if="!sceneLoading && sceneError">{{ sceneError.message }}</span>
+          </div>
           <DiagramCanvas
             :scene="scene"
             :selected-element-id="selectedElementId"
             :zoom="zoom"
-            :read-only="readOnly"
+            :read-only="readOnly || sceneLoading || applyingTurtle"
             @select="selectElement"
             @gesture-start="beginGesture"
             @gesture-end="endGesture"
@@ -536,7 +727,9 @@ defineExpose({
               </div>
               <div>
                 <button type="button" :disabled="!turtlePending" @click="revertTurtleDraft">元に戻す</button>
-                <button type="button" class="primary" :disabled="!turtlePending || readOnly" @click="applyTurtleDraft">検証して適用</button>
+                <button type="button" class="primary" :disabled="!turtlePending || readOnly || applyingTurtle" @click="applyTurtleDraft">
+                  {{ applyingTurtle ? "適用中…" : "検証して適用" }}
+                </button>
               </div>
             </footer>
             <ul v-if="diagnostics.length" class="iriograph-diagnostics">
@@ -606,7 +799,7 @@ defineExpose({
             <div class="iriograph-edge-contract">
               <span>{{ selectedElement.sourceElementId }}</span><b>→</b><span>{{ selectedElement.targetElementId }}</span>
             </div>
-            <p>{{ selectedElement.fallback ? "Core fallback arrow" : selectedElement.projectionRuleId }}</p>
+            <p>{{ selectedElement.fallback ? "Core fallback arrow" : selectedElement.provenance?.rule?.ruleId ?? selectedElement.projectionRuleId }}</p>
           </section>
           <section v-if="selectedOverlay?.placement === 'user'">
             <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="clearSelectedOverride">ユーザー調整を解除</button>

@@ -1,99 +1,111 @@
 {
+  "schemaVersion": "1",
+  "kind": "iriograph.catalog",
   "catalogId": "urn:iriograph:catalog:workflow-mock",
   "catalogVersion": "1",
-  "profileRef": "urn:iriograph:profile:bpmn-like:1",
-  "defaults": {
-    "nodeTemplateRef": "urn:iriograph:template:generic-node:1",
-    "edgeTemplateRef": "urn:iriograph:template:generic-edge:1",
-    "layoutRef": "urn:iriograph:layout:hierarchical-lr:1"
-  },
-  "nodeRules": [
-    {
-      "ruleId": "workflow:lane",
-      "rdfType": "urn:iriograph:demo:Lane",
-      "structuralKind": "container",
-      "templateRef": "urn:iriograph:template:lane:1",
-      "priority": 100
-    },
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:1",
+  "rules": [
     {
       "ruleId": "workflow:start-event",
-      "rdfType": "urn:iriograph:demo:StartEvent",
-      "structuralKind": "node",
-      "templateRef": "urn:iriograph:template:start-event:1",
-      "priority": 100
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "urn:iriograph:demo:StartEvent",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:iriograph:template:start-event:1"
     },
     {
       "ruleId": "workflow:user-task",
-      "rdfType": "urn:iriograph:demo:UserTask",
-      "structuralKind": "node",
-      "templateRef": "urn:iriograph:template:user-task:1",
-      "priority": 100
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "urn:iriograph:demo:UserTask",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:iriograph:template:user-task:1"
     },
     {
       "ruleId": "workflow:service-task",
-      "rdfType": "urn:iriograph:demo:ServiceTask",
-      "structuralKind": "node",
-      "templateRef": "urn:iriograph:template:service-task:1",
-      "priority": 100
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "urn:iriograph:demo:ServiceTask",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:iriograph:template:service-task:1"
     },
     {
       "ruleId": "workflow:exclusive-gateway",
-      "rdfType": "urn:iriograph:demo:ExclusiveGateway",
-      "structuralKind": "node",
-      "templateRef": "urn:iriograph:template:gateway:1",
-      "priority": 100
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "urn:iriograph:demo:ExclusiveGateway",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "alternative",
+        "ordinalPredicatePrefix": "http://www.w3.org/1999/02/22-rdf-syntax-ns#_",
+        "defaultOrdinal": 1
+      },
+      "templateRef": "urn:iriograph:template:gateway:1"
     },
     {
       "ruleId": "workflow:end-event",
-      "rdfType": "urn:iriograph:demo:EndEvent",
-      "structuralKind": "node",
-      "templateRef": "urn:iriograph:template:end-event:1",
-      "priority": 100
-    }
-  ],
-  "relationRules": [
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "urn:iriograph:demo:EndEvent",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:iriograph:template:end-event:1"
+    },
     {
-      "ruleId": "workflow:sequence-flow",
-      "rdfType": "urn:iriograph:demo:SequenceFlow",
-      "sourcePath": "urn:iriograph:demo:from",
-      "targetPath": "urn:iriograph:demo:to",
-      "labelPath": "http://www.w3.org/2000/01/rdf-schema#label",
-      "templateRef": "urn:iriograph:template:sequence-flow:1",
-      "priority": 100
-    }
-  ],
-  "containmentRules": [
+      "ruleId": "workflow:reference",
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "urn:iriograph:demo:Reference",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "resource",
+        "structuralKind": "node"
+      },
+      "templateRef": "urn:iriograph:template:reference:1"
+    },
     {
-      "ruleId": "workflow:lane-membership",
-      "predicate": "urn:iriograph:demo:inLane",
-      "child": "subject",
-      "parent": "object"
+      "ruleId": "workflow:sequence-appearance",
+      "priority": 200,
+      "match": {
+        "kind": "type",
+        "iri": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Seq",
+        "entailment": "exact"
+      },
+      "project": {
+        "operator": "ordinal-sequence",
+        "ordinalPredicatePrefix": "http://www.w3.org/1999/02/22-rdf-syntax-ns#_"
+      },
+      "templateRef": "urn:iriograph:template:sequence-flow:1"
     }
   ],
   "templates": {
-    "urn:iriograph:template:generic-node:1": {
-      "templateRef": "urn:iriograph:template:generic-node:1",
-      "structuralKind": "node",
-      "shape": "rectangle",
-      "iconRef": "urn:iriograph:icon:reference:1",
-      "style": {
-        "fill": "#fffef8",
-        "stroke": "#879697",
-        "text": "#243b3d",
-        "accent": "#879697"
-      },
-      "defaultSize": { "width": 168, "height": 72 }
-    },
-    "urn:iriograph:template:generic-edge:1": {
-      "templateRef": "urn:iriograph:template:generic-edge:1",
-      "structuralKind": "edge",
-      "style": {
-        "fill": "none",
-        "stroke": "#7f8c8d",
-        "text": "#647173",
-        "dash": "5 5"
-      }
-    },
     "urn:iriograph:template:lane:1": {
       "templateRef": "urn:iriograph:template:lane:1",
       "structuralKind": "container",
@@ -168,6 +180,19 @@
       },
       "defaultSize": { "width": 58, "height": 58 }
     },
+    "urn:iriograph:template:reference:1": {
+      "templateRef": "urn:iriograph:template:reference:1",
+      "structuralKind": "node",
+      "shape": "rectangle",
+      "iconRef": "urn:iriograph:icon:reference:1",
+      "style": {
+        "fill": "#fffef8",
+        "stroke": "#879697",
+        "text": "#243b3d",
+        "accent": "#879697"
+      },
+      "defaultSize": { "width": 168, "height": 72 }
+    },
     "urn:iriograph:template:sequence-flow:1": {
       "templateRef": "urn:iriograph:template:sequence-flow:1",
       "structuralKind": "edge",
@@ -182,17 +207,17 @@
     "urn:iriograph:icon:user-task:1": {
       "assetRef": "urn:iriograph:icon:user-task:1",
       "mediaType": "image/svg+xml",
-      "url": "/workspace/assets/icons/user-task.svg"
+      "url": "urn:iriograph:mock-asset-source:user-task"
     },
     "urn:iriograph:icon:service-task:1": {
       "assetRef": "urn:iriograph:icon:service-task:1",
       "mediaType": "image/svg+xml",
-      "url": "/workspace/assets/icons/service-task.svg"
+      "url": "urn:iriograph:mock-asset-source:service-task"
     },
     "urn:iriograph:icon:reference:1": {
       "assetRef": "urn:iriograph:icon:reference:1",
       "mediaType": "image/svg+xml",
-      "url": "/workspace/assets/icons/reference.svg"
+      "url": "urn:iriograph:mock-asset-source:reference"
     }
   }
 }

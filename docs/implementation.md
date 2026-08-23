@@ -4,8 +4,8 @@
 
 | Package | 責務 | 持たない責務 |
 |---|---|---|
-| `@iriograph/core` | model、Turtle parse/serialize、semantic commandのgraph patch変換、catalog投影、検証、reconciliation、非同期layout adapter契約と標準軽量layout | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
-| `@iriograph/vue-editor` | Scene描画、human semantic command UI、overlay編集、Turtle draft、history、inspector | 語彙判定、永続化、認証、catalog取得 |
+| `@iriograph/core` | model、Turtle parse、catalog投影、検証、reconciliation、非同期layout adapter契約と標準軽量layout。決定的serializeとsemantic commandのgraph patch変換はP0-06/P1-04で追加する | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
+| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、inspector。human semantic command UIはP1-04で追加する | 語彙判定、永続化、認証、catalog取得 |
 | `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver例 | 投影規則、editor内部state |
 
 ## 投影処理
@@ -20,13 +20,19 @@
 8. `layoutRef`に対応する非同期layout adapterを呼び、generated elementのgeometryとroutingを決定する
 9. asset resolverでicon IRIを表示URLへ解決する
 
-Sceneは毎回導出します。`projectIriographDocument`はStep 1〜7のprojectionだけを行ってgeometry未確定の`ProjectedScene`を返し、`layoutProjectedScene`がStep 8を非同期に行います。Vue editor向けには両者を順に呼ぶconvenience orchestrationを提供できますが、rendererはTurtle storeやlayout engineを直接問い合わせず、完成した`DiagramScene`だけを描画します。Coreには決定的な標準軽量layoutを同梱し、Vue editorはこれをdefaultにします。Hostは明示注入した同じadapter契約で高機能layoutを差し替えます。通常の再layoutはgenerated elementだけを移動し、user geometryはfixed constraintにします。
+Sceneは毎回導出します。`projectSemanticView`はStep 1〜7だけを行ってgeometry未確定の`ProjectedScene`を同期的に返します。`buildIriographView`はviewのprofileに対応する解決済みcatalogを選択し、Step 8を非同期に実行してrenderer向け`DiagramScene`を返します。RendererはTurtle storeやlayout engineを直接問い合わせません。Coreには決定的な標準軽量layoutを同梱し、Vue editorはこれをdefaultにします。Hostは明示注入した同じadapter契約で高機能layoutへ差し替えます。通常の再layoutはgenerated elementだけを移動し、user geometryとpinned geometryはfixed constraintにします。
+
+## Catalog解決
+
+Portable documentの`imports`はhost境界の`ProjectionCatalogResolver`でraw bytesへ解決します。Coreの`resolveProjectionCatalogImports`はversion付き`catalogRef`、任意のSHA-256 integrity、取得結果のcatalog identity、runtime schemaを検証してから、同じprofileのcatalogを`catalogRef`順に結合します。Rule IDはorigin catalogとlocal IDから修飾し、template、asset、rule IDの衝突やprofile内のdefaults欠落・複数定義をlast-winsにせずerrorにします。解決済みcatalogとrule originは`ProjectionRuntimeContext`へ渡し、projection provenanceでは元のcatalogRefとlocal rule IDを復元します。
+
+Local mockはnetwork resolverを持たないstatic fixtureなので、RDF/RDFS標準catalogとdefaultsを持たないdomain extension catalogを同じ競合規則で決定的に結合してeditorへ注入します。URIからの取得、cache、認証をmock固有のprojection処理へ混ぜません。
 
 ## 編集transaction
 
 drag、resize、waypoint変更、template/icon overrideはpresentation transactionです。選択elementのoverlay entryだけを更新し、Turtleを変更しません。一つのpointer gestureを一つのundo履歴として扱います。
 
-Turtle textareaは未適用draftを持ちます。「検証して適用」または保存前の`flushPendingEdits()`でsemantic transactionを開始します。parse error時はdraftを残してdocument正本を変更しません。
+Turtle textareaは未適用draftを持ちます。「検証して適用」または保存前の非同期`flushPendingEdits()`でsemantic transactionを開始します。現行実装はparseとRDF/RDFS構造検証後、全viewをそれぞれのprofile/catalog/layoutで再構成し、一つでもblocking errorがあれば元documentへrollbackします。Parse error時はdraftを残してdocument正本を変更しません。
 
 Target semantic transactionはactorを`human`または`llm`として受け取り、元graphとの差分にauthoring profileを適用します。Rendererのfallback投影はunknown termを許容しますが、LLM transactionはprofile外term、新規semantic term、許可外namespaceを拒否します。
 
@@ -67,15 +73,13 @@ P1の暫定基準は、500 node / 1,000 edgeを通常規模、2,000 node / 4,000
 
 ## 現在のlocal mock
 
-購入承認フローを例に、lane containment、開始・終了event、user/service task、gateway、relation resourceによるsequence flow、未登録predicateのfallback edgeを一画面に表示します。
+購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。開始・終了event、user/service task、gateway等のdomain typeは構造を独自述語で再定義せず、domain extension catalogからappearanceへ対応付けます。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
 
-editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、zoom、Turtle編集、document/catalog参照を提供します。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。mock hostはrepository内の`public/workspace`をmanifestからtree表示し、実体の`.iriograph`を読み込みます。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+Editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、zoom、Turtle編集、document/catalog参照を提供します。Turtleの適用、保存、書出は非同期reconciliationの完了を待ちます。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
 
 同じworkspaceの画像はmanifest上でasset IRIとURLを対応付けます。sample documentの
 catalog外icon overrideはこのresolverを通るため、Turtle・catalog・editor packageへ
 workspace pathや画像bytesを混ぜずに参照表示する最小の縦切りになっています。非同期取得、
 picker、移動追従、安全policyを含む正式contractはP0-09で実装します。
 
-現在のfallback layoutは決定的な単純配置です。graph topologyとcontainer制約を使う正式layout engineはバックログで管理します。
-
-現在のmockは`urn:iriograph:demo:`内の`Lane`、`SequenceFlow`、`from`、`to`等を使う初期prototypeです。これは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に適合しておらず、標準catalogと汎用operatorの縦切りを実装した時点でRDF/RDFS表現へ移行します。仕様固定と実装済み範囲を混同しないため、移行完了まではこの差を明示します。
+現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、manual edge routeを決定的に扱います。より高機能なroutingや大規模graph向けengineは、Coreへ依存を追加せずhost注入adapterとして実装します。

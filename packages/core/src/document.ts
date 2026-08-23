@@ -10,12 +10,52 @@ import {
   parseIriographSemanticSource,
   projectIriographDocument,
 } from "./projection";
+import { reconcileIriographDocumentViews } from "./reconciliation";
+import type { ProjectionRuntimeContext } from "./scene";
 
 /**
  * Turtleの変更を一つのsemantic transactionとして適用します。
  * parseに失敗したdraftは正本へ入れず、成功時だけdisplay overlayを照合します。
  */
 export function applySemanticSource(
+  document: IriographDocument,
+  source: string,
+  context: ProjectionRuntimeContext,
+): Promise<SemanticSourceUpdate>;
+export function applySemanticSource(
+  document: IriographDocument,
+  source: string,
+  catalog: DiagramCatalog,
+): SemanticSourceUpdate;
+export function applySemanticSource(
+  document: IriographDocument,
+  source: string,
+  context: ProjectionRuntimeContext | DiagramCatalog,
+): Promise<SemanticSourceUpdate> | SemanticSourceUpdate {
+  if (isProjectionRuntimeContext(context)) {
+    return applySemanticSourceTarget(document, source, context);
+  }
+  return applySemanticSourceLegacy(document, source, context);
+}
+
+async function applySemanticSourceTarget(
+  document: IriographDocument,
+  source: string,
+  context: ProjectionRuntimeContext,
+): Promise<SemanticSourceUpdate> {
+  const candidate = clone(document);
+  // Direct source editing keeps the user's exact accepted Turtle text. Rich
+  // command canonical serialization is a separate authoring concern.
+  candidate.semantic.source = source;
+  const result = await reconcileIriographDocumentViews(document, candidate, context);
+  return {
+    accepted: result.accepted,
+    document: result.document,
+    diagnostics: result.diagnostics,
+  };
+}
+
+function applySemanticSourceLegacy(
   document: IriographDocument,
   source: string,
   catalog: DiagramCatalog,
@@ -186,4 +226,10 @@ function clone<T>(value: T): T {
   // Public documentはJSON contractです。Vue等のreactive Proxyもhostから渡されるため、
   // structuredCloneではなくJSON境界でplain dataへ正規化します。
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function isProjectionRuntimeContext(
+  value: ProjectionRuntimeContext | DiagramCatalog,
+): value is ProjectionRuntimeContext {
+  return "catalogsByProfile" in value && "layouts" in value;
 }

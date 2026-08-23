@@ -33,9 +33,9 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `semantic.source`は意味の正本です。`views[].overlay`のkeyはview内element ID、各entryの`semanticRef`はIRIまたはstatement identityです。
 
-`semantic.authoringProfileRef`はtarget contractで、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。現行TypeScript modelへの追加はP0-01で行います。
+`semantic.authoringProfileRef`はv1の必須値で、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。P1-04まではdocument schemaとhost fixtureだけがこの参照を保持し、実際のauthoring policy解決はP2-01で追加します。
 
-`views[].locale`はtarget contractの任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。現行TypeScript modelへの追加はP0-01で行います。
+`views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
 
 `viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideもsession stateであり、overlayへ書き込みません。
 
@@ -60,11 +60,11 @@ v1 target catalogは次の宣言を持ちます。
 
 標準catalogはRDF/RDFS IRIを`membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
 
-現行TypeScriptの`nodeRules`、`relationRules`、`containmentRules`はprototype contractであり、上記`rules`へ移行するまでstable APIとはしません。
+現行の正規化contractは上記`rules`です。`nodeRules`、`relationRules`、`containmentRules`を持つ`DiagramCatalog`は既存hostの移行だけに残す互換APIであり、stable APIとはしません。
 
 ## Scene
 
-Targetの`projectIriographDocument(document, projectionContext, viewId)`は保存documentを変更せず、意味graphからgeometry未確定の`ProjectedScene`を同期的に返します。`layoutProjectedScene(projectedScene, view, adapter)`はlayoutだけを非同期に適用し、renderer向け`Promise<DiagramScene>`を返します。両者を順に呼ぶ`buildIriographScene(...)` convenience APIは提供できますが、projectionとlayoutの公開責務は統合しません。Sceneはいずれもderived dataであり保存正本ではありません。現行の同期`projectIriographDocument(document, catalog)`がgeometryまで返す挙動は移行前contractです。
+`projectSemanticView(document, catalog, viewId, options)`は保存documentを変更せず、意味graphからgeometry未確定の`ProjectedScene`を同期的に返します。`layoutProjectedDiagramScene(projected, layoutRef, registry, mode)`はlayoutだけを非同期に適用し、renderer向け`Promise<DiagramScene>`を返します。`buildIriographView(document, viewId, context, mode)`はview profileに対応する解決済みcatalogを選び、両者を順に呼ぶconvenience APIです。Projectionとlayoutの公開責務は統合せず、Sceneはいずれもderived dataであり保存正本ではありません。`DiagramCatalog`を受けてgeometryまで返す同期`projectIriographDocument` overloadは移行用互換contractです。
 
 現在のprimitiveは`node`、`edge`、`container`です。`annotation`は型上予約されていますが未投影です。
 
@@ -90,18 +90,18 @@ export interface LayoutAdapter {
 
 Coreはnode-link、LR/TB階層、Bag container、pinned geometryを扱う決定的な標準軽量adapterを提供し、Vue editorはこれをdefaultとして利用します。Hostがlayout adapterを明示注入した場合は同じinterfaceでworkerを使う高機能adapter等へ差し替えます。Adapter未解決、失敗、結果不正はdiagnosticとし、異なるlayoutへ黙ってfallbackしません。
 
-Re-layoutの通常対象は`placement: "generated"`だけです。`placement: "user"`のgeometryは固定制約としてadapterへ渡します。明示的な「自動配置へ戻す」presentation commandによってplacementをgeneratedへ戻した場合に限り、次のlayoutで再配置できます。
+Re-layoutの通常対象は`placement: "generated"`かつ`pinned !== true`の要素だけです。`placement: "user"`または`pinned: true`のgeometryは固定制約としてadapterへ渡します。明示的な「自動配置へ戻す」presentation commandによってplacementをgenerated、pinnedをfalseへ戻した場合に限り、次のlayoutで再配置できます。
 
 ## Semantic transaction
 
-Targetの`applySemanticSource(document, source, context)`は、Turtleをparseしてから意味変更を適用し、全viewの非同期layoutを含む`Promise<SemanticSourceUpdate>`を返します。`context`はresolved catalog群、view profile群、layout adapter群、authoring profile、actor、元revisionを含みます。
+現行の`applySemanticSource(document, source, context)`は、TurtleをparseしてからRDF/RDFS構造を検証し、全viewの非同期layoutを含む`Promise<SemanticSourceUpdate>`を返します。現行`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Actor、resolved authoring profile、元revisionを含むsemantic authoring contextはP1-04/P2-01でこの境界へ追加します。
 
 - 失敗: `accepted: false`とdiagnosticsを返し、元documentを維持
 - 成功: `accepted: true`とreconcile済みdocumentを返す
 
-`actor`は少なくとも`human`または`llm`です。LLM transactionではauthoring profile未解決、unknown term追加、term minting、許可外resource namespaceをerrorとして扱います。現行の`applySemanticSource(document, source, catalog)`は移行前contractです。
+Targetの`actor`は少なくとも`human`または`llm`です。LLM transactionではauthoring profile未解決、unknown term追加、term minting、許可外resource namespaceをerrorとして扱います。`DiagramCatalog`を受ける同期`applySemanticSource` overloadは既存host向けの移行用互換contractです。
 
-`applySemanticCommands(document, commands, context)`は一つ以上の人間のstructured commandを一つのatomic graph patchとcandidate sourceへ変換し、同じく`Promise<SemanticSourceUpdate>`を返します。以降は`applySemanticSource`と同じparse、authoring profile、構造、domain validation、投影、非同期layout、reconciliationのパイプラインを使います。Human UIとLLMに別々の検証経路を作りません。
+P1-04で追加する`applySemanticCommands(document, commands, context)`は、一つ以上の人間のstructured commandを一つのatomic graph patchとcandidate sourceへ変換し、同じく`Promise<SemanticSourceUpdate>`を返します。以降は`applySemanticSource`と同じparse、authoring profile、構造、domain validation、投影、非同期layout、reconciliationのパイプラインを使います。Human UIとLLMに別々の検証経路を作りません。
 
 Turtle textareaから`applySemanticSource`を実行した場合、妥当な入力sourceは原文のまま保持します。`applySemanticCommands`とactor=`llm`のsource editはcandidate datasetを共通のversioned serializerで決定的なTurtleへ再serializeしてから確定します。再serializeでは有効なprefix/baseを可能な範囲で再利用しますが、comment、空白、改行位置、triple記述順の保持はcontractに含めません。
 

@@ -240,6 +240,111 @@ export type ProjectionOptions = {
   ) => string | undefined;
 };
 
+/**
+ * Catalog rule identity is catalog-qualified because ruleId is only required to
+ * be unique inside one catalog.
+ */
+export type CatalogRuleReference = {
+  catalogRef: string;
+  ruleId: string;
+};
+
+export type SemanticEditCapability =
+  | {
+      command: "remove-statement";
+      statementRef: string;
+      subject: string;
+      predicate: string;
+      object: string;
+    }
+  | {
+      command: "set-membership";
+      container: string;
+      member: string;
+      predicate: string;
+    }
+  | {
+      command: "set-sequence";
+      sequence: string;
+    }
+  | {
+      command: "set-alternatives";
+      alternative: string;
+    };
+
+/** Derived edit information. It is never persisted in an .iriograph file. */
+export type ProjectionProvenance = {
+  sourceStatementRefs: string[];
+  operator: ProjectionOperator["operator"] | "implicit-resource" | "implicit-direct-edge";
+  rule?: CatalogRuleReference;
+  derivation: "resource" | "direct" | "derived";
+  editCapability?: SemanticEditCapability;
+};
+
+/**
+ * Projection output before a layout adapter supplies missing geometry.
+ * Existing overlay geometry remains available as a layout constraint.
+ */
+export type ProjectedScene = {
+  viewId: string;
+  nodes: ProjectedNode[];
+  containers: ProjectedContainer[];
+  edges: ProjectedEdge[];
+  diagnostics: ProjectionDiagnostic[];
+};
+
+export type ProjectedNode = {
+  elementId: string;
+  semanticRef: string;
+  structuralKind: "node";
+  label: string;
+  templateRef: string;
+  shape: NonNullable<VisualTemplate["shape"]>;
+  iconRef?: string;
+  iconUrl?: string;
+  defaultSize: { width: number; height: number };
+  geometry?: ElementGeometry;
+  parentElementId?: string;
+  parentProvenance?: ProjectionProvenance;
+  style: VisualTemplate["style"];
+  pinned: boolean;
+  placement: "generated" | "user";
+  provenance: ProjectionProvenance;
+};
+
+export type ProjectedContainer = {
+  elementId: string;
+  semanticRef: string;
+  structuralKind: "container";
+  label: string;
+  templateRef: string;
+  defaultSize: { width: number; height: number };
+  geometry?: ElementGeometry;
+  parentElementId?: string;
+  parentProvenance?: ProjectionProvenance;
+  headerPosition: NonNullable<VisualTemplate["headerPosition"]>;
+  style: VisualTemplate["style"];
+  pinned: boolean;
+  placement: "generated" | "user";
+  provenance: ProjectionProvenance;
+};
+
+export type ProjectedEdge = {
+  elementId: string;
+  semanticRef: string;
+  structuralKind: "edge";
+  label: string;
+  sourceElementId: string;
+  targetElementId: string;
+  templateRef: string;
+  style: VisualTemplate["style"];
+  waypoints?: Point[];
+  labelOffset?: Point;
+  routingPlacement: "generated" | "user";
+  fallback: boolean;
+  provenance: ProjectionProvenance;
+};
+
 export type DiagramScene = {
   viewId: string;
   width: number;
@@ -261,10 +366,12 @@ export type SceneNode = {
   iconUrl?: string;
   geometry: ElementGeometry;
   parentElementId?: string;
+  parentProvenance?: ProjectionProvenance;
   style: VisualTemplate["style"];
   pinned: boolean;
   placement: "generated" | "user";
   projectionRuleId?: string;
+  provenance?: ProjectionProvenance;
 };
 
 export type SceneContainer = {
@@ -279,6 +386,9 @@ export type SceneContainer = {
   pinned: boolean;
   placement: "generated" | "user";
   projectionRuleId?: string;
+  parentElementId?: string;
+  parentProvenance?: ProjectionProvenance;
+  provenance?: ProjectionProvenance;
 };
 
 export type SceneEdge = {
@@ -291,8 +401,10 @@ export type SceneEdge = {
   templateRef: string;
   style: VisualTemplate["style"];
   waypoints?: Point[];
+  labelOffset?: Point;
   projectionRuleId?: string;
   fallback: boolean;
+  provenance?: ProjectionProvenance;
 };
 
 export type ProjectionDiagnostic = {
@@ -300,6 +412,9 @@ export type ProjectionDiagnostic = {
   code: string;
   message: string;
   semanticRef?: string;
+  statementRef?: string;
+  catalogRef?: string;
+  ruleId?: string;
 };
 
 export type SemanticSourceUpdate = {

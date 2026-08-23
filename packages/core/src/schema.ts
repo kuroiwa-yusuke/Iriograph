@@ -525,7 +525,11 @@ function validateCatalogReferences(catalog: ProjectionCatalogV1): RuntimeValidat
         "suppress must not declare templateRef",
         { operator: rule.project.operator },
       ));
-    } else if (rule.project.operator !== "suppress" && !rule.templateRef) {
+    } else if (
+      rule.project.operator !== "suppress"
+      && rule.project.operator !== "ordinal-sequence"
+      && !rule.templateRef
+    ) {
       issues.push(customIssue(
         `/rules/${index}`,
         "operator-contract",

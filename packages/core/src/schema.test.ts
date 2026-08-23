@@ -11,6 +11,7 @@ import {
   validateIriographDocumentV1,
   validateProjectionCatalogV1,
 } from "./schema";
+import { standardRdfRdfsCatalog } from "./standard-catalog";
 
 function fixture(name: string): unknown {
   return JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
@@ -100,6 +101,19 @@ describe("normalized projection catalog v1 schema", () => {
       issues: [],
     });
     expect(parseProjectionCatalogV1(source).rules).toHaveLength(7);
+  });
+
+  it("accepts the standard RDF/RDFS catalog with the default edge template for ordinal sequences", () => {
+    const sequenceRule = standardRdfRdfsCatalog.rules.find(
+      (rule) => rule.project.operator === "ordinal-sequence",
+    );
+
+    expect(sequenceRule?.templateRef).toBeUndefined();
+    expect(validateProjectionCatalogV1(standardRdfRdfsCatalog)).toMatchObject({
+      valid: true,
+      value: standardRdfRdfsCatalog,
+      issues: [],
+    });
   });
 
   it("rejects parameters belonging to another projection operator", () => {

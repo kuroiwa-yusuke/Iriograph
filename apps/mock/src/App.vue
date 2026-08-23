@@ -3,16 +3,18 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 import type {
   AssetDefinition,
-  DiagramCatalog,
-  IriographDocument,
+  IriographDocumentV1,
+  ProjectionCatalogV1,
   ProjectionDiagnostic,
 } from "@iriograph/core";
+import { parseIriographDocumentV1 } from "@iriograph/core";
 import { IriographEditor } from "@iriograph/vue-editor";
 
-import rawCatalog from "./mock/catalog.json";
+import { mockProjectionCatalog } from "./mock/catalog";
 import {
   buildWorkspaceTreeRows,
   loadMockWorkspace,
+  parseMockWorkingCopy,
   readIriographDocument,
   type MockWorkspaceEntry,
   type MockWorkspaceManifest,
@@ -21,7 +23,7 @@ import {
 
 const STORAGE_PREFIX = "iriograph.mock.workspace:";
 
-const catalog = rawCatalog as unknown as DiagramCatalog;
+const catalog: ProjectionCatalogV1 = mockProjectionCatalog;
 const editor = ref<InstanceType<typeof IriographEditor> | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
 const workspace = ref<MockWorkspaceManifest>();
@@ -29,7 +31,7 @@ const workspaceReady = ref(false);
 const workspaceError = ref("");
 const activeFilePath = ref("");
 const selectedAssetRef = ref("");
-const document = ref<IriographDocument>(emptyDocument());
+const document = ref<IriographDocumentV1>(emptyDocument());
 const savedJson = ref("");
 const saving = ref(false);
 const saveMessage = ref("");
@@ -81,12 +83,13 @@ function handleGlobalKeydown(event: KeyboardEvent): void {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     event.stopPropagation();
-    saveDocument();
+    void saveDocument();
   }
 }
 
-function saveDocument(): void {
-  if (!workspaceReady.value || !editor.value?.flushPendingEdits()) return;
+async function saveDocument(): Promise<void> {
+  if (!workspaceReady.value || saving.value || !editor.value) return;
+  if (!await editor.value.flushPendingEdits()) return;
   saving.value = true;
   window.localStorage.setItem(storageKey(activeFilePath.value), JSON.stringify(document.value));
   savedJson.value = JSON.stringify(document.value);
@@ -105,10 +108,7 @@ async function importDocument(event: Event): Promise<void> {
   if (!file) return;
 
   try {
-    const imported = JSON.parse(await file.text()) as IriographDocument;
-    if (!isIriographDocument(imported)) {
-      throw new Error("Iriograph document schema v1ではありません。");
-    }
+    const imported = parseIriographDocumentV1(JSON.parse(await file.text()) as unknown);
     document.value = structuredClone(imported);
     activeFilePath.value = `imports/${file.name}`;
     savedJson.value = JSON.stringify(imported);
@@ -119,8 +119,9 @@ async function importDocument(event: Event): Promise<void> {
   }
 }
 
-function exportDocument(): void {
-  if (!workspaceReady.value || !editor.value?.flushPendingEdits()) return;
+async function exportDocument(): Promise<void> {
+  if (!workspaceReady.value || !editor.value) return;
+  if (!await editor.value.flushPendingEdits()) return;
   const blob = new Blob([JSON.stringify(document.value, null, 2)], {
     type: "application/json",
   });
@@ -205,26 +206,8 @@ async function copyAssetRef(): Promise<void> {
   }
 }
 
-function readStoredDocument(key: string): IriographDocument | undefined {
-  try {
-    const source = window.localStorage.getItem(key);
-    if (!source) return undefined;
-    const parsed = JSON.parse(source) as unknown;
-    return isIriographDocument(parsed) ? parsed : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isIriographDocument(value: unknown): value is IriographDocument {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Partial<IriographDocument>;
-  return candidate.kind === "iriograph.document"
-    && candidate.schemaVersion === "1"
-    && typeof candidate.documentId === "string"
-    && candidate.semantic?.format === "text/turtle"
-    && typeof candidate.semantic.source === "string"
-    && Array.isArray(candidate.views);
+function readStoredDocument(key: string): IriographDocumentV1 | undefined {
+  return parseMockWorkingCopy(window.localStorage.getItem(key));
 }
 
 function storageKey(path: string): string {
@@ -239,7 +222,7 @@ function showSaveMessage(message: string): void {
   }, 2600);
 }
 
-function emptyDocument(): IriographDocument {
+function emptyDocument(): IriographDocumentV1 {
   return {
     schemaVersion: "1",
     kind: "iriograph.document",
@@ -247,13 +230,14 @@ function emptyDocument(): IriographDocument {
     semantic: {
       format: "text/turtle",
       baseIri: "urn:iriograph:loading:",
+      authoringProfileRef: "urn:iriograph:authoring-profile:workflow-mock@1",
       source: "",
     },
     views: [{
       viewId: "main",
       kind: "node-link",
       profileRef: catalog.profileRef,
-      layoutRef: catalog.defaults.layoutRef,
+      layoutRef: catalog.defaults?.layoutRef ?? "urn:iriograph:layout:hierarchical-lr:1",
       overlay: {},
     }],
   };

@@ -4,9 +4,9 @@
 
 ## 現在の基準点
 
-coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostがあり、意味編集と表示編集のtransactionは分離されています。これはAPI安定版ではなく、保存schema、catalog rule解決、layout、host統合を検証するための基準実装です。
+Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identity、非同期layout adapter、全named viewのdisplay reconciliationまでがcoreからVue editorとlocal mockへ接続されています。意味編集と表示編集のtransactionは分離されていますが、決定的serializer、workspace assetの正式contract、package配布・回帰test基盤は未完了であり、API安定版ではありません。
 
-意味層のv1 targetは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)で確定しています。現在のmockは独自`wf`相当語彙を使う移行前prototypeであり、P0-01〜04が完了するまでprofile適合例とはみなしません。
+Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq、Alt、seeAlsoを使う購入承認例です。Domain語彙はこれらの標準構造を置き換えずnode等のappearanceを選択し、標準catalogとdefaultsを持たないdomain extension catalogを決定的に結合しています。
 
 ## 優先度
 
@@ -19,14 +19,7 @@ coreからSceneへの縦切り、埋め込み用Vue editor、local mock hostが�
 
 | ID | 項目 | 依存 | 完了条件 |
 |---|---|---|---|
-| P0-01 | Documentと正規化catalogのJSON Schema/runtime validation | 規範仕様、現行TypeScript model | `authoringProfileRef`を含む必須値、不明field方針、IRI、version、operator別parameterを検証し、invalid fixtureのtestがある |
-| P0-02 | 汎用projection operatorとRDF/RDFS標準catalog | P0-01 | `membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`を業務IRI分岐なしで実装し、mock Turtleから独自workflow構造語彙を除去する |
-| P0-03 | RDF/RDFS profile構造validation | P0-01、P0-02 | named IRI、Bag parent、container cycle、Seq/Altの連番・個数・重複型をvalid/invalid fixtureで検証する |
-| P0-04 | 限定RDFS closureとrule競合解決 | P0-01、P0-02 | `subClassOf`/`subPropertyOf`の推移閉包、priority、specificityを登録順非依存で解決し、同順位競合を投影前errorにする |
-| P0-05 | catalog import・version・integrity解決contract | P0-01、P0-04 | host resolver I/F、重複catalog、version不一致、取得失敗のdiagnosticが決定的になる |
-| P0-06 | stable resource/triple/derived-edge identity | P0-01、P0-02 | Turtle再整形後の直接triple、Seq transition、Alt branchとnamed resourceでoverlay照合testが通る。Structured/LLM editはversioned serializerで決定的にTurtleを再生成し、direct source editは適用原文を保持する。再serialize後のcomment・書式保持を保証しないことをfixtureで固定する |
-| P0-07 | projection分離と決定的layout engine v1 | P0-02、P0-06 | Projectionがgeometry未確定Sceneを返し、別の非同期layout adapterがnode-link、階層LR/TB、Bag container、pinned nodeを扱う。Coreの標準軽量adapterをeditor defaultにし、host注入adapterへ差替え可能で、同一入力から同一座標を得る |
-| P0-08 | 正式display reconciliation | P0-04、P0-06、P0-07 | 追加・削除・type変更・containment・sequence変更で全named viewをそれぞれのprofile/layoutから再投影する。存続user overlayを互換な範囲で維持し、通常再配置はgeneratedだけを対象にし、新規geometryにgenerated provenanceを付け、catalog由来appearanceを複製しないfixture testが通る |
+| P0-06 | 決定的Turtle serializer contract | stable identity、P0-08 | Structured/LLM editはversioned serializerで決定的にTurtleを再生成し、direct source editは適用原文を保持する。再serialize後のcomment・書式保持を保証しないことをfixtureで固定する |
 | P0-09 | workspace asset picker、resolver、安全policy contract | P0-01 | documentは安定asset IRIだけを保持し、host注入の選択UIと非同期resolverでworkspace assetを表示できる。未解決fallback、移動・削除diagnostic、media type・容量、許可scheme/origin、Blob URL lifecycleをtestし、mockのtreeにcatalog外assetの縦切りがある |
 | P0-10 | package配布contract | P0-01〜09 | coreとVue editorのexports、CSS、peer dependency、semver方針を定め、別fixture appでbuildできる |
 | P0-11 | editor操作の回帰test基盤 | P0-10 | drag、resize、routing、undo/redo、Turtle適用、保存flushをcomponent/E2E testで検証する |

@@ -1,0 +1,42 @@
+@prefix : <urn:test:workflow:> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+:requester a rdf:Bag ;
+  rdfs:label "Requester"@en, "申請者"@ja ;
+  rdfs:member :start, :submit .
+
+:operations a rdf:Bag ;
+  rdfs:label "Operations"@en, "業務"@ja ;
+  rdfs:member :review, :decision, :register, :rework, :end .
+
+:mainFlow a rdf:Seq ;
+  rdf:_1 :start ;
+  rdf:_2 :submit ;
+  rdf:_3 :review ;
+  rdf:_4 :decision .
+
+:decision a rdf:Alt ;
+  rdfs:label "Decision"@en, "判断"@ja ;
+  rdf:_1 :approvedPath ;
+  rdf:_2 :reworkPath .
+
+:approvedPath a rdf:Seq ;
+  rdfs:label "Approved"@en, "承認"@ja ;
+  rdf:_1 :register ;
+  rdf:_2 :end .
+
+:reworkPath a rdf:Seq ;
+  rdfs:label "Rework"@en, "差し戻し"@ja ;
+  rdf:_1 :rework ;
+  rdf:_2 :review .
+
+:start rdfs:label "Start"@en, "開始"@ja .
+:submit rdfs:label "Submit"@en, "提出"@ja ;
+  :dependsOn :policy .
+:review rdfs:label "Review"@en, "審査"@ja ;
+  rdfs:seeAlso :policy .
+:register rdfs:label "Register"@en, "登録"@ja .
+:rework rdfs:label "Rework"@en, "修正"@ja .
+:end rdfs:label "End"@en, "完了"@ja .
+:policy rdfs:label "Policy"@en, "ポリシー"@ja .
