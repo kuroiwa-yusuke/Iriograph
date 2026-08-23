@@ -36,7 +36,7 @@ Iriograph documentは次の三層を分離します。
 |---|---|---|
 | `rdf:type` | resourceの意味上の分類 | classが存在する場合はtemplate ruleと構造ruleの照合に使い、edgeとしては表示しない |
 | `rdfs:label` | 人向け表示名 | node、container、edgeのlabel候補 |
-| `rdfs:comment` | 説明 | metadataとして保持し、v1のScene elementは生成しない |
+| `rdfs:comment` | 説明 | resourceに紐づくhover説明と任意のannotation calloutへ導出する |
 | `rdf:Bag` | 順不同の包含集合 | node-link viewでは階層`container`、region viewでは重なり可能な`region`として表示する |
 | `rdfs:member` | containerからmemberへの所属 | 全membershipを保持し、選択した空間文法で包含または領域所属として表示する |
 | `rdf:Seq` | 順序付きresource列 | resource自体は既定で非表示とし、連続member間に有向edgeを導出する |
@@ -72,6 +72,10 @@ label/commentを付けられます。限定RDFS closureで一致したsubpropert
 上表以外のclassとpredicateも利用できます。ただしdomain resource IRIとdomain vocabulary IRIを区別し、表示だけのtypeをvocabularyとして導入しません。IRIをobjectに持つ未登録predicateは、subjectからobjectへの通常矢印として表示します。edge labelはpredicateの`rdfs:label`を優先し、なければcompact IRIを使います。
 
 literalをobjectに持つ未登録predicateは意味グラフには保持しますが、annotation投影が未確定のv1ではScene elementを生成しません。
+
+Predicate vocabulary catalogはIRIを置き換えず、日本語を含むlocale別label/comment、category、短い利用例を付加できます。Editorはこれを発見と候補順位に使いますが、categoryや表示文からpredicate identityを推論しません。RDF/RDFS、SKOS、Dublin Core Terms、PROV-O等の標準語彙をprofile別catalogとして追加でき、base packageへ全domain語彙を直書きしません。
+
+Direct edgeの線と矢印は既定で共通にし、predicateごとに無制限な線種を増やしません。Catalogは必要な場合だけ、`generic`、`reference`、`dependency`、`membership`、`classification`等の閉じたterminal marker categoryをsource/target接続端へ割り当てられます。Markerは表示上の補助であり意味の正本ではなく、未知predicateはgeneric arrowへfallbackします。
 
 `rdf:Seq`と`rdf:Alt`は簡潔な順序・分岐の表現であり、任意のgraph topologyをこれだけで記述する義務はありません。domain predicateで直接resourceを結んだ場合も通常矢印になるため、複雑なnetworkやdomain固有relationを失わず扱えます。
 
@@ -131,6 +135,8 @@ Region viewは各Bagを独立した半透明領域として投影し、複数Bag
 
 `rdf:type`のobjectは、type objectであることだけを理由に表示候補へ追加しません。これによりdomain classを分類に使うだけでclass nodeが毎回混入することを避けます。class自体を図示する場合は、classを主語にした宣言またはontology relationを同じviewへ含めます。
 
+Region view profileがclass membershipを明示的にbindする場合は例外として、`rdfs:Class` resourceをregion、`resource rdf:type class`をmembershipへ投影できます。ClassはBagではなく、元statementのpredicateと向きを保持した汎用membership projectionです。複数typeはregionの交差として表示し、交差自体をsemantic resourceへしません。
+
 直接tripleは、predicate ruleが`direct-edge`を選び、かつsubject/objectの両方が可視候補である場合にedgeになります。`suppress`されたpredicateからfallback edgeを生成してはなりません。
 
 ## 5. Label選択
@@ -145,6 +151,8 @@ Region viewは各Bagを独立した半透明領域として投影し、複数Bag
 
 同順位のlabelが複数ある場合もsource記述順には依存せず、language tagとliteral valueの辞書順で決定します。v1 documentにview localeがない場合、host localeを保存時にdocumentへ固定するまで、3、4、5の順だけを使います。
 
+全`rdfs:label`はScene metadataと検索索引へ保持し、上記で選んだ一件だけをprimary display labelとします。同一languageに複数のpreferred labelがありprofile上のprimaryを決められない場合はwarningを返します。別名を明示するprofileは`skos:altLabel`等を許可語彙として追加できます。Literal内の改行は保持し、Canvasはwrap・測定した表示boxをlayoutへ渡します。
+
 比較時はlanguage tagをASCII lowercase、literal valueをUnicode NFCへ正規化し、Unicode code point順でsortします。
 
 ## 6. Projection catalog契約
@@ -157,7 +165,7 @@ profileはTurtleの利用制約を定義し、catalogはsemantic patternをScene
 |---|---|---|
 | `resource` | named resource | `node`または`container` |
 | `direct-edge` | IRI-object triple | `edge` |
-| `membership-container` | container typeとmembership predicate | 全membership、およびviewに応じた`container`/`region` |
+| `membership-container` | container typeとmembership predicate・向き | 全membership、およびviewに応じた`container`/`region` |
 | `ordinal-sequence` | container typeとordinal predicate pattern | member間のderived `edge` |
 | `alternative` | container typeとordinal predicate pattern | choice `node`とbranch `edge` |
 | `suppress` | typeまたはpredicate | Scene生成を抑止しmetadataとして消費 |
@@ -200,7 +208,7 @@ catalogのprojection部分は、現行prototypeの`nodeRules`、`relationRules`�
 |---|---|---|
 | `resource` | `structuralKind` | `node`または`container` |
 | `direct-edge` | なし | subjectからobjectへ接続する |
-| `membership-container` | `membershipPredicate` | ruleが一致したresourceをparent、predicate objectをmemberにする |
+| `membership-container` | `membershipPredicate` | `direction`既定値ではruleが一致したresourceをparent、predicate objectをmemberにする。Class region等は明示directionでobject側をregion、subject側をmemberにできる |
 | `ordinal-sequence` | `ordinalPredicatePrefix` | prefix直後の正の10進整数をordinalとして読む |
 | `alternative` | `ordinalPredicatePrefix`、`defaultOrdinal` | ordinal memberへbranchを生成する |
 | `suppress` | なし | 一致tripleを消費してScene elementを生成しない |
@@ -214,14 +222,14 @@ catalogのprojection部分は、現行prototypeの`nodeRules`、`relationRules`�
 | Match | Operator | 既定appearance |
 |---|---|---|
 | type `rdf:Bag` | `membership-container` | region/container |
-| type `rdf:Seq` | `ordinal-sequence` | sequence自体はhidden、derived edgeはsolid arrow |
-| type `rdf:Alt` | `alternative` | choice nodeとbranch arrow |
-| predicate `rdfs:seeAlso` | `direct-edge` | dashed reference arrow |
-| predicate `rdfs:isDefinedBy` | `direct-edge` | dashed definition arrow |
-| predicate `rdfs:subClassOf` | `direct-edge` | specialization arrow |
-| predicate `rdfs:subPropertyOf` | `direct-edge` | specialization arrow |
-| predicate `rdfs:domain` | `direct-edge` | domain relation arrow |
-| predicate `rdfs:range` | `direct-edge` | range relation arrow |
+| type `rdf:Seq` | `ordinal-sequence` | sequence自体はhidden、derived edgeは共通線＋target arrow |
+| type `rdf:Alt` | `alternative` | choice nodeとbranch共通線＋target arrow |
+| predicate `rdfs:seeAlso` | `direct-edge` | 共通線＋target open-arrow |
+| predicate `rdfs:isDefinedBy` | `direct-edge` | 共通線＋target open-arrow |
+| predicate `rdfs:subClassOf` | `direct-edge` | 共通線＋target triangle |
+| predicate `rdfs:subPropertyOf` | `direct-edge` | 共通線＋target triangle |
+| predicate `rdfs:domain` | `direct-edge` | 共通線＋target arrow |
+| predicate `rdfs:range` | `direct-edge` | 共通線＋target arrow |
 | predicate `rdf:type`、`rdfs:label`、`rdfs:comment`、`rdfs:member` | `suppress` | 直接edgeを生成しない |
 | `any-iri-object` | `direct-edge` | generic arrow |
 

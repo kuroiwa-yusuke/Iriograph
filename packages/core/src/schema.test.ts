@@ -38,11 +38,13 @@ describe("Iriograph document v1 schema", () => {
     source.views[0]!.overlay.edge = {
       semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
       routing: {
+        routeMode: "curve",
         waypoints: [],
         labelOffset: { x: 6, y: -4 },
         sourceAnchor: { position: 0 },
         targetAnchor: { position: .75 },
       },
+      appearance: { labelPlacement: "bottom" },
     };
 
     expect(source.schemaVersion).toBe("1");
@@ -164,7 +166,7 @@ describe("normalized projection catalog v1 schema", () => {
       value: source,
       issues: [],
     });
-    expect(parseProjectionCatalogV1(source).rules).toHaveLength(7);
+    expect(parseProjectionCatalogV1(source).rules).toHaveLength(8);
   });
 
   it("accepts IRI-keyed style presets and a region default template", () => {
@@ -196,6 +198,17 @@ describe("normalized projection catalog v1 schema", () => {
       value: standardRdfRdfsCatalog,
       issues: [],
     });
+  });
+
+  it("accepts only closed renderer-safe edge terminal markers", () => {
+    const source = structuredClone(standardRdfRdfsCatalog);
+    const edge = source.templates[source.defaults!.edgeTemplateRef]!;
+    edge.sourceMarker = "circle";
+    edge.targetMarker = "arrow";
+    expect(validateProjectionCatalogV1(source).valid).toBe(true);
+
+    (edge as { targetMarker?: string }).targetMarker = "url(javascript:alert(1))";
+    expect(validateProjectionCatalogV1(source).valid).toBe(false);
   });
 
   it("accepts an appearance-only template and asset library without rules or defaults", () => {

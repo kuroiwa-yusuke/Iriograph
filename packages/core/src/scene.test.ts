@@ -126,6 +126,27 @@ describe("ProjectedScene conversion", () => {
     expect(scene.diagnostics).toEqual([]);
   });
 
+  it("非表示時もcomment callout全体の表示領域をlayout boundsへ予約する", async () => {
+    const document = documentFor({});
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :a rdfs:label "A" ;
+        rdfs:comment "一行目\\n二行目。さらに長い説明を折り返して常に予約します。"@ja ;
+        :p :b .
+      :b rdfs:label "B" .
+    `;
+    const scene = await layoutProjectedDiagramScene(
+      projectSemanticView(document, standardRdfRdfsCatalog),
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    const commented = scene.nodes.find((node) => node.semanticRef === "urn:test:scene:a")!;
+
+    expect(commented.semanticText?.comments).toHaveLength(1);
+    expect(scene.height).toBeGreaterThan(commented.geometry.y + commented.geometry.height + 100);
+  });
+
   it("region viewで多対多membershipを重なり領域としてend-to-end投影する", async () => {
     const document = documentFor({});
     document.views[0]!.kind = "region";

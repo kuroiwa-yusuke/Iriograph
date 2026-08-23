@@ -20,6 +20,7 @@ import type {
   ProjectionOptions,
   ProjectionProvenance,
   ProjectionRule,
+  SceneSemanticText,
   ViewElementOverlay,
   VisualTemplate,
 } from "./model.js";
@@ -76,6 +77,7 @@ export function executeProjectionOperators(
 
   collectStructuralStatements(
     graph,
+    view,
     plans,
     consumed,
     candidates,
@@ -177,6 +179,7 @@ export function executeProjectionOperators(
 
 function collectStructuralStatements(
   graph: SemanticGraph,
+  view: DiagramView,
   plans: ReadonlyMap<string, NamedResourcePlan>,
   consumed: Set<string>,
   candidates: Set<string>,
@@ -207,6 +210,23 @@ function collectStructuralStatements(
         });
         parentsByChild.set(quad.object.value, bindings);
       }
+    } else if (operator.operator === "membership-region" && view.kind === "region") {
+      candidates.add(plan.semanticRef);
+      const quads = operator.containerPosition === "subject"
+        ? graph.store.getQuads(plan.semanticRef, null, null, null)
+        : graph.store.getQuads(null, null, plan.semanticRef, null);
+      for (const quad of quads.filter((candidate) => (
+        isNamedNode(candidate.predicate)
+        && closure.subpropertyDistance(candidate.predicate.value, operator.membershipPredicate) !== undefined
+      ))) {
+        const member = operator.containerPosition === "subject" ? quad.object : quad.subject;
+        consumed.add(statementIdentityFromQuad(quad));
+        if (!isNamedNode(member)) continue;
+        candidates.add(member.value);
+        const bindings = parentsByChild.get(member.value) ?? [];
+        bindings.push({ parentIri: plan.semanticRef, quad, rule: resolved });
+        parentsByChild.set(member.value, bindings);
+      }
     } else if (operator.operator === "ordinal-sequence" || operator.operator === "alternative") {
       if (operator.operator === "alternative") candidates.add(plan.semanticRef);
       for (const member of collectOrdinalMembers(
@@ -235,6 +255,8 @@ function projectResource(
   if (operator?.operator === "ordinal-sequence" || operator?.operator === "suppress") return undefined;
   const structuralKind = operator?.operator === "membership-container"
     ? view.kind === "region" ? "region" : "container"
+    : operator?.operator === "membership-region"
+      ? view.kind === "region" ? "region" : "node"
     : operator?.operator === "resource"
       ? operator.structuralKind
       : "node";
@@ -265,10 +287,19 @@ function projectResource(
   );
   const elementId = overlayEntry?.elementId
     ?? generatedElementId(structuralKind, plan.semanticRef);
+  const semanticText = collectSemanticText(
+    graph,
+    plan.semanticRef,
+    vocabulary.labelPredicate,
+    vocabulary.commentPredicate,
+    view.locale,
+  );
   const common = {
     elementId,
     semanticRef: plan.semanticRef,
-    label: selectLabel(graph, plan.semanticRef, vocabulary.labelPredicate, view.locale),
+    label: semanticText.primaryLabel?.value ?? compactIri(plan.semanticRef),
+    semanticText,
+    labelPlacement: overlayEntry?.overlay.appearance?.labelPlacement ?? template.labelPlacement,
     templateRef: template.templateRef,
     defaultSize: template.defaultSize ?? (structuralKind === "container" || structuralKind === "region"
       ? { width: 360, height: 220 }
@@ -342,16 +373,26 @@ function projectDirectEdge(
   const fallback = !plan.resolved || plan.resolved.rule.match.kind === "any-iri-object";
   const waypoints = overlay?.overlay.routing?.waypoints;
   const manualWaypoints = waypoints?.length ? waypoints : undefined;
+  const semanticText = collectSemanticText(
+    graph,
+    plan.quad.predicate.value,
+    vocabulary.labelPredicate,
+    vocabulary.commentPredicate,
+    view.locale,
+  );
+  const routeMode = overlay?.overlay.routing?.routeMode
+    ?? (manualWaypoints ? "manual" : template.routeMode ?? "auto");
   return {
     elementId: overlay?.elementId ?? generatedElementId("edge", semanticRef),
     semanticRef,
     structuralKind: "edge",
-    label: selectLabel(
-      graph,
-      plan.quad.predicate.value,
-      vocabulary.labelPredicate,
-      view.locale,
-    ),
+    label: semanticText.primaryLabel?.value ?? compactIri(plan.quad.predicate.value),
+    semanticText,
+    labelProvenance: {
+      kind: "predicate",
+      labelSemanticRef: plan.quad.predicate.value,
+      sourceStatementRefs: semanticText.labels.map((value) => value.statementRef),
+    },
     sourceElementId,
     targetElementId,
     templateRef: template.templateRef,
@@ -366,6 +407,9 @@ function projectDirectEdge(
     labelOffset: overlay?.overlay.routing?.labelOffset,
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
     targetAnchor: overlay?.overlay.routing?.targetAnchor,
+    routeMode,
+    sourceMarker: template.sourceMarker ?? "none",
+    targetMarker: template.targetMarker ?? "arrow",
     routingPlacement: manualWaypoints ? "user" : "generated",
     fallback,
     provenance: {
@@ -406,10 +450,26 @@ function projectDerivedEdges(
         const to = members[index + 1]!;
         if (!from.memberIri || !to.memberIri || from.ordinal === undefined || to.ordinal === undefined) continue;
         const semanticRef = sequenceTransitionIdentity(plan.semanticRef, from.ordinal, to.ordinal);
+        const semanticText = collectSemanticText(
+          graph,
+          plan.semanticRef,
+          vocabulary.labelPredicate,
+          vocabulary.commentPredicate,
+          view.locale,
+        );
         const edge = projectDerivedEdge(
           catalog,
           semanticRef,
           "",
+          semanticText,
+          {
+            kind: "derived-structure",
+            role: "sequence-transition",
+            structureSemanticRef: plan.semanticRef,
+            fromOrdinal: from.ordinal,
+            toOrdinal: to.ordinal,
+            sourceStatementRefs: semanticText.labels.map((value) => value.statementRef),
+          },
           from.memberIri,
           to.memberIri,
           semanticToElement,
@@ -444,6 +504,14 @@ function projectDerivedEdges(
         if (!member.memberIri || member.ordinal === undefined) continue;
         let targetIri = member.memberIri;
         let label = "";
+        let labelSemanticRef: string | undefined;
+        let semanticText = collectSemanticText(
+          graph,
+          plan.semanticRef,
+          vocabulary.labelPredicate,
+          vocabulary.commentPredicate,
+          view.locale,
+        );
         const sourceStatements = [statementIdentityFromQuad(member.quad)];
         const memberPlan = plans.get(member.memberIri);
         const memberOperator = memberPlan?.resolved?.rule.project;
@@ -455,7 +523,15 @@ function projectDerivedEdges(
           )[0];
           if (!first?.memberIri) continue;
           targetIri = first.memberIri;
-          label = selectLabel(graph, member.memberIri, vocabulary.labelPredicate, view.locale);
+          semanticText = collectSemanticText(
+            graph,
+            member.memberIri,
+            vocabulary.labelPredicate,
+            vocabulary.commentPredicate,
+            view.locale,
+          );
+          label = semanticText.primaryLabel?.value ?? compactIri(member.memberIri);
+          labelSemanticRef = member.memberIri;
           sourceStatements.push(statementIdentityFromQuad(first.quad));
         }
         const semanticRef = alternativeBranchIdentity(plan.semanticRef, member.ordinal);
@@ -463,6 +539,14 @@ function projectDerivedEdges(
           catalog,
           semanticRef,
           label,
+          semanticText,
+          {
+            kind: "derived-structure",
+            role: "alternative-branch",
+            structureSemanticRef: plan.semanticRef,
+            ...(labelSemanticRef ? { labelSemanticRef } : {}),
+            sourceStatementRefs: semanticText.labels.map((value) => value.statementRef),
+          },
           plan.semanticRef,
           targetIri,
           semanticToElement,
@@ -494,6 +578,8 @@ function projectDerivedEdge(
   catalog: ProjectionCatalogV1,
   semanticRef: string,
   label: string,
+  semanticText: SceneSemanticText,
+  labelProvenance: ProjectedEdge["labelProvenance"],
   sourceIri: string,
   targetIri: string,
   semanticToElement: ReadonlyMap<string, string>,
@@ -525,11 +611,15 @@ function projectDerivedEdge(
   );
   const waypoints = overlay?.overlay.routing?.waypoints;
   const manualWaypoints = waypoints?.length ? waypoints : undefined;
+  const routeMode = overlay?.overlay.routing?.routeMode
+    ?? (manualWaypoints ? "manual" : template.routeMode ?? "auto");
   return {
     elementId: overlay?.elementId ?? generatedElementId("edge", semanticRef),
     semanticRef,
     structuralKind: "edge",
     label,
+    semanticText,
+    labelProvenance,
     sourceElementId,
     targetElementId,
     templateRef: template.templateRef,
@@ -544,6 +634,9 @@ function projectDerivedEdge(
     labelOffset: overlay?.overlay.routing?.labelOffset,
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
     targetAnchor: overlay?.overlay.routing?.targetAnchor,
+    routeMode,
+    sourceMarker: template.sourceMarker ?? "none",
+    targetMarker: template.targetMarker ?? "arrow",
     routingPlacement: manualWaypoints ? "user" : "generated",
     fallback: false,
     provenance,
@@ -589,18 +682,23 @@ function applyMembershipBindings(
         parentBindings.set(entry.parentElementId, entry.binding);
       }
     }
-    if (view.kind !== "node-link" || parentBindings.size === 0) continue;
-    if (parentBindings.size > 1) {
+    const hierarchicalParents = new Map(
+      [...parentBindings].filter(([, binding]) => (
+        binding.rule.rule.project.operator === "membership-container"
+      )),
+    );
+    if (view.kind !== "node-link" || hierarchicalParents.size === 0) continue;
+    if (hierarchicalParents.size > 1) {
       diagnostics.push({
         severity: "warning",
         code: "multiple-container-memberships-not-hierarchical",
-        message: `${childIri}の${parentBindings.size}件のcontainer membershipはhierarchy parentへ縮約せず保持します。`,
+        message: `${childIri}の${hierarchicalParents.size}件のcontainer membershipはhierarchy parentへ縮約せず保持します。`,
         semanticRef: childIri,
       });
       continue;
     }
     if (child.structuralKind === "region") continue;
-    const [parentElementId, binding] = [...parentBindings.entries()][0]!;
+    const [parentElementId, binding] = [...hierarchicalParents.entries()][0]!;
     child.parentElementId = parentElementId;
     child.parentProvenance = membershipProvenance(childIri, binding);
   }
@@ -613,7 +711,7 @@ function membershipProvenance(
 ): ProjectionProvenance {
   return {
       sourceStatementRefs: [statementIdentityFromQuad(binding.quad)],
-      operator: "membership-container",
+      operator: binding.rule.rule.project.operator,
       rule: ruleReference(binding.rule),
       derivation: "derived",
       editCapability: binding.rule.rule.match.kind === "type" && binding.rule.matchedIri
@@ -623,6 +721,9 @@ function membershipProvenance(
             member: childIri,
             containerTypeIri: binding.rule.matchedIri,
             predicate: binding.quad.predicate.value,
+            containerPosition: binding.rule.rule.project.operator === "membership-region"
+              ? binding.rule.rule.project.containerPosition
+              : "subject",
           }
         : undefined,
   };
@@ -690,23 +791,30 @@ function selectTemplate(
   return catalog.templates[fallbackRef]!;
 }
 
-function selectLabel(
+function collectSemanticText(
   graph: SemanticGraph,
   semanticRef: string,
   labelPredicate: string,
+  commentPredicate: string,
   locale: string | undefined,
-): string {
-  const labels = graph.store
-    .getObjects(semanticRef, labelPredicate, null)
-    .filter((term): term is Literal => term.termType === "Literal")
-    .map((literal) => ({
-      language: literal.language.toLowerCase(),
-      value: literal.value.normalize("NFC"),
+): SceneSemanticText {
+  const values = (predicateIri: string) => graph.store
+    .getQuads(semanticRef, predicateIri, null, null)
+    .filter((quad): quad is Quad & { object: Literal } => quad.object.termType === "Literal")
+    .map((quad) => ({
+      value: quad.object.value.normalize("NFC"),
+      predicateIri,
+      statementRef: statementIdentityFromQuad(quad),
+      ...(quad.object.language ? { language: quad.object.language.toLowerCase() } : {}),
+      ...(quad.object.datatype?.value ? { datatypeIri: quad.object.datatype.value } : {}),
     }))
     .sort((left, right) => (
-      compareCodePoints(left.language, right.language)
+      compareCodePoints(left.language ?? "", right.language ?? "")
       || compareCodePoints(left.value, right.value)
+      || compareCodePoints(left.statementRef, right.statementRef)
     ));
+  const labels = values(labelPredicate);
+  const comments = values(commentPredicate);
   const normalizedLocale = locale?.toLowerCase();
   const primaryLocale = normalizedLocale?.split("-")[0];
   const selected = (
@@ -715,11 +823,15 @@ function selectLabel(
       : undefined
   ) ?? (
     primaryLocale
-      ? labels.find((label) => label.language.split("-")[0] === primaryLocale)
+      ? labels.find((label) => label.language?.split("-")[0] === primaryLocale)
       : undefined
   ) ?? labels.find((label) => !label.language)
     ?? labels[0];
-  return selected?.value ?? compactIri(semanticRef);
+  return {
+    ...(selected ? { primaryLabel: selected } : {}),
+    labels,
+    comments,
+  };
 }
 
 function compactIri(value: string): string {

@@ -49,13 +49,16 @@ overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
 - `pinned`と`placement`: 自動配置かユーザー固定か
-- `appearance`: template、icon、catalog style preset、sparse styleの明示override
-- `routing`: edge waypointとlabel offset
+- `appearance`: template、icon、catalog style preset、sparse styleの明示override、region等の`labelPlacement`
+- `routing`: edgeの`routeMode`、manual waypoint、label offset、source/target anchor
 
 `routing.waypoints`はsource/target attachmentを含まない、ユーザーが確定したmanual中間点だけです。
 空配列はautomatic routingと同じ意味に正規化し、保存時は省略します。`routing.labelOffset`は
 endpoint込みrouteのarc-length 50%地点からの相対値で、labelがないedgeには作成しません。
 Edge routingの編集ではnode/container用の`pinned`、`placement`をedge overlayへ付けません。
+`routeMode`は`auto`、`straight`、`orthogonal`、`curve`、`manual`の閉じた値です。`straight`以外の
+自動modeはlayoutが返す障害物回避routeを利用し、`curve`はそのcorridor内のbendだけをrendererが
+滑らかにします。自動生成した補助点はoverlayへ保存しません。
 
 `appearance.iconRef`はassetの安定したIRIだけを保持します。workspace path、取得URL、
 認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
@@ -71,13 +74,13 @@ sparseに保持します。`styleToken`はabsolute IRIを`styleRef`として読�
 v1 target catalogは次の宣言を持ちます。
 
 - `rules`: type、predicate、fallback patternから汎用projection operatorへの写像
-- `templates`: primitive kind、shape、既定size、style、icon参照
+- `templates`: primitive kind、shape、既定size、style、icon参照、閉じたsource/target terminal marker
 - `styles`: overlayからIRI参照できる安全なsparse style preset
 - `assets`: asset IRIからresolver hintとなる取得定義への写像
 
 `AssetDefinition.url`と`mediaType`はcatalog schema互換のため保持しますが、取得結果としては信頼しません。Host resolverは自身のpolicyと取得正本から実URL、実media type、byte lengthを確認します。Workspace固有assetのようにcatalog外の`iconRef`を解決する場合、resolverへ渡すdefinitionは`undefined`です。
 
-標準catalogはRDF/RDFS IRIを`membership-container`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
+標準catalogはRDF/RDFS IRIを`membership-container`、`membership-region`、`ordinal-sequence`、`alternative`、`direct-edge`、`suppress`へbindします。未登録の直接IRI-object tripleはfallback edgeになります。rule schema、競合解決、標準bindingは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)を正本とします。
 `membership-container.membershipPredicate`は限定RDFS `subPropertyOf` closureで照合し、sourceで使った
 exact predicateはmembership provenanceと`set-membership`逆編集へ保持します。
 
@@ -93,10 +96,19 @@ exact predicateはmembership provenanceと`set-membership`逆編集へ保持し�
 viewの階層化可否にかかわらず全membershipとprovenanceを保持します。複数containerに属する要素へ
 一つの`parentElementId`を恣意的に選びません。
 
+`membership-region`はmembershipの向きを明示し、class regionでは`rdf:type`のobjectをregion、
+subjectをmemberとして投影します。複数membershipの交差cellはSceneから導出するだけで、新しい
+semantic resourceやoverlay identityを作りません。各elementの`semanticText`は全label/commentと
+localeで選択したprimary labelを保持し、language、datatype、元statement identityを失いません。
+Edgeの`labelProvenance`はpredicate、Seq transition、Alt branchのどこから表示名を得たかを区別します。
+
 `SceneEdge.route`はlayoutから導出されるrenderer用polylineで、source/target attachmentを含む
 2点以上の配列です。`SceneEdge.waypoints`はportable overlay由来のmanual中間点だけを表し、
 両者を同じ配列として保存しません。Rendererは`route`を優先し、`route`を持たない旧Scene入力に
 限ってsource/target geometryとlegacy waypointから経路を補います。
+`sourceMarker`/`targetMarker`は`none`、`arrow`、`open-arrow`、`triangle`、`diamond`、`circle`の
+閉じたrenderer vocabularyです。これはpredicate identityの代用ではなく、未知predicateは共通線と
+generic arrowへfallbackします。
 
 Target Sceneの各elementとparent-child関係は、次のedit provenanceを持ちます。これはderived dataでありdocumentには保存しません。
 
@@ -188,7 +200,7 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 | `create-resource` | named resourceと初期statementを追加 | named IRIと、そのresourceをsubjectまたはobjectに含む少なくとも1tripleが同一transactionに必要。node作成UIではtarget viewでnode/containerに投影できることも検証 |
 | `set-property` | literalまたはIRI propertyを追加・置換・削除 | predicate、datatype/language、cardinalityはprofile/domain validationの対象 |
 | `connect-resources` | subjectからobjectへの関係を追加 | predicate必須。直接IRI-object tripleまたはcapability定義のgraph patchとし、generic predicateを暗黙生成しない |
-| `set-membership` | containerとmemberの所属を追加・削除 | RDF/RDFS profileでは`rdf:type rdf:Bag`と`rdfs:member`を用いる。複数membershipを許容し、container間cycleを検証 |
+| `set-membership` | containerとmemberの所属を追加・削除 | Bagではcontainer-subject、class分類ではclass-objectの向きをcatalogから解決する。複数membershipを許容し、hierarchy container間cycleを検証 |
 | `set-sequence` | 順序付きmemberを再構成 | `rdf:Seq`と`rdf:_n`を一括更新し、連番制約を途中状態に適用しない |
 | `set-alternatives` | 選択肢と既定選択を再構成 | `memberIris`を最終ordinal順の正本として`rdf:Alt`と`rdf:_n`を一括更新。2件以上かつ`memberIris[defaultOrdinal - 1] === defaultMemberIri`を要求し、重複IRIを保持 |
 | `delete-resource` | resourceをsubjectとする記述statementとresourceを削除 | 他subjectからresourceへの参照がある場合は既定で拒否。影響statementのpreview付き明示cascadeだけを許可し、Seq/Alt member削除は同じpatchで再採番 |

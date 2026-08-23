@@ -11,6 +11,7 @@ import {
   createStandardLayoutRegistry,
   diagnosticTargetsSceneElement,
   generatedElementId,
+  parseSemanticGraph,
   previewAuthoringCommands,
   seedAuthoringCommandFromProvenance,
   semanticSourceFingerprint,
@@ -23,6 +24,7 @@ import {
   type AssetAccess,
   type AssetMediaType,
   type DiagramScene,
+  type EdgeRouteMode,
   type ElementGeometry,
   type IriographDocument,
   type LayoutAdapterRegistry,
@@ -116,9 +118,13 @@ import {
   type EditorContextActionId,
 } from "../context-actions";
 import { catalogCreationPalette } from "../creation-palette";
+import { diagnosticGuidance } from "../diagnostic-guidance";
+import { semanticDisplayMetadata } from "../semantic-metadata";
+import { membershipRegionClassIrisAtPoint } from "../region-membership-constraints";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
+type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
 
 const props = withDefaults(defineProps<{
   modelValue: IriographDocument;
@@ -211,10 +217,16 @@ const viewDialogTitleId = `${useId()}-view-dialog-title`;
 const contextMenuRequest = ref<DiagramContextMenuRequest>();
 let contextMenuReturnFocus: HTMLElement | undefined;
 const detailsDialogElementId = ref("");
-const creationPalette = ref<{ kind: "node" | "region"; position?: Point; containerIri?: string }>();
+const creationPalette = ref<{
+  kind: "node" | "region";
+  position?: Point;
+  containerIri?: string;
+  classIris?: string[];
+}>();
 const appearanceEditorOpen = ref(false);
 const appearanceTargetIds = ref<string[]>([]);
 const appearancePreviewValue = ref<AppearanceEditorValue>();
+const showAllComments = ref(false);
 let viewDialogReturnFocus: HTMLElement | undefined;
 const defaultLayoutRegistry = createStandardLayoutRegistry();
 const assetSceneSession = new AssetSceneSession();
@@ -292,6 +304,47 @@ const selectedEdge = computed(() => selectedElement.value?.structuralKind === "e
   ? selectedElement.value
   : undefined);
 const selectedManualWaypoints = computed(() => selectedEdge.value?.waypoints ?? []);
+const semanticMetadata = computed(() => semanticDisplayMetadata(draft.value));
+const edgeRouteModes = computed<Record<string, EdgeRouteMode>>(() => Object.fromEntries(
+  scene.value.edges.map((edge) => [edge.elementId, routeModeFor(edge)]),
+));
+const selectedRouteMode = computed<EdgeRouteMode>(() => (
+  selectedEdge.value ? routeModeFor(selectedEdge.value) : "auto"
+));
+const selectedEdgeDisplayName = computed(() => {
+  const edge = selectedEdge.value;
+  if (!edge) return "";
+  const provenance = edge.labelProvenance as (SceneEdge["labelProvenance"] & {
+    fromOrdinal?: number;
+    toOrdinal?: number;
+  }) | undefined;
+  if (
+    !edge.label
+    && provenance?.kind === "derived-structure"
+    && provenance.role === "sequence-transition"
+    && Number.isSafeInteger(provenance.fromOrdinal)
+    && Number.isSafeInteger(provenance.toOrdinal)
+  ) return `順序 ${provenance.fromOrdinal}→${provenance.toOrdinal}`;
+  return edge.label || "名前のない関係";
+});
+const selectedEdgeEndpointLabels = computed(() => {
+  const edge = selectedEdge.value;
+  if (!edge) return { source: "始点", target: "終点" };
+  return {
+    source: edgeEndpointLabel(edge.sourceElementId, "始点"),
+    target: edgeEndpointLabel(edge.targetElementId, "終点"),
+  };
+});
+const selectedEdgeLabelExplanation = computed(() => {
+  const provenance = selectedEdge.value?.labelProvenance;
+  if (provenance?.kind === "predicate") return "この名前はpredicateのlabelから表示しています。意味はTurtleのpredicate IRIに保持されます。";
+  if (provenance?.kind === "derived-structure" && provenance.role === "sequence-transition") return "この線は並び順から導出されています。順序badgeは表示専用で、Turtleへedge labelとして保存しません。";
+  if (provenance?.kind === "derived-structure" && provenance.role === "alternative-branch") return "この名前は分岐または分岐経路のlabelから表示しています。";
+  return "この線の表示名は意味グラフから解決されています。";
+});
+const regionLabelPlacements = computed<Record<string, RegionLabelPlacement>>(() => Object.fromEntries(
+  (scene.value.regions ?? []).map((region) => [region.elementId, regionLabelPlacementFor(region.elementId)]),
+));
 const hasSelectedEditableRouting = computed(() => Boolean(
   selectedEdge.value?.waypoints?.length
     || selectedEdge.value?.labelOffset
@@ -344,19 +397,100 @@ const authoringBlockedReason = computed(() => {
   return "";
 });
 const authoringEnabled = computed(() => !authoringBlockedReason.value);
-const authoringClassChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
-  .filter((term) => term.kind === "class")
-  .map(({ iri, label }) => ({ iri, label })) ?? []);
+const authoringClassChoices = computed<AuthoringChoice[]>(() => {
+  const choices = new Map<string, AuthoringChoice>();
+  for (const term of authoringContext.value?.terms ?? []) {
+    if (term.kind === "class") choices.set(term.iri, {
+      iri: term.iri,
+      label: term.label,
+      description: term.description,
+      category: term.category,
+      example: term.examples?.[0],
+    });
+  }
+  const graph = parseSemanticGraph(draft.value);
+  const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+  const rdfsClass = "http://www.w3.org/2000/01/rdf-schema#Class";
+  for (const quad of graph.quads) {
+    if (
+      quad.subject.termType !== "NamedNode"
+      || quad.predicate.value !== rdfType
+      || quad.object.termType !== "NamedNode"
+      || quad.object.value !== rdfsClass
+    ) continue;
+    const existing = choices.get(quad.subject.value);
+    const label = existing?.label ?? semanticMetadata.value[quad.subject.value]?.labels[0]?.value;
+    choices.set(quad.subject.value, {
+      ...existing,
+      iri: quad.subject.value,
+      label,
+    });
+  }
+  return [...choices.values()];
+});
 const authoringPropertyChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
   .filter((term) => term.kind === "property" && !term.structural)
-  .map(({ iri, label }) => ({ iri, label })) ?? []);
-const authoringEdgeChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
-  .filter((term) => (
+  .map(({ iri, label, description, category, examples }) => ({
+    iri,
+    label,
+    description,
+    category,
+    example: examples?.[0],
+  })) ?? []);
+const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
+  const terms = authoringContext.value?.terms.filter((term) => (
     term.kind === "property"
     && !term.structural
     && (!term.objectKinds || term.objectKinds.includes("iri"))
-  ))
-  .map(({ iri, label }) => ({ iri, label })) ?? []);
+  )) ?? [];
+  const graph = parseSemanticGraph(draft.value);
+  const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+  const rdfsDomain = "http://www.w3.org/2000/01/rdf-schema#domain";
+  const rdfsRange = "http://www.w3.org/2000/01/rdf-schema#range";
+  const rdfsSeeAlso = "http://www.w3.org/2000/01/rdf-schema#seeAlso";
+  const typesOf = (iri: string) => new Set(graph.quads.filter((quad) => (
+    quad.subject.termType === "NamedNode"
+    && quad.subject.value === iri
+    && quad.predicate.value === rdfType
+    && quad.object.termType === "NamedNode"
+  )).map((quad) => quad.object.value));
+  const relationIris = (predicateIri: string, relationIri: string) => graph.quads.filter((quad) => (
+    quad.subject.termType === "NamedNode"
+    && quad.subject.value === predicateIri
+    && quad.predicate.value === relationIri
+    && quad.object.termType === "NamedNode"
+  )).map((quad) => quad.object.value);
+  const sourceTypes = typesOf(authoringDraft.value.sourceIri);
+  const targetTypes = typesOf(authoringDraft.value.targetIri);
+  const labelFor = (iri: string) => semanticMetadata.value[iri]?.labels[0]?.value ?? iri;
+  return terms.map((term) => {
+    const { iri, label } = term;
+    const domains = relationIris(iri, rdfsDomain);
+    const ranges = relationIris(iri, rdfsRange);
+    let priority = 0;
+    if (domains.length && sourceTypes.size) priority += domains.some((value) => sourceTypes.has(value)) ? 20 : -20;
+    if (ranges.length && targetTypes.size) priority += ranges.some((value) => targetTypes.has(value)) ? 10 : -10;
+    const exampleQuad = graph.quads.find((quad) => (
+      quad.subject.termType === "NamedNode"
+      && quad.predicate.value === iri
+      && quad.object.termType === "NamedNode"
+    ));
+    return {
+      iri,
+      label: label ?? semanticMetadata.value[iri]?.labels[0]?.value,
+      description: term.description
+        ?? semanticMetadata.value[iri]?.comments.map((item) => item.value).join("\n"),
+      category: term.category ?? (iri === rdfsSeeAlso ? "参照" : "関係"),
+      example: term.examples?.[0] ?? (exampleQuad?.subject.termType === "NamedNode" && exampleQuad.object.termType === "NamedNode"
+        ? `${labelFor(exampleQuad.subject.value)} → ${labelFor(exampleQuad.object.value)}`
+        : undefined),
+      priority,
+    };
+  }).sort((left, right) => (
+    (right.priority ?? 0) - (left.priority ?? 0)
+    || (left.label ?? left.iri).localeCompare(right.label ?? right.iri, "ja")
+  ));
+});
 const authoringCapabilityChoices = computed<AuthoringCapabilityChoice[]>(() => authoringContext.value?.capabilities
   .map(({ capabilityId, label, parameters }) => ({ iri: capabilityId, label, parameters })) ?? []);
 const authoringResourceChoices = computed<AuthoringChoice[]>(() => {
@@ -382,11 +516,47 @@ const authoringResourceChoices = computed<AuthoringChoice[]>(() => {
   }
   return [...choices.values()];
 });
+const authoringContainerChoices = computed<AuthoringChoice[]>(() => {
+  const classRegionIds = new Set((scene.value.regions ?? [])
+    .filter((region) => region.provenance?.operator === "membership-region")
+    .map((region) => region.elementId));
+  return [
+    ...scene.value.containers,
+    ...(scene.value.regions ?? []).filter((region) => !classRegionIds.has(region.elementId)),
+  ].map((element) => ({
+  iri: element.semanticRef,
+  label: element.label,
+  structuralKind: element.structuralKind as "container" | "region",
+}))
+    .filter((choice, index, all) => all.findIndex((candidate) => candidate.iri === choice.iri) === index);
+});
 const selectedAuthoringResource = computed<AuthoringChoice | undefined>(() => {
   const element = selectedElement.value;
   return element && element.structuralKind !== "edge"
-    ? { iri: element.semanticRef, label: element.label }
+    ? {
+        iri: element.semanticRef,
+        label: element.label,
+        structuralKind: element.structuralKind,
+      }
     : undefined;
+});
+const selectedAuthoringResources = computed<AuthoringChoice[]>(() => {
+  const candidates = [
+    ...scene.value.containers,
+    ...(scene.value.regions ?? []),
+    ...scene.value.nodes,
+  ];
+  const choices = selectedElementIds.value
+    .map((elementId) => candidates.find((candidate) => candidate.elementId === elementId))
+    .filter((candidate): candidate is typeof candidates[number] => Boolean(candidate))
+    .map((element) => ({
+      iri: element.semanticRef,
+      label: element.label,
+      structuralKind: element.structuralKind as "node" | "container" | "region",
+    }));
+  return choices.filter((choice, index) => (
+    choices.findIndex((candidate) => candidate.iri === choice.iri) === index
+  ));
 });
 const authoringResourcePickerLabel = computed(() => {
   const target = authoringResourcePicker.value;
@@ -701,11 +871,22 @@ const contextMenuActions = computed(() => contextActionsFor(
   contextMenuRequest.value?.kind ?? "blank",
   props.readOnly,
 ));
-const detailsDialogElement = computed(() => [
+const detailsDialogTarget = computed(() => {
+  const element = [
   ...scene.value.nodes,
   ...scene.value.containers,
   ...(scene.value.regions ?? []),
-].find((element) => element.elementId === detailsDialogElementId.value));
+  ].find((candidate) => candidate.elementId === detailsDialogElementId.value);
+  if (element) return { semanticRef: element.semanticRef, label: element.label, notice: undefined };
+  const edge = scene.value.edges.find((candidate) => candidate.elementId === detailsDialogElementId.value);
+  return edge?.labelProvenance?.kind === "predicate"
+    ? {
+        semanticRef: edge.labelProvenance.labelSemanticRef,
+        label: edge.label || "関係",
+        notice: "ここで変更した名前・説明は、この関係種別を使うすべてのedge表示に反映されます。",
+      }
+    : undefined;
+});
 const creationPaletteCards = computed(() => catalogCreationPalette(
   activeCatalog.value,
   authoringContext.value?.terms ?? [],
@@ -1195,7 +1376,11 @@ function updateSnapGridSize(event: Event): void {
   } });
 }
 
-function changeRouting(payload: EdgeRoutingUpdate, recordHistory = false): void {
+function changeRouting(
+  payload: EdgeRoutingUpdate,
+  recordHistory = false,
+  preserveRouteMode = true,
+): void {
   mutateDocument((document) => {
     const edge = scene.value.edges.find((candidate) => candidate.elementId === payload.elementId);
     const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
@@ -1205,9 +1390,15 @@ function changeRouting(payload: EdgeRoutingUpdate, recordHistory = false): void 
       ? { ...payload.routing, labelOffset: undefined }
       : payload.routing;
     const routingValue = normalizeEditableRouting(requestedRouting);
-    const routing = routingValue || current.routing?.extensions
+    const routeMode: EdgeRouteMode | undefined = preserveRouteMode
+      ? current.routing?.routeMode === "manual"
+        ? routingValue?.waypoints?.length ? "manual" : undefined
+        : current.routing?.routeMode
+      : undefined;
+    const routing = routingValue || current.routing?.extensions || routeMode
       ? {
           ...routingValue,
+          ...(routeMode ? { routeMode } : {}),
           ...(current.routing?.extensions ? { extensions: clone(current.routing.extensions) } : {}),
         }
       : undefined;
@@ -1336,7 +1527,69 @@ function resetEndpointAnchor(endpoint: "source" | "target"): void {
 function resetSelectedRouting(): void {
   const edge = selectedEdge.value;
   if (!edge) return;
-  changeRouting({ elementId: edge.elementId }, true);
+  changeRouting({ elementId: edge.elementId }, true, false);
+}
+
+function routeModeFor(edge: SceneEdge): EdgeRouteMode {
+  const value = activeView.value?.overlay[edge.elementId]?.routing?.routeMode ?? edge.routeMode;
+  return isEdgeRouteMode(value) ? value : edge.waypoints?.length ? "manual" : "auto";
+}
+
+function isEdgeRouteMode(value: unknown): value is EdgeRouteMode {
+  return typeof value === "string" && ["auto", "straight", "orthogonal", "curve", "manual"].includes(value);
+}
+
+function setSelectedRouteMode(mode: EdgeRouteMode): void {
+  const edge = selectedEdge.value;
+  if (!edge || props.readOnly) return;
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[edge.elementId] ?? { semanticRef: edge.semanticRef };
+    const routing = clone(current.routing) ?? {};
+    if (mode === "auto") delete routing.routeMode;
+    else routing.routeMode = mode;
+    if (mode !== "manual") delete routing.waypoints;
+    const hasRouting = Boolean(
+      routing.routeMode
+      || routing.waypoints?.length
+      || routing.labelOffset
+      || routing.sourceAnchor
+      || routing.targetAnchor
+      || routing.extensions,
+    );
+    const entry: ViewElementOverlay = { ...current, semanticRef: edge.semanticRef };
+    if (hasRouting) entry.routing = routing;
+    else delete entry.routing;
+    if (!entry.routing && !entry.appearance && !entry.geometry && !entry.extensions) delete view.overlay[edge.elementId];
+    else view.overlay[edge.elementId] = entry;
+  }, true);
+}
+
+function regionLabelPlacementFor(elementId: string): RegionLabelPlacement {
+  const element = (scene.value.regions ?? []).find((candidate) => candidate.elementId === elementId);
+  const value = activeView.value?.overlay[elementId]?.appearance?.labelPlacement ?? element?.labelPlacement;
+  return typeof value === "string" && ["top", "right", "bottom", "left"].includes(value)
+    ? value as RegionLabelPlacement
+    : "top";
+}
+
+function updateSelectedRegionLabelPlacement(event: Event): void {
+  const element = selectedElement.value;
+  const placement = (event.target as HTMLSelectElement).value as RegionLabelPlacement;
+  if (element?.structuralKind !== "region" || props.readOnly) return;
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
+    const appearance = { ...current.appearance };
+    if (placement === "top") delete appearance.labelPlacement;
+    else appearance.labelPlacement = placement;
+    if (Object.keys(appearance).length) current.appearance = appearance;
+    else delete current.appearance;
+    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[element.elementId];
+    else view.overlay[element.elementId] = current;
+  }, true);
 }
 
 function updateGeometryField(field: keyof ElementGeometry, event: Event): void {
@@ -1587,11 +1840,23 @@ function updateAuthoringDraft(next: EditorAuthoringDraft): void {
     ? undefined
     : selectedElement.value;
   if (changedKind && selected) {
-    if (next.kind === "set-property") next.subjectIri = selected.semanticRef;
+    const batch = selectedAuthoringResources.value;
+    if (next.kind === "set-property") {
+      next.subjectIri = batch[0]?.iri ?? selected.semanticRef;
+      next.subjectIris = batch.slice(1).map((item) => item.iri);
+    }
     if (next.kind === "connect-resources") next.sourceIri = selected.semanticRef;
     if (next.kind === "set-membership") {
-      if (selected.structuralKind === "container") next.containerIri = selected.semanticRef;
-      else next.memberIri = selected.semanticRef;
+      const selectedContainer = batch.length === 1
+        && (selected.structuralKind === "container" || selected.structuralKind === "region");
+      if (selectedContainer) {
+        next.containerIri = selected.semanticRef;
+        next.memberIri = "";
+        next.memberIris = [];
+      } else {
+        next.memberIri = batch[0]?.iri ?? selected.semanticRef;
+        next.memberIris = batch.slice(1).map((item) => item.iri);
+      }
     }
     if (next.kind === "set-sequence" || next.kind === "set-alternatives") {
       next.structureIri = selected.semanticRef;
@@ -1646,7 +1911,7 @@ async function previewStructuredAuthoring(): Promise<void> {
 
 async function previewDetailsCommands(commands: AuthoringCommand[]): Promise<void> {
   const context = authoringContext.value;
-  const element = detailsDialogElement.value;
+  const element = detailsDialogTarget.value;
   if (!context || !element || !authoringEnabled.value || authoringBusy.value || commands.length === 0) return;
   detailsDialogElementId.value = "";
   cancelAuthoringRequest();
@@ -1841,25 +2106,41 @@ function runContextAction(actionId: EditorContextActionId): void {
       if (element?.structuralKind === "edge" && !element.waypoints?.length) addSelectedWaypoint();
       return;
     case "edit-endpoints":
-    case "inspect-edge":
       appearanceEditorOpen.value = false;
       void nextTick(() => document.querySelector<HTMLElement>(".iriograph-endpoint-anchor-fields input")?.focus());
       return;
+    case "inspect-edge":
+      if (element?.structuralKind === "edge" && element.labelProvenance?.kind === "predicate") {
+        openDetailsDialog(element.elementId);
+      } else {
+        appearanceEditorOpen.value = false;
+        void nextTick(() => document.querySelector<HTMLElement>(".iriograph-endpoint-anchor-fields input")?.focus());
+      }
+      return;
     case "create-node":
-      creationPalette.value = { kind: "node", position: request?.canvasPosition };
+      creationPalette.value = {
+        kind: "node",
+        position: request?.canvasPosition,
+        classIris: request?.canvasPosition
+          ? membershipRegionClassIrisAtPoint(scene.value, request.canvasPosition)
+          : [],
+      };
       return;
     case "create-region":
       creationPalette.value = { kind: "region", position: request?.canvasPosition };
       return;
     case "add-contained-element":
       if (element && element.structuralKind !== "edge") {
+        const position = request?.canvasPosition ?? ("geometry" in element ? {
+          x: element.geometry.x + element.geometry.width / 2,
+          y: element.geometry.y + element.geometry.height / 2,
+        } : undefined);
+        const classIris = position ? membershipRegionClassIrisAtPoint(scene.value, position) : [];
         creationPalette.value = {
           kind: "node",
-          position: request?.canvasPosition ?? ("geometry" in element ? {
-            x: element.geometry.x + element.geometry.width / 2,
-            y: element.geometry.y + element.geometry.height / 2,
-          } : undefined),
-          containerIri: element.semanticRef,
+          position,
+          classIris,
+          ...(classIris.length === 0 ? { containerIri: element.semanticRef } : {}),
         };
       }
   }
@@ -1972,6 +2253,10 @@ function containmentElementLabel(elementId: string): string {
   return geometryElement(elementId)?.label ?? compactRef(elementId);
 }
 
+function edgeEndpointLabel(elementId: string, fallback: string): string {
+  return geometryElement(elementId)?.label || fallback;
+}
+
 function containmentWarningMessage(warning: ContainmentConsistencyWarning): string {
   if (warning.kind === "visual-only") {
     return `${containmentElementLabel(warning.elementId)} は見た目上 ${containmentElementLabel(warning.visualContainerId)} の中ですが、意味上の包含はありません。`;
@@ -2003,6 +2288,14 @@ function seedSelectedResource(
     "membership-container": "containerIri",
     "membership-member": "memberIri",
   }[target] as "sourceIri" | "targetIri" | "containerIri" | "memberIri";
+  if (field === "memberIri" && selectedAuthoringResources.value.length > 1) {
+    updateAuthoringDraft({
+      ...authoringDraft.value,
+      memberIri: selectedAuthoringResources.value[0]?.iri ?? selected.iri,
+      memberIris: selectedAuthoringResources.value.slice(1).map((item) => item.iri),
+    });
+    return;
+  }
   updateAuthoringDraft({ ...authoringDraft.value, [field]: selected.iri });
 }
 
@@ -2024,12 +2317,14 @@ function seedDraftPosition(position: Point, containerIri?: string): void {
     x: Math.max(8, Math.min(position.x, scene.value.width - size.width - 8)),
     y: Math.max(8, Math.min(position.y, scene.value.height - size.height - 8)),
   };
+  const matrixClassIris = membershipRegionClassIrisAtPoint(scene.value, position);
   updateAuthoringDraft({
     ...authoringDraft.value,
     initialX: String(Math.round(bounded.x)),
     initialY: String(Math.round(bounded.y)),
     positionPicking: false,
-    ...(containerIri ? createMembershipSeed(containerIri) : {}),
+    classIris: [...new Set([...authoringDraft.value.classIris, ...matrixClassIris])],
+    ...(containerIri && matrixClassIris.length === 0 ? createMembershipSeed(containerIri) : {}),
   });
 }
 
@@ -2852,7 +3147,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <div>
             <span><b>{{ scene.nodes.length }}</b> nodes</span>
             <span><b>{{ scene.edges.length }}</b> edges</span>
-            <span><b>{{ scene.containers.length }}</b> areas</span>
+            <span><b>{{ scene.containers.length + (scene.regions?.length ?? 0) }}</b> areas</span>
           </div>
         </section>
         <nav class="iriograph-element-list" aria-label="Scene elements">
@@ -2899,6 +3194,12 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <small>{{ activeView?.layoutRef }}</small>
             </div>
             <div class="iriograph-navigation-actions">
+              <button
+                type="button"
+                :aria-pressed="showAllComments"
+                :title="showAllComments ? '説明をhover時だけ表示' : 'すべての説明を表示'"
+                @click="showAllComments = !showAllComments"
+              >{{ showAllComments ? '説明を隠す' : '説明を表示' }}</button>
               <button type="button" aria-label="全体を表示" title="Fit to view" @click="fitToView">▣</button>
               <button
                 type="button"
@@ -2983,6 +3284,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :semantic-resource-pick-label="authoringResourcePickerLabel"
             :semantic-draft-position="authoringDraftPosition"
             :containment-warning-element-ids="containmentWarningElementIds"
+            :semantic-metadata="semanticMetadata"
+            :show-all-comments="showAllComments"
+            :edge-route-modes="edgeRouteModes"
+            :region-label-placements="regionLabelPlacements"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
             @selection-set-request="selectElements"
@@ -3034,7 +3339,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </footer>
             <ul v-if="diagnostics.length" class="iriograph-diagnostics">
               <li v-for="(diagnostic, index) in diagnostics" :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`" :class="diagnostic.severity">
-                <span><b>{{ diagnostic.code }}</b> {{ diagnostic.message }}</span>
+                  <span><b>{{ diagnosticGuidance(diagnostic).title }}</b> {{ diagnosticGuidance(diagnostic).action }}<details><summary>技術的な詳細</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic).detail }}</details></span>
                 <span class="iriograph-diagnostic-actions">
                   <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Source</button>
                   <button v-if="sceneElementForDiagnostic(diagnostic)" type="button" @click="navigateDiagnosticToScene(diagnostic)">Scene</button>
@@ -3047,6 +3352,15 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </main>
 
       <aside class="iriograph-inspector">
+        <section v-if="selectedEdge" class="iriograph-edge-routing-quick" aria-label="選択した関係の経路">
+          <header><div><small>SELECTED RELATION</small><strong>{{ selectedEdgeDisplayName }}</strong></div><span>{{ selectedManualWaypoints.length }} waypoint</span></header>
+          <div class="iriograph-edge-contract"><span>{{ selectedEdgeEndpointLabels.source }}</span><b>→</b><span>{{ selectedEdgeEndpointLabels.target }}</span></div>
+          <p>{{ selectedEdgeLabelExplanation }}</p>
+          <button v-if="selectedEdge.labelProvenance?.kind === 'predicate'" type="button" class="iriograph-wide-button" :disabled="readOnly || !authoringEnabled" @click="openDetailsDialog(selectedEdge.elementId)">関係名・説明を編集</button>
+          <label><span>線の形式</span><select :value="selectedRouteMode" :disabled="readOnly" @change="setSelectedRouteMode(($event.target as HTMLSelectElement).value as EdgeRouteMode)"><option value="auto">自動</option><option value="straight">直線（waypointなし）</option><option value="orthogonal">直交線</option><option value="curve">曲線</option><option value="manual">waypointで調整</option></select></label>
+          <button v-if="selectedRouteMode === 'manual'" type="button" class="iriograph-wide-button" :disabled="readOnly" @click="addSelectedWaypoint">Waypointを追加</button>
+          <small>接点と詳細な座標は下の「経路・接点」で調整できます。</small>
+        </section>
         <AuthoringPanel
           :model-value="authoringDraft"
           :enabled="authoringEnabled"
@@ -3056,9 +3370,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           :properties="authoringPropertyChoices"
           :edge-predicates="authoringEdgeChoices"
           :resources="authoringResourceChoices"
+          :containers="authoringContainerChoices"
           :capabilities="authoringCapabilityChoices"
           :structures="authoringStructureChoices"
           :selected-resource="selectedAuthoringResource"
+          :selected-resources="selectedAuthoringResources"
           :picker-target="authoringResourcePicker"
           :preview="authoringPreviewView"
           :diagnostics="applyDiagnostics"
@@ -3133,8 +3449,9 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`"
               :class="diagnostic.severity"
             >
-              <b>{{ diagnostic.code }}</b>
-              <span>{{ diagnostic.message }}</span>
+              <b>{{ diagnosticGuidance(diagnostic).title }}</b>
+              <span>{{ diagnosticGuidance(diagnostic).action }}</span>
+              <details><summary>技術的な詳細</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic).detail }}</details>
               <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Sourceへ移動</button>
             </article>
           </section>
@@ -3172,6 +3489,12 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               {{ pickingAsset ? "assetを選択中…" : "Workspace assetを選択" }}
             </button>
           </section>
+          <section v-if="selectedElement.structuralKind === 'region'">
+            <label>領域名の位置</label>
+            <select :value="regionLabelPlacements[selectedElement.elementId] ?? 'top'" :disabled="readOnly" @change="updateSelectedRegionLabelPlacement">
+              <option value="top">上</option><option value="right">右</option><option value="bottom">下</option><option value="left">左</option>
+            </select>
+          </section>
           <section v-if="'geometry' in selectedElement">
             <div class="iriograph-section-heading">
               <label>Geometry overlay</label>
@@ -3192,7 +3515,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <section v-if="selectedElement.structuralKind === 'edge'">
             <label>Projection</label>
             <div class="iriograph-edge-contract">
-              <span>{{ selectedElement.sourceElementId }}</span><b>→</b><span>{{ selectedElement.targetElementId }}</span>
+              <span>{{ edgeEndpointLabel(selectedElement.sourceElementId, '始点') }}</span><b>→</b><span>{{ edgeEndpointLabel(selectedElement.targetElementId, '終点') }}</span>
             </div>
             <p>{{ selectedElement.fallback ? "標準の矢印として表示" : "定義済みの関係表示" }}</p>
             <details><summary>Advanced: projection rule</summary><code>{{ selectedElement.provenance?.rule?.ruleId ?? selectedElement.projectionRuleId }}</code></details>
@@ -3349,21 +3672,25 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       :kind="creationPalette.kind"
       :cards="creationPaletteCards"
       :resources="authoringResourceChoices"
+      :classes="authoringClassChoices"
+      :containers="authoringContainerChoices"
       :predicates="authoringEdgeChoices"
       :memberships="authoringStructureChoices.filter((item) => item.kind === 'membership')"
       :position="creationPalette.position"
       :container-iri="creationPalette.containerIri"
+      :initial-class-iris="creationPalette.classIris"
       @seed="seedCreationDraft"
       @close="creationPalette = undefined"
     />
     <ResourceDetailsDialog
-      v-if="detailsDialogElement"
+      v-if="detailsDialogTarget"
       :document="draft"
-      :subject-iri="detailsDialogElement.semanticRef"
-      :title="detailsDialogElement.label"
+      :subject-iri="detailsDialogTarget.semanticRef"
+      :title="detailsDialogTarget.label"
       :terms="authoringContext?.terms ?? []"
       :resources="authoringResourceChoices"
       :busy="authoringBusy"
+      :notice="detailsDialogTarget.notice"
       @preview="previewDetailsCommands"
       @close="detailsDialogElementId = ''"
     />

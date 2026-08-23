@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from "vue";
+import { computed, ref, useId } from "vue";
 import type { ProjectionDiagnostic } from "@iriograph/core";
 
 import type {
@@ -20,6 +20,7 @@ import {
   splitIriLines,
 } from "../authoring-draft";
 import IriChoiceField from "./IriChoiceField.vue";
+import { diagnosticGuidance } from "../diagnostic-guidance";
 
 const props = withDefaults(defineProps<{
   modelValue: EditorAuthoringDraft;
@@ -30,9 +31,11 @@ const props = withDefaults(defineProps<{
   properties?: AuthoringChoice[];
   edgePredicates?: AuthoringChoice[];
   resources?: AuthoringChoice[];
+  containers?: AuthoringChoice[];
   capabilities?: AuthoringCapabilityChoice[];
   structures?: AuthoringStructureChoice[];
   selectedResource?: AuthoringChoice;
+  selectedResources?: AuthoringChoice[];
   preview?: AuthoringPreviewView;
   diagnostics?: ProjectionDiagnostic[];
   pickerTarget?: AuthoringResourcePickerTarget;
@@ -44,9 +47,11 @@ const props = withDefaults(defineProps<{
   properties: () => [],
   edgePredicates: () => [],
   resources: () => [],
+  containers: () => [],
   capabilities: () => [],
   structures: () => [],
   selectedResource: undefined,
+  selectedResources: () => [],
   preview: undefined,
   diagnostics: () => [],
   pickerTarget: undefined,
@@ -54,6 +59,11 @@ const props = withDefaults(defineProps<{
 
 const instanceId = useId();
 const resourceListId = `${instanceId}-authoring-resources`;
+const structureMemberCandidate = ref("");
+const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label";
+const RDFS_COMMENT = "http://www.w3.org/2000/01/rdf-schema#comment";
+const RDFS_SUBCLASS = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 
 const emit = defineEmits<{
   "update:modelValue": [draft: EditorAuthoringDraft];
@@ -87,6 +97,25 @@ const relevantStructures = computed(() => props.structures.filter((item) => (
   || (props.modelValue.kind === "set-alternatives" && item.kind === "alternatives")
 )));
 const membershipStructures = computed(() => props.structures.filter((item) => item.kind === "membership"));
+const structureMembers = computed(() => splitIriLines(props.modelValue.membersText));
+const selectedBatch = computed(() => {
+  const values = props.selectedResources.length
+    ? props.selectedResources
+    : props.selectedResource ? [props.selectedResource] : [];
+  return values.filter((item, index) => values.findIndex((candidate) => candidate.iri === item.iri) === index);
+});
+const propertyObjectChoices = computed(() => (
+  props.modelValue.predicateIri === RDF_TYPE || props.modelValue.predicateIri === RDFS_SUBCLASS
+    ? props.classes
+    : props.resources
+));
+const isMultilinePredicate = computed(() => (
+  props.modelValue.predicateIri === RDFS_LABEL || props.modelValue.predicateIri === RDFS_COMMENT
+));
+const selectedMembershipIris = computed(() => new Set([
+  props.modelValue.memberIri,
+  ...props.modelValue.memberIris,
+].filter(Boolean)));
 
 function update<K extends keyof EditorAuthoringDraft>(
   key: K,
@@ -104,11 +133,47 @@ function changeKind(event: Event): void {
 }
 
 function selectQuickKind(kind: EditorAuthoringKind): void {
-  const draft = emptyAuthoringDraft(kind, props.selectedResource?.iri ?? "");
+  const primary = selectedBatch.value[0]?.iri ?? props.selectedResource?.iri ?? "";
+  const draft = emptyAuthoringDraft(kind, primary);
+  if (kind === "set-property") {
+    draft.subjectIri = primary;
+    draft.subjectIris = selectedBatch.value.slice(1).map((item) => item.iri);
+  }
+  if (kind === "set-membership") {
+    const singleContainer = selectedBatch.value.length === 1
+      && ["container", "region"].includes(selectedBatch.value[0]?.structuralKind ?? "");
+    if (singleContainer) {
+      draft.containerIri = primary;
+      draft.memberIri = "";
+    } else {
+      draft.memberIri = primary;
+      draft.memberIris = selectedBatch.value.slice(1).map((item) => item.iri);
+    }
+  }
   if (kind === "connect-resources" && props.edgePredicates.length === 1) {
     draft.predicateIri = props.edgePredicates[0]?.iri ?? "";
   }
   emit("update:modelValue", draft);
+}
+
+function selectClassification(predicateIri: typeof RDF_TYPE | typeof RDFS_SUBCLASS): void {
+  const primary = selectedBatch.value[0]?.iri ?? props.selectedResource?.iri ?? "";
+  const draft = emptyAuthoringDraft("set-property", primary);
+  draft.subjectIri = primary;
+  draft.subjectIris = selectedBatch.value.slice(1).map((item) => item.iri);
+  draft.predicateIri = predicateIri;
+  draft.propertyValues = [emptyPropertyValueDraft("iri")];
+  emit("update:modelValue", draft);
+}
+
+function updateMembershipSelection(iri: string, selected: boolean): void {
+  const values = [...selectedMembershipIris.value].filter((item) => item !== iri);
+  if (selected) values.push(iri);
+  emit("update:modelValue", {
+    ...props.modelValue,
+    memberIri: values[0] ?? "",
+    memberIris: values.slice(1),
+  });
 }
 
 function selectCapabilityAction(capability: AuthoringCapabilityChoice): void {
@@ -204,6 +269,38 @@ function memberAtOrdinal(source: string, ordinal: number): string {
   return Number.isSafeInteger(ordinal) && ordinal > 0 ? splitIriLines(source)[ordinal - 1] ?? "" : "";
 }
 
+function memberLabel(iri: string): string {
+  return props.resources.find((item) => item.iri === iri)?.label ?? iri;
+}
+
+function addStructureMember(): void {
+  if (!structureMemberCandidate.value) return;
+  updateMembers([...structureMembers.value, structureMemberCandidate.value].join("\n"));
+  structureMemberCandidate.value = "";
+}
+
+function removeStructureMember(index: number): void {
+  const members = [...structureMembers.value];
+  members.splice(index, 1);
+  updateMembers(members.join("\n"));
+}
+
+function moveStructureMember(index: number, delta: -1 | 1): void {
+  const target = index + delta;
+  const members = [...structureMembers.value];
+  if (target < 0 || target >= members.length) return;
+  [members[index], members[target]] = [members[target]!, members[index]!];
+  updateMembers(members.join("\n"));
+}
+
+function setDefaultStructureMember(index: number): void {
+  emit("update:modelValue", {
+    ...props.modelValue,
+    defaultOrdinal: String(index + 1),
+    defaultMemberIri: structureMembers.value[index] ?? "",
+  });
+}
+
 function changeCapability(event: Event): void {
   const capabilityId = inputValue(event);
   const capability = props.capabilities.find((item) => item.iri === capabilityId);
@@ -243,7 +340,7 @@ function requestPosition(): void {
     </header>
     <p v-if="blockedReason" class="iriograph-authoring-blocked">{{ blockedReason }}</p>
     <ul v-if="!preview && diagnostics.length" class="iriograph-authoring-diagnostics">
-      <li v-for="(item, index) in diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ item.code }}</b> {{ item.message }}</li>
+      <li v-for="(item, index) in diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ diagnosticGuidance(item).title }}</b><span>{{ diagnosticGuidance(item).action }}</span><details><summary>技術的な詳細</summary><code>{{ item.code }}</code> {{ diagnosticGuidance(item).detail }}</details></li>
     </ul>
     <datalist :id="resourceListId"><option v-for="item in resources" :key="item.iri" :value="item.iri">{{ item.label }}</option></datalist>
     <nav class="iriograph-authoring-quick-actions" aria-label="意味グラフの操作">
@@ -251,6 +348,8 @@ function requestPosition(): void {
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('openDetails')">詳細・属性</button>
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectQuickKind('connect-resources')">関係を作成</button>
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectQuickKind('set-membership')">領域・包含</button>
+      <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectClassification(RDF_TYPE)">分類を設定</button>
+      <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectClassification(RDFS_SUBCLASS)">上位概念を設定</button>
       <button v-if="selectedResource && structures.some((item) => item.kind === 'sequence')" type="button" :disabled="!enabled || busy" @click="selectQuickKind('set-sequence')">並び順を編集</button>
       <button v-if="selectedResource && structures.some((item) => item.kind === 'alternatives')" type="button" :disabled="!enabled || busy" @click="selectQuickKind('set-alternatives')">分岐を編集</button>
       <button v-for="capability in capabilities" :key="capability.iri" type="button" :title="capability.iri" :disabled="!enabled || busy" @click="selectCapabilityAction(capability)">{{ capability.label ?? '追加アクション' }}</button>
@@ -308,6 +407,7 @@ function requestPosition(): void {
     </template>
 
     <template v-else-if="modelValue.kind === 'set-property'">
+      <div v-if="modelValue.subjectIris.length" class="iriograph-authoring-batch-summary"><b>{{ modelValue.subjectIris.length + 1 }}件をまとめて更新</b><span>同じ属性と値を選択中の要素へ適用します。</span></div>
       <IriChoiceField label="対象" input-label="Property subject" :model-value="modelValue.subjectIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'subjectIri' })" @update:model-value="update('subjectIri', $event)" @pick="requestResource({ field: 'subjectIri' })" />
       <IriChoiceField label="属性" input-label="Property predicate" :model-value="modelValue.predicateIri" :choices="properties" :enabled="enabled && !busy" :allow-empty="false" @update:model-value="update('predicateIri', $event)" />
       <label><span>更新方法</span><select aria-label="Property update mode" :value="modelValue.propertyMode" :disabled="!enabled || busy" @change="update('propertyMode', inputValue($event) as 'replace' | 'delete')"><option value="replace">値を完全置換</option><option value="delete">属性を削除</option></select></label>
@@ -315,8 +415,8 @@ function requestPosition(): void {
         <fieldset v-for="(value, index) in modelValue.propertyValues" :key="index" class="iriograph-authoring-value-row">
           <legend>値 {{ index + 1 }}</legend>
           <label><span>値の種類</span><select :aria-label="`Property object kind ${index + 1}`" :value="value.objectKind" :disabled="!enabled || busy" @change="updatePropertyValue(index, 'objectKind', inputValue($event) as 'literal' | 'iri')"><option value="literal">テキスト</option><option value="iri">既存要素</option></select></label>
-          <IriChoiceField v-if="value.objectKind === 'iri'" label="既存要素" :input-label="`Property value ${index + 1}`" :model-value="value.value" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'propertyValue', index })" @update:model-value="updatePropertyValue(index, 'value', $event)" @pick="requestResource({ field: 'propertyValue', index })" />
-          <label v-else><span>値</span><input :aria-label="`Property value ${index + 1}`" :value="value.value" :disabled="!enabled || busy" @input="updatePropertyValue(index, 'value', inputValue($event))" /></label>
+          <IriChoiceField v-if="value.objectKind === 'iri'" :label="modelValue.predicateIri === RDF_TYPE ? '概念クラス' : modelValue.predicateIri === RDFS_SUBCLASS ? '上位概念' : '既存要素'" :input-label="`Property value ${index + 1}`" :model-value="value.value" :choices="propertyObjectChoices" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'propertyValue', index })" @update:model-value="updatePropertyValue(index, 'value', $event)" @pick="requestResource({ field: 'propertyValue', index })" />
+          <label v-else><span>値</span><textarea v-if="isMultilinePredicate" :aria-label="`Property value ${index + 1}`" :value="value.value" :disabled="!enabled || busy" rows="3" @input="updatePropertyValue(index, 'value', inputValue($event))" /><input v-else :aria-label="`Property value ${index + 1}`" :value="value.value" :disabled="!enabled || busy" @input="updatePropertyValue(index, 'value', inputValue($event))" /></label>
           <template v-if="value.objectKind === 'literal'">
             <label><span>Language</span><input :aria-label="`Literal language ${index + 1}`" :value="value.language" :disabled="!enabled || busy || Boolean(value.datatypeIri)" @input="updatePropertyValue(index, 'language', inputValue($event))" /></label>
             <label><span>Datatype IRI</span><input :aria-label="`Literal datatype ${index + 1}`" :value="value.datatypeIri" :disabled="!enabled || busy || Boolean(value.language)" @input="updatePropertyValue(index, 'datatypeIri', inputValue($event))" /></label>
@@ -339,10 +439,12 @@ function requestPosition(): void {
     <template v-else-if="modelValue.kind === 'set-membership'">
       <label><span>包含方法</span><select aria-label="Membership structure config" :value="modelValue.structureConfigKey" :disabled="!enabled || busy" @change="selectStructure"><option value="">選択してください</option><option v-for="item in relevantStructures" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
       <details v-if="modelValue.containerTypeIri" class="iriograph-authoring-advanced"><summary>Advanced: 包含定義</summary><code>{{ modelValue.containerTypeIri }} / {{ modelValue.membershipPredicateIri }}</code></details>
-      <IriChoiceField label="領域" input-label="Membership container" :model-value="modelValue.containerIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'containerIri' })" @update:model-value="update('containerIri', $event)" @pick="requestResource({ field: 'containerIri' })" />
+      <IriChoiceField label="領域" input-label="Membership container" :model-value="modelValue.containerIri" :choices="containers" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'containerIri' })" @update:model-value="update('containerIri', $event)" @pick="requestResource({ field: 'containerIri' })" />
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('seedSelection', 'membership-container')">選択中を領域へ</button>
+      <div v-if="modelValue.memberIris.length" class="iriograph-authoring-batch-summary"><b>{{ modelValue.memberIris.length + 1 }}件をまとめて更新</b><span>選択した要素を同じ領域へ含めます。</span></div>
       <IriChoiceField label="含まれる要素" input-label="Membership member" :model-value="modelValue.memberIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'memberIri' })" @update:model-value="update('memberIri', $event)" @pick="requestResource({ field: 'memberIri' })" />
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('seedSelection', 'membership-member')">選択中を含まれる要素へ</button>
+      <details class="iriograph-authoring-member-picker"><summary>複数の要素をまとめて選択</summary><div class="iriograph-authoring-check-grid"><label v-for="item in resources.filter((candidate) => candidate.iri !== modelValue.containerIri)" :key="item.iri"><input type="checkbox" :checked="selectedMembershipIris.has(item.iri)" :disabled="!enabled || busy" @change="updateMembershipSelection(item.iri, ($event.target as HTMLInputElement).checked)" /><span>{{ item.label ?? item.iri }}</span></label></div></details>
       <label class="iriograph-authoring-check"><input aria-label="Membership present" type="checkbox" :checked="modelValue.present" :disabled="!enabled || busy" @change="update('present', ($event.target as HTMLInputElement).checked)" /><span>領域へ含める</span></label>
     </template>
 
@@ -350,11 +452,17 @@ function requestPosition(): void {
       <label><span>{{ modelValue.kind === 'set-sequence' ? '並び方' : '分岐方法' }}</span><select aria-label="Ordinal structure config" :value="modelValue.structureConfigKey" :disabled="!enabled || busy" @change="selectStructure"><option value="">選択してください</option><option v-for="item in relevantStructures" :key="item.key" :value="item.key">{{ item.label }}</option></select></label>
       <details v-if="modelValue.ordinalPredicatePrefix" class="iriograph-authoring-advanced"><summary>Advanced: 順序定義</summary><code>{{ modelValue.kind === 'set-sequence' ? modelValue.sequenceTypeIri : modelValue.alternativeTypeIri }} / {{ modelValue.ordinalPredicatePrefix }}</code></details>
       <IriChoiceField label="対象" input-label="Structure IRI" :model-value="modelValue.structureIri" :choices="resources" :enabled="enabled && !busy" pickable :picking="isPicking({ field: 'structureIri' })" @update:model-value="update('structureIri', $event)" @pick="requestResource({ field: 'structureIri' })" />
-      <label><span>並べる要素（1行ずつ）</span><textarea aria-label="Structure members" :value="modelValue.membersText" :disabled="!enabled || busy" @input="updateMembers(inputValue($event))" /></label>
-      <template v-if="modelValue.kind === 'set-alternatives'">
-        <label><span>既定にする位置</span><input aria-label="Default ordinal" type="number" min="1" :value="modelValue.defaultOrdinal" readonly /></label>
-        <label><span>既定の要素</span><input aria-label="Default member IRI" :value="modelValue.defaultMemberIri" readonly /></label>
-      </template>
+      <div class="iriograph-structure-member-picker"><label><span>{{ modelValue.kind === 'set-sequence' ? '並べる要素を追加' : '選択肢を追加' }}</span><select v-model="structureMemberCandidate" :disabled="!enabled || busy"><option value="">選択してください</option><option v-for="resource in resources" :key="resource.iri" :value="resource.iri">{{ resource.label ?? resource.iri }}</option></select></label><button type="button" :disabled="!structureMemberCandidate || !enabled || busy" @click="addStructureMember">追加</button></div>
+      <ol class="iriograph-structure-member-cards" :aria-label="modelValue.kind === 'set-sequence' ? '現在の並び順' : '現在の分岐'">
+        <li v-for="(member, index) in structureMembers" :key="`${member}:${index}`">
+          <label v-if="modelValue.kind === 'set-alternatives'"><input type="radio" name="iriograph-default-member" :checked="Number(modelValue.defaultOrdinal) === index + 1" :disabled="!enabled || busy" @change="setDefaultStructureMember(index)" />既定</label>
+          <span><b>{{ memberLabel(member) }}</b><small>{{ member }}</small></span>
+          <div><button type="button" aria-label="上へ移動" :disabled="index === 0 || !enabled || busy" @click="moveStructureMember(index, -1)">↑</button><button type="button" aria-label="下へ移動" :disabled="index === structureMembers.length - 1 || !enabled || busy" @click="moveStructureMember(index, 1)">↓</button><button type="button" aria-label="項目を削除" :disabled="!enabled || busy" @click="removeStructureMember(index)">×</button></div>
+        </li>
+      </ol>
+      <p v-if="structureMembers.length === 0">まだ要素がありません。上の候補から追加してください。</p>
+      <details class="iriograph-authoring-advanced"><summary>Advanced: IRIを1行ずつ編集</summary><textarea aria-label="Structure members" :value="modelValue.membersText" :disabled="!enabled || busy" @input="updateMembers(inputValue($event))" /></details>
+      <template v-if="modelValue.kind === 'set-alternatives'"><input aria-label="Default ordinal" type="hidden" :value="modelValue.defaultOrdinal" /><input aria-label="Default member IRI" type="hidden" :value="modelValue.defaultMemberIri" /></template>
     </template>
 
     <template v-else-if="modelValue.kind === 'delete-resource'">
@@ -403,7 +511,7 @@ function requestPosition(): void {
           <small>{{ chip.role }}</small>{{ chip.label }}
         </span>
       </div>
-      <ul v-if="preview.diagnostics.length"><li v-for="(item, index) in preview.diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ item.code }}</b> {{ item.message }}</li></ul>
+      <ul v-if="preview.diagnostics.length"><li v-for="(item, index) in preview.diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ diagnosticGuidance(item).title }}</b><span>{{ diagnosticGuidance(item).action }}</span><details><summary>技術的な詳細</summary><code>{{ item.code }}</code> {{ diagnosticGuidance(item).detail }}</details></li></ul>
       <details><summary>Advanced: 正確な triple（削除 {{ preview.removedStatements.length }} / 追加 {{ preview.addedStatements.length }}）</summary><h5>Removed</h5><pre>{{ preview.removedStatements.join('\n') }}</pre><h5>Added</h5><pre>{{ preview.addedStatements.join('\n') }}</pre></details>
       <details><summary>Advanced: 適用後の Turtle</summary><pre>{{ preview.candidateSource }}</pre></details>
     </section>

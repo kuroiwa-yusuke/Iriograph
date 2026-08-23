@@ -363,12 +363,16 @@ function applySetProperty(
   if (!requireIri(command.predicateIri, "predicate", diagnostics)) return;
   const term = context.terms.find((candidate) => candidate.iri === command.predicateIri);
   if (
-    command.predicateIri === RDF_TYPE
-    || command.predicateIri === RDFS_MEMBER
+    command.predicateIri === RDFS_MEMBER
     || isOrdinalPredicate(command.predicateIri)
-    || isResolvedStructuralPredicate(store, command.predicateIri, context)
-    || term?.structural
-    || term?.kind === "structure"
+    || (
+      command.predicateIri !== RDF_TYPE
+      && (
+        isResolvedStructuralPredicate(store, command.predicateIri, context)
+        || term?.structural
+        || term?.kind === "structure"
+      )
+    )
   ) {
     diagnostics.push(error(
       "structural-predicate-property-edit-denied",
@@ -499,17 +503,31 @@ function applyMembership(
   diagnostics: ProjectionDiagnostic[],
 ): void {
   if (!hasResolvedStructureConfig(store, context, command)) {
-    diagnostics.push(error(
-      "authoring-structure-config-unresolved",
-      `Membership configuration is not resolved by a catalog: ${command.containerTypeIri} / ${command.predicateIri}`,
-      command.containerIri,
-    ));
+    diagnostics.push({
+      ...error(
+        "authoring-structure-config-unresolved",
+        `Membership configuration is not resolved by a catalog: ${command.containerTypeIri} / ${command.predicateIri}`,
+        command.containerIri,
+      ),
+      suggestedActions: [{
+        actionId: "select-catalog-membership-capability",
+        semanticRef: command.containerIri,
+        parameters: {
+          containerTypeIri: command.containerTypeIri,
+          predicateIri: command.predicateIri,
+        },
+      }],
+    });
     return;
   }
+  const containerPosition = command.containerPosition ?? "subject";
   const membership = authoringQuad(
-    command.containerIri,
+    containerPosition === "subject" ? command.containerIri : command.memberIri,
     command.predicateIri,
-    { kind: "iri", iri: command.memberIri },
+    {
+      kind: "iri",
+      iri: containerPosition === "subject" ? command.memberIri : command.containerIri,
+    },
     diagnostics,
   );
   if (!membership) return;
@@ -978,8 +996,14 @@ function hasResolvedStructureConfig(
     const operator = resolved.rule.project;
     if (
       command.type === "set-membership"
-      && operator.operator === "membership-container"
+      && (
+        operator.operator === "membership-container"
+        || operator.operator === "membership-region"
+      )
       && closure.subpropertyDistance(command.predicateIri, operator.membershipPredicate) !== undefined
+      && (operator.operator === "membership-container"
+        ? (command.containerPosition ?? "subject") === "subject"
+        : (command.containerPosition ?? "subject") === operator.containerPosition)
     ) return true;
     if (
       command.type === "set-sequence"
@@ -1005,7 +1029,8 @@ function isResolvedStructuralPredicate(
     for (const rule of profile.catalog.rules) {
       const operator = rule.project;
       if (
-        operator.operator === "membership-container"
+        (operator.operator === "membership-container"
+          || operator.operator === "membership-region")
         && isSubpropertyOf(store, predicateIri, operator.membershipPredicate)
       ) return true;
       if (

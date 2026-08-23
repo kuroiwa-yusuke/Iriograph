@@ -44,6 +44,7 @@ import { standardRdfRdfsCatalog } from "./standard-catalog";
 
 const NS = "urn:test:authoring:";
 const XSD_INTEGER = `${XSD_NAMESPACE}integer`;
+const RDFS_SUBCLASS_OF = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 
 describe("structured semantic authoring", () => {
   it("全structured commandをcanonical datasetと全view reconciliationへatomicに適用する", async () => {
@@ -1246,6 +1247,29 @@ ex:b rdfs:label "B" .
       code: "authoring-context-invalid",
     }));
 
+    const invalidMetadata = {
+      ...context,
+      terms: [...context.terms, {
+        iri: `${NS}invalid-metadata`,
+        kind: "property",
+        description: " ",
+        category: 42,
+        examples: ["valid", ""],
+      }],
+    } as unknown as ResolvedAuthoringContext;
+    const metadataResult = await previewAuthoringCommands(document, [{
+      type: "set-property",
+      commandId: "invalid-metadata-context",
+      subjectIri: `${NS}a`,
+      predicateIri: `${NS}count`,
+      values: [{ kind: "literal", value: "2", datatypeIri: XSD_INTEGER }],
+    }], invalidMetadata);
+    expect(metadataResult.diagnostics.map((value) => value.message)).toEqual(expect.arrayContaining([
+      expect.stringContaining("description must be a non-empty string"),
+      expect.stringContaining("category must be a non-empty string"),
+      expect.stringContaining("examples must contain non-empty strings"),
+    ]));
+
     const invalidCapability: ResolvedAuthoringContext = {
       ...context,
       capabilities: [{
@@ -1422,6 +1446,9 @@ ex:b rdfs:label "B" .
     }], context);
     expect(wrongConfig.diagnostics).toContainEqual(expect.objectContaining({
       code: "authoring-structure-config-unresolved",
+      suggestedActions: [expect.objectContaining({
+        actionId: "select-catalog-membership-capability",
+      })],
     }));
 
     const scene = await buildIriographView(document, "main", context.runtime);
@@ -1467,6 +1494,103 @@ ex:b rdfs:label "B" .
     const cascadeGraph = graphFor(cascaded.candidateSource!);
     expect(cascadeGraph.countQuads(`${NS}seq`, `${NS}ordinal-label`, null, null)).toBe(1);
     expect(cascadeGraph.countQuads(`${NS}seq`, `${NS}ordinal-01`, null, null)).toBe(1);
+  });
+
+  it("RDFS class regionへのmembershipをobject側containerとして追加・除去する", async () => {
+    const document = documentFor(`
+      @prefix : <${NS}> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :Category a rdfs:Class ; rdfs:label "Category" .
+      :member rdfs:label "Member" .
+    `);
+    const context = contextFor("revision-1");
+    const add = await previewAuthoringCommands(document, [{
+      type: "set-membership",
+      commandId: "classify",
+      containerIri: `${NS}Category`,
+      memberIri: `${NS}member`,
+      enabled: true,
+      containerTypeIri: RDFS_CLASS,
+      predicateIri: RDF_TYPE,
+      containerPosition: "object",
+    }], context);
+
+    expect(add.valid).toBe(true);
+    const applied = await applyAuthoringPreview(document, add, context, {
+      confirmationId: add.confirmationId,
+    });
+    expect(applied.accepted).toBe(true);
+    expect(graphFor(applied.document.semantic.source).countQuads(
+      `${NS}member`,
+      RDF_TYPE,
+      `${NS}Category`,
+      null,
+    )).toBe(1);
+
+    const remove = seedAuthoringCommandFromProvenance(applied.document, {
+      command: "set-membership",
+      container: `${NS}Category`,
+      member: `${NS}member`,
+      containerTypeIri: RDFS_CLASS,
+      predicate: RDF_TYPE,
+      containerPosition: "object",
+    }, "unclassify");
+    expect(remove).toMatchObject({
+      command: { type: "set-membership", enabled: false, containerPosition: "object" },
+      diagnostics: [],
+    });
+  });
+
+  it("既存resourceのrdf:type分類とrdfs:subClassOf階層をset-propertyで編集する", async () => {
+    const document = documentFor(`
+      @prefix : <${NS}> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :Task a rdfs:Class ; rdfs:label "Task" .
+      :Category a rdfs:Class ; rdfs:label "Category" .
+      :a rdfs:label "A" .
+    `);
+    const base = contextFor("revision-1");
+    const context: ResolvedAuthoringContext = {
+      ...base,
+      terms: [...base.terms, {
+        iri: `${NS}Category`,
+        kind: "class",
+      }, {
+        iri: RDF_TYPE,
+        kind: "property",
+        roles: ["predicate"],
+        objectKinds: ["iri"],
+        structural: true,
+      }, {
+        iri: RDFS_SUBCLASS_OF,
+        kind: "property",
+        roles: ["predicate"],
+        objectKinds: ["iri"],
+      }],
+    };
+    const preview = await previewAuthoringCommands(document, [{
+      type: "set-property",
+      commandId: "classify-a",
+      subjectIri: `${NS}a`,
+      predicateIri: RDF_TYPE,
+      values: [{ kind: "iri", iri: `${NS}Task` }],
+    }, {
+      type: "set-property",
+      commandId: "class-hierarchy",
+      subjectIri: `${NS}Task`,
+      predicateIri: RDFS_SUBCLASS_OF,
+      values: [{ kind: "iri", iri: `${NS}Category` }],
+    }], context);
+
+    expect(preview.valid).toBe(true);
+    expect(preview.diagnostics.some((value) => (
+      value.code === "structural-predicate-property-edit-denied"
+    ))).toBe(false);
+    const graph = graphFor(preview.candidateSource!);
+    expect(graph.countQuads(`${NS}a`, RDF_TYPE, `${NS}Task`, null)).toBe(1);
+    expect(graph.countQuads(`${NS}Task`, RDFS_SUBCLASS_OF, `${NS}Category`, null)).toBe(1);
   });
 
   it("rdfs:memberのdomain subpropertyをmembership authoringとprovenanceでexact保持する", async () => {

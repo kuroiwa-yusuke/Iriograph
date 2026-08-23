@@ -6,9 +6,15 @@
 
 Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとcompact serializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。
 
-Vue editorは右クリックの対象別操作、見た目を確認できる作成palette、label-firstのdetails dialog、関係削除draft、Canvasからの関係・包含対象選択を備え、利用者がTurtleやIRIを通常操作で入力しない境界を基準にします。色、透明度、線、style presetは安全なsparse appearance overlayとして編集し、edge接点はnode外側のhaloとstubから周囲を連続的に調整できます。単一parentのnode-linkと、多対多membershipを交差する半透明領域として示すregion viewは別の空間文法として実装済みです。Domain membership predicateは限定RDFSの`subPropertyOf rdfs:member`で包含へ投影しつつ、元statement/predicateを逆編集用provenanceに保持します。
+Vue editorは右クリックの対象別操作、見た目を確認できる作成palette、label-firstのdetails dialog、関係削除draft、Canvasからの関係・包含対象選択を備え、利用者がTurtleやIRIを通常操作で入力しない境界を基準にします。作成時の複数分類・上位概念・関係・包含、既存要素の分類/包含batch、Seq/Altのcard reorder、predicate label/comment編集を一つのpreview/apply lifecycleへ統合しています。複数・複数行のlabel/commentを保持し、commentはhoverまたは全表示でき、非表示時もlayoutが表示領域を予約します。診断は通常画面では原因と次actionを日本語表示し、code・IRI・tripleはAdvancedへ分離します。
 
-`@iriograph/semantic-access`はlabel/comment中心の検索、describe、neighbor、subgraph、membership索引、revisionに束縛した決定的alias、Core authoring transactionへ委譲するwrite facadeを提供します。これはLLM tool transportそのものではなく、host/MCP adapterが認証、actor policy、revision conflictを接続するためのpackage境界です。Core/editorは0.1.1の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
+色、透明度、線、style presetは安全なsparse appearance overlayとして編集し、edge接点はnode外側のhaloとstubから周囲を連続的に調整できます。Edgeはauto/straight/orthogonal/curve/manualを選べ、選択中のwaypointをnodeより上で操作できます。線種はpredicateごとに増殖させず、共通線と閉じたterminal markerで補助的に区分します。配置後のroute refinementはnode、表示用comment、既存edgeとの交差・重複を抑え、manual waypointを保存済みhard gateとして保持します。
+
+単一parentのnode-linkと、多対多membershipを交差する半透明領域として示すregion viewは別の空間文法として実装済みです。Domain membership predicateは限定RDFSの`subPropertyOf rdfs:member`で包含へ投影しつつ、元statement/predicateを逆編集用provenanceに保持します。`rdfs:Class`と`rdf:type`はregion profileで独立概念領域と多対多membershipへ投影し、交差cellを新しいsemantic resourceにせず導出します。複数classに属するnodeは全領域の交差内へ表示上拘束し、交差位置での作成は該当する全classを分類候補へseedします。
+
+`@iriograph/semantic-access`はlabel/comment中心の検索、describe、neighbor、subgraph、membership索引、revisionに束縛した決定的alias、Core authoring transactionへ委譲するwrite facadeを提供します。これはLLM tool transportそのものではなく、host/MCP adapterが認証、actor policy、revision conflictを接続するためのpackage境界です。標準predicate IRIへ日本語label、説明、category、例を付けるpicker catalogも持ち、日本語独自IRIを生成しません。Instanceのopaque IRIと、統制されたclass/predicate vocabularyをS/P/O上の位置ではなく役割で区別します。
+
+Core/editorは0.2.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
 
 kuroxiom-cloudのhost adapterは実装・deploy済みです。workspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続しています。
 

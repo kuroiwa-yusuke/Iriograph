@@ -20,6 +20,7 @@ describe("catalogCreationPalette", () => {
       },
       rules: [
         { ruleId: "region", priority: 1, match: { kind: "type", iri: "urn:type:area", entailment: "exact" }, project: { operator: "membership-container", membershipPredicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#member" }, templateRef: "urn:template:region" },
+        { ruleId: "class", priority: 1, match: { kind: "type", iri: "urn:type:class", entailment: "exact" }, project: { operator: "membership-region", membershipPredicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", containerPosition: "object" }, templateRef: "urn:template:node" },
         { ruleId: "node", priority: 1, match: { kind: "type", iri: "urn:type:item", entailment: "exact" }, project: { operator: "resource", structuralKind: "node" }, templateRef: "urn:template:node" },
       ],
       templates: {
@@ -33,9 +34,11 @@ describe("catalogCreationPalette", () => {
     expect(catalogCreationPalette(catalog, [
       { iri: "urn:type:item", kind: "class", label: "Item" },
       { iri: "urn:type:area", kind: "class", label: "Area" },
+      { iri: "urn:type:class", kind: "class", label: "Concept" },
     ], "region")).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "node", label: "Item", shape: "circle" }),
       expect.objectContaining({ kind: "region", label: "Area", shape: "region", structuralKind: "region" }),
+      expect.objectContaining({ kind: "node", label: "Concept", classIri: "urn:type:class" }),
       expect.objectContaining({ kind: "node", label: "基本の要素", classIri: undefined }),
     ]));
   });

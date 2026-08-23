@@ -3,6 +3,7 @@ import type {
   SceneContainer,
   SceneEdge,
   SceneNode,
+  SceneRegion,
 } from "./model.js";
 import { compareCodePoints } from "./rdf.js";
 
@@ -37,13 +38,13 @@ export function hasBlockingDiagnostics(
 /** Matches both direct semantic identity and every statement recorded by projection provenance. */
 export function diagnosticTargetsSceneElement(
   diagnostic: ProjectionDiagnostic,
-  element: SceneNode | SceneContainer | SceneEdge,
+  element: SceneNode | SceneContainer | SceneRegion | SceneEdge,
 ): boolean {
   if (diagnostic.semanticRef === element.semanticRef) return true;
   if (!diagnostic.statementRef) return false;
   return diagnostic.statementRef === element.semanticRef
     || element.provenance?.sourceStatementRefs.includes(diagnostic.statementRef) === true
-    || (element.structuralKind !== "edge"
+    || ((element.structuralKind === "node" || element.structuralKind === "container")
       && element.parentProvenance?.sourceStatementRefs.includes(diagnostic.statementRef) === true);
 }
 

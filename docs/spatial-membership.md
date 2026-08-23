@@ -106,6 +106,20 @@ type SceneMembership = {
 
 固定geometryで所属regionの共通交差が空なら`region-membership-intersection-empty`、交差はあるがmember中心が外なら`region-member-outside-intersection`をwarningとして返します。単一regionのmemberが外なら`region-member-outside`を返せます。これらはpresentation診断であり、Turtleを変更せず、Scene生成をblockingしてはなりません。
 
+### 4.3 Concept class region
+
+分類を空間表示するregion viewは、`rdfs:Class` resourceをregion、`member rdf:type class`を向きの異なるmembershipとしてcatalogで宣言的にbindできます。これはClassを`rdf:Bag`として扱うことを意味しません。意味の正本は`rdf:type`のまま、同一Scene membership契約へ投影します。
+
+```turtle
+:review a :HumanTask, :AuditedStep .
+```
+
+このresourceは二つのclass regionの共通部分へ配置します。交差cellは複数statementから導出するview-only identityであり、独自語彙や新しいsemantic resourceを作りません。Cellを選んだ分類操作は構成classの`rdf:type`を一つのatomic patchで追加・解除し、各exact statementのprovenanceを保持します。
+
+Class同士の概念階層は`rdfs:subClassOf`、resourceの分類は`rdf:type`、任意group所属は`rdfs:member`またはそのsubpropertyとして別々に編集します。Editorはこれらを一つの「包含」actionへ混ぜてはなりません。
+
+Classification-constrained viewでは、要素の全boundsを現在のclass intersection内へclampできます。別cellへ移す操作はgeometryから意味を推論せず、移動先classを明示したsemantic previewを開きます。共通部分が空または要素より小さい場合は移動を拒否し、region geometryまたはclassificationのどちらを修正するか選べるdiagnosticを返します。
+
 ## 5. Layout adapter境界
 
 Layout requestは`elements`、`edges`とは独立した`memberships`を受け取ります。Adapterは`parentElementId`だけから多対多membershipを復元してはなりません。

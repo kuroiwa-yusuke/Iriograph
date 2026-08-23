@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-const INITIAL_NODE_COUNT = 12;
+const INITIAL_NODE_COUNT = 14;
+const REGION_VIEW_NODE_COUNT = 12;
 
 test("editorのpointer操作、history、Turtle rollback、保存flushがbrowserで連携する", async ({ page }) => {
   const consoleErrors: string[] = [];
@@ -56,7 +57,11 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   const domainInvalidSource = `${acceptedSource}\n<urn:iriograph:demo:g-01> <http://www.w3.org/2000/01/rdf-schema#member> <urn:iriograph:demo:e2e-invalid> .\n`;
   await textarea.fill(domainInvalidSource);
   await page.getByRole("button", { name: "検証して適用" }).click();
-  await expect(page.locator(".iriograph-diagnostics").getByText("demo-visible-resource-label-required")).toBeVisible();
+  const domainDiagnostic = page.locator(".iriograph-diagnostics .error")
+    .filter({ hasText: "demo-visible-resource-label-required" });
+  await expect(domainDiagnostic).toContainText("変更を適用できません");
+  await domainDiagnostic.getByText("技術的な詳細").click();
+  await expect(domainDiagnostic.getByText("demo-visible-resource-label-required")).toBeVisible();
   await page.getByRole("button", { name: "Source", exact: true }).click();
   await expect.poll(() => textarea.evaluate((element) => (
     (element as HTMLTextAreaElement).selectionStart
@@ -87,8 +92,9 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
 
   await viewSelect.selectOption("regions");
   await expect(viewSelect).toHaveValue("regions");
-  await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
-  await expect(page.locator(".iriograph-scene-region")).toHaveCount(3);
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(REGION_VIEW_NODE_COUNT);
+  await expect(page.locator(".iriograph-scene-region")).toHaveCount(5);
+  await expect(page.locator(".iriograph-view-summary")).toContainText("5 areas");
 
   await page.locator(".iriograph-view-actions").getByRole("button", { name: "複製" }).click();
   await expect(viewSelect).toHaveValue("regions-copy");
@@ -247,6 +253,7 @@ test("作成paletteとregion viewでラベル中心の作成・重なり・複�
 
   await page.goto("/");
   const turtleBefore = await readTurtle(page);
+  expect(turtleBefore).toContain("wf:n-03 a wf:HumanStep, wf:AuditedStep");
   const grid = page.locator(".iriograph-canvas-grid");
   const gridBox = await requiredBox(grid, "canvas grid");
   await grid.dispatchEvent("contextmenu", {
@@ -267,7 +274,7 @@ test("作成paletteとregion viewでラベル中心の作成・重なり・複�
   await relationFields.locator("select").nth(2).selectOption({ label: "内容を審査" });
   const membershipFields = palette.locator("fieldset").filter({ hasText: "領域へ含める" });
   await membershipFields.getByRole("checkbox").check();
-  await membershipFields.locator("select").nth(0).selectOption({ label: "申請者" });
+  await membershipFields.getByRole("checkbox", { name: "申請者", exact: true }).check();
   await palette.getByRole("button", { name: "作成内容を確認へ" }).click();
   await page.getByLabel("Initial x").fill("420");
   await page.getByLabel("Initial y").fill("260");
@@ -280,11 +287,18 @@ test("作成paletteとregion viewでラベル中心の作成・重なり・複�
 
   const viewSelect = page.getByLabel("Named view", { exact: true });
   await viewSelect.selectOption("regions");
-  await expect(page.locator(".iriograph-scene-region")).toHaveCount(3);
+  await expect(page.locator(".iriograph-scene-region")).toHaveCount(5);
   await expect(page.locator(".iriograph-scene-container")).toHaveCount(0);
-  await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(REGION_VIEW_NODE_COUNT);
+  await page.getByRole("button", { name: "説明を表示" }).click();
+  await expect(page.locator(".iriograph-comment-callout.visible").first()).toBeVisible();
+  await expect(page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" }))
+    .toContainText("Review request (en)");
+  await expect(page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" }))
+    .toContainText("購入内容と承認条件を確認し");
+  await page.getByRole("button", { name: "説明を隠す" }).click();
   const operations = page.locator(".iriograph-scene-region").filter({ hasText: "業務オペレーション" });
-  const audit = page.locator(".iriograph-scene-region").filter({ hasText: "監査対象" });
+  const audit = page.locator('.iriograph-scene-region[data-element-id="region:audit"]');
   const review = page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" });
   const operationsBox = await requiredBox(operations, "operations region");
   const auditBox = await requiredBox(audit, "audit region");
@@ -295,6 +309,17 @@ test("作成paletteとregion viewでラベル中心の作成・重なり・複�
     x: reviewBox.x + reviewBox.width / 2,
     y: reviewBox.y + reviewBox.height / 2,
   }, overlap!)).toBe(true);
+  const humanStep = page.locator(".iriograph-scene-region").filter({ hasText: "人が行う工程" });
+  const auditedStep = page.locator(".iriograph-scene-region").filter({ hasText: "監査対象工程" });
+  const classOverlap = intersectionBox(
+    await requiredBox(humanStep, "human step class region"),
+    await requiredBox(auditedStep, "audited step class region"),
+  );
+  expect(classOverlap).toBeDefined();
+  expect(pointInsideBox({
+    x: reviewBox.x + reviewBox.width / 2,
+    y: reviewBox.y + reviewBox.height / 2,
+  }, classOverlap!)).toBe(true);
 
   await audit.dispatchEvent("contextmenu", { clientX: 680, clientY: 420 });
   await menu.getByRole("menuitem", { name: "領域の見た目を調整" }).click();

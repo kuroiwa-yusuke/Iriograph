@@ -34,7 +34,7 @@ describe("normalized RDF/RDFS mock", () => {
 
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(projected.containers).toHaveLength(3);
-    expect(projected.nodes).toHaveLength(12);
+    expect(projected.nodes).toHaveLength(14);
     expect(projected.edges).toHaveLength(11);
     expect(projected.containers.map((item) => item.semanticRef).sort(compareText)).toEqual([
       "urn:iriograph:demo:g-01",
@@ -80,9 +80,16 @@ describe("normalized RDF/RDFS mock", () => {
     const regions = projectSemanticView(document, mockProjectionCatalog, "regions");
     expect(regions.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(regions.containers).toEqual([]);
-    expect(regions.regions ?? []).toHaveLength(3);
-    expect((regions.memberships ?? []).filter((membership) => (
-      membership.memberElementId === regions.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-03")?.elementId
+    expect(regions.regions ?? []).toHaveLength(5);
+    const regionReview = regions.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-03");
+    const regionReviewMemberships = (regions.memberships ?? []).filter((membership) => (
+      membership.memberElementId === regionReview?.elementId
+    ));
+    expect(regionReviewMemberships).toHaveLength(4);
+    expect(regionReviewMemberships.filter((membership) => (
+      membership.provenance.operator === "membership-region"
+      && membership.provenance.editCapability?.command === "set-membership"
+      && membership.provenance.editCapability.predicate === "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
     ))).toHaveLength(2);
     expect(regions.regions?.find((item) => item.semanticRef === "urn:iriograph:demo:g-03")?.style)
       .toMatchObject({ fill: "#ede9fe", fillOpacity: 0.2 });
@@ -115,7 +122,8 @@ describe("normalized RDF/RDFS mock", () => {
     expect(source).toContain("rdfs:seeAlso");
     expect(source).toContain("wf:p-01");
     expect(source).toContain("wf:p-02");
-    expect(source).toContain("wf:p-03 rdfs:subPropertyOf rdfs:member");
+    expect(source).toContain("wf:p-03 a rdf:Property");
+    expect(source).toContain("rdfs:subPropertyOf rdfs:member");
     expect(source).toContain('rdfs:label "関連する"@ja');
     expect(source).toContain('rdfs:comment "標準の包含を特殊化し、元predicateを保持する業務語彙"@ja');
   });

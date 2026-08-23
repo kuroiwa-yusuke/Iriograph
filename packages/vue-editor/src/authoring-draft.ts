@@ -5,6 +5,8 @@ import type {
   ProjectionDiagnostic,
 } from "@iriograph/core";
 
+const RDFS_CLASS = "http://www.w3.org/2000/01/rdf-schema#Class";
+
 export type EditorAuthoringKind =
   | "create-resource"
   | "set-property"
@@ -35,8 +37,11 @@ export type EditorAuthoringDraft = {
   kind: EditorAuthoringKind;
   resourceIri: string;
   classIri: string;
+  classIris: string[];
+  createSuperClassIris: string[];
   label: string;
   subjectIri: string;
+  subjectIris: string[];
   predicateIri: string;
   propertyMode: "replace" | "delete";
   propertyValues: EditorPropertyValueDraft[];
@@ -44,6 +49,7 @@ export type EditorAuthoringDraft = {
   targetIri: string;
   containerIri: string;
   memberIri: string;
+  memberIris: string[];
   present: boolean;
   containerTypeIri: string;
   membershipPredicateIri: string;
@@ -71,6 +77,7 @@ export type EditorAuthoringDraft = {
   createEdgeResourceIri: string;
   createMembershipEnabled: boolean;
   createMembershipContainerIri: string;
+  createMembershipContainerIris: string[];
   createMembershipStructureConfigKey: string;
   createMembershipContainerTypeIri: string;
   createMembershipPredicateIri: string;
@@ -82,6 +89,11 @@ export type EditorAuthoringDraft = {
 export type AuthoringChoice = {
   iri: string;
   label?: string;
+  structuralKind?: "node" | "container" | "region";
+  description?: string;
+  category?: string;
+  example?: string;
+  priority?: number;
 };
 
 export type AuthoringCapabilityChoice = AuthoringChoice & {
@@ -129,8 +141,11 @@ export function emptyAuthoringDraft(
     kind,
     resourceIri: "",
     classIri: "",
+    classIris: [],
+    createSuperClassIris: [],
     label: "",
     subjectIri: semanticRef,
+    subjectIris: [],
     predicateIri: "",
     propertyMode: "replace",
     propertyValues: [emptyPropertyValueDraft()],
@@ -138,6 +153,7 @@ export function emptyAuthoringDraft(
     targetIri: "",
     containerIri: "",
     memberIri: semanticRef,
+    memberIris: [],
     present: true,
     containerTypeIri: "",
     membershipPredicateIri: "",
@@ -165,6 +181,7 @@ export function emptyAuthoringDraft(
     createEdgeResourceIri: "",
     createMembershipEnabled: false,
     createMembershipContainerIri: "",
+    createMembershipContainerIris: [],
     createMembershipStructureConfigKey: "",
     createMembershipContainerTypeIri: "",
     createMembershipPredicateIri: "",
@@ -210,11 +227,24 @@ export function compileAuthoringDraft(
       const initialStatements: Array<
         Extract<AuthoringCommand, { type: "create-resource" }>["initialStatements"][number]
       > = [];
-      if (draft.classIri.trim()) {
+      for (const classIri of [...new Set([
+        draft.classIri.trim(),
+        ...draft.classIris.map((iri) => iri.trim()),
+      ].filter(Boolean))]) {
         initialStatements.push({
           subject: { kind: "created-resource" },
           predicateIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
-          object: { kind: "iri", iri: draft.classIri.trim() },
+          object: { kind: "iri", iri: classIri },
+        });
+      }
+      const superClassIris = draft.classIri.trim() === RDFS_CLASS
+        ? [...new Set(draft.createSuperClassIris.map((iri) => iri.trim()).filter(Boolean))]
+        : [];
+      for (const superClassIri of superClassIris) {
+        initialStatements.push({
+          subject: { kind: "created-resource" },
+          predicateIri: "http://www.w3.org/2000/01/rdf-schema#subClassOf",
+          object: { kind: "iri", iri: superClassIri },
         });
       }
       if (draft.label.trim()) {
@@ -246,16 +276,17 @@ export function compileAuthoringDraft(
             });
       }
       if (draft.createMembershipEnabled) {
-        const containerIri = requiredIri(
-          draft.createMembershipContainerIri,
-          "作成時の包含には既存containerが必要です。",
-        );
+        const containerIris = [...new Set([
+          draft.createMembershipContainerIri.trim(),
+          ...draft.createMembershipContainerIris.map((iri) => iri.trim()),
+        ].filter(Boolean))];
+        if (containerIris.length === 0) throw new Error("作成時の包含には既存containerが必要です。");
         if (
           !draft.createMembershipStructureConfigKey
           || !draft.createMembershipContainerTypeIri.trim()
           || !draft.createMembershipPredicateIri.trim()
         ) throw new Error("作成時の包含にはcatalog membership structureの選択が必要です。");
-        initialStatements.push({
+        for (const containerIri of containerIris) initialStatements.push({
           subject: { kind: "iri", iri: containerIri },
           predicateIri: draft.createMembershipPredicateIri.trim(),
           object: { kind: "created-resource" },
@@ -280,16 +311,21 @@ export function compileAuthoringDraft(
           : {}),
       }];
     }
-    case "set-property":
-      return [{
+    case "set-property": {
+      const subjects = [...new Set([
+        draft.subjectIri.trim(),
+        ...draft.subjectIris.map((iri) => iri.trim()),
+      ].filter(Boolean))];
+      return subjects.map((subjectIri, index) => ({
         type: "set-property",
-        commandId,
-        subjectIri: draft.subjectIri.trim(),
+        commandId: subjects.length === 1 ? commandId : `${commandId}-${index + 1}`,
+        subjectIri,
         predicateIri: draft.predicateIri.trim(),
         values: draft.propertyMode === "delete"
           ? []
           : draft.propertyValues.map(objectValue),
-      }];
+      }));
+    }
     case "connect-resources":
       return [{
         type: "connect-resources",
@@ -298,16 +334,21 @@ export function compileAuthoringDraft(
         predicateIri: draft.predicateIri.trim(),
         objectIri: draft.targetIri.trim(),
       }];
-    case "set-membership":
-      return [{
+    case "set-membership": {
+      const members = [...new Set([
+        draft.memberIri.trim(),
+        ...draft.memberIris.map((iri) => iri.trim()),
+      ].filter(Boolean))];
+      return members.map((memberIri, index) => ({
         type: "set-membership",
-        commandId,
+        commandId: members.length === 1 ? commandId : `${commandId}-${index + 1}`,
         containerIri: draft.containerIri.trim(),
-        memberIri: draft.memberIri.trim(),
+        memberIri,
         enabled: draft.present,
         containerTypeIri: draft.containerTypeIri.trim(),
         predicateIri: draft.membershipPredicateIri.trim(),
-      }];
+      }));
+    }
     case "set-sequence":
       return [{
         type: "set-sequence",

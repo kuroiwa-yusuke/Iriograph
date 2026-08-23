@@ -48,6 +48,10 @@ Layer内順序を上下sweepで改善し、交差数が改善しない時点ま�
 
 Orthogonal routeはsource/target attachmentを必ず含み、parallel edgeとself-loopへstable laneを割り当てます。Manual waypointはhard constraintとして保持します。交差回避とroutingがbudgetを超える場合は、straightまたは単純なdogleg routeへ品質を段階的に落とし、要素欠落や非決定的timeoutにはしません。
 
+Portable overlayの経路modeは`auto`、`straight`、`orthogonal`、`curve`、`manual`を区別します。自動routerが障害物を避けるために作る内部屈曲点または曲線制御点はSceneのderived routeであり、manual waypointとして保存しません。`straight`だけは中間点を持たないことを契約とし、障害物回避より利用者の明示指定を優先して必要ならdiagnosticを返します。
+
+User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutをpadding付き障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/comment交差、edge重複長、edge交差数、bend数、距離の辞書順で比較します。Stable edge ID順と逆順を含む固定回数だけ混雑penalty付きrerouteを行い、同一入力の決定性と計算上限を保ちます。
+
 ### 2.6 Component packing
 
 独立component、container、SCC内部結果をrectangleとしてpackingします。面積だけでなく、希望direction、component間edge、既存位置を考慮します。まずstable size順とidentity順のshelf/skyline packingを行い、aspect ratioが閾値を外れる場合だけ別候補を評価します。
@@ -55,6 +59,8 @@ Orthogonal routeはsource/target attachmentを必ず含み、parallel edgeとsel
 ### 2.7 Overlapとlabel
 
 Node/containerのoverlapを空間indexで検出し、generated elementだけを最小量移動します。Pinnedまたはuser配置同士の矛盾は勝手に直さずdiagnosticにします。Node label、edge label、icon boundsは別boxとして扱い、重要度の低いlabelはLOD段階で省略できます。
+
+`rdfs:comment`から導出するcalloutは、全文をwrap・測定したannotation boxとして入力します。Stable comment layoutでは表示toggleがOFFでも同じboxを予約し、ON/OFFでnode geometryとedge routeを変えません。Projection、text measurement、annotation obstacle追加、node layout、routeの順で処理し、font実測を利用できないhostでは決定的な文字幅と行高を使います。
 
 全pair比較を避け、uniform gridまたはR-tree相当のindexで近傍だけを検査します。Overlap除去で新しいedge crossingが大幅に増える場合は、後段の品質scoreで候補を比較します。
 

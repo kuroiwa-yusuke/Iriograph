@@ -172,6 +172,33 @@ describe("IriographEditor transaction regression", () => {
     });
   });
 
+  it("線の形式をrouting overlayへ保存し接点編集後も維持してresetする", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    await wrapper.get<HTMLSelectElement>(".iriograph-edge-routing-quick select").setValue("curve");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.routeMode).toBe("curve");
+
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { sourceAnchor: { position: .25 } },
+    });
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toMatchObject({
+      routeMode: "curve",
+      sourceAnchor: { position: .25 },
+    });
+
+    await buttonWithText(wrapper, "Routingを自動に戻す").trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
+  });
+
   it("Inspectorからderived routeをseedしてwaypoint追加・label offset・resetする", async () => {
     wrapper = await mountEditor();
     const canvas = wrapper.getComponent(DiagramCanvas);
@@ -824,6 +851,24 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
+  it("direct edgeの名前・説明をpredicate resourceの詳細として開く", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
+    const edge = wrapper.getComponent(DiagramCanvas).props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    const quickContract = wrapper.get(".iriograph-edge-routing-quick .iriograph-edge-contract");
+    expect(quickContract.text()).toContain("A");
+    expect(quickContract.text()).toContain("B");
+    expect(quickContract.text()).not.toContain(edge.sourceElementId);
+    expect(quickContract.text()).not.toContain(edge.targetElementId);
+    await buttonWithText(wrapper, "関係名・説明を編集").trigger("click");
+    const dialog = wrapper.get(".iriograph-resource-details-dialog");
+    expect(dialog.text()).toContain("名前・説明");
+    expect(dialog.text()).toContain(`${NS}rel`);
+    expect(dialog.text()).toContain("すべてのedge表示に反映");
+  });
+
   it("details dialogの複数属性変更を一つのPreview batchへまとめる", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
@@ -833,7 +878,7 @@ describe("IriographEditor transaction regression", () => {
     await nextTick();
     await buttonWithText(wrapper, "詳細・属性").trigger("click");
     const dialog = wrapper.get(".iriograph-resource-details-dialog");
-    const labelInput = dialog.findAll<HTMLInputElement>('input:not([type="checkbox"])')
+    const labelInput = dialog.findAll<HTMLInputElement | HTMLTextAreaElement>('input:not([type="checkbox"]), textarea')
       .find((input) => input.element.value === "A")!;
     await labelInput.setValue("A renamed");
     await dialog.get("button.primary").trigger("click");

@@ -1,10 +1,12 @@
 import {
+  edgeEndpointAnchorFromPoint,
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
 } from "./endpoint-anchor.js";
 import type {
   EdgeEndpointAnchor,
   EdgeEndpointShape,
+  EdgeRouteMode,
   ElementGeometry,
   Point,
 } from "./model.js";
@@ -18,9 +20,16 @@ export const STANDARD_LAYOUT_REFS = {
 export type LayoutDirection = "LR" | "TB";
 export type LayoutMode = "incremental" | "full";
 
+export type LayoutExternalReservation = {
+  placement: "bottom-center";
+  width: number;
+  height: number;
+  gap: number;
+};
+
 export type LayoutElement = {
   elementId: string;
-  structuralKind: "node" | "container" | "region";
+  structuralKind: "node" | "container" | "region" | "annotation";
   parentElementId?: string;
   geometry?: ElementGeometry;
   size?: { width: number; height: number };
@@ -30,6 +39,8 @@ export type LayoutElement = {
   shape?: EdgeEndpointShape;
   /** Content rectangle reserved inside a container by its visual template. */
   contentInsets?: ContainerContentInsets;
+  /** Renderer-only boxes reserved outside the visual element geometry. */
+  externalReservations?: readonly LayoutExternalReservation[];
 };
 
 export type LayoutMembership = {
@@ -47,6 +58,7 @@ export type LayoutEdge = {
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
   routingPlacement?: "generated" | "user";
+  routeMode?: EdgeRouteMode;
 };
 
 /**
@@ -523,7 +535,7 @@ function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): 
   placeGroup(ROOT_GROUP, { x: state.spacing.margin, y: state.spacing.margin }, state);
   const routes = routeEdges(state);
   const bounds = sceneBounds(
-    Object.values(state.geometries),
+    layoutBounds(state),
     Object.values(routes).flat(),
     state.spacing.margin,
   );
@@ -665,7 +677,9 @@ function placeGroup(groupId: string, origin: Point, state: LayoutState): void {
 
   for (const childId of children) {
     const element = state.elements.get(childId)!;
-    if (isFixed(element) && element.geometry) occupied.push(copyGeometry(element.geometry));
+    if (isFixed(element) && element.geometry) {
+      occupied.push(layoutElementFootprintGeometry(element, element.geometry));
+    }
   }
   for (const childId of children) {
     const element = state.elements.get(childId)!;
@@ -683,14 +697,26 @@ function placeGroup(groupId: string, origin: Point, state: LayoutState): void {
           elementId: childId,
         });
       }
-      geometry = {
+      const visualSize = state.measured.get(childId)!;
+      const relativeFootprint = layoutElementFootprintGeometry(element, {
+        x: 0,
+        y: 0,
+        width: visualSize.width,
+        height: visualSize.height,
+      });
+      const footprint = avoidOccupiedGeometry({
         x: origin.x + natural.x,
         y: origin.y + natural.y,
         width: natural.width,
         height: natural.height,
+      }, occupied, state.direction, state.spacing.itemGap);
+      geometry = {
+        x: footprint.x - relativeFootprint.x,
+        y: footprint.y - relativeFootprint.y,
+        width: visualSize.width,
+        height: visualSize.height,
       };
-      geometry = avoidOccupiedGeometry(geometry, occupied, state.direction, state.spacing.itemGap);
-      occupied.push(copyGeometry(geometry));
+      occupied.push(layoutElementFootprintGeometry(element, geometry));
     }
     state.geometries[childId] = geometry;
 
@@ -725,10 +751,12 @@ function naturalGroupLayout(
   let maxCross = 0;
   for (const rank of [...byRank.keys()].sort((left, right) => left - right)) {
     const members = byRank.get(rank)!;
-    const rankPrimary = Math.max(...members.map((id) => primarySize(state.measured.get(id)!, state.direction)));
+    const rankPrimary = Math.max(...members.map((id) => (
+      primarySize(elementLayoutSize(id, state), state.direction)
+    )));
     let cross = 0;
     for (const id of members) {
-      const size = state.measured.get(id)!;
+      const size = elementLayoutSize(id, state);
       const geometry = state.direction === "LR"
         ? { x: primary, y: cross, width: size.width, height: size.height }
         : { x: cross, y: primary, width: size.width, height: size.height };
@@ -745,6 +773,20 @@ function naturalGroupLayout(
       ? { width: primaryExtent, height: maxCross }
       : { width: maxCross, height: primaryExtent },
   };
+}
+
+function elementLayoutSize(
+  elementId: string,
+  state: LayoutState,
+): { width: number; height: number } {
+  const measured = state.measured.get(elementId)!;
+  const footprint = layoutElementFootprintGeometry(state.elements.get(elementId)!, {
+    x: 0,
+    y: 0,
+    width: measured.width,
+    height: measured.height,
+  });
+  return { width: footprint.width, height: footprint.height };
 }
 
 function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): Map<string, number> {
@@ -853,7 +895,11 @@ function expandGeneratedContainer(containerId: string, state: LayoutState): void
   const element = state.elements.get(containerId)!;
   const insets = elementContentInsets(element, state);
   const childGeometries = (state.children.get(containerId) ?? [])
-    .map((id) => state.geometries[id])
+    .map((id) => {
+      const geometry = state.geometries[id];
+      const child = state.elements.get(id);
+      return geometry && child ? layoutElementFootprintGeometry(child, geometry) : undefined;
+    })
     .filter((value): value is ElementGeometry => value !== undefined);
   if (childGeometries.length === 0) return;
   const left = Math.min(geometry.x, ...childGeometries.map((item) => item.x - insets.left));
@@ -892,6 +938,11 @@ function elementContentInsets(
 const PARALLEL_LANE_GAP = 20;
 const SELF_LOOP_BASE = 36;
 const SELF_LOOP_GAP = 18;
+const ROUTE_OBSTACLE_PADDING = 10;
+const ROUTE_GRID_OBSTACLE_LIMIT = 24;
+const ROUTE_GRID_COMMITTED_LIMIT = 16;
+const ROUTE_GRID_ELEMENT_LIMIT = 256;
+const ROUTE_GRID_EDGE_LIMIT = 512;
 
 function routeEdges(state: LayoutState): Record<string, Point[]> {
   const routes: Record<string, Point[]> = {};
@@ -933,6 +984,16 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
         );
         return;
       }
+      if (edge.routeMode === "straight") {
+        routes[edge.elementId] = applyEndpointAnchors(
+          directRoute(edge, source, target, state),
+          edge,
+          source,
+          target,
+          state,
+        );
+        return;
+      }
       const canonicalRoute = orthogonalRoute(
         canonicalSource,
         canonicalTarget,
@@ -945,7 +1006,778 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
       routes[edge.elementId] = applyEndpointAnchors(route, edge, source, target, state);
     });
   }
+  return improveDerivedRoutes(routes, state);
+}
+
+function directRoute(
+  edge: LayoutEdge,
+  source: ElementGeometry,
+  target: ElementGeometry,
+  state: LayoutState,
+): Point[] {
+  const sourceToward = centerOf(target);
+  const targetToward = centerOf(source);
+  return [
+    edgeEndpointAnchorPoint(
+      source,
+      layoutElementShape(state.elements.get(edge.sourceElementId)),
+      edgeEndpointAnchorFromPoint(source, sourceToward),
+    ),
+    edgeEndpointAnchorPoint(
+      target,
+      layoutElementShape(state.elements.get(edge.targetElementId)),
+      edgeEndpointAnchorFromPoint(target, targetToward),
+    ),
+  ];
+}
+
+type RoutedEdge = {
+  edge: LayoutEdge;
+  points: Point[];
+};
+
+type RouteCost = readonly [
+  obstacleIntersections: number,
+  overlapLength: number,
+  crossings: number,
+  bends: number,
+  length: number,
+];
+
+type RouteSearchCost = readonly [
+  overlapLength: number,
+  crossings: number,
+  bends: number,
+  length: number,
+];
+
+type GridSearchEntry = {
+  pointIndex: number;
+  direction: 0 | 1 | 2;
+  cost: RouteSearchCost;
+  signature: string;
+};
+
+/**
+ * Improves renderer-only routes without creating or changing persisted manual
+ * waypoints. This bounded, dependency-free visibility grid keeps the Core
+ * adapter usable as a portable fallback; hosts can still replace the complete
+ * adapter when they need a higher-budget engine. It is deliberately a
+ * post-layout step, so pinned and user-positioned nodes remain hard constraints.
+ */
+function improveDerivedRoutes(
+  input: Record<string, Point[]>,
+  state: LayoutState,
+): Record<string, Point[]> {
+  const routes = Object.fromEntries(Object.entries(input).map(([id, points]) => [
+    id,
+    points.map(copyPoint),
+  ]));
+  if (
+    state.elements.size > ROUTE_GRID_ELEMENT_LIMIT
+    || state.edges.length > ROUTE_GRID_EDGE_LIMIT
+  ) return routes;
+
+  const committed: RoutedEdge[] = [];
+  for (const edge of state.edges) {
+    const base = routes[edge.elementId];
+    if (edge.routeMode === "straight") {
+      if (base) committed.push({ edge, points: base });
+      continue;
+    }
+    if (!base || base.length < 2 || edge.sourceElementId === edge.targetElementId) {
+      if (base) committed.push({ edge, points: base });
+      continue;
+    }
+    const obstacles = routeObstacles(edge, state);
+    const baseCost = routeCost(base, obstacles, committed);
+    const manual = edge.routingPlacement === "user" && Boolean(edge.waypoints?.length);
+    if (
+      baseCost[0] === 0
+      && (manual || (baseCost[1] === 0 && baseCost[2] === 0))
+    ) {
+      committed.push({ edge, points: base });
+      continue;
+    }
+
+    const gates = routeGates(edge, base);
+    const candidate = routeThroughGates(gates, base, obstacles, committed);
+    if (candidate) {
+      const candidateCost = routeCost(candidate, obstacles, committed);
+      if (
+        (baseCost[0] === 0 || candidateCost[0] === 0)
+        && compareRouteCandidate(candidateCost, candidate, baseCost, base) < 0
+      ) {
+        routes[edge.elementId] = candidate;
+      }
+    }
+    committed.push({ edge, points: routes[edge.elementId]! });
+  }
   return routes;
+}
+
+function routeObstacles(edge: LayoutEdge, state: LayoutState): ElementGeometry[] {
+  const result: ElementGeometry[] = [];
+  for (const element of [...state.elements.values()].sort(compareElement)) {
+    if (element.structuralKind !== "node" && element.structuralKind !== "annotation") continue;
+    const geometry = state.geometries[element.elementId];
+    if (!geometry) continue;
+    if (element.elementId !== edge.sourceElementId && element.elementId !== edge.targetElementId) {
+      result.push(expandGeometry(geometry, ROUTE_OBSTACLE_PADDING));
+    }
+    for (const reservation of layoutExternalReservationGeometries(element, geometry)) {
+      result.push(expandGeometry(reservation, ROUTE_OBSTACLE_PADDING));
+    }
+  }
+  return result;
+}
+
+function routeGates(edge: LayoutEdge, base: readonly Point[]): Point[] {
+  const start = base[0];
+  const end = base.at(-1);
+  if (!start || !end) return [];
+  const manual = edge.routingPlacement === "user" && edge.waypoints?.length
+    ? edge.waypoints.map(copyPoint)
+    : [];
+  return [copyPoint(start), ...manual, copyPoint(end)];
+}
+
+function routeThroughGates(
+  gates: readonly Point[],
+  base: readonly Point[],
+  allObstacles: readonly ElementGeometry[],
+  committed: readonly RoutedEdge[],
+): Point[] | undefined {
+  if (gates.length < 2) return undefined;
+  const relevant = relevantRouteObstacles(gates, base, allObstacles);
+  const route: Point[] = [];
+  for (let index = 0; index < gates.length - 1; index += 1) {
+    const start = gates[index];
+    const end = gates[index + 1];
+    if (!start || !end) return undefined;
+    const segmentRoute = rectilinearVisibilityRoute(
+      start,
+      end,
+      relevant,
+      committed,
+      base,
+    );
+    if (!segmentRoute) return undefined;
+    appendConnectedRoute(route, segmentRoute);
+  }
+  return route;
+}
+
+function relevantRouteObstacles(
+  gates: readonly Point[],
+  base: readonly Point[],
+  obstacles: readonly ElementGeometry[],
+): ElementGeometry[] {
+  if (obstacles.length <= ROUTE_GRID_OBSTACLE_LIMIT) return obstacles.map(copyGeometry);
+  const routeBounds = pointBounds([...gates, ...base]);
+  const colliding = obstacles.filter((obstacle) => polylineIntersectsGeometry(base, obstacle));
+  const remaining = obstacles
+    .filter((obstacle) => !colliding.includes(obstacle))
+    .sort((left, right) => (
+      geometryDistanceToBounds(left, routeBounds) - geometryDistanceToBounds(right, routeBounds)
+      || compareGeometry(left, right)
+    ));
+  return [...colliding, ...remaining]
+    .slice(0, ROUTE_GRID_OBSTACLE_LIMIT)
+    .map(copyGeometry);
+}
+
+function rectilinearVisibilityRoute(
+  start: Point,
+  end: Point,
+  obstacles: readonly ElementGeometry[],
+  committed: readonly RoutedEdge[],
+  base: readonly Point[],
+): Point[] | undefined {
+  if (samePoint(start, end)) return [copyPoint(start), copyPoint(end)];
+  if (obstacles.some((obstacle) => pointInsideGeometry(start, obstacle))) return undefined;
+  if (obstacles.some((obstacle) => pointInsideGeometry(end, obstacle))) return undefined;
+
+  const xValues = new Set<number>([start.x, end.x]);
+  const yValues = new Set<number>([start.y, end.y]);
+  for (const point of base) {
+    xValues.add(point.x);
+    yValues.add(point.y);
+  }
+  for (const obstacle of obstacles) {
+    xValues.add(obstacle.x);
+    xValues.add(obstacle.x + obstacle.width);
+    yValues.add(obstacle.y);
+    yValues.add(obstacle.y + obstacle.height);
+  }
+  // Add a bounded set of already-routed coordinates to the visibility grid.
+  // Crossing penalties cannot influence Dijkstra when there is no grid line on
+  // which a route can turn before or after an existing segment.
+  for (const routed of relevantCommittedRoutes(base, committed)) {
+    for (const point of routed.points) {
+      xValues.add(point.x);
+      yValues.add(point.y);
+    }
+  }
+  const initialXs = [...xValues];
+  const initialYs = [...yValues];
+  const outsideGap = ROUTE_OBSTACLE_PADDING * 2;
+  const minimumX = Math.min(...initialXs);
+  const minimumY = Math.min(...initialYs);
+  xValues.add(minimumX >= 0 ? Math.max(0, minimumX - outsideGap) : minimumX - outsideGap);
+  xValues.add(Math.max(...initialXs) + outsideGap);
+  yValues.add(minimumY >= 0 ? Math.max(0, minimumY - outsideGap) : minimumY - outsideGap);
+  yValues.add(Math.max(...initialYs) + outsideGap);
+  const xs = [...xValues].sort((left, right) => left - right);
+  const ys = [...yValues].sort((left, right) => left - right);
+  const points: Point[] = [];
+  const pointIndexByGrid = new Map<string, number>();
+  for (let yIndex = 0; yIndex < ys.length; yIndex += 1) {
+    for (let xIndex = 0; xIndex < xs.length; xIndex += 1) {
+      const point = { x: xs[xIndex]!, y: ys[yIndex]! };
+      if (obstacles.some((obstacle) => pointInsideGeometry(point, obstacle))) continue;
+      const pointIndex = points.length;
+      points.push(point);
+      pointIndexByGrid.set(gridKey(xIndex, yIndex), pointIndex);
+    }
+  }
+  const startIndex = pointIndexByGrid.get(gridKey(xs.indexOf(start.x), ys.indexOf(start.y)));
+  const endIndex = pointIndexByGrid.get(gridKey(xs.indexOf(end.x), ys.indexOf(end.y)));
+  if (startIndex === undefined || endIndex === undefined) return undefined;
+
+  const queue = new MinRouteQueue();
+  const distances = new Map<string, { cost: RouteSearchCost; signature: string }>();
+  const previous = new Map<string, string>();
+  const startState = searchStateKey(startIndex, 0);
+  const zero: RouteSearchCost = [0, 0, 0, 0];
+  distances.set(startState, { cost: zero, signature: pointSignature(start) });
+  queue.push({ pointIndex: startIndex, direction: 0, cost: zero, signature: pointSignature(start) });
+  let completedState: string | undefined;
+
+  while (queue.size > 0) {
+    const current = queue.pop()!;
+    const currentState = searchStateKey(current.pointIndex, current.direction);
+    const known = distances.get(currentState);
+    if (!known || compareSearchCandidate(current.cost, current.signature, known.cost, known.signature) !== 0) {
+      continue;
+    }
+    if (current.pointIndex === endIndex) {
+      completedState = currentState;
+      break;
+    }
+    const point = points[current.pointIndex]!;
+    const xIndex = binaryIndex(xs, point.x);
+    const yIndex = binaryIndex(ys, point.y);
+    const neighbors: Array<{ pointIndex: number; direction: 1 | 2 }> = [];
+    for (const [nextX, nextY, direction] of [
+      [xIndex - 1, yIndex, 1],
+      [xIndex + 1, yIndex, 1],
+      [xIndex, yIndex - 1, 2],
+      [xIndex, yIndex + 1, 2],
+    ] as const) {
+      const neighborIndex = pointIndexByGrid.get(gridKey(nextX, nextY));
+      if (neighborIndex === undefined) continue;
+      const neighbor = points[neighborIndex]!;
+      if (segmentIntersectsAnyGeometry(point, neighbor, obstacles)) continue;
+      neighbors.push({ pointIndex: neighborIndex, direction });
+    }
+    neighbors.sort((left, right) => comparePoint(points[left.pointIndex]!, points[right.pointIndex]!));
+
+    for (const neighbor of neighbors) {
+      const target = points[neighbor.pointIndex]!;
+      const interaction = segmentInteraction(point, target, committed, true);
+      const nextCost: RouteSearchCost = [
+        current.cost[0] + interaction.overlapLength,
+        current.cost[1] + interaction.crossings,
+        current.cost[2] + (current.direction !== 0 && current.direction !== neighbor.direction ? 1 : 0),
+        current.cost[3] + pointDistance(point, target),
+      ];
+      const nextSignature = `${current.signature}>${pointSignature(target)}`;
+      const nextState = searchStateKey(neighbor.pointIndex, neighbor.direction);
+      const previousBest = distances.get(nextState);
+      if (
+        previousBest
+        && compareSearchCandidate(nextCost, nextSignature, previousBest.cost, previousBest.signature) >= 0
+      ) continue;
+      distances.set(nextState, { cost: nextCost, signature: nextSignature });
+      previous.set(nextState, currentState);
+      queue.push({
+        pointIndex: neighbor.pointIndex,
+        direction: neighbor.direction,
+        cost: nextCost,
+        signature: nextSignature,
+      });
+    }
+  }
+  if (!completedState) return undefined;
+
+  const reversed: Point[] = [];
+  let stateKey: string | undefined = completedState;
+  while (stateKey) {
+    const [pointIndexText] = stateKey.split(":");
+    const point = points[Number(pointIndexText)];
+    if (!point) return undefined;
+    reversed.push(copyPoint(point));
+    stateKey = previous.get(stateKey);
+  }
+  return simplifyOrthogonalRoute(reversed.reverse());
+}
+
+function relevantCommittedRoutes(
+  base: readonly Point[],
+  committed: readonly RoutedEdge[],
+): RoutedEdge[] {
+  if (committed.length <= ROUTE_GRID_COMMITTED_LIMIT) return [...committed];
+  const baseBounds = pointBounds(base);
+  return [...committed]
+    .sort((left, right) => (
+      geometryDistanceToBounds(pointBounds(left.points), baseBounds)
+      - geometryDistanceToBounds(pointBounds(right.points), baseBounds)
+      || compareText(left.edge.elementId, right.edge.elementId)
+    ))
+    .slice(0, ROUTE_GRID_COMMITTED_LIMIT);
+}
+
+class MinRouteQueue {
+  readonly #items: GridSearchEntry[] = [];
+
+  get size(): number {
+    return this.#items.length;
+  }
+
+  push(entry: GridSearchEntry): void {
+    this.#items.push(entry);
+    let index = this.#items.length - 1;
+    while (index > 0) {
+      const parent = Math.floor((index - 1) / 2);
+      if (compareGridEntry(this.#items[parent]!, this.#items[index]!) <= 0) break;
+      [this.#items[parent], this.#items[index]] = [this.#items[index]!, this.#items[parent]!];
+      index = parent;
+    }
+  }
+
+  pop(): GridSearchEntry | undefined {
+    const first = this.#items[0];
+    const last = this.#items.pop();
+    if (!first || !last || this.#items.length === 0) return first;
+    this.#items[0] = last;
+    let index = 0;
+    for (;;) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let smallest = index;
+      if (left < this.#items.length && compareGridEntry(this.#items[left]!, this.#items[smallest]!) < 0) {
+        smallest = left;
+      }
+      if (right < this.#items.length && compareGridEntry(this.#items[right]!, this.#items[smallest]!) < 0) {
+        smallest = right;
+      }
+      if (smallest === index) break;
+      [this.#items[index], this.#items[smallest]] = [this.#items[smallest]!, this.#items[index]!];
+      index = smallest;
+    }
+    return first;
+  }
+}
+
+function routeCost(
+  route: readonly Point[],
+  obstacles: readonly ElementGeometry[],
+  committed: readonly RoutedEdge[],
+): RouteCost {
+  let obstacleIntersections = 0;
+  let overlapLength = 0;
+  let crossings = 0;
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const start = route[index]!;
+    const end = route[index + 1]!;
+    obstacleIntersections += obstacles.filter((obstacle) => (
+      segmentIntersectsGeometry(start, end, obstacle)
+    )).length;
+    const interaction = segmentInteraction(start, end, committed);
+    overlapLength += interaction.overlapLength;
+    crossings += interaction.crossings;
+  }
+  return [
+    obstacleIntersections,
+    overlapLength,
+    crossings,
+    routeBends(route),
+    routeLength(route),
+  ];
+}
+
+function segmentInteraction(
+  start: Point,
+  end: Point,
+  committed: readonly RoutedEdge[],
+  includeCandidateEndpoints = false,
+): { overlapLength: number; crossings: number } {
+  let overlapLength = 0;
+  let crossings = 0;
+  for (const routed of committed) {
+    for (let index = 0; index < routed.points.length - 1; index += 1) {
+      const otherStart = routed.points[index]!;
+      const otherEnd = routed.points[index + 1]!;
+      overlapLength += collinearOverlapLength(start, end, otherStart, otherEnd);
+      if (
+        includeCandidateEndpoints
+          ? candidateSegmentCrossesRoute(start, end, otherStart, otherEnd)
+          : segmentsCrossStrictly(start, end, otherStart, otherEnd)
+      ) crossings += 1;
+    }
+  }
+  return { overlapLength, crossings };
+}
+
+function candidateSegmentCrossesRoute(
+  candidateStart: Point,
+  candidateEnd: Point,
+  routeStart: Point,
+  routeEnd: Point,
+): boolean {
+  const candidateDx = candidateEnd.x - candidateStart.x;
+  const candidateDy = candidateEnd.y - candidateStart.y;
+  const routeDx = routeEnd.x - routeStart.x;
+  const routeDy = routeEnd.y - routeStart.y;
+  const denominator = candidateDx * routeDy - candidateDy * routeDx;
+  if (denominator === 0) return false;
+  const offsetX = routeStart.x - candidateStart.x;
+  const offsetY = routeStart.y - candidateStart.y;
+  const candidateRatio = (offsetX * routeDy - offsetY * routeDx) / denominator;
+  const routeRatio = (offsetX * candidateDy - offsetY * candidateDx) / denominator;
+  return candidateRatio >= 0 && candidateRatio <= 1 && routeRatio > 0 && routeRatio < 1;
+}
+
+function compareRouteCandidate(
+  leftCost: RouteCost,
+  leftRoute: readonly Point[],
+  rightCost: RouteCost,
+  rightRoute: readonly Point[],
+): number {
+  return compareNumberTuples(leftCost, rightCost)
+    || compareText(routeSignature(leftRoute), routeSignature(rightRoute));
+}
+
+function compareSearchCandidate(
+  leftCost: RouteSearchCost,
+  leftSignature: string,
+  rightCost: RouteSearchCost,
+  rightSignature: string,
+): number {
+  return compareNumberTuples(leftCost, rightCost) || compareText(leftSignature, rightSignature);
+}
+
+function compareGridEntry(left: GridSearchEntry, right: GridSearchEntry): number {
+  return compareSearchCandidate(left.cost, left.signature, right.cost, right.signature)
+    || left.pointIndex - right.pointIndex
+    || left.direction - right.direction;
+}
+
+function compareNumberTuples(left: readonly number[], right: readonly number[]): number {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+function appendConnectedRoute(target: Point[], input: readonly Point[]): void {
+  if (target.length === 0) {
+    target.push(...input.map(copyPoint));
+    return;
+  }
+  const offset = samePoint(target.at(-1)!, input[0]!) ? 1 : 0;
+  target.push(...input.slice(offset).map(copyPoint));
+}
+
+function simplifyOrthogonalRoute(route: readonly Point[]): Point[] {
+  const result: Point[] = [];
+  for (const point of route) {
+    if (result.length > 0 && samePoint(result.at(-1)!, point)) continue;
+    while (result.length >= 2 && collinear(result.at(-2)!, result.at(-1)!, point)) {
+      result.pop();
+    }
+    result.push(copyPoint(point));
+  }
+  return result;
+}
+
+function routeBends(route: readonly Point[]): number {
+  let bends = 0;
+  for (let index = 1; index < route.length - 1; index += 1) {
+    if (!collinear(route[index - 1]!, route[index]!, route[index + 1]!)) bends += 1;
+  }
+  return bends;
+}
+
+function routeLength(route: readonly Point[]): number {
+  let length = 0;
+  for (let index = 0; index < route.length - 1; index += 1) {
+    length += pointDistance(route[index]!, route[index + 1]!);
+  }
+  return length;
+}
+
+function polylineIntersectsGeometry(
+  route: readonly Point[],
+  geometry: ElementGeometry,
+): boolean {
+  for (let index = 0; index < route.length - 1; index += 1) {
+    if (segmentIntersectsGeometry(route[index]!, route[index + 1]!, geometry)) return true;
+  }
+  return false;
+}
+
+function segmentIntersectsAnyGeometry(
+  start: Point,
+  end: Point,
+  geometries: readonly ElementGeometry[],
+): boolean {
+  return geometries.some((geometry) => segmentIntersectsGeometry(start, end, geometry));
+}
+
+function segmentIntersectsGeometry(
+  start: Point,
+  end: Point,
+  geometry: ElementGeometry,
+): boolean {
+  const left = geometry.x;
+  const right = geometry.x + geometry.width;
+  const top = geometry.y;
+  const bottom = geometry.y + geometry.height;
+  if (start.x === end.x) {
+    return start.x > left && start.x < right
+      && Math.max(Math.min(start.y, end.y), top) < Math.min(Math.max(start.y, end.y), bottom);
+  }
+  if (start.y === end.y) {
+    return start.y > top && start.y < bottom
+      && Math.max(Math.min(start.x, end.x), left) < Math.min(Math.max(start.x, end.x), right);
+  }
+  return segmentIntersectsRectangleInterior(start, end, geometry);
+}
+
+function segmentIntersectsRectangleInterior(
+  start: Point,
+  end: Point,
+  geometry: ElementGeometry,
+): boolean {
+  const xInterval = segmentAxisInteriorInterval(
+    start.x,
+    end.x,
+    geometry.x,
+    geometry.x + geometry.width,
+  );
+  const yInterval = segmentAxisInteriorInterval(
+    start.y,
+    end.y,
+    geometry.y,
+    geometry.y + geometry.height,
+  );
+  if (!xInterval || !yInterval) return false;
+  const low = Math.max(0, xInterval[0], yInterval[0]);
+  const high = Math.min(1, xInterval[1], yInterval[1]);
+  return low < high && high > 0 && low < 1;
+}
+
+function segmentAxisInteriorInterval(
+  start: number,
+  end: number,
+  minimum: number,
+  maximum: number,
+): readonly [number, number] | undefined {
+  if (start === end) {
+    return start > minimum && start < maximum
+      ? [Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY]
+      : undefined;
+  }
+  const first = (minimum - start) / (end - start);
+  const second = (maximum - start) / (end - start);
+  return first < second ? [first, second] : [second, first];
+}
+
+function pointInsideGeometry(point: Point, geometry: ElementGeometry): boolean {
+  return point.x > geometry.x
+    && point.x < geometry.x + geometry.width
+    && point.y > geometry.y
+    && point.y < geometry.y + geometry.height;
+}
+
+function collinearOverlapLength(
+  leftStart: Point,
+  leftEnd: Point,
+  rightStart: Point,
+  rightEnd: Point,
+): number {
+  if (leftStart.x === leftEnd.x && rightStart.x === rightEnd.x && leftStart.x === rightStart.x) {
+    return intervalOverlap(leftStart.y, leftEnd.y, rightStart.y, rightEnd.y);
+  }
+  if (leftStart.y === leftEnd.y && rightStart.y === rightEnd.y && leftStart.y === rightStart.y) {
+    return intervalOverlap(leftStart.x, leftEnd.x, rightStart.x, rightEnd.x);
+  }
+  return 0;
+}
+
+function intervalOverlap(leftA: number, leftB: number, rightA: number, rightB: number): number {
+  return Math.max(
+    0,
+    Math.min(Math.max(leftA, leftB), Math.max(rightA, rightB))
+      - Math.max(Math.min(leftA, leftB), Math.min(rightA, rightB)),
+  );
+}
+
+function segmentsCrossStrictly(
+  leftStart: Point,
+  leftEnd: Point,
+  rightStart: Point,
+  rightEnd: Point,
+): boolean {
+  const leftDx = leftEnd.x - leftStart.x;
+  const leftDy = leftEnd.y - leftStart.y;
+  const rightDx = rightEnd.x - rightStart.x;
+  const rightDy = rightEnd.y - rightStart.y;
+  const denominator = leftDx * rightDy - leftDy * rightDx;
+  if (denominator === 0) return false;
+  const offsetX = rightStart.x - leftStart.x;
+  const offsetY = rightStart.y - leftStart.y;
+  const leftRatio = (offsetX * rightDy - offsetY * rightDx) / denominator;
+  const rightRatio = (offsetX * leftDy - offsetY * leftDx) / denominator;
+  return leftRatio > 0 && leftRatio < 1 && rightRatio > 0 && rightRatio < 1;
+}
+
+function collinear(first: Point, middle: Point, last: Point): boolean {
+  return (first.x === middle.x && middle.x === last.x)
+    || (first.y === middle.y && middle.y === last.y);
+}
+
+function expandGeometry(geometry: ElementGeometry, amount: number): ElementGeometry {
+  return {
+    x: geometry.x - amount,
+    y: geometry.y - amount,
+    width: geometry.width + amount * 2,
+    height: geometry.height + amount * 2,
+  };
+}
+
+export function layoutExternalReservationGeometries(
+  element: LayoutElement,
+  geometry: ElementGeometry,
+): ElementGeometry[] {
+  const result: ElementGeometry[] = [];
+  for (const reservation of element.externalReservations ?? []) {
+    if (
+      reservation.placement !== "bottom-center"
+      || !Number.isFinite(reservation.width)
+      || !Number.isFinite(reservation.height)
+      || !Number.isFinite(reservation.gap)
+      || reservation.width <= 0
+      || reservation.height <= 0
+      || reservation.gap < 0
+    ) continue;
+    result.push({
+      x: geometry.x + (geometry.width - reservation.width) / 2,
+      y: geometry.y + geometry.height + reservation.gap,
+      width: reservation.width,
+      height: reservation.height,
+    });
+  }
+  return result;
+}
+
+export function layoutElementFootprintGeometry(
+  element: LayoutElement,
+  geometry: ElementGeometry,
+): ElementGeometry {
+  const reservations = layoutExternalReservationGeometries(element, geometry);
+  if (reservations.length === 0) return copyGeometry(geometry);
+  const left = Math.min(geometry.x, ...reservations.map((item) => item.x));
+  const top = Math.min(geometry.y, ...reservations.map((item) => item.y));
+  const right = Math.max(
+    geometry.x + geometry.width,
+    ...reservations.map((item) => item.x + item.width),
+  );
+  const bottom = Math.max(
+    geometry.y + geometry.height,
+    ...reservations.map((item) => item.y + item.height),
+  );
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function layoutBounds(state: LayoutState): ElementGeometry[] {
+  const result: ElementGeometry[] = [];
+  for (const element of [...state.elements.values()].sort(compareElement)) {
+    const geometry = state.geometries[element.elementId];
+    if (!geometry) continue;
+    result.push(copyGeometry(geometry), ...layoutExternalReservationGeometries(element, geometry));
+  }
+  return result;
+}
+
+function pointBounds(points: readonly Point[]): ElementGeometry {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const left = Math.min(...xs);
+  const top = Math.min(...ys);
+  return {
+    x: left,
+    y: top,
+    width: Math.max(...xs) - left,
+    height: Math.max(...ys) - top,
+  };
+}
+
+function geometryDistanceToBounds(geometry: ElementGeometry, bounds: ElementGeometry): number {
+  const dx = Math.max(
+    0,
+    bounds.x - (geometry.x + geometry.width),
+    geometry.x - (bounds.x + bounds.width),
+  );
+  const dy = Math.max(
+    0,
+    bounds.y - (geometry.y + geometry.height),
+    geometry.y - (bounds.y + bounds.height),
+  );
+  return dx + dy;
+}
+
+function compareGeometry(left: ElementGeometry, right: ElementGeometry): number {
+  return left.x - right.x
+    || left.y - right.y
+    || left.width - right.width
+    || left.height - right.height;
+}
+
+function comparePoint(left: Point, right: Point): number {
+  return left.x - right.x || left.y - right.y;
+}
+
+function routeSignature(route: readonly Point[]): string {
+  return route.map(pointSignature).join(">");
+}
+
+function pointSignature(point: Point): string {
+  return `${point.x},${point.y}`;
+}
+
+function gridKey(xIndex: number, yIndex: number): string {
+  return `${xIndex},${yIndex}`;
+}
+
+function searchStateKey(pointIndex: number, direction: number): string {
+  return `${pointIndex}:${direction}`;
+}
+
+function binaryIndex(values: readonly number[], value: number): number {
+  let low = 0;
+  let high = values.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    const candidate = values[middle]!;
+    if (candidate === value) return middle;
+    if (candidate < value) low = middle + 1;
+    else high = middle - 1;
+  }
+  return -1;
 }
 
 function parallelLaneOffsets(
@@ -1251,6 +2083,18 @@ function copyGeometry(value: ElementGeometry): ElementGeometry {
 
 function copyPoint(value: Point): Point {
   return { ...value };
+}
+
+function pointDistance(left: Point, right: Point): number {
+  return Math.abs(left.x - right.x) + Math.abs(left.y - right.y);
+}
+
+function samePoint(left: Point, right: Point): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
+function compareElement(left: LayoutElement, right: LayoutElement): number {
+  return compareText(left.elementId, right.elementId);
 }
 
 function compareEdge(left: LayoutEdge, right: LayoutEdge): number {

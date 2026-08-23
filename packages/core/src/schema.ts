@@ -190,6 +190,7 @@ export const iriographDocumentSchema = {
         styleRef: { type: "string", format: "iri" },
         style: { $ref: "#/$defs/styleOverride" },
         styleToken: { type: "string", minLength: 1 },
+        labelPlacement: { enum: ["top", "right", "bottom", "left", "center"] },
         extensions: extensionProperty,
       },
     },
@@ -197,6 +198,7 @@ export const iriographDocumentSchema = {
       type: "object",
       additionalProperties: false,
       properties: {
+        routeMode: { enum: ["auto", "straight", "orthogonal", "curve", "manual"] },
         waypoints: {
           type: "array",
           items: { $ref: "#/$defs/point" },
@@ -336,6 +338,17 @@ export const projectionCatalogSchema = {
         {
           type: "object",
           additionalProperties: false,
+          required: ["operator", "membershipPredicate", "containerPosition"],
+          properties: {
+            operator: { const: "membership-region" },
+            membershipPredicate: { type: "string", format: "iri" },
+            containerPosition: { enum: ["subject", "object"] },
+            extensions: extensionProperty,
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
           required: ["operator", "ordinalPredicatePrefix"],
           properties: {
             operator: { const: "ordinal-sequence" },
@@ -387,6 +400,10 @@ export const projectionCatalogSchema = {
         shape: { enum: ["rectangle", "rounded-rectangle", "circle", "diamond"] },
         iconRef: { type: "string", format: "iri" },
         headerPosition: { enum: ["top", "left", "none"] },
+        labelPlacement: { enum: ["top", "right", "bottom", "left", "center"] },
+        routeMode: { enum: ["auto", "straight", "orthogonal", "curve", "manual"] },
+        sourceMarker: { $ref: "#/$defs/edgeTerminalMarker" },
+        targetMarker: { $ref: "#/$defs/edgeTerminalMarker" },
         style: { $ref: "#/$defs/style" },
         defaultSize: { $ref: "#/$defs/size" },
         extensions: extensionProperty,
@@ -440,6 +457,9 @@ export const projectionCatalogSchema = {
         height: { type: "number", exclusiveMinimum: 0 },
         extensions: extensionProperty,
       },
+    },
+    edgeTerminalMarker: {
+      enum: ["none", "arrow", "open-arrow", "triangle", "diamond", "circle"],
     },
     asset: {
       type: "object",

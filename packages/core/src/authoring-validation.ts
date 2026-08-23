@@ -110,6 +110,31 @@ export function validateResolvedAuthoringContext(
       diagnostics.push(error("authoring-context-invalid", `Duplicate authoring term: ${term.iri}`));
     }
     terms.add(term.iri);
+    for (const [field, value] of [
+      ["label", term.label],
+      ["description", term.description],
+      ["category", term.category],
+    ] as const) {
+      if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `${field} must be a non-empty string for ${term.iri}.`,
+        ));
+      }
+    }
+    if (
+      term.examples !== undefined
+      && (
+        !Array.isArray(term.examples)
+        || term.examples.length === 0
+        || term.examples.some((value) => typeof value !== "string" || value.trim().length === 0)
+      )
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `examples must contain non-empty strings for ${term.iri}.`,
+      ));
+    }
     const standardRoles = STANDARD_TERM_ROLES.get(term.iri)
       ?? (isOrdinalPredicate(term.iri) ? ["predicate" as const] : undefined);
     const resolvedRoles = authoringTermRolesFromResolved(term);
@@ -296,11 +321,18 @@ export function validateAuthoringGraphPolicy(
       ? context.termPolicy.llmMinting
       : context.termPolicy.humanMinting;
     if (mintingPolicy === "deny") {
-      diagnostics.push(error(
-        "term-minting-denied",
-        `Semantic term minting is denied: ${quad.subject.value}`,
-        quad.subject.value,
-      ));
+      diagnostics.push({
+        ...error(
+          "term-minting-denied",
+          `Semantic term minting is denied: ${quad.subject.value}`,
+          quad.subject.value,
+        ),
+        suggestedActions: [{
+          actionId: "choose-existing-profile-term",
+          semanticRef: quad.subject.value,
+          parameters: { requestedTermIri: quad.subject.value },
+        }],
+      });
     } else if (mintingPolicy === "warn") {
       diagnostics.push({
         severity: "warning",

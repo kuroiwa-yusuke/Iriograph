@@ -44,4 +44,16 @@ describe("resource details", () => {
       }),
     ]);
   });
+
+  it("rdf:_nを詳細属性へ漏らさず、名前・分類・関連を区分する", () => {
+    const sequenceDocument = structuredClone(document);
+    sequenceDocument.semantic.source = `@prefix : <urn:test:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n:item a :Task ; rdfs:label "line 1\\nline 2" ; rdfs:seeAlso :other ; rdf:_1 :first .`;
+    const rows = resourcePropertyEditorRows(sequenceDocument, "urn:test:item", []);
+    expect(rows.some((row) => row.predicateIri.endsWith("#_1"))).toBe(false);
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicateIri: expect.stringMatching(/#label$/u), category: "name-description", multiline: true }),
+      expect.objectContaining({ predicateIri: expect.stringMatching(/#type$/u), category: "classification" }),
+      expect.objectContaining({ predicateIri: expect.stringMatching(/#seeAlso$/u), category: "relationship" }),
+    ]));
+  });
 });

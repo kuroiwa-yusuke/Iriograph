@@ -71,9 +71,13 @@ export type ViewElementOverlay = {
     style?: VisualStyleOverride;
     /** @deprecated Use styleRef. An absolute IRI is resolved as a styleRef. */
     styleToken?: string;
+    /** Sparse, view-local label placement. The semantic label remains in RDF. */
+    labelPlacement?: LabelPlacement;
     extensions?: IriographExtensions;
   };
   routing?: {
+    /** Rendering/routing policy. Legacy waypoint overlays imply `manual`. */
+    routeMode?: EdgeRouteMode;
     waypoints?: Point[];
     labelOffset?: Point;
     sourceAnchor?: EdgeEndpointAnchor;
@@ -106,6 +110,29 @@ export type EdgeEndpointAnchor = {
 };
 
 export type EdgeEndpointShape = NonNullable<VisualTemplate["shape"]> | "container" | "region";
+
+export type LabelPlacement = "top" | "right" | "bottom" | "left" | "center";
+
+export type EdgeRouteMode = "auto" | "straight" | "orthogonal" | "curve" | "manual";
+
+/** Closed renderer-safe terminal vocabulary; predicate identity stays semantic. */
+export type EdgeTerminalMarker = "none" | "arrow" | "open-arrow" | "triangle" | "diamond" | "circle";
+
+/** Exact RDF literal metadata used by renderer/inspector without becoming identity. */
+export type SemanticTextValue = {
+  value: string;
+  predicateIri: string;
+  statementRef: string;
+  language?: string;
+  datatypeIri?: string;
+};
+
+/** All labels/comments plus the locale-selected primary label. */
+export type SceneSemanticText = {
+  primaryLabel?: SemanticTextValue;
+  labels: SemanticTextValue[];
+  comments: SemanticTextValue[];
+};
 
 export type ProjectionCatalogV1 = {
   schemaVersion: "1";
@@ -165,6 +192,17 @@ export type ProjectionOperator =
   | {
       operator: "membership-container";
       membershipPredicate: string;
+      extensions?: IriographExtensions;
+    }
+  | {
+      /**
+       * Projects a typed resource as an independent region and relation endpoint
+       * as a member. Unlike hierarchy containment, memberships may overlap and
+       * never establish `parentElementId`.
+       */
+      operator: "membership-region";
+      membershipPredicate: string;
+      containerPosition: "subject" | "object";
       extensions?: IriographExtensions;
     }
   | {
@@ -231,6 +269,12 @@ export type VisualTemplate = {
   shape?: "rectangle" | "rounded-rectangle" | "circle" | "diamond";
   iconRef?: string;
   headerPosition?: "top" | "left" | "none";
+  labelPlacement?: LabelPlacement;
+  /** Meaningful for edge templates; ignored by non-edge renderers. */
+  routeMode?: EdgeRouteMode;
+  /** Meaningful for edge templates; omitted values resolve to none/arrow. */
+  sourceMarker?: EdgeTerminalMarker;
+  targetMarker?: EdgeTerminalMarker;
   style: VisualStyle;
   defaultSize?: {
     width: number;
@@ -299,6 +343,7 @@ export type SemanticEditCapability =
       member: string;
       containerTypeIri: string;
       predicate: string;
+      containerPosition?: "subject" | "object";
     }
   | {
       command: "set-sequence";
@@ -322,6 +367,29 @@ export type ProjectionProvenance = {
   derivation: "resource" | "direct" | "derived";
   editCapability?: SemanticEditCapability;
 };
+
+export type EdgeLabelProvenance =
+  | {
+      kind: "predicate";
+      labelSemanticRef: string;
+      sourceStatementRefs: string[];
+    }
+  | {
+      kind: "derived-structure";
+      role: "sequence-transition";
+      structureSemanticRef: string;
+      fromOrdinal: number;
+      toOrdinal: number;
+      sourceStatementRefs: string[];
+    }
+  | {
+      kind: "derived-structure";
+      role: "alternative-branch";
+      structureSemanticRef: string;
+      /** Present when a path resource supplies the visible label. */
+      labelSemanticRef?: string;
+      sourceStatementRefs: string[];
+    };
 
 /**
  * Projection output before a layout adapter supplies missing geometry.
@@ -353,6 +421,8 @@ export type ProjectedNode = {
   semanticRef: string;
   structuralKind: "node";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelPlacement?: LabelPlacement;
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
   iconRef?: string;
@@ -372,6 +442,8 @@ export type ProjectedContainer = {
   semanticRef: string;
   structuralKind: "container";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelPlacement?: LabelPlacement;
   templateRef: string;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
@@ -389,6 +461,8 @@ export type ProjectedRegion = {
   semanticRef: string;
   structuralKind: "region";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelPlacement?: LabelPlacement;
   templateRef: string;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
@@ -403,6 +477,8 @@ export type ProjectedEdge = {
   semanticRef: string;
   structuralKind: "edge";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelProvenance?: EdgeLabelProvenance;
   sourceElementId: string;
   targetElementId: string;
   templateRef: string;
@@ -411,6 +487,9 @@ export type ProjectedEdge = {
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
+  routeMode?: EdgeRouteMode;
+  sourceMarker?: EdgeTerminalMarker;
+  targetMarker?: EdgeTerminalMarker;
   routingPlacement: "generated" | "user";
   fallback: boolean;
   provenance: ProjectionProvenance;
@@ -437,6 +516,8 @@ export type SceneNode = {
   semanticRef: string;
   structuralKind: "node";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelPlacement?: LabelPlacement;
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
   iconRef?: string;
@@ -456,6 +537,8 @@ export type SceneContainer = {
   semanticRef: string;
   structuralKind: "container";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelPlacement?: LabelPlacement;
   templateRef: string;
   geometry: ElementGeometry;
   headerPosition: NonNullable<VisualTemplate["headerPosition"]>;
@@ -473,6 +556,8 @@ export type SceneRegion = {
   semanticRef: string;
   structuralKind: "region";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelPlacement?: LabelPlacement;
   templateRef: string;
   geometry: ElementGeometry;
   style: VisualStyle;
@@ -486,6 +571,8 @@ export type SceneEdge = {
   semanticRef: string;
   structuralKind: "edge";
   label: string;
+  semanticText?: SceneSemanticText;
+  labelProvenance?: EdgeLabelProvenance;
   sourceElementId: string;
   targetElementId: string;
   templateRef: string;
@@ -500,6 +587,9 @@ export type SceneEdge = {
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
+  routeMode?: EdgeRouteMode;
+  sourceMarker?: EdgeTerminalMarker;
+  targetMarker?: EdgeTerminalMarker;
   projectionRuleId?: string;
   fallback: boolean;
   provenance?: ProjectionProvenance;
@@ -526,6 +616,15 @@ export type ProjectionDiagnostic = {
   catalogRef?: string;
   ruleId?: string;
   assetRef?: string;
+  /** Machine-actionable recovery suggestions; hosts localize/present them. */
+  suggestedActions?: DiagnosticActionHint[];
+};
+
+export type DiagnosticActionHint = {
+  actionId: string;
+  semanticRef?: string;
+  statementRef?: string;
+  parameters?: Record<string, JsonValue>;
 };
 
 export type SemanticSourceUpdate = {

@@ -85,6 +85,8 @@ export function validateProfileStructure(
     if (!operator) continue;
     if (operator.operator === "membership-container") {
       validateMembership(graph, plan.semanticRef, operator, closure, parentByChild, diagnostics);
+    } else if (operator.operator === "membership-region") {
+      validateRegionMembership(graph, plan.semanticRef, operator, closure, diagnostics);
     } else if (operator.operator === "ordinal-sequence" || operator.operator === "alternative") {
       validateOrdinalStructure(graph, plan.semanticRef, operator, diagnostics);
     }
@@ -128,6 +130,12 @@ function validateMembershipParents(
         message: `${quad.subject.value}はmembership-containerとして解決されないため${quad.predicate.value}を使用できません。`,
         semanticRef: isNamedNode(quad.subject) ? quad.subject.value : canonicalTerm(quad.subject),
         statementRef: statementIdentityFromQuad(quad),
+        suggestedActions: [{
+          actionId: "choose-valid-membership-container",
+          semanticRef: isNamedNode(quad.subject) ? quad.subject.value : canonicalTerm(quad.subject),
+          statementRef: statementIdentityFromQuad(quad),
+          parameters: { predicateIri: quad.predicate.value },
+        }],
       });
   }
 }
@@ -241,6 +249,37 @@ function validateMembership(
     const parents = parentByChild.get(quad.object.value) ?? [];
     parents.push({ parent: parentIri, quad });
     parentByChild.set(quad.object.value, parents);
+  }
+}
+
+function validateRegionMembership(
+  graph: SemanticGraph,
+  regionIri: string,
+  operator: Extract<ProjectionOperator, { operator: "membership-region" }>,
+  closure: RdfsClosure,
+  diagnostics: ProjectionDiagnostic[],
+): void {
+  const candidates = operator.containerPosition === "subject"
+    ? graph.store.getQuads(regionIri, null, null, null)
+    : graph.store.getQuads(null, null, regionIri, null);
+  for (const quad of candidates.filter((candidate) => (
+    isNamedNode(candidate.predicate)
+    && closure.subpropertyDistance(candidate.predicate.value, operator.membershipPredicate) !== undefined
+  ))) {
+    const member = operator.containerPosition === "subject" ? quad.object : quad.subject;
+    if (isNamedNode(member)) continue;
+    diagnostics.push({
+      severity: "error",
+      code: "structural-resource-must-be-named",
+      message: `${regionIri}のregion memberはnamed IRIでなければなりません。`,
+      semanticRef: regionIri,
+      statementRef: statementIdentityFromQuad(quad),
+      suggestedActions: [{
+        actionId: "replace-region-member-with-named-resource",
+        semanticRef: regionIri,
+        statementRef: statementIdentityFromQuad(quad),
+      }],
+    });
   }
 }
 
@@ -389,6 +428,7 @@ function validateOrphanOrdinals(
 
 function isStructuralOperator(operator: ProjectionOperator): boolean {
   return operator.operator === "membership-container"
+    || operator.operator === "membership-region"
     || operator.operator === "ordinal-sequence"
     || operator.operator === "alternative";
 }

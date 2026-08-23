@@ -33,11 +33,19 @@ Palette上のtemplateやiconは外観の選択です。選択した形を正当�
 
 Resource作成では、named IRIと、作成resourceをsubjectまたはobjectに含む少なくとも一つのtripleが必要です。Label、意味のあるclass、既存resourceとのedge、catalog規定のcontainer membershipを一つの作成draftへまとめられます。Canvasで選んだ位置とghostはApply前の一時表示であり、validationと実投影後のbounds確認に成功した場合だけ、意味graphと初期geometryを一つのundo itemへ確定します。
 
+通常要素、概念クラス、関係種別の定義は同じ「要素作成」という表示にまとめません。通常要素は既存classへの分類、概念クラスは`rdfs:Class`としての語彙定義、関係種別は`rdf:Property`としての語彙定義です。Humanによる語彙定義を許すprofileでは、許可namespace、label、comment、明示確認を必須にし、作成後のclass/predicate候補へ動的に加えます。LLMのterm minting policyとは独立です。禁止するprofileでは作成cardを無効理由付きで隠すかdisableし、Apply後に拒否して利用者を迷わせません。
+
+通常要素の作成draftは、作成時点で既存classへの分類、上位概念、領域所属、既存resourceとの関係を複数選択できます。Canvas上のresourceまたは交差領域を選ぶ操作はIRI入力の代替であり、確定前に生成される全statementをlabel中心のrich previewで示します。
+
 ## Detailsとproperty編集
 
 要素の詳細actionは、resourceのlabelを見出しにしたdetails/property dialogを開きます。通常表示ではlabel、値の種類、関係先を読みやすく示し、完全IRI、datatype、language、exact tripleは`Advanced`または詳細領域に置きます。Advanced入力から渡す値もCoreでは常に完全IRIとして検証されます。
 
 Property編集はsubjectとpredicateの値集合を扱います。複数のIRI/literal値、literalのdatatypeまたはlanguage、空文字列literalを区別します。値を空にする明示削除と、空文字列を一値として保存する操作は同じではありません。`rdfs:member`や`rdf:_n`などの構造predicateは通常propertyとして編集せず、包含、順序、選択の専用actionを使います。
+
+通常detailsは、RDF statementの平坦な一覧ではなく、`名前・説明・別名`、`分類・概念階層`、`関係・参照`、`データ属性`、`Advanced identity`へ分けます。`rdf:_n`は順序editorだけに表示します。Predicate resourceを編集する場合は「関係種別」としてlabel、comment、`rdfs:subPropertyOf`を示し、label変更が同じpredicateを使う全edgeへ反映されることを説明します。
+
+Labelとcommentは複数行literalを入力でき、language別の値集合として編集します。Canvasの既定labelはactive localeのprimary label一つです。同一languageの`rdfs:label`が複数ありprimaryを決定できない場合は警告し、別名を必要とするprofileは`skos:altLabel`等の標準語彙を明示的に許可します。文字列をidentityやrule matchingには使いません。
 
 Dialogは表示時に見出しまたは最初のfieldへfocusし、focusをdialog内に保ちます。EscapeまたはCancelは未適用draftを破棄し、閉じた後は存在するopenerまたはCanvasのactive itemへfocusを戻します。Semantic propertyはdialog内のPreviewから同じ明示Applyへ進み、dialogを閉じただけでは保存しません。
 
@@ -45,9 +53,13 @@ Dialogは表示時に見出しまたは最初のfieldへfocusし、focusをdialo
 
 Edge作成はsource、predicate、targetを明示するsemantic authoringです。Canvas gestureを使う場合も、最初のresourceと次のresourceをdraftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補から選び、候補外IRIを許すpolicyの場合だけ`Advanced`から入力できます。空欄をgeneric predicateで補完することはありません。
 
+Predicate pickerは解決済み語彙catalogの日本語label、comment、category、利用例を主表示し、source/targetの既知classとactive profileへ適合する候補を上位にします。全predicateを平坦に並べず、検索とcategory絞り込みを提供します。近い既存predicateがない場合だけ、許可されたhuman vocabulary definitionを別actionとして開きます。表示名が同じ候補は説明とAdvanced IRIで識別します。
+
 選択edgeの始点と終点は、endpoint haloまたはInspectorの値からnode/container周囲の任意位置へ調整できます。Anchorは外周を時計回りに一周する`0 <= position < 1`の正規化値で、`0`は上、`0.25`は右、`0.5`は下、`0.75`は左です。Haloのdrag中はrouteを一時previewし、pointerupで一つのpresentation historyへ確定します。Inspectorは同じ値のkeyboard入力とautomaticへのresetを提供します。
 
 Anchor、waypoint、label offsetはsparse routing overlayであり、edgeのsource、predicate、targetという意味は変更しません。意味上の接続先を変えたい場合は、既存edgeの見た目を付け替えず、元関係の削除と新関係の作成をsemantic Previewで確認します。
+
+Edgeを選択した時点でInspectorの先頭に経路情報を表示します。経路modeは`auto`、waypointを持たない`straight`、自動直交の`orthogonal`、曲線の`curve`、利用者制御点を持つ`manual`を区別します。Layoutが生成した屈曲点はportable overlayのmanual waypointではなく、明示した「手動経路へ変換」でだけ保存対象になります。選択中のanchorとwaypoint handleはnodeより前面のinteraction layerへ表示し、背後の要素と重なっても操作可能にします。
 
 ## Appearance editor
 
@@ -66,6 +78,18 @@ Editorは次の不一致をCanvasとInspectorに警告します。
 - 重なった複数領域が候補になる、または一意parentのprofileに対して複数membershipがある
 
 不一致は自動修正しません。「意味包含のdraftを作成／外す」はcatalog provenanceに対応する構造commandをPreviewへ送り、「表示を領域内／領域外へ移動」はoverlayだけを一つのpresentation historyへ保存します。複数候補では対象containerを明示選択するまでsemantic draftを確定しません。作成位置指定modeでcontainer背景を選んだ場合も、一致するmembership ruleが一意なときだけdraftを補完します。
+
+分類、概念階層、領域所属は別actionとして表示します。複数resourceと複数class/regionを選び、追加と解除を一つのatomic previewへまとめられます。Concept classをregionへ投影するviewでは、複数`rdf:type`の共通部分をderived intersection cellとして選択でき、cellへの分類操作は構成classのstatementを一括更新します。通常dragは意味を変更しませんが、classification-constrained viewでは現在の所属intersectionから要素を外へ出さず、別cellへの移動は「分類も変更」のsemantic draftを明示的に開始します。
+
+Region labelはcatalog既定またはsparse overlayによりinside、top、right、bottom、leftへ置けます。外側labelとoffsetはlayoutの占有boxに含めます。
+
+## Comment表示
+
+`rdfs:comment`は意味graphから導出するannotationであり、view overlayへ本文を複製しません。既定はhoverまたはkeyboard focusで全文tooltipを表示し、session/viewの「コメントをすべて表示」で折り返したcalloutを表示します。Stable comment layoutを選んだviewは非表示時も同じcallout boundsをlayout obstacleとして予約し、表示toggleでnodeやedgeが動かないようにします。Region背景は障害物にせず、通常nodeとcomment calloutの重なりを避けます。
+
+## 順序と分岐
+
+`rdf:Seq`はlabel付きcardの並べ替え、`rdf:Alt`は選択肢cardと既定値の選択として編集します。利用者に`rdf:_1`等のpredicateやIRI改行textareaを通常表示しません。Scene上のderived edgeから元Seq/Altを開けるようprovenanceを保持し、「順序の2番から3番」「選択肢の承認」のように由来を説明します。順序edgeの「次へ」や番号、分岐edgeの選択肢名はderived display labelであり、元Turtleへ偽のlabel tripleを追加しません。
 
 ## 削除などの破壊操作
 

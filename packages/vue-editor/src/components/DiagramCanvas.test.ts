@@ -923,6 +923,92 @@ describe("DiagramCanvas pointer gestures", () => {
         .toBe(`url(#${ids[index]})`);
     });
   });
+
+  it("curveはderived routeの全bendを保ちterminal markerと複数label/commentを表示する", async () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.routeMode = "curve";
+    scene.edges[0]!.sourceMarker = "diamond";
+    scene.edges[0]!.targetMarker = "circle";
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene,
+        semanticMetadata: {
+          "urn:test:canvas:a": {
+            labels: [{ value: "A", language: "ja" }, { value: "別名A", language: "ja" }],
+            comments: [{ value: "一行目\n二行目", language: "ja" }],
+          },
+        },
+      },
+    });
+    const path = wrapper.get(".iriograph-edge-path");
+    expect(path.attributes("d")).toContain("Q 220 70");
+    expect(path.attributes("d")).toContain("Q 220 190");
+    expect(path.attributes("marker-start")).toMatch(/diamond/u);
+    expect(path.attributes("marker-end")).toMatch(/circle/u);
+    expect(wrapper.get(".iriograph-additional-labels").text()).toContain("別名A");
+    expect(wrapper.get(".iriograph-comment-callout").text()).toContain("一行目\n二行目");
+    expect(wrapper.get(".iriograph-comment-callout").classes()).not.toContain("visible");
+    await wrapper.setProps({ showAllComments: true });
+    expect(wrapper.get(".iriograph-comment-callout").classes()).toContain("visible");
+  });
+
+  it("Scene regionのlabelPlacementをprop未指定時の表示へ反映する", () => {
+    const scene = sceneFixture();
+    scene.regions = [{
+      elementId: "region-a",
+      semanticRef: "urn:test:ClassA",
+      structuralKind: "region",
+      label: "A",
+      labelPlacement: "right",
+      templateRef: "urn:test:region",
+      geometry: { x: 0, y: 0, width: 250, height: 220 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      pinned: false,
+      placement: "generated",
+    }];
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+    expect(wrapper.get(".iriograph-region-label").classes()).toContain("label-right");
+  });
+
+  it("membership-regionのnode dragを複数領域のintersection内へclampする", async () => {
+    const scene = sceneFixture();
+    const provenance = {
+      sourceStatementRefs: ["urn:test:membership"],
+      operator: "membership-region" as const,
+      derivation: "direct" as const,
+    };
+    scene.edges = [];
+    scene.nodes = [{ ...scene.nodes[0]!, geometry: { x: 120, y: 90, width: 40, height: 30 } }];
+    scene.regions = [
+      { elementId: "region-a", semanticRef: "urn:test:ClassA", structuralKind: "region", label: "A", templateRef: "urn:test:region", geometry: { x: 0, y: 0, width: 250, height: 220 }, style: { fill: "#fff", stroke: "#000", text: "#000" }, pinned: false, placement: "generated", provenance },
+      { elementId: "region-b", semanticRef: "urn:test:ClassB", structuralKind: "region", label: "B", templateRef: "urn:test:region", geometry: { x: 100, y: 50, width: 250, height: 220 }, style: { fill: "#fff", stroke: "#000", text: "#000" }, pinned: false, placement: "generated", provenance },
+    ];
+    scene.memberships = [
+      { semanticRef: "urn:test:m1", containerElementId: "region-a", memberElementId: "node-a", regionElementId: "region-a", provenance },
+      { semanticRef: "urn:test:m2", containerElementId: "region-b", memberElementId: "node-a", regionElementId: "region-b", provenance },
+    ];
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene, snap: disabledSnap() } });
+    await wrapper.get(".iriograph-scene-node").trigger("pointerdown", { button: 0, clientX: 120, clientY: 90 });
+    dispatchPointer("pointermove", 520, 90);
+    dispatchPointer("pointerup", 520, 90);
+    expect(lastPayload<{ elementId: string; geometry: ElementGeometry }>(wrapper, "geometryChange"))
+      .toMatchObject({ elementId: "node-a", geometry: { x: 210, y: 90, width: 40, height: 30 } });
+  });
+
+  it("labelなしsequence edgeへ表示専用の順序badgeを出す", () => {
+    const scene = sceneFixture();
+    scene.edges[0]!.label = "";
+    scene.edges[0]!.labelProvenance = {
+      kind: "derived-structure",
+      role: "sequence-transition",
+      structureSemanticRef: "urn:test:seq",
+      sourceStatementRefs: ["urn:test:seq-1", "urn:test:seq-2"],
+      fromOrdinal: 1,
+      toOrdinal: 2,
+    };
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+    expect(wrapper.get(".iriograph-edge-label").text()).toBe("1→2");
+  });
 });
 
 function dispatchPointer(type: "pointermove" | "pointerup", clientX: number, clientY: number): void {

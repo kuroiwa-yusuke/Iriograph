@@ -409,6 +409,21 @@
   white-space: nowrap;
 }
 
+.iriograph-choice-metadata {
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
+  border-left: 3px solid #b7c9c3;
+  color: #526b68;
+  background: #f8fbfa;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.iriograph-choice-metadata b {
+  color: #83601d;
+}
+
 .iriograph-iri-choice-field details,
 .iriograph-authoring-advanced {
   color: #6f807e;
@@ -499,6 +514,103 @@
   background: #fff9e9;
   font-size: 8px;
   line-height: 1.45;
+}
+
+.iriograph-authoring-batch-summary {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid #b9d2c9;
+  border-radius: 5px;
+  color: #315957;
+  background: #eaf5f0;
+  font-size: 8px;
+}
+
+.iriograph-authoring-check-grid,
+.iriograph-palette-check-grid {
+  max-height: 160px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 5px;
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid #d3dedb;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.iriograph-authoring-check-grid label,
+.iriograph-palette-check-grid label {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  font-size: 8px;
+  overflow-wrap: anywhere;
+}
+
+.iriograph-authoring-check-grid input,
+.iriograph-palette-check-grid input {
+  width: auto;
+  min-height: auto;
+  flex: 0 0 auto;
+}
+
+.iriograph-structure-member-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 6px;
+}
+
+.iriograph-structure-member-picker label {
+  display: grid;
+  gap: 3px;
+}
+
+.iriograph-structure-member-cards {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-structure-member-cards li {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid #cdd9d5;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-structure-member-cards li > span {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+}
+
+.iriograph-structure-member-cards li small {
+  overflow: hidden;
+  color: #758684;
+  font: 7px/1.4 "SFMono-Regular", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-structure-member-cards li > div {
+  display: flex;
+  gap: 2px;
+}
+
+.iriograph-structure-member-cards button {
+  width: 24px;
+  min-height: 24px;
+  padding: 0;
 }
 
 .iriograph-authoring-preview {
@@ -974,6 +1086,25 @@
   transform: translate(-50%, -50%);
 }
 
+.iriograph-region-constraint-warning {
+  max-width: 420px;
+  position: absolute;
+  z-index: 12;
+  left: 50%;
+  top: 14px;
+  margin: 0;
+  padding: 8px 11px;
+  border: 1px solid #d09a43;
+  border-radius: 6px;
+  color: #704b0e;
+  background: #fff8e2;
+  box-shadow: 0 5px 18px rgb(92 66 20 / 18%);
+  font-size: 9px;
+  line-height: 1.45;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
 .iriograph-minimap {
   width: 170px;
   position: absolute;
@@ -1092,6 +1223,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
+}
+
+.iriograph-region-label.label-right {
+  left: auto;
+  right: 7px;
+  top: 10px;
+  max-width: calc(100% - 20px);
+  writing-mode: vertical-rl;
+}
+
+.iriograph-region-label.label-bottom {
+  left: 10px;
+  top: auto;
+  bottom: 7px;
+}
+
+.iriograph-region-label.label-left {
+  left: 7px;
+  top: 10px;
+  max-width: calc(100% - 20px);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
 }
 
 .iriograph-scene-container.selected,
@@ -1375,6 +1528,67 @@
   gap: 9px;
 }
 
+.iriograph-node-text {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.iriograph-additional-labels {
+  display: block;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 7px;
+  font-weight: 500;
+  opacity: .72;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-scene-container > .iriograph-additional-labels,
+.iriograph-scene-region > .iriograph-additional-labels {
+  position: absolute;
+  left: 10px;
+  top: 24px;
+  right: 10px;
+}
+
+.iriograph-comment-callout {
+  width: max-content;
+  min-width: 140px;
+  max-width: 280px;
+  position: absolute;
+  z-index: 9;
+  left: 50%;
+  top: calc(100% + 10px);
+  padding: 8px 10px;
+  border: 1px solid #9eb4ae;
+  border-radius: 6px;
+  color: #294d4b;
+  background: #fffefb;
+  box-shadow: 0 8px 24px rgb(24 52 50 / 20%);
+  font-size: 9px;
+  line-height: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -4px);
+  transition: opacity .12s ease, transform .12s ease;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.iriograph-scene-node:hover > .iriograph-comment-callout,
+.iriograph-scene-node:focus > .iriograph-comment-callout,
+.iriograph-scene-container:hover > .iriograph-comment-callout,
+.iriograph-scene-container:focus > .iriograph-comment-callout,
+.iriograph-scene-region:hover > .iriograph-comment-callout,
+.iriograph-scene-region:focus > .iriograph-comment-callout,
+.iriograph-comment-callout.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .iriograph-node-icon {
   width: 23px;
   height: 23px;
@@ -1633,6 +1847,33 @@
 .iriograph-inspector > section {
   padding: 13px 0;
   border-bottom: 1px solid #e0e6e3;
+}
+
+.iriograph-inspector > .iriograph-edge-routing-quick {
+  display: grid;
+  gap: 8px;
+  margin: -16px -16px 0;
+  padding: 13px 16px;
+  border-bottom: 2px solid #cab371;
+  background: #fff9e9;
+}
+
+.iriograph-edge-routing-quick > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-edge-routing-quick > header div {
+  min-width: 0;
+  display: grid;
+}
+
+.iriograph-edge-routing-quick > header strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .iriograph-inspector section > label,
@@ -1990,6 +2231,48 @@
   padding: 10px;
   border: 1px solid #d0dbd7;
   border-radius: 6px;
+}
+
+.iriograph-property-section {
+  display: grid;
+  gap: 8px;
+  padding: 11px;
+  border: 1px solid #d0dbd7;
+  border-radius: 7px;
+  background: #fbfcfb;
+}
+
+.iriograph-property-section > header {
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-property-section > header strong {
+  color: #315957;
+  font-size: 11px;
+}
+
+.iriograph-property-section > header small {
+  color: #748683;
+  font-size: 8px;
+}
+
+.iriograph-property-notice {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid #b77a15;
+  background: #fff6de;
+  color: #6b4a13;
+}
+
+.iriograph-resource-details-dialog textarea {
+  width: 100%;
+  min-height: 72px;
+  padding: 7px;
+  resize: vertical;
+  border: 1px solid #bdcbc7;
+  border-radius: 4px;
+  background: #fff;
 }
 
 .iriograph-property-editor-row > div {

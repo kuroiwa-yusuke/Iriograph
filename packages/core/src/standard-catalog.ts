@@ -66,7 +66,11 @@ export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
       ruleId: "rdfs-class",
       priority: 20,
       match: { kind: "type", iri: `${RDFS}Class`, entailment: "rdfs-subclass" },
-      project: { operator: "resource", structuralKind: "node" },
+      project: {
+        operator: "membership-region",
+        membershipPredicate: `${RDF}type`,
+        containerPosition: "object",
+      },
       templateRef: "urn:iriograph:template:node:class:1",
     },
     {
@@ -168,22 +172,26 @@ export const standardRdfRdfsCatalog: ProjectionCatalogV1 = {
     "urn:iriograph:template:edge:generic:1": {
       templateRef: "urn:iriograph:template:edge:generic:1",
       structuralKind: "edge",
+      targetMarker: "arrow",
       style: { fill: "none", stroke: "#475569", text: "#334155" },
     },
     "urn:iriograph:template:edge:reference:1": {
       templateRef: "urn:iriograph:template:edge:reference:1",
       structuralKind: "edge",
-      style: { fill: "none", stroke: "#64748b", text: "#475569", dash: "6 4" },
+      targetMarker: "open-arrow",
+      style: { fill: "none", stroke: "#475569", text: "#334155" },
     },
     "urn:iriograph:template:edge:specialization:1": {
       templateRef: "urn:iriograph:template:edge:specialization:1",
       structuralKind: "edge",
-      style: { fill: "none", stroke: "#2563eb", text: "#1e40af" },
+      targetMarker: "triangle",
+      style: { fill: "none", stroke: "#475569", text: "#334155" },
     },
     "urn:iriograph:template:edge:ontology:1": {
       templateRef: "urn:iriograph:template:edge:ontology:1",
       structuralKind: "edge",
-      style: { fill: "none", stroke: "#7c3aed", text: "#5b21b6" },
+      targetMarker: "arrow",
+      style: { fill: "none", stroke: "#475569", text: "#334155" },
     },
   },
   styles: {

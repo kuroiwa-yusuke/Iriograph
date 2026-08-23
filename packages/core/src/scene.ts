@@ -7,6 +7,7 @@ import {
   layoutProjectedScene,
   type LayoutAdapterRegistry,
   type LayoutDiagnostic,
+  type LayoutExternalReservation,
   type LayoutMode,
 } from "./layout.js";
 import { containerContentInsets } from "./container-content.js";
@@ -22,6 +23,7 @@ import type {
   SceneEdge,
   SceneRegion,
   SceneNode,
+  SceneSemanticText,
 } from "./model.js";
 import { projectSemanticView } from "./projection.js";
 
@@ -122,6 +124,9 @@ export async function layoutProjectedDiagramScene(
         contentInsets: element.structuralKind === "container"
           ? containerContentInsets(element.headerPosition)
           : undefined,
+        externalReservations: element.structuralKind === "node"
+          ? commentCalloutReservations(element.semanticText)
+          : undefined,
       })),
       edges: projected.edges.map((edge) => ({
         elementId: edge.elementId,
@@ -131,6 +136,7 @@ export async function layoutProjectedDiagramScene(
         sourceAnchor: edge.sourceAnchor,
         targetAnchor: edge.targetAnchor,
         routingPlacement: edge.routingPlacement,
+        routeMode: edge.routeMode,
       })),
       memberships: (projected.memberships ?? []).map((membership) => ({
         semanticRef: membership.semanticRef,
@@ -153,6 +159,8 @@ export async function layoutProjectedDiagramScene(
     semanticRef: node.semanticRef,
     structuralKind: "node",
     label: node.label,
+    semanticText: node.semanticText,
+    labelPlacement: node.labelPlacement,
     templateRef: node.templateRef,
     shape: node.shape,
     iconRef: node.iconRef,
@@ -170,6 +178,8 @@ export async function layoutProjectedDiagramScene(
     semanticRef: container.semanticRef,
     structuralKind: "container",
     label: container.label,
+    semanticText: container.semanticText,
+    labelPlacement: container.labelPlacement,
     templateRef: container.templateRef,
     geometry: layout.geometries[container.elementId]!,
     headerPosition: container.headerPosition,
@@ -185,6 +195,8 @@ export async function layoutProjectedDiagramScene(
     semanticRef: region.semanticRef,
     structuralKind: "region",
     label: region.label,
+    semanticText: region.semanticText,
+    labelPlacement: region.labelPlacement,
     templateRef: region.templateRef,
     geometry: layout.geometries[region.elementId]!,
     style: region.style,
@@ -202,6 +214,8 @@ export async function layoutProjectedDiagramScene(
       semanticRef: edge.semanticRef,
       structuralKind: "edge",
       label: edge.label,
+      semanticText: edge.semanticText,
+      labelProvenance: edge.labelProvenance,
       sourceElementId: edge.sourceElementId,
       targetElementId: edge.targetElementId,
       templateRef: edge.templateRef,
@@ -211,6 +225,9 @@ export async function layoutProjectedDiagramScene(
       labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
       sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
       targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
+      routeMode: edge.routeMode,
+      sourceMarker: edge.sourceMarker,
+      targetMarker: edge.targetMarker,
       fallback: edge.fallback,
       provenance: edge.provenance,
     };
@@ -229,6 +246,53 @@ export async function layoutProjectedDiagramScene(
     edges,
     diagnostics,
   };
+}
+
+const COMMENT_CALLOUT_MIN_WIDTH = 140;
+const COMMENT_CALLOUT_MAX_WIDTH = 280;
+const COMMENT_CALLOUT_HORIZONTAL_CHROME = 22;
+const COMMENT_CALLOUT_VERTICAL_CHROME = 18;
+const COMMENT_CALLOUT_CHARACTER_WIDTH = 9;
+const COMMENT_CALLOUT_LINE_HEIGHT = 13.5;
+const COMMENT_CALLOUT_GAP = 10;
+
+/** Mirrors the Editor's bottom-centered, pre-wrapped comment callout box. */
+function commentCalloutReservations(
+  semanticText: SceneSemanticText | undefined,
+): LayoutExternalReservation[] | undefined {
+  const comments = semanticText?.comments ?? [];
+  if (comments.length === 0) return undefined;
+  const text = comments.map((comment) => (
+    comment.language
+      ? `${comment.value.normalize("NFC")} (${comment.language.toLowerCase()})`
+      : comment.value.normalize("NFC")
+  )).join("\n\n");
+  const lines = text.split("\n");
+  const longestLine = Math.max(1, ...lines.map((line) => Array.from(line).length));
+  const width = Math.max(
+    COMMENT_CALLOUT_MIN_WIDTH,
+    Math.min(
+      COMMENT_CALLOUT_MAX_WIDTH,
+      longestLine * COMMENT_CALLOUT_CHARACTER_WIDTH + COMMENT_CALLOUT_HORIZONTAL_CHROME,
+    ),
+  );
+  const charactersPerLine = Math.max(
+    1,
+    Math.floor(
+      (width - COMMENT_CALLOUT_HORIZONTAL_CHROME) / COMMENT_CALLOUT_CHARACTER_WIDTH,
+    ),
+  );
+  const visualLines = lines.reduce((count, line) => (
+    count + Math.max(1, Math.ceil(Array.from(line).length / charactersPerLine))
+  ), 0);
+  return [{
+    placement: "bottom-center",
+    width,
+    height: Math.ceil(
+      COMMENT_CALLOUT_VERTICAL_CHROME + visualLines * COMMENT_CALLOUT_LINE_HEIGHT,
+    ),
+    gap: COMMENT_CALLOUT_GAP,
+  }];
 }
 
 export function remapProjectedRuleOrigins(

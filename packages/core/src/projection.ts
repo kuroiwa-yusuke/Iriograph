@@ -180,6 +180,7 @@ function projectLegacyIriographDocument(
         semanticRef,
         structuralKind,
         label,
+        labelPlacement: overlay?.appearance?.labelPlacement ?? template.labelPlacement,
         templateRef,
         geometry,
         headerPosition: template.headerPosition ?? "top",
@@ -197,6 +198,7 @@ function projectLegacyIriographDocument(
       semanticRef,
       structuralKind,
       label,
+      labelPlacement: overlay?.appearance?.labelPlacement ?? template.labelPlacement,
       templateRef,
       shape: template.shape ?? "rounded-rectangle",
       iconRef,
@@ -274,6 +276,9 @@ function projectLegacyIriographDocument(
       labelOffset: overlayEntry?.overlay.routing?.labelOffset,
       sourceAnchor: overlayEntry?.overlay.routing?.sourceAnchor,
       targetAnchor: overlayEntry?.overlay.routing?.targetAnchor,
+      routeMode: overlayEntry?.overlay.routing?.routeMode ?? template.routeMode ?? "auto",
+      sourceMarker: template.sourceMarker ?? "none",
+      targetMarker: template.targetMarker ?? "arrow",
       projectionRuleId: rule.ruleId,
       fallback: false,
     });
@@ -302,6 +307,9 @@ function projectLegacyIriographDocument(
       labelOffset: overlayEntry?.overlay.routing?.labelOffset,
       sourceAnchor: overlayEntry?.overlay.routing?.sourceAnchor,
       targetAnchor: overlayEntry?.overlay.routing?.targetAnchor,
+      routeMode: overlayEntry?.overlay.routing?.routeMode ?? template.routeMode ?? "auto",
+      sourceMarker: template.sourceMarker ?? "none",
+      targetMarker: template.targetMarker ?? "arrow",
       fallback: true,
     });
   }

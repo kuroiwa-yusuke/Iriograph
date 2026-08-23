@@ -12,6 +12,7 @@ import {
 
 import type {
   DiagramScene,
+  EdgeTerminalMarker,
   EdgeEndpointShape,
   ElementGeometry,
   Point,
@@ -76,6 +77,11 @@ import type {
   DiagramContextMenuRequest,
   DiagramContextTargetKind,
 } from "../context-actions";
+import {
+  semanticTextLabel,
+  type SemanticDisplayMetadata,
+} from "../semantic-metadata";
+import { constrainMembershipRegionMovement } from "../region-membership-constraints";
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;
@@ -89,6 +95,10 @@ const props = withDefaults(defineProps<{
   semanticResourcePickLabel?: string;
   semanticDraftPosition?: Point;
   containmentWarningElementIds?: string[];
+  semanticMetadata?: Readonly<Record<string, SemanticDisplayMetadata>>;
+  showAllComments?: boolean;
+  edgeRouteModes?: Readonly<Record<string, "auto" | "straight" | "orthogonal" | "curve" | "manual">>;
+  regionLabelPlacements?: Readonly<Record<string, "top" | "right" | "bottom" | "left" | "center">>;
   busy?: boolean;
 }>(), {
   selectedElementId: "",
@@ -101,6 +111,10 @@ const props = withDefaults(defineProps<{
   semanticResourcePickLabel: "resource",
   semanticDraftPosition: undefined,
   containmentWarningElementIds: () => [],
+  semanticMetadata: () => ({}),
+  showAllComments: false,
+  edgeRouteModes: () => ({}),
+  regionLabelPlacements: () => ({}),
   busy: false,
 });
 
@@ -130,10 +144,17 @@ const emit = defineEmits<{
 const CANVAS_PADDING = 20;
 const PAN_KEY_STEP = 64;
 const instanceId = useId();
-const arrowMarkerId = `${instanceId}-arrow`;
+const markerIds: Record<Exclude<EdgeTerminalMarker, "none">, string> = {
+  arrow: `${instanceId}-arrow`,
+  "open-arrow": `${instanceId}-open-arrow`,
+  triangle: `${instanceId}-triangle`,
+  diamond: `${instanceId}-diamond`,
+  circle: `${instanceId}-circle`,
+};
 const scrollElement = ref<HTMLElement>();
 const stageElement = ref<HTMLElement>();
 const edgeLayerElement = ref<SVGSVGElement>();
+const regionConstraintMessage = ref("");
 const viewport = reactive<DiagramViewportMetrics>({
   scrollLeft: 0,
   scrollTop: 0,
@@ -200,6 +221,20 @@ const viewportLabel = computed(() => [
 ].join(" · "));
 
 type DiagnosticElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
+
+function metadataFor(semanticRef: string): SemanticDisplayMetadata {
+  return props.semanticMetadata[semanticRef] ?? { labels: [], comments: [] };
+}
+
+function additionalLabels(semanticRef: string, primary: string): string[] {
+  return metadataFor(semanticRef).labels
+    .filter((item) => item.value !== primary)
+    .map(semanticTextLabel);
+}
+
+function commentsFor(semanticRef: string): string {
+  return metadataFor(semanticRef).comments.map(semanticTextLabel).join("\n\n");
+}
 
 function diagnosticsForElement(element: DiagnosticElement): ProjectionDiagnostic[] {
   return props.scene.diagnostics.filter((diagnostic) => (
@@ -286,7 +321,7 @@ watch(() => props.selectedElementId, (elementId) => {
 
 function pathFor(edge: SceneEdge): string {
   const derivedRoute = previewedDerivedRoute(edge);
-  if (derivedRoute.length >= 2) return polylinePath(renderedRoute(edge));
+  if (derivedRoute.length >= 2) return displayRoutePath(edge, renderedRoute(edge));
   const source = endpointElementsById.value.get(edge.sourceElementId);
   const target = endpointElementsById.value.get(edge.targetElementId);
   if (!source || !target) return "";
@@ -298,6 +333,60 @@ function pathFor(edge: SceneEdge): string {
   const bend = Math.max(44, Math.abs(end.x - start.x) * 0.42);
   const direction = end.x >= start.x ? 1 : -1;
   return `M ${start.x} ${start.y} C ${start.x + bend * direction} ${start.y}, ${end.x - bend * direction} ${end.y}, ${end.x} ${end.y}`;
+}
+
+function displayRoutePath(edge: SceneEdge, route: readonly Point[]): string {
+  const start = route[0];
+  const end = route.at(-1);
+  if (!start || !end) return "";
+  const mode = props.edgeRouteModes[edge.elementId]
+    ?? edge.routeMode
+    ?? (edge.waypoints?.length ? "manual" : "auto");
+  if (mode === "straight") return polylinePath([start, end]);
+  if (mode === "curve") {
+    if (route.length > 2) return roundedPolylinePath(route);
+    const horizontal = Math.abs(end.x - start.x) >= Math.abs(end.y - start.y);
+    if (horizontal) {
+      const middle = (start.x + end.x) / 2;
+      return `M ${start.x} ${start.y} C ${middle} ${start.y}, ${middle} ${end.y}, ${end.x} ${end.y}`;
+    }
+    const middle = (start.y + end.y) / 2;
+    return `M ${start.x} ${start.y} C ${start.x} ${middle}, ${end.x} ${middle}, ${end.x} ${end.y}`;
+  }
+  return polylinePath(route);
+}
+
+/**
+ * Rounds only a small neighborhood around each derived bend. The path keeps
+ * every layout-supplied corridor segment instead of replacing an obstacle-
+ * avoiding route with one unconstrained source-to-target Bézier curve.
+ */
+function roundedPolylinePath(points: readonly Point[], radius = 10): string {
+  const start = points[0];
+  const end = points.at(-1);
+  if (!start || !end) return "";
+  if (points.length < 3) return polylinePath(points);
+  const parts = [`M ${start.x} ${start.y}`];
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const previous = points[index - 1]!;
+    const corner = points[index]!;
+    const next = points[index + 1]!;
+    const incoming = Math.hypot(corner.x - previous.x, corner.y - previous.y);
+    const outgoing = Math.hypot(next.x - corner.x, next.y - corner.y);
+    if (incoming === 0 || outgoing === 0) continue;
+    const inset = Math.min(radius, incoming / 2, outgoing / 2);
+    const before = {
+      x: corner.x + (previous.x - corner.x) * inset / incoming,
+      y: corner.y + (previous.y - corner.y) * inset / incoming,
+    };
+    const after = {
+      x: corner.x + (next.x - corner.x) * inset / outgoing,
+      y: corner.y + (next.y - corner.y) * inset / outgoing,
+    };
+    parts.push(`L ${before.x} ${before.y}`, `Q ${corner.x} ${corner.y} ${after.x} ${after.y}`);
+  }
+  parts.push(`L ${end.x} ${end.y}`);
+  return parts.join(" ");
 }
 
 function edgeLabelPosition(edge: SceneEdge): Point {
@@ -404,11 +493,16 @@ function endpointAnchorHalo(
   );
 }
 
-function arrowOverlayPath(edge: SceneEdge): string {
+function terminalOverlayPath(edge: SceneEdge, endpoint: "source" | "target"): string {
   const route = renderedRoute(edge);
-  const from = route.at(-2);
-  const to = route.at(-1);
+  const from = endpoint === "source" ? route[0] : route.at(-2);
+  const to = endpoint === "source" ? route[1] : route.at(-1);
   return from && to ? polylinePath([from, to]) : "";
+}
+
+function terminalMarkerUrl(marker: EdgeTerminalMarker | undefined): string | undefined {
+  if (!marker || marker === "none") return undefined;
+  return `url(#${markerIds[marker]})`;
 }
 
 function polylinePath(points: readonly Point[]): string {
@@ -455,11 +549,12 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
       .map((candidate) => candidate.elementId)
     : [element.elementId];
   emit("gestureStart");
+  regionConstraintMessage.value = "";
   const origin = { x: event.clientX, y: event.clientY };
   let pendingChanges: GeometryChange[] = [];
 
   trackPointer((moveEvent) => {
-    pendingChanges = translateSelection(
+    const translated = translateSelection(
       initialScene,
       movingElementIds,
       {
@@ -479,6 +574,9 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
             },
           },
     );
+    const constrained = constrainMembershipRegionMovement(initialScene, translated);
+    pendingChanges = constrained.changes;
+    regionConstraintMessage.value = constrained.issue?.message ?? "";
     previewGeometries.value = Object.fromEntries(
       pendingChanges.map((change) => [change.elementId, change.geometry]),
     );
@@ -500,6 +598,7 @@ function startResize(event: PointerEvent, element: GeometryElement): void {
   event.stopPropagation();
   requestSelection({ elementId: element.elementId, mode: "replace" });
   emit("gestureStart");
+  regionConstraintMessage.value = "";
   const origin = { x: event.clientX, y: event.clientY };
   const initial = { ...element.geometry };
 
@@ -511,8 +610,12 @@ function startResize(event: PointerEvent, element: GeometryElement): void {
       height: requestedHeight,
     });
     if (!change) return;
-    emit("resizeChange", change);
-    emit("geometryChange", change);
+    const constrained = constrainMembershipRegionMovement(props.scene, [change]);
+    regionConstraintMessage.value = constrained.issue?.message ?? "";
+    const accepted = constrained.changes[0];
+    if (!accepted) return;
+    emit("resizeChange", accepted);
+    emit("geometryChange", accepted);
   });
 }
 
@@ -708,7 +811,20 @@ function emitLabelRouting(edge: SceneEdge, labelOffset: Point | undefined): void
 function edgeAriaLabel(edge: SceneEdge): string {
   const source = endpointElementsById.value.get(edge.sourceElementId)?.label ?? edge.sourceElementId;
   const target = endpointElementsById.value.get(edge.targetElementId)?.label ?? edge.targetElementId;
-  return `${source}から${target}への${edge.label || "edge"}`;
+  return `${source}から${target}への${edge.label || sequenceOrdinalBadge(edge) || "edge"}`;
+}
+
+function sequenceOrdinalBadge(edge: SceneEdge): string {
+  const provenance = edge.labelProvenance as (SceneEdge["labelProvenance"] & {
+    fromOrdinal?: number;
+    toOrdinal?: number;
+  }) | undefined;
+  return provenance?.kind === "derived-structure"
+    && provenance.role === "sequence-transition"
+    && Number.isSafeInteger(provenance.fromOrdinal)
+    && Number.isSafeInteger(provenance.toOrdinal)
+    ? `${provenance.fromOrdinal}→${provenance.toOrdinal}`
+    : "";
 }
 
 function navigatorDomId(elementId: string): string {
@@ -992,7 +1108,7 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
   const gesture = beginKeyboardGesture("move", activeId, event.key);
   gesture.delta.x += movement.x;
   gesture.delta.y += movement.y;
-  gesture.geometryChanges = translateSelection(
+  const translated = translateSelection(
     gesture.initialScene,
     selected,
     gesture.delta,
@@ -1001,6 +1117,9 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
       targets: { enabled: false, tolerance: props.snap.targets.tolerance },
     },
   );
+  const constrained = constrainMembershipRegionMovement(gesture.initialScene, translated);
+  gesture.geometryChanges = constrained.changes;
+  regionConstraintMessage.value = constrained.issue?.message ?? "";
   previewGeometries.value = Object.fromEntries(
     gesture.geometryChanges.map((change) => [change.elementId, change.geometry]),
   );
@@ -1543,6 +1662,10 @@ defineExpose<DiagramCanvasNavigationApi>({
             readOnly,
             semanticDraftPosition,
             containmentWarningElementIds,
+            semanticMetadata,
+            showAllComments,
+            edgeRouteModes,
+            regionLabelPlacements,
           ]"
           :style="{
             width: `${scene.width}px`,
@@ -1552,6 +1675,7 @@ defineExpose<DiagramCanvasNavigationApi>({
           @contextmenu="requestBlankContextMenu"
         >
           <div class="iriograph-canvas-grid" />
+          <p v-if="regionConstraintMessage" class="iriograph-region-constraint-warning" role="alert">{{ regionConstraintMessage }}</p>
           <span
             v-if="semanticDraftPosition"
             class="iriograph-semantic-position-marker"
@@ -1587,7 +1711,9 @@ defineExpose<DiagramCanvasNavigationApi>({
             @contextmenu="requestPointerContextMenu($event, 'region', region.elementId)"
           >
             <span class="iriograph-region-fill" :style="{ background: region.style.fill, opacity: region.style.fillOpacity ?? 0.28 }" />
-            <span class="iriograph-region-label">{{ region.label }}</span>
+            <span class="iriograph-region-label" :class="`label-${regionLabelPlacements[region.elementId] ?? region.labelPlacement ?? 'top'}`">{{ region.label }}</span>
+            <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(' ／ ') }}</span>
+            <span v-if="commentsFor(region.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(region.semanticRef) }}</span>
             <span v-if="selectedElementIdsSet.size === 1 && selectedElementId === region.elementId && !readOnly" class="iriograph-resize-handle" title="領域サイズを変更" @pointerdown="startResize($event, region)" />
           </div>
 
@@ -1602,6 +1728,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               containmentWarningElementIdsSet.has(container.elementId),
               scene.diagnostics,
               readOnly,
+              semanticMetadata[container.semanticRef],
+              showAllComments,
             ]"
             :id="navigatorDomId(container.elementId)"
             class="iriograph-scene-container"
@@ -1637,6 +1765,8 @@ defineExpose<DiagramCanvasNavigationApi>({
             >
               {{ container.label }}
             </span>
+            <span v-if="additionalLabels(container.semanticRef, container.label).length" class="iriograph-additional-labels">{{ additionalLabels(container.semanticRef, container.label).join(' ／ ') }}</span>
+            <span v-if="commentsFor(container.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(container.semanticRef) }}</span>
             <span
               v-if="selectedElementIdsSet.size === 1 && selectedElementId === container.elementId && !readOnly"
               class="iriograph-resize-handle"
@@ -1654,8 +1784,20 @@ defineExpose<DiagramCanvasNavigationApi>({
             aria-label="関係edge"
           >
             <defs>
-              <marker :id="arrowMarkerId" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth">
+              <marker :id="markerIds.arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="strokeWidth">
                 <path d="M0,0 L9,4.5 L0,9 z" fill="context-stroke" />
+              </marker>
+              <marker :id="markerIds['open-arrow']" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="strokeWidth">
+                <path d="M1,1 L9,5 L1,9" fill="none" stroke="context-stroke" stroke-width="1.5" />
+              </marker>
+              <marker :id="markerIds.triangle" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="strokeWidth">
+                <path d="M1,1 L9,5 L1,9 z" fill="context-stroke" />
+              </marker>
+              <marker :id="markerIds.diamond" markerWidth="11" markerHeight="11" refX="10" refY="5.5" orient="auto-start-reverse" markerUnits="strokeWidth">
+                <path d="M1,5.5 L5.5,1 L10,5.5 L5.5,10 z" fill="context-stroke" />
+              </marker>
+              <marker :id="markerIds.circle" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto-start-reverse" markerUnits="strokeWidth">
+                <circle cx="5" cy="5" r="3.5" fill="context-stroke" />
               </marker>
             </defs>
             <g
@@ -1670,6 +1812,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 activeNavigatorElementId === edge.elementId,
                 scene.diagnostics,
                 readOnly,
+                edgeRouteModes[edge.elementId],
               ]"
               :id="navigatorDomId(edge.elementId)"
               class="iriograph-edge-group"
@@ -1693,10 +1836,11 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :stroke="edge.style.stroke"
                 :stroke-dasharray="edge.style.dash"
                 :stroke-width="edge.style.strokeWidth"
-                :marker-end="`url(#${arrowMarkerId})`"
+                :marker-start="terminalMarkerUrl(edge.sourceMarker ?? 'none')"
+                :marker-end="terminalMarkerUrl(edge.targetMarker ?? 'arrow')"
               />
               <text
-                v-if="edge.label"
+                v-if="edge.label || sequenceOrdinalBadge(edge)"
                 class="iriograph-edge-label"
                 :class="{ editable: !readOnly }"
                 :x="edgeLabelPosition(edge).x"
@@ -1710,22 +1854,8 @@ defineExpose<DiagramCanvasNavigationApi>({
                 @keydown="handleLabelKeydown($event, edge)"
                 @dblclick.stop
               >
-                {{ edge.label }}
+                {{ edge.label || sequenceOrdinalBadge(edge) }}
               </text>
-            </g>
-            <g v-if="selectedEdge && !readOnly" class="iriograph-waypoints">
-              <circle
-                v-for="(point, index) in editableWaypoints(selectedEdge)"
-                :key="index"
-                :cx="point.x"
-                :cy="point.y"
-                r="11"
-                :class="{ active: index === activeWaypointIndex }"
-                tabindex="-1"
-                aria-hidden="true"
-                @pointerdown="startWaypointMove($event, selectedEdge, index)"
-                @keydown="handleWaypointKeydown($event, selectedEdge, index)"
-              />
             </g>
           </svg>
 
@@ -1740,6 +1870,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               containmentWarningElementIdsSet.has(node.elementId),
               scene.diagnostics,
               readOnly,
+              semanticMetadata[node.semanticRef],
+              showAllComments,
             ]"
             :id="navigatorDomId(node.elementId)"
             class="iriograph-scene-node"
@@ -1779,8 +1911,9 @@ defineExpose<DiagramCanvasNavigationApi>({
           >
             <span class="iriograph-node-content">
               <img v-if="node.iconUrl" class="iriograph-node-icon" :src="node.iconUrl" alt="" draggable="false" />
-              <span class="iriograph-node-label">{{ node.label }}</span>
+              <span class="iriograph-node-text"><span class="iriograph-node-label">{{ node.label }}</span><small v-if="additionalLabels(node.semanticRef, node.label).length" class="iriograph-additional-labels">{{ additionalLabels(node.semanticRef, node.label).join(' ／ ') }}</small></span>
             </span>
+            <span v-if="commentsFor(node.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(node.semanticRef) }}</span>
             <span v-if="node.shape === 'diamond'" class="iriograph-gateway-mark">×</span>
             <span v-if="node.placement === 'user'" class="iriograph-pin-indicator" title="ユーザー調整済み">●</span>
             <span
@@ -1794,13 +1927,36 @@ defineExpose<DiagramCanvasNavigationApi>({
           <svg class="iriograph-edge-interaction-layer" :width="scene.width" :height="scene.height" :viewBox="`0 0 ${scene.width} ${scene.height}`" aria-hidden="true">
             <path
               v-for="edge in scene.edges"
-              :key="`arrow:${edge.elementId}`"
+              :key="`target-marker:${edge.elementId}`"
               class="iriograph-edge-arrow-overlay"
-              :d="arrowOverlayPath(edge)"
+              :d="terminalOverlayPath(edge, 'target')"
               :stroke="edge.style.stroke"
               :stroke-width="edge.style.strokeWidth"
-              :marker-end="`url(#${arrowMarkerId})`"
+              :marker-end="terminalMarkerUrl(edge.targetMarker ?? 'arrow')"
             />
+            <path
+              v-for="edge in scene.edges"
+              :key="`source-marker:${edge.elementId}`"
+              class="iriograph-edge-arrow-overlay"
+              :d="terminalOverlayPath(edge, 'source')"
+              :stroke="edge.style.stroke"
+              :stroke-width="edge.style.strokeWidth"
+              :marker-start="terminalMarkerUrl(edge.sourceMarker ?? 'none')"
+            />
+            <g v-if="selectedEdge && !readOnly" class="iriograph-waypoints">
+              <circle
+                v-for="(point, index) in editableWaypoints(selectedEdge)"
+                :key="index"
+                :cx="point.x"
+                :cy="point.y"
+                r="11"
+                :class="{ active: index === activeWaypointIndex }"
+                tabindex="-1"
+                aria-hidden="true"
+                @pointerdown="startWaypointMove($event, selectedEdge, index)"
+                @keydown="handleWaypointKeydown($event, selectedEdge, index)"
+              />
+            </g>
             <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors">
               <template v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
                 <line

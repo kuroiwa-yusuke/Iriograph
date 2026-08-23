@@ -266,6 +266,7 @@ function operatorSupportsMatch(rule: ProjectionRule): boolean {
   switch (rule.project.operator) {
     case "resource":
     case "membership-container":
+    case "membership-region":
     case "ordinal-sequence":
     case "alternative":
       return matchKind === "type";
@@ -284,6 +285,8 @@ function expectedTemplateKind(
       return rule.project.structuralKind;
     case "membership-container":
       return "container";
+    case "membership-region":
+      return "node";
     case "alternative":
       return "node";
     case "direct-edge":

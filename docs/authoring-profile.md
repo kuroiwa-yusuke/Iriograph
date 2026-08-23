@@ -79,6 +79,8 @@ Authoring policyが検査する「term」は次です。
 
 業務instanceやflow要素としてsubject/objectに作るresource IRIはtermではありません。新規resource IRIは`resourcePolicy.allowedMintNamespaces`で検査します。
 
+S/P/Oという文中の位置ではなく、instance resourceと再利用するvocabulary termを区別します。Instanceのsubject/objectは許可namespace内のopaque IRIをallocatorで生成でき、人間とLLMはlabel/commentを主に理解します。Predicate、class、predicate objectとして選ばれる語彙termはprofileの統制対象です。独自termのlocal nameも人間可読である必要はありませんが、label、comment、上位term、必要に応じdomain/rangeを自己記述します。全IRIは文字列の読みやすさによらず安定identityです。
+
 termは次のいずれかを満たす場合にknownです。
 
 1. `structureProfiles`が提供する標準term
@@ -103,6 +105,8 @@ LLM semantic editを有効にするhostは、authoring profileを解決できな
 ## 6. Human structured authoring
 
 Rich editorはTurtle文字列の書き換えをUI独自の実装で行わず、authoring profileから解決したclass、predicate、resource namespaceと、view profile/catalogから導出したsemantic capabilityを入力候補に使います。Labelとcommentは人が意味を理解するための主表示ですが、commandは必ずIRIを持ちます。Labelはrule keyでもidentityでもありません。同名labelは説明、型、近傍、compact IRIを併記して曖昧さを解消します。
+
+Predicate候補はlocale別label/commentに加え、categoryと短いexampleを持てます。Pickerは現在のsource/target class、profile、既存graphでの利用を順位付けに使い、近い既存termの再利用を優先します。これらの表示metadataは選択支援であり、predicateのidentityや推論規則を置き換えません。
 
 通常UIは完全IRIを常時入力させる必要はありません。Host注入のIRI allocatorまたは明示入力からnamed IRIを得られますが、どちらも`allowedMintNamespaces`とgraph内衝突を検証します。Allocatorが返したIRIであってもauthoring policyを迂回できません。
 

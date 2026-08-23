@@ -6,6 +6,7 @@ export * from "./diagnostics.js";
 export * from "./identity.js";
 export * from "./operators.js";
 export * from "./profile-validation.js";
+export * from "./structural-predicate.js";
 export * from "./rdf.js";
 export * from "./rdfs-closure.js";
 export * from "./rule-resolution.js";

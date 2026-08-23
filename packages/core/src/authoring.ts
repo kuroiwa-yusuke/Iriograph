@@ -225,6 +225,7 @@ export function provenanceToAuthoringCommand(
             memberIri: capability.member,
             containerTypeIri: capability.containerTypeIri,
             predicateIri: capability.predicate,
+            containerPosition: capability.containerPosition,
             enabled: input.enabled,
           };
     case "set-sequence":
@@ -287,10 +288,11 @@ export function seedAuthoringCommandFromProvenance(
       capability.containerTypeIri,
       null,
     ) > 0;
+    const containerPosition = capability.containerPosition ?? "subject";
     const member = store.countQuads(
-      capability.container,
+      containerPosition === "subject" ? capability.container : capability.member,
       capability.predicate,
-      capability.member,
+      containerPosition === "subject" ? capability.member : capability.container,
       null,
     ) > 0;
     if (!typed || !member) return staleSeed(capability.container);

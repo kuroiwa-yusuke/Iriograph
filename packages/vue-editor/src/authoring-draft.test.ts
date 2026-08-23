@@ -86,6 +86,70 @@ describe("authoring draft", () => {
     }, "main")).toThrow(/catalog membership structure/u);
   });
 
+  it("create時の複数分類・上位概念・包含領域を重複なく一commandへまとめる", () => {
+    const command = compileAuthoringDraft({
+      ...emptyAuthoringDraft("create-resource"),
+      label: "Matrix item",
+      classIri: "http://www.w3.org/2000/01/rdf-schema#Class",
+      classIris: ["urn:test:ClassA", "urn:test:ClassB"],
+      createSuperClassIris: ["urn:test:ParentA", "urn:test:ParentB"],
+      createMembershipEnabled: true,
+      createMembershipContainerIris: ["urn:test:region-a", "urn:test:region-b"],
+      createMembershipStructureConfigKey: "region-membership",
+      createMembershipContainerTypeIri: "urn:test:Region",
+      createMembershipPredicateIri: "urn:test:contains",
+    }, "main")[0]!;
+    expect(command).toMatchObject({
+      type: "create-resource",
+      initialStatements: expect.arrayContaining([
+        expect.objectContaining({ predicateIri: expect.stringMatching(/#type$/u), object: { kind: "iri", iri: "urn:test:ClassA" } }),
+        expect.objectContaining({ predicateIri: expect.stringMatching(/#type$/u), object: { kind: "iri", iri: "urn:test:ClassB" } }),
+        expect.objectContaining({ predicateIri: expect.stringMatching(/#subClassOf$/u), object: { kind: "iri", iri: "urn:test:ParentA" } }),
+        expect.objectContaining({ subject: { kind: "iri", iri: "urn:test:region-a" }, object: { kind: "created-resource" } }),
+        expect.objectContaining({ subject: { kind: "iri", iri: "urn:test:region-b" }, object: { kind: "created-resource" } }),
+      ]),
+    });
+  });
+
+  it("通常nodeの古いdraftに上位概念が残っていてもsubClassOfを生成しない", () => {
+    const command = compileAuthoringDraft({
+      ...emptyAuthoringDraft("create-resource"),
+      label: "Item",
+      classIri: "urn:test:Item",
+      createSuperClassIris: ["urn:test:Parent"],
+    }, "main")[0];
+    expect(command?.type).toBe("create-resource");
+    if (command?.type !== "create-resource") return;
+    expect(command.initialStatements.some((statement) => (
+      statement.predicateIri === "http://www.w3.org/2000/01/rdf-schema#subClassOf"
+    ))).toBe(false);
+  });
+
+  it("複数選択の分類と包含を個別command id付きbatchへcompileする", () => {
+    const classification = compileAuthoringDraft({
+      ...emptyAuthoringDraft("set-property"),
+      subjectIri: "urn:test:a",
+      subjectIris: ["urn:test:b"],
+      predicateIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+      propertyValues: [{ ...emptyPropertyValueDraft("iri"), value: "urn:test:Task" }],
+    }, "main");
+    expect(classification).toMatchObject([
+      { commandId: "editor-semantic-command-1", subjectIri: "urn:test:a" },
+      { commandId: "editor-semantic-command-2", subjectIri: "urn:test:b" },
+    ]);
+
+    const membership = compileAuthoringDraft({
+      ...emptyAuthoringDraft("set-membership"),
+      containerIri: "urn:test:region",
+      memberIri: "urn:test:a",
+      memberIris: ["urn:test:b"],
+      containerTypeIri: "urn:test:Region",
+      membershipPredicateIri: "urn:test:contains",
+    }, "main");
+    expect(membership.map((command) => command.type === "set-membership" && command.memberIri))
+      .toEqual(["urn:test:a", "urn:test:b"]);
+  });
+
   it("空literalと明示的なproperty削除を区別する", () => {
     const draft = {
       ...emptyAuthoringDraft("set-property"),

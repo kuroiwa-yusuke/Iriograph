@@ -30,8 +30,20 @@ const emit = defineEmits<{
 const listId = `${useId()}-iri-choices`;
 const advancedOpen = ref(false);
 const advancedInput = ref<HTMLInputElement>();
+const query = ref("");
 const knownChoice = computed(() => props.choices.find((choice) => choice.iri === props.modelValue));
 const selection = computed(() => props.modelValue && !knownChoice.value ? CUSTOM_VALUE : props.modelValue);
+const filteredChoices = computed(() => {
+  const normalized = query.value.trim().toLocaleLowerCase();
+  if (!normalized) return props.choices;
+  return props.choices.filter((choice) => choice.iri === props.modelValue || [
+    choice.label,
+    choice.description,
+    choice.category,
+    choice.example,
+    choice.iri,
+  ].some((value) => value?.toLocaleLowerCase().includes(normalized)));
+});
 
 function changeChoice(event: Event): void {
   const value = (event.target as HTMLSelectElement).value;
@@ -41,6 +53,7 @@ function changeChoice(event: Event): void {
     return;
   }
   advancedOpen.value = false;
+  query.value = "";
   emit("update:modelValue", value);
 }
 
@@ -54,6 +67,10 @@ function compactIri(iri: string): string {
 
 <template>
   <div class="iriograph-iri-choice-field">
+    <label v-if="choices.length > 5" class="iriograph-choice-search">
+      <span>{{ label }}を検索</span>
+      <input v-model="query" :aria-label="`${inputLabel} search`" type="search" :disabled="!enabled" placeholder="名前・説明・分類で絞り込み" />
+    </label>
     <label>
       <span>{{ label }}</span>
       <select
@@ -64,19 +81,18 @@ function compactIri(iri: string): string {
       >
         <option value="" :disabled="!allowEmpty">選択してください</option>
         <option
-          v-for="choice in choices"
+          v-for="choice in filteredChoices"
           :key="choice.iri"
           :value="choice.iri"
           :title="choice.iri"
-        >{{ choice.label || compactIri(choice.iri) }}</option>
+        >{{ choice.category ? `[${choice.category}] ` : '' }}{{ choice.label || compactIri(choice.iri) }}</option>
         <option :value="CUSTOM_VALUE">完全IRIを指定…</option>
       </select>
     </label>
-    <small v-if="knownChoice" class="iriograph-choice-iri" :title="knownChoice.iri">
-      {{ knownChoice.iri }}
-    </small>
+    <small v-if="knownChoice && (knownChoice.category || knownChoice.description || knownChoice.example)" class="iriograph-choice-metadata"><b v-if="knownChoice.category">{{ knownChoice.category }}</b><span v-if="knownChoice.description">{{ knownChoice.description }}</span><span v-if="knownChoice.example">例: {{ knownChoice.example }}</span></small>
     <details :open="advancedOpen || Boolean(modelValue && !knownChoice)" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
       <summary>Advanced: 完全IRI</summary>
+      <small v-if="knownChoice" class="iriograph-choice-iri" :title="knownChoice.iri">{{ knownChoice.iri }}</small>
       <input
         ref="advancedInput"
         :aria-label="inputLabel"

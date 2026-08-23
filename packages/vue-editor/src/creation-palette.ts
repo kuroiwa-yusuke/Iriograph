@@ -49,6 +49,24 @@ export function catalogCreationPalette(
         size: template.defaultSize ?? { width: 240, height: 120 },
       }];
     }
+    if (rule.project.operator === "membership-region") {
+      if (!declaredClasses.has(rule.match.iri)) return [];
+      const templateRef = rule.templateRef ?? catalog.defaults?.nodeTemplateRef;
+      const template = templateRef ? catalog.templates[templateRef] : undefined;
+      if (!template || template.structuralKind !== "node") return [];
+      return [{
+        templateRef: template.templateRef,
+        classIri: rule.match.iri,
+        kind: "node",
+        structuralKind: "node",
+        label: termLabels.get(rule.match.iri) ?? compactIri(rule.match.iri),
+        description: "分類領域としても利用できる概念クラス",
+        shape: template.shape ?? "rectangle",
+        iconRef: template.iconRef,
+        style: template.style,
+        size: template.defaultSize ?? { width: 120, height: 60 },
+      }];
+    }
     if (rule.project.operator !== "resource" || !declaredClasses.has(rule.match.iri)) return [];
     const structuralKind = rule.project.structuralKind;
     const templateRef = rule.templateRef ?? catalog.defaults?.nodeTemplateRef;

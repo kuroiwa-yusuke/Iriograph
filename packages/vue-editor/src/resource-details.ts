@@ -12,8 +12,18 @@ import {
 } from "./authoring-draft";
 
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const RDF_ORDINAL_PREFIX = "http://www.w3.org/1999/02/22-rdf-syntax-ns#_";
 const RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label";
+const RDFS_COMMENT = "http://www.w3.org/2000/01/rdf-schema#comment";
+const RDFS_SUBCLASS_OF = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
+const RDFS_SUBPROPERTY_OF = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
 const XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
+
+export type ResourcePropertyCategory =
+  | "name-description"
+  | "classification"
+  | "relationship"
+  | "attribute";
 
 export type ResourcePropertyEditorRow = {
   predicateIri: string;
@@ -22,6 +32,8 @@ export type ResourcePropertyEditorRow = {
   datatypes: readonly string[];
   languages: readonly string[];
   values: EditorPropertyValueDraft[];
+  category: ResourcePropertyCategory;
+  multiline: boolean;
 };
 
 export function resourcePropertyEditorRows(
@@ -35,7 +47,7 @@ export function resourcePropertyEditorRows(
     .filter((term) => term.kind === "property" && !term.structural)
     .map((term) => term.iri));
   for (const quad of graph.store.getQuads(subjectIri, null, null, null)) {
-    if (quad.predicate.value !== RDF_TYPE && !termByIri.get(quad.predicate.value)?.structural) {
+    if (!isStructurePredicate(quad.predicate.value, termByIri)) {
       predicates.add(quad.predicate.value);
     }
   }
@@ -65,6 +77,8 @@ export function resourcePropertyEditorRows(
       datatypes: term?.datatypes ?? [],
       languages: term?.languages ?? [],
       values,
+      category: propertyCategory(predicateIri, objectKinds),
+      multiline: predicateIri === RDFS_LABEL || predicateIri === RDFS_COMMENT,
     };
   }).sort((left, right) => (
     (left.predicateIri === RDFS_LABEL ? -1 : 0)
@@ -72,6 +86,30 @@ export function resourcePropertyEditorRows(
     || compareCodePoints(left.label, right.label)
     || compareCodePoints(left.predicateIri, right.predicateIri)
   ));
+}
+
+function isStructurePredicate(
+  predicateIri: string,
+  terms: ReadonlyMap<string, ResolvedAuthoringTerm>,
+): boolean {
+  return Boolean(terms.get(predicateIri)?.structural)
+    || (
+      predicateIri.startsWith(RDF_ORDINAL_PREFIX)
+      && /^[1-9][0-9]*$/u.test(predicateIri.slice(RDF_ORDINAL_PREFIX.length))
+    );
+}
+
+function propertyCategory(
+  predicateIri: string,
+  objectKinds: readonly ("iri" | "literal")[],
+): ResourcePropertyCategory {
+  if (predicateIri === RDFS_LABEL || predicateIri === RDFS_COMMENT) return "name-description";
+  if (
+    predicateIri === RDF_TYPE
+    || predicateIri === RDFS_SUBCLASS_OF
+    || predicateIri === RDFS_SUBPROPERTY_OF
+  ) return "classification";
+  return objectKinds.includes("iri") ? "relationship" : "attribute";
 }
 
 export function resourcePropertyCommands(

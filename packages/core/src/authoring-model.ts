@@ -25,6 +25,10 @@ export type ResolvedAuthoringTerm = {
   /** Required for non-standard structure terms whose RDF role is otherwise ambiguous. */
   roles?: readonly AuthoringTermRole[];
   label?: string;
+  /** UI-only picker metadata; core never derives semantic behavior from it. */
+  description?: string;
+  category?: string;
+  examples?: readonly string[];
   objectKinds?: readonly AuthoringObjectKind[];
   datatypes?: readonly string[];
   languages?: readonly string[];
@@ -172,6 +176,8 @@ export type SetMembershipCommand = AuthoringCommandBase & {
   enabled: boolean;
   containerTypeIri: string;
   predicateIri: string;
+  /** Defaults to `subject` for backward-compatible hierarchical containers. */
+  containerPosition?: "subject" | "object";
 };
 
 export type SetSequenceCommand = AuthoringCommandBase & {

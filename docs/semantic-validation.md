@@ -42,6 +42,10 @@ Diagnostic categoryは少なくとも次を区別します。
 - `domain`: 注入validatorのconstraint finding
 - `projection` / `layout` / `asset` / `internal`: 後続処理またはadapter contract故障
 
+Diagnosticは安定したmachine `code`と詳細`message`に加え、任意のpresentation hintを返せます。Hintは`title`、利用者向け`reason`、一つ以上の`nextActions`、対象resource/statementを持ちます。Actionは`open-vocabulary-manager`、`choose-existing-term`、`open-region-picker`、`show-source`等の汎用IDとseed dataであり、validatorがVue componentや業務predicateを指定しません。Editorは既知actionをbuttonとして表示し、未知actionもreasonを失わず表示します。
+
+選択時点で判定できる無効なclass、region、predicateは候補から除外または理由付きdisableにし、Apply後のdiagnosticだけへ依存しません。Raw codeと完全IRIはAdvancedへ残し、通常表示は「何ができなかったか」「なぜか」「次に何をすればよいか」をlabel中心で示します。
+
 ## Transactionとwarning
 
 Turtle直接編集、structured command、LLM source/canonical datasetは、全view reconciliation後に同じdomain validation portを通ります。Candidateのdomain errorはTurtleとoverlayを元documentへatomic rollbackします。既に読み込まれたdomain-invalid documentはSceneを表示したままdiagnosticを重ね、該当node/container/edgeを`semanticRef`、`statementRef`、projection provenanceでannotationします。

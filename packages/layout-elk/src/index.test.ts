@@ -1,4 +1,7 @@
 import {
+  edgeEndpointAnchorFromPoint,
+  edgeEndpointAnchorPoint,
+  layoutExternalReservationGeometries,
   LayoutAdapterRegistry,
   layoutProjectedScene,
   type LayoutEdge,
@@ -53,6 +56,16 @@ describe("ElkLayeredLayoutAdapter", () => {
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+      "elk.layered.crossingMinimization.greedySwitch.type": "TWO_SIDED",
+      "elk.layered.crossingMinimization.greedySwitchHierarchical.type": "TWO_SIDED",
+      "elk.layered.nodePlacement.favorStraightEdges": "true",
+      "elk.layered.thoroughness": "20",
+      "elk.layered.unnecessaryBendpoints": "false",
+      "elk.spacing.edgeEdge": "12",
+      "elk.spacing.edgeNode": "16",
+      "elk.layered.spacing.edgeEdgeBetweenLayers": "16",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "24",
     });
     expect(input.edges?.map((item) => item.id)).toEqual(["edge-1"]);
     expect(result.geometries["b-child"]!.x).toBeGreaterThan(result.geometries["a-container"]!.x);
@@ -79,6 +92,72 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(firstEngine.inputs[0]).toEqual(secondEngine.inputs[0]);
     expect(left).toEqual(right);
     expect(firstEngine.inputs[0]!.layoutOptions?.["elk.direction"]).toBe("TB");
+  });
+
+  test("maps external comment reservations to deterministic ELK margins", async () => {
+    const engine = new RecordingEngine();
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:comment-margin", "LR", { engine });
+    await adapter.layout(request([{
+      ...element("commented"),
+      externalReservations: [{
+        placement: "bottom-center",
+        width: 240,
+        height: 90,
+        gap: 10,
+      }],
+    }], [], "urn:test:comment-margin"));
+
+    expect(engine.inputs[0]!.children?.[0]?.layoutOptions?.["elk.margins"])
+      .toBe("[top=0,left=40,bottom=100,right=40]");
+  });
+
+  test("reroutes ELK edges around external comment reservations without moving nodes", async () => {
+    const engine: ElkLayoutEngine = {
+      layout: async (input) => {
+        const graph = structuredClone(input);
+        const positions: Record<string, { x: number; y: number }> = {
+          source: { x: 20, y: 150 },
+          commented: { x: 220, y: 40 },
+          target: { x: 520, y: 150 },
+        };
+        for (const child of graph.children ?? []) Object.assign(child, positions[child.id]);
+        graph.edges = (graph.edges ?? []).map((item) => ({
+          ...item,
+          sections: [{
+            startPoint: { x: 120, y: 180 },
+            endPoint: { x: 520, y: 180 },
+          }],
+        }));
+        return graph;
+      },
+    };
+    const commented = {
+      ...element("commented"),
+      size: { width: 100, height: 60 },
+      externalReservations: [{
+        placement: "bottom-center" as const,
+        width: 200,
+        height: 100,
+        gap: 10,
+      }],
+    };
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:comment-route", "LR", { engine });
+    const result = await adapter.layout(request(
+      [
+        { ...element("source"), size: { width: 100, height: 60 } },
+        commented,
+        { ...element("target"), size: { width: 100, height: 60 } },
+      ],
+      [edge("flow", "source", "target")],
+      "urn:test:comment-route",
+    ));
+    const reservation = layoutExternalReservationGeometries(
+      commented,
+      result.geometries.commented!,
+    )[0]!;
+
+    expect(result.geometries.commented).toMatchObject({ width: 100, height: 60 });
+    expect(polylineCrossesBox(result.routes.flow!, reservation)).toBe(false);
   });
 
   test("keeps manual waypoints and completes self and parallel routes", async () => {
@@ -154,6 +233,39 @@ describe("ElkLayeredLayoutAdapter", () => {
       x: a.x,
       y: a.y + a.height / 2,
     });
+  });
+
+  test("keeps straight routes endpoint-only at shape boundaries", async () => {
+      const adapter = new ElkLayeredLayoutAdapter("urn:test:straight", "LR", {
+        engine: new RecordingEngine(),
+      });
+      const result = await adapter.layout(request(
+        [element("a"), element("b")],
+        [{ ...edge("direct", "a", "b"), routeMode: "straight" }],
+        "urn:test:straight",
+      ));
+
+      const a = result.geometries.a!;
+      const b = result.geometries.b!;
+      const aCenter = { x: a.x + a.width / 2, y: a.y + a.height / 2 };
+      const bCenter = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+      expect(result.routes.direct).toEqual([
+        edgeEndpointAnchorPoint(a, "rectangle", edgeEndpointAnchorFromPoint(a, bCenter)),
+        edgeEndpointAnchorPoint(b, "rectangle", edgeEndpointAnchorFromPoint(b, aCenter)),
+      ]);
+  });
+
+  test("keeps ELK bend points available for curve smoothing", async () => {
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:curve", "LR", {
+      engine: new RecordingEngine(),
+    });
+    const result = await adapter.layout(request(
+      [element("a"), element("b")],
+      [{ ...edge("curved", "a", "b"), routeMode: "curve" }],
+      "urn:test:curve",
+    ));
+
+    expect(result.routes.curved!.length).toBeGreaterThan(2);
   });
 
   test("never invokes ELK for fixed geometry and returns a Core-valid result", async () => {
@@ -391,6 +503,31 @@ function containsCenter(
   const y = inner.y + inner.height / 2;
   return x >= outer.x && x <= outer.x + outer.width
     && y >= outer.y && y <= outer.y + outer.height;
+}
+
+function polylineCrossesBox(
+  route: readonly { x: number; y: number }[],
+  box: { x: number; y: number; width: number; height: number },
+): boolean {
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const start = route[index]!;
+    const end = route[index + 1]!;
+    if (
+      start.x === end.x
+      && start.x > box.x
+      && start.x < box.x + box.width
+      && Math.max(Math.min(start.y, end.y), box.y)
+        < Math.min(Math.max(start.y, end.y), box.y + box.height)
+    ) return true;
+    if (
+      start.y === end.y
+      && start.y > box.y
+      && start.y < box.y + box.height
+      && Math.max(Math.min(start.x, end.x), box.x)
+        < Math.min(Math.max(start.x, end.x), box.x + box.width)
+    ) return true;
+  }
+  return false;
 }
 
 function fakeLayout(

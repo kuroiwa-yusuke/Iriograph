@@ -130,6 +130,47 @@ describe("AuthoringPanel", () => {
     expect(draft.propertyMode).toBe("delete");
   });
 
+  it("multi-selectionを分類・包含のbatch draftへseedする", async () => {
+    const selected = [
+      { iri: "urn:test:a", label: "A", structuralKind: "node" as const },
+      { iri: "urn:test:b", label: "B", structuralKind: "node" as const },
+    ];
+    const wrapper = mount(AuthoringPanel, {
+      props: {
+        modelValue: emptyAuthoringDraft(),
+        selectedResource: selected[0],
+        selectedResources: selected,
+        classes: [{ iri: "urn:test:Task", label: "タスク", description: "処理する項目", category: "業務" }],
+        resources: selected,
+        containers: [{ iri: "urn:test:region", label: "領域", structuralKind: "region" }],
+      },
+    });
+    await wrapper.findAll(".iriograph-authoring-quick-actions button")
+      .find((button) => button.text() === "分類を設定")!.trigger("click");
+    let draft = wrapper.emitted("update:modelValue")?.at(-1)?.[0] as ReturnType<typeof emptyAuthoringDraft>;
+    expect(draft).toMatchObject({
+      kind: "set-property",
+      subjectIri: "urn:test:a",
+      subjectIris: ["urn:test:b"],
+      predicateIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+      propertyValues: [{ objectKind: "iri" }],
+    });
+    await wrapper.setProps({ modelValue: draft });
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Property value 1 choice"]').setValue("urn:test:Task");
+    draft = wrapper.emitted("update:modelValue")?.at(-1)?.[0] as ReturnType<typeof emptyAuthoringDraft>;
+    await wrapper.setProps({ modelValue: draft });
+    expect(wrapper.text()).toContain("処理する項目");
+
+    await wrapper.findAll(".iriograph-authoring-quick-actions button")
+      .find((button) => button.text() === "領域・包含")!.trigger("click");
+    draft = wrapper.emitted("update:modelValue")?.at(-1)?.[0] as ReturnType<typeof emptyAuthoringDraft>;
+    expect(draft).toMatchObject({
+      kind: "set-membership",
+      memberIri: "urn:test:a",
+      memberIris: ["urn:test:b"],
+    });
+  });
+
   it("capability metadataからrequired省略も必須のtyped IRI fieldを生成する", async () => {
     const capability = {
       iri: "urn:test:capability",

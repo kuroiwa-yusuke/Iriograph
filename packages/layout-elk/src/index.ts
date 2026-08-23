@@ -1,7 +1,10 @@
 import {
   StandardLightweightLayoutAdapter,
+  edgeEndpointAnchorFromPoint,
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
+  layoutElementFootprintGeometry,
+  layoutExternalReservationGeometries,
   type ElementGeometry,
   type LayoutAdapter,
   type LayoutDiagnostic,
@@ -142,6 +145,15 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
       const engine = await this.#getEngine();
       const output = await engine.layout(prepared.graph);
       const parsed = parseEngineOutput(request, prepared, output, this.direction);
+      if (!parsed.invalidGeometry && hasExternalReservations(request.scene.elements)) {
+        const routed = await routeWithFixedGeometry(
+          request,
+          parsed.geometries,
+          this.direction,
+        );
+        parsed.routes = routed.routes;
+        parsed.diagnostics.push(...routed.diagnostics);
+      }
       const diagnostics = [...prepared.diagnostics, ...parsed.diagnostics];
       if (parsed.invalidGeometry) {
         return this.#fallback(request, diagnostics);
@@ -211,6 +223,29 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
   }
 }
 
+function hasExternalReservations(elements: readonly LayoutElement[]): boolean {
+  return elements.some((element) => (element.externalReservations?.length ?? 0) > 0);
+}
+
+async function routeWithFixedGeometry(
+  request: LayoutRequest,
+  geometries: Readonly<Record<string, ElementGeometry>>,
+  direction: LayoutDirection,
+): Promise<LayoutResult> {
+  return new StandardLightweightLayoutAdapter(request.layoutRef, direction).layout({
+    ...request,
+    scene: {
+      ...request.scene,
+      elements: request.scene.elements.map((element) => ({
+        ...element,
+        geometry: geometries[element.elementId],
+        placement: "user" as const,
+        pinned: true,
+      })),
+    },
+  });
+}
+
 function prepareGraph(request: LayoutRequest, direction: LayoutDirection): PreparedGraph {
   const diagnostics: LayoutDiagnostic[] = [];
   const elements = new Map<string, LayoutElement>();
@@ -243,23 +278,28 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
     const element = elements.get(id)!;
     const size = elementSize(element);
     const nested = children.get(id) ?? [];
+    const reservationMargins = externalReservationMargins(element, size);
+    const layoutOptions: Record<string, string> = {
+      ...(element.structuralKind === "container"
+        ? {
+            "elk.padding": paddingInsetsOption(element.contentInsets ?? {
+              top: spacing.containerHeader + spacing.containerPadding,
+              right: spacing.containerPadding,
+              bottom: spacing.containerPadding,
+              left: spacing.containerPadding,
+            }),
+          }
+        : {}),
+      ...(reservationMargins
+        ? { "elk.margins": reservationMargins }
+        : {}),
+    };
     return {
       id,
       width: size.width,
       height: size.height,
       ...(nested.length > 0 ? { children: nested.map(buildNode) } : {}),
-      ...(element.structuralKind === "container"
-        ? {
-            layoutOptions: {
-              "elk.padding": paddingInsetsOption(element.contentInsets ?? {
-                top: spacing.containerHeader + spacing.containerPadding,
-                right: spacing.containerPadding,
-                bottom: spacing.containerPadding,
-                left: spacing.containerPadding,
-              }),
-            },
-          }
-        : {}),
+      ...(Object.keys(layoutOptions).length > 0 ? { layoutOptions } : {}),
     };
   };
 
@@ -301,7 +341,21 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
         "elk.edgeRouting": "ORTHOGONAL",
         "elk.hierarchyHandling": "INCLUDE_CHILDREN",
         "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+        "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
+        "elk.layered.crossingMinimization.greedySwitch.type": "TWO_SIDED",
+        "elk.layered.crossingMinimization.greedySwitchHierarchical.type": "TWO_SIDED",
+        "elk.layered.nodePlacement.favorStraightEdges": "true",
+        "elk.layered.thoroughness": "20",
+        "elk.layered.unnecessaryBendpoints": "false",
         "elk.spacing.nodeNode": String(spacing.itemGap),
+        "elk.spacing.edgeEdge": String(Math.max(10, Math.round(spacing.itemGap / 4))),
+        "elk.spacing.edgeNode": String(Math.max(12, Math.round(spacing.itemGap / 3))),
+        "elk.layered.spacing.edgeEdgeBetweenLayers": String(
+          Math.max(12, Math.round(spacing.itemGap / 3)),
+        ),
+        "elk.layered.spacing.edgeNodeBetweenLayers": String(
+          Math.max(16, Math.round(spacing.itemGap / 2)),
+        ),
         "elk.layered.spacing.nodeNodeBetweenLayers": String(spacing.rankGap),
         "elk.padding": paddingOption(spacing.margin, spacing.margin),
       },
@@ -574,7 +628,7 @@ function ensureCompleteResult(
         ? copyGeometry(candidateGeometry)
         : fallbackGeometry(element, index, direction, spacing);
     if (!fixedGeometry && !isValidGeometry(candidateGeometry)) {
-      geometry = avoidOccupied(geometry, occupied, direction, spacing.itemGap);
+      geometry = avoidElementOccupied(element, geometry, occupied, direction, spacing.itemGap);
       diagnostics.push({
         severity: "warning",
         code: "elk-result-geometry-completed",
@@ -584,7 +638,7 @@ function ensureCompleteResult(
       });
     }
     geometries[element.elementId] = geometry;
-    occupied.push(copyGeometry(geometry));
+    occupied.push(layoutElementFootprintGeometry(element, geometry));
   });
 
   const routes: Record<string, Point[]> = {};
@@ -597,6 +651,8 @@ function ensureCompleteResult(
     let route: Point[];
     if (manual) {
       route = manual;
+    } else if (edge.routeMode === "straight") {
+      route = directRoute(edge, geometries, elementsById);
     } else if (isValidRoute(candidateRoute)) {
       route = candidateRoute.map(copyPoint);
     } else {
@@ -622,7 +678,16 @@ function ensureCompleteResult(
     );
   }
 
-  const bounds = sceneBounds(Object.values(geometries), Object.values(routes).flat(), spacing.margin);
+  const bounds = sceneBounds(
+    elements.flatMap((element) => {
+      const geometry = geometries[element.elementId];
+      return geometry
+        ? [geometry, ...layoutExternalReservationGeometries(element, geometry)]
+        : [];
+    }),
+    Object.values(routes).flat(),
+    spacing.margin,
+  );
   return {
     layoutRef: request.layoutRef,
     geometries,
@@ -631,6 +696,36 @@ function ensureCompleteResult(
     height: bounds.height,
     diagnostics,
   };
+}
+
+function directRoute(
+  edge: LayoutEdge,
+  geometries: Readonly<Record<string, ElementGeometry>>,
+  elements: ReadonlyMap<string, LayoutElement>,
+): Point[] {
+  const source = geometries[edge.sourceElementId];
+  const target = geometries[edge.targetElementId];
+  if (!source || !target) return [{ x: 0, y: 0 }, { x: 1, y: 0 }];
+  const sourceToward = centerOf(target);
+  const targetToward = centerOf(source);
+  return [
+    edgeEndpointAnchorPoint(
+      source,
+      elementShape(elements.get(edge.sourceElementId)),
+      edgeEndpointAnchorFromPoint(source, sourceToward),
+    ),
+    edgeEndpointAnchorPoint(
+      target,
+      elementShape(elements.get(edge.targetElementId)),
+      edgeEndpointAnchorFromPoint(target, targetToward),
+    ),
+  ];
+}
+
+function elementShape(element: LayoutElement | undefined) {
+  return element?.shape ?? (element?.structuralKind === "container"
+    ? "container"
+    : element?.structuralKind === "region" ? "region" : "rectangle");
 }
 
 function applyExplicitEndpointAnchors(
@@ -648,18 +743,14 @@ function applyExplicitEndpointAnchors(
   if (sourceGeometry && isValidEdgeEndpointAnchor(edge.sourceAnchor)) {
     result[0] = edgeEndpointAnchorPoint(
       sourceGeometry,
-      sourceElement?.shape ?? (sourceElement?.structuralKind === "container"
-        ? "container"
-        : sourceElement?.structuralKind === "region" ? "region" : "rectangle"),
+      elementShape(sourceElement),
       edge.sourceAnchor,
     );
   }
   if (targetGeometry && isValidEdgeEndpointAnchor(edge.targetAnchor)) {
     result[result.length - 1] = edgeEndpointAnchorPoint(
       targetGeometry,
-      targetElement?.shape ?? (targetElement?.structuralKind === "container"
-        ? "container"
-        : targetElement?.structuralKind === "region" ? "region" : "rectangle"),
+      elementShape(targetElement),
       edge.targetAnchor,
     );
   }
@@ -681,7 +772,10 @@ function fixedSiblingOverlapDiagnostics(
       const right = valid[rightIndex]!;
       if (left.structuralKind === "region" || right.structuralKind === "region") continue;
       if ((left.parentElementId ?? "") !== (right.parentElementId ?? "")) continue;
-      if (!intersects(left.geometry, right.geometry)) continue;
+      if (!intersects(
+        layoutElementFootprintGeometry(left, left.geometry),
+        layoutElementFootprintGeometry(right, right.geometry),
+      )) continue;
       diagnostics.push({
         severity: "error",
         code: "elk-fixed-overlap",
@@ -715,7 +809,11 @@ function fixedContainerDiagnostics(
           left: spacing.containerPadding,
         })
       : undefined;
-    if (parentContent && childGeometry && !contains(parentContent, childGeometry)) {
+    if (
+      parentContent
+      && childGeometry
+      && !contains(parentContent, layoutElementFootprintGeometry(element, childGeometry))
+    ) {
       diagnostics.push({
         severity: "error",
         code: "elk-fixed-container-overflow",
@@ -846,6 +944,33 @@ function avoidOccupied(
   return result;
 }
 
+function avoidElementOccupied(
+  element: LayoutElement,
+  geometry: ElementGeometry,
+  occupied: ElementGeometry[],
+  direction: LayoutDirection,
+  gap: number,
+): ElementGeometry {
+  const relative = layoutElementFootprintGeometry(element, {
+    x: 0,
+    y: 0,
+    width: geometry.width,
+    height: geometry.height,
+  });
+  const footprint = avoidOccupied({
+    x: geometry.x + relative.x,
+    y: geometry.y + relative.y,
+    width: relative.width,
+    height: relative.height,
+  }, occupied, direction, gap);
+  return {
+    x: footprint.x - relative.x,
+    y: footprint.y - relative.y,
+    width: geometry.width,
+    height: geometry.height,
+  };
+}
+
 function routeBundleKey(edge: LayoutEdge): string {
   const endpoints = [edge.sourceElementId, edge.targetElementId].sort(compareText);
   return `${endpoints[0]}\u0000${endpoints[1]}`;
@@ -867,6 +992,24 @@ function elementSize(element: LayoutElement): { width: number; height: number } 
   return element.structuralKind === "container"
     ? { width: 360, height: 180 }
     : { width: 160, height: 72 };
+}
+
+function externalReservationMargins(
+  element: LayoutElement,
+  size: { width: number; height: number },
+): string | undefined {
+  const footprint = layoutElementFootprintGeometry(element, {
+    x: 0,
+    y: 0,
+    width: size.width,
+    height: size.height,
+  });
+  const top = Math.max(0, -footprint.y);
+  const left = Math.max(0, -footprint.x);
+  const bottom = Math.max(0, footprint.y + footprint.height - size.height);
+  const right = Math.max(0, footprint.x + footprint.width - size.width);
+  if (top === 0 && left === 0 && bottom === 0 && right === 0) return undefined;
+  return `[top=${top},left=${left},bottom=${bottom},right=${right}]`;
 }
 
 function paddingOption(vertical: number, horizontal: number): string {

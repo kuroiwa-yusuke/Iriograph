@@ -203,6 +203,225 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(result.routes.edge?.[2]).not.toEqual({ x: 12, y: 34 });
   });
 
+  it("returns an endpoint-only straight route", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "a", structuralKind: "node" },
+        { elementId: "b", structuralKind: "node" },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "a", targetElementId: "b", routeMode: "straight" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:straight", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.edge).toHaveLength(2);
+    expect(result.routes.edge?.[0]).toEqual({
+      x: result.geometries.a!.x + result.geometries.a!.width,
+      y: result.geometries.a!.y + result.geometries.a!.height / 2,
+    });
+    expect(result.routes.edge?.at(-1)).toEqual({
+      x: result.geometries.b!.x,
+      y: result.geometries.b!.y + result.geometries.b!.height / 2,
+    });
+  });
+
+  it("keeps derived bend points for curve rendering", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "a", structuralKind: "node" },
+        { elementId: "b", structuralKind: "node" },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "a", targetElementId: "b", routeMode: "curve" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:curve", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.edge!.length).toBeGreaterThan(2);
+  });
+
+  it("routes around fixed node and annotation obstacles without creating manual waypoints", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "source",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 20, y: 100, width: 100, height: 60 },
+        },
+        {
+          elementId: "blocking-node",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 180, y: 90, width: 100, height: 80 },
+        },
+        {
+          elementId: "blocking-comment",
+          structuralKind: "annotation",
+          placement: "user",
+          geometry: { x: 330, y: 70, width: 120, height: 100 },
+        },
+        {
+          elementId: "target",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 520, y: 100, width: 100, height: 60 },
+        },
+      ],
+      edges: [{
+        elementId: "edge",
+        sourceElementId: "source",
+        targetElementId: "target",
+        routingPlacement: "generated",
+      }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:obstacles", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const route = result.routes.edge!;
+
+    expect(scene.edges[0]!.waypoints).toBeUndefined();
+    expect(route.length).toBeGreaterThan(2);
+    expect(polylineCrossesBox(route, scene.elements[1]!.geometry!)).toBe(false);
+    expect(polylineCrossesBox(route, scene.elements[2]!.geometry!)).toBe(false);
+    expect(result.geometries.source).toEqual(scene.elements[0]!.geometry);
+    expect(result.geometries.target).toEqual(scene.elements[3]!.geometry);
+  });
+
+  it("reserves hidden comment callouts for node placement and edge routing", async () => {
+    const commentReservation = {
+      placement: "bottom-center" as const,
+      width: 200,
+      height: 100,
+      gap: 10,
+    };
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "source",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 20, y: 180, width: 100, height: 60 },
+        },
+        {
+          elementId: "comment-owner",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 220, y: 40, width: 100, height: 60 },
+          externalReservations: [commentReservation],
+        },
+        {
+          elementId: "target",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 520, y: 180, width: 100, height: 60 },
+        },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "source", targetElementId: "target" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:comments", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const callout = { x: 170, y: 110, width: 200, height: 100 };
+
+    expect(result.geometries["comment-owner"]).toEqual(scene.elements[1]!.geometry);
+    expect(polylineCrossesBox(result.routes.edge!, callout)).toBe(false);
+    expect(result.height).toBeGreaterThanOrEqual(callout.y + callout.height + 48);
+  });
+
+  it("uses the comment footprint when spacing generated siblings", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "a-commented",
+          structuralKind: "node",
+          externalReservations: [{
+            placement: "bottom-center",
+            width: 240,
+            height: 90,
+            gap: 10,
+          }],
+        },
+        { elementId: "b-plain", structuralKind: "node" },
+      ],
+      edges: [],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:comment-spacing", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const commented = result.geometries["a-commented"]!;
+    const plain = result.geometries["b-plain"]!;
+
+    expect(plain.y).toBeGreaterThanOrEqual(commented.y + commented.height + 10 + 90 + 48);
+  });
+
+  it("keeps manual waypoint gates while derived segments avoid obstacles", async () => {
+    const manualPoint = { x: 320, y: 230 };
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "source",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 20, y: 80, width: 100, height: 60 },
+        },
+        {
+          elementId: "blocker",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 170, y: 80, width: 110, height: 100 },
+        },
+        {
+          elementId: "target",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 500, y: 80, width: 100, height: 60 },
+        },
+      ],
+      edges: [{
+        elementId: "edge",
+        sourceElementId: "source",
+        targetElementId: "target",
+        routingPlacement: "user",
+        waypoints: [manualPoint],
+      }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:manual-obstacle", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.edge).toContainEqual(manualPoint);
+    expect(scene.edges[0]!.waypoints).toEqual([manualPoint]);
+    expect(polylineCrossesBox(result.routes.edge!, scene.elements[1]!.geometry!)).toBe(false);
+  });
+
+  it("deterministically separates otherwise overlapping routes", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "a", structuralKind: "node", placement: "user", geometry: { x: 20, y: 20, width: 80, height: 50 } },
+        { elementId: "b", structuralKind: "node", placement: "user", geometry: { x: 420, y: 220, width: 80, height: 50 } },
+        { elementId: "c", structuralKind: "node", placement: "user", geometry: { x: 20, y: 220, width: 80, height: 50 } },
+        { elementId: "d", structuralKind: "node", placement: "user", geometry: { x: 420, y: 20, width: 80, height: 50 } },
+      ],
+      edges: [
+        { elementId: "cross-a", sourceElementId: "a", targetElementId: "b" },
+        { elementId: "cross-b", sourceElementId: "c", targetElementId: "d" },
+      ],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:route-congestion", "LR");
+
+    const first = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const second = await adapter.layout({
+      layoutRef: adapter.layoutRef,
+      scene: { elements: [...scene.elements].reverse(), edges: [...scene.edges].reverse() },
+    });
+
+    expect(first.routes).toEqual(second.routes);
+    expect(polylineOverlapLength(first.routes["cross-a"]!, first.routes["cross-b"]!)).toBe(0);
+    expect(polylineStrictCrossings(first.routes["cross-a"]!, first.routes["cross-b"]!)).toBe(0);
+  });
+
   it("routes parallel, reciprocal, and self-loop edges deterministically with bounded lanes", async () => {
     const scene: LayoutProjectedScene = {
       elements: [
@@ -660,4 +879,94 @@ function isInside(child: { x: number; y: number; width: number; height: number }
     && child.y >= parent.y
     && child.x + child.width <= parent.x + parent.width
     && child.y + child.height <= parent.y + parent.height;
+}
+
+function polylineCrossesBox(
+  route: readonly { x: number; y: number }[],
+  box: { x: number; y: number; width: number; height: number },
+): boolean {
+  for (let index = 0; index < route.length - 1; index += 1) {
+    const start = route[index]!;
+    const end = route[index + 1]!;
+    if (start.x === end.x) {
+      if (
+        start.x > box.x
+        && start.x < box.x + box.width
+        && Math.max(Math.min(start.y, end.y), box.y) < Math.min(Math.max(start.y, end.y), box.y + box.height)
+      ) return true;
+    } else if (start.y === end.y) {
+      if (
+        start.y > box.y
+        && start.y < box.y + box.height
+        && Math.max(Math.min(start.x, end.x), box.x) < Math.min(Math.max(start.x, end.x), box.x + box.width)
+      ) return true;
+    }
+  }
+  return false;
+}
+
+function polylineOverlapLength(
+  left: readonly { x: number; y: number }[],
+  right: readonly { x: number; y: number }[],
+): number {
+  let total = 0;
+  for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
+    const leftStart = left[leftIndex]!;
+    const leftEnd = left[leftIndex + 1]!;
+    for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
+      const rightStart = right[rightIndex]!;
+      const rightEnd = right[rightIndex + 1]!;
+      if (leftStart.x === leftEnd.x && rightStart.x === rightEnd.x && leftStart.x === rightStart.x) {
+        total += intervalOverlap(leftStart.y, leftEnd.y, rightStart.y, rightEnd.y);
+      } else if (leftStart.y === leftEnd.y && rightStart.y === rightEnd.y && leftStart.y === rightStart.y) {
+        total += intervalOverlap(leftStart.x, leftEnd.x, rightStart.x, rightEnd.x);
+      }
+    }
+  }
+  return total;
+}
+
+function intervalOverlap(leftA: number, leftB: number, rightA: number, rightB: number): number {
+  return Math.max(
+    0,
+    Math.min(Math.max(leftA, leftB), Math.max(rightA, rightB))
+      - Math.max(Math.min(leftA, leftB), Math.min(rightA, rightB)),
+  );
+}
+
+function polylineStrictCrossings(
+  left: readonly { x: number; y: number }[],
+  right: readonly { x: number; y: number }[],
+): number {
+  let crossings = 0;
+  for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
+    for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
+      if (segmentsCrossStrictly(
+        left[leftIndex]!,
+        left[leftIndex + 1]!,
+        right[rightIndex]!,
+        right[rightIndex + 1]!,
+      )) crossings += 1;
+    }
+  }
+  return crossings;
+}
+
+function segmentsCrossStrictly(
+  leftStart: { x: number; y: number },
+  leftEnd: { x: number; y: number },
+  rightStart: { x: number; y: number },
+  rightEnd: { x: number; y: number },
+): boolean {
+  const leftDx = leftEnd.x - leftStart.x;
+  const leftDy = leftEnd.y - leftStart.y;
+  const rightDx = rightEnd.x - rightStart.x;
+  const rightDy = rightEnd.y - rightStart.y;
+  const denominator = leftDx * rightDy - leftDy * rightDx;
+  if (denominator === 0) return false;
+  const offsetX = rightStart.x - leftStart.x;
+  const offsetY = rightStart.y - leftStart.y;
+  const leftRatio = (offsetX * rightDy - offsetY * rightDx) / denominator;
+  const rightRatio = (offsetX * leftDy - offsetY * leftDx) / denominator;
+  return leftRatio > 0 && leftRatio < 1 && rightRatio > 0 && rightRatio < 1;
 }
