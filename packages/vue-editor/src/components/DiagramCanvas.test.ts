@@ -4,6 +4,7 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import type { DiagramScene, ElementGeometry, Point } from "@iriograph/core";
 
 import DiagramCanvas from "./DiagramCanvas.vue";
+import type { DiagramCanvasNavigationApi } from "../viewport";
 
 describe("DiagramCanvas pointer gestures", () => {
   let wrapper: VueWrapper | undefined;
@@ -36,6 +37,7 @@ describe("DiagramCanvas pointer gestures", () => {
         geometry: { x: 40, y: 50, width: 120, height: 60 },
       });
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+    expect(wrapper.emitted("zoomChange")).toBeUndefined();
   });
 
   it("selected nodeをminimum sizeまでresizeしてgestureを閉じる", async () => {
@@ -83,6 +85,103 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureStart")).toHaveLength(1);
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
   });
+
+  it("blank canvasのmouse dragとfocusされたviewportのkeyだけをpanに使う", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture() },
+    });
+    configureViewport(wrapper, 260, 180);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: 120,
+      clientY: 90,
+    });
+    dispatchPointer("pointermove", 70, 50);
+    dispatchPointer("pointerup", 70, 50);
+
+    expect(viewport.element.scrollLeft).toBe(50);
+    expect(viewport.element.scrollTop).toBe(40);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureStart")).toBeUndefined();
+
+    await viewport.trigger("keydown", { key: "ArrowRight" });
+    expect(viewport.element.scrollLeft).toBe(114);
+    await viewport.trigger("keydown", { key: "PageDown" });
+    expect(viewport.element.scrollTop).toBe(184);
+  });
+
+  it("primary node gestureをpanから分離し、middle dragはreadOnlyでもnavigationに使う", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), readOnly: true },
+    });
+    configureViewport(wrapper, 260, 180);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const node = wrapper.get(".iriograph-scene-node");
+
+    await node.trigger("pointerdown", { button: 0, clientX: 100, clientY: 80 });
+    dispatchPointer("pointermove", 60, 40);
+    dispatchPointer("pointerup", 60, 40);
+    expect(viewport.element.scrollLeft).toBe(0);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+
+    await node.trigger("pointerdown", { button: 1, clientX: 100, clientY: 80 });
+    dispatchPointer("pointermove", 45, 30);
+    dispatchPointer("pointerup", 45, 30);
+    expect(viewport.element.scrollLeft).toBe(55);
+    expect(viewport.element.scrollTop).toBe(50);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+  });
+
+  it("fit、selection reveal、minimap navigationをsession scroll/zoomだけで行う", async () => {
+    let mounted: VueWrapper;
+    mounted = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: sceneFixture(),
+        zoom: 1,
+        onZoomChange: (value: number) => mounted.setProps({ zoom: value }),
+      },
+    });
+    wrapper = mounted;
+    configureViewport(wrapper, 220, 160);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const api = wrapper.vm as unknown as DiagramCanvasNavigationApi;
+
+    expect(await api.revealElement("node-b")).toBe(true);
+    expect(viewport.element.scrollLeft).toBeGreaterThan(0);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+
+    await api.fitToView();
+    expect(wrapper.emitted("zoomChange")?.at(-1)?.[0]).toBe(.22);
+    expect((wrapper.props() as { zoom: number }).zoom).toBe(.22);
+
+    await mounted.setProps({ zoom: 1 });
+    configureViewport(wrapper, 220, 160);
+    const minimap = wrapper.get<SVGSVGElement>(".iriograph-minimap svg");
+    minimap.element.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 160,
+      bottom: 100,
+      width: 160,
+      height: 100,
+      toJSON: () => undefined,
+    });
+    await minimap.trigger("pointerdown", { button: 0, clientX: 150, clientY: 90 });
+    dispatchPointer("pointerup", 150, 90);
+    expect(viewport.element.scrollLeft).toBeGreaterThan(500);
+    expect(viewport.element.scrollTop).toBeGreaterThan(300);
+    const minimapLeft = viewport.element.scrollLeft;
+    await minimap.trigger("keydown", { key: "ArrowLeft" });
+    expect(viewport.element.scrollLeft).toBe(minimapLeft - 64);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+  });
 });
 
 function dispatchPointer(type: "pointermove" | "pointerup", clientX: number, clientY: number): void {
@@ -91,6 +190,20 @@ function dispatchPointer(type: "pointermove" | "pointerup", clientX: number, cli
 
 function lastPayload<T>(wrapper: VueWrapper, eventName: string): T | undefined {
   return wrapper.emitted(eventName)?.at(-1)?.[0] as T | undefined;
+}
+
+function configureViewport(wrapper: VueWrapper, width: number, height: number): void {
+  const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll").element;
+  const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
+  Object.defineProperties(viewport, {
+    clientWidth: { configurable: true, value: width },
+    clientHeight: { configurable: true, value: height },
+  });
+  Object.defineProperties(stage, {
+    offsetLeft: { configurable: true, value: 20 },
+    offsetTop: { configurable: true, value: 20 },
+  });
+  window.dispatchEvent(new Event("resize"));
 }
 
 function sceneFixture(): DiagramScene {

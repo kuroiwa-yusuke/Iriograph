@@ -18,6 +18,10 @@ import {
 
 import DiagramCanvas from "./DiagramCanvas.vue";
 import IriographEditor from "./IriographEditor.vue";
+import {
+  diagramFitZoom,
+  type IriographEditorNavigationApi,
+} from "../viewport";
 
 const NS = "urn:test:editor:";
 const initialSource = `
@@ -144,19 +148,113 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("save")).toBeUndefined();
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
+
+  it("pan、fit、selection revealをdocument/historyと分離して公開する", async () => {
+    wrapper = await mountEditor();
+    configureEditorViewport(wrapper, 180, 140);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const target = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}b`)!;
+    const api = wrapper.vm as unknown as IriographEditorNavigationApi;
+
+    api.panBy(80, 45);
+    expect(viewport.element.scrollLeft).toBe(80);
+    expect(viewport.element.scrollTop).toBe(45);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    expect(await api.focusElement(target.elementId)).toBe(true);
+    expect(wrapper.emitted("selectionChanged")?.at(-1)?.[0]).toBe(target.elementId);
+    expect(viewport.element.scrollLeft).toBeGreaterThan(100);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await api.fitToView();
+    const expectedFit = diagramFitZoom(canvas.props("scene"), { width: 180, height: 140 });
+    expect(wrapper.get(".zoom-value").text()).toBe(`${Math.round(expectedFit * 100)}%`);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(await api.focusElement("missing-element")).toBe(false);
+  });
+
+  it("viewport focusの矢印はpan、node focusの矢印は既存編集に使い分ける", async () => {
+    wrapper = await mountEditor();
+    configureEditorViewport(wrapper, 180, 140);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const target = canvas.props("scene").nodes[0]!;
+    const selectionApi = wrapper.vm as unknown as { selectElement(elementId: string): void };
+    selectionApi.selectElement(target.elementId);
+    await nextTick();
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+
+    await viewport.trigger("keydown", { key: "ArrowRight" });
+    expect(viewport.element.scrollLeft).toBe(64);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await wrapper.get(".iriograph-scene-node.selected").trigger("keydown", { key: "ArrowRight" });
+    await settle();
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
+  });
+
+  it("readOnlyでもnavigationを許可しpresentation editは発行しない", async () => {
+    wrapper = await mountEditor({ readOnly: true });
+    configureEditorViewport(wrapper, 180, 140);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+
+    await viewport.trigger("keydown", { key: "ArrowDown" });
+    expect(viewport.element.scrollTop).toBe(64);
+    await wrapper.get('button[aria-label="全体を表示"]').trigger("click");
+    await settle();
+    expect(Number.parseInt(wrapper.get(".zoom-value").text(), 10)).toBeLessThan(100);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
+  it("source tabを往復してもsession viewportを保持する", async () => {
+    wrapper = await mountEditor();
+    configureEditorViewport(wrapper, 180, 140);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const api = wrapper.vm as unknown as IriographEditorNavigationApi;
+    api.panBy(96, 72);
+    await api.zoomTo(.8);
+    const before = {
+      left: viewport.element.scrollLeft,
+      top: viewport.element.scrollTop,
+    };
+
+    await openTurtlePanel(wrapper);
+    await buttonWithText(wrapper, "Diagram").trigger("click");
+    await settle();
+
+    expect(wrapper.get<HTMLElement>(".iriograph-canvas-scroll").element.scrollLeft).toBe(before.left);
+    expect(wrapper.get<HTMLElement>(".iriograph-canvas-scroll").element.scrollTop).toBe(before.top);
+    expect(wrapper.text()).toContain("80%");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
 });
 
-async function mountEditor(): Promise<VueWrapper> {
+async function mountEditor(extraProps: Record<string, unknown> = {}): Promise<VueWrapper> {
   const wrapper = mount(IriographEditor, {
     attachTo: document.body,
     props: {
       modelValue: documentFixture(),
       catalog: standardRdfRdfsCatalog,
       title: "Editor regression fixture",
+      ...extraProps,
     },
   });
   await waitUntil(() => wrapper.getComponent(DiagramCanvas).props("scene").nodes.length === 2);
   return wrapper;
+}
+
+function configureEditorViewport(wrapper: VueWrapper, width: number, height: number): void {
+  const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll").element;
+  const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
+  Object.defineProperties(viewport, {
+    clientWidth: { configurable: true, value: width },
+    clientHeight: { configurable: true, value: height },
+  });
+  Object.defineProperties(stage, {
+    offsetLeft: { configurable: true, value: 20 },
+    offsetTop: { configurable: true, value: 20 },
+  });
+  window.dispatchEvent(new Event("resize"));
 }
 
 async function openTurtlePanel(wrapper: VueWrapper): Promise<void> {

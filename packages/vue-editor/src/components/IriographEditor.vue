@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 
 import {
   applySemanticSource,
@@ -32,6 +32,11 @@ import {
   normalizePickedAssetRef,
   type AssetPicker,
 } from "../asset-session";
+import {
+  normalizeDiagramZoom,
+  type DiagramCanvasNavigationApi,
+  type IriographEditorNavigationApi,
+} from "../viewport";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneEdge;
@@ -76,6 +81,7 @@ const turtleDraft = ref(draft.value.semantic.source);
 const panel = ref<Panel>("diagram");
 const selectedElementId = ref("");
 const zoom = ref(1);
+const diagramCanvas = ref<DiagramCanvasNavigationApi>();
 const history = ref<IriographDocument[]>([]);
 const future = ref<IriographDocument[]>([]);
 const schemaDiagnostics = ref<ProjectionDiagnostic[]>([]);
@@ -276,6 +282,10 @@ function selectElement(elementId: string): void {
   if (elementId !== selectedElementId.value) cancelAssetPicker();
   selectedElementId.value = elementId;
   emit("selectionChanged", elementId);
+}
+
+function selectAndReveal(elementId: string): void {
+  void focusElement(elementId);
 }
 
 function beginGesture(): void {
@@ -634,8 +644,54 @@ function trimHistory(): void {
   if (history.value.length > 100) history.value.splice(0, history.value.length - 100);
 }
 
-function setZoom(value: number): void {
-  zoom.value = Math.min(1.6, Math.max(0.5, Math.round(value * 10) / 10));
+function setZoomState(value: number): void {
+  zoom.value = normalizeDiagramZoom(value);
+}
+
+async function zoomTo(value: number): Promise<void> {
+  if (panel.value !== "diagram") {
+    panel.value = "diagram";
+    await nextTick();
+  }
+  if (diagramCanvas.value) await diagramCanvas.value.zoomTo(value);
+  else setZoomState(value);
+}
+
+function panBy(deltaX: number, deltaY: number): void {
+  if (panel.value === "diagram") {
+    diagramCanvas.value?.panBy(deltaX, deltaY);
+    return;
+  }
+  panel.value = "diagram";
+  void nextTick(() => diagramCanvas.value?.panBy(deltaX, deltaY));
+}
+
+async function fitToView(): Promise<void> {
+  if (panel.value !== "diagram") {
+    panel.value = "diagram";
+    await nextTick();
+  }
+  await diagramCanvas.value?.fitToView();
+}
+
+async function revealSelection(): Promise<boolean> {
+  if (!selectedElementId.value) return false;
+  if (panel.value !== "diagram") {
+    panel.value = "diagram";
+    await nextTick();
+  }
+  return await diagramCanvas.value?.revealElement(selectedElementId.value) ?? false;
+}
+
+async function focusElement(elementId: string): Promise<boolean> {
+  const exists = [
+    ...scene.value.nodes,
+    ...scene.value.containers,
+    ...scene.value.edges,
+  ].some((element) => element.elementId === elementId);
+  if (!exists) return false;
+  selectElement(elementId);
+  return revealSelection();
 }
 
 function roundGeometry(geometry: ElementGeometry): ElementGeometry {
@@ -703,11 +759,21 @@ function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-defineExpose({
+defineExpose<IriographEditorNavigationApi & {
+  flushPendingEdits(): Promise<boolean>;
+  undo(): void;
+  redo(): void;
+  selectElement(elementId: string): void;
+}>({
   flushPendingEdits,
   undo,
   redo,
   selectElement,
+  panBy,
+  zoomTo,
+  fitToView,
+  revealSelection,
+  focusElement,
 });
 </script>
 
@@ -748,7 +814,7 @@ defineExpose({
             :key="container.elementId"
             type="button"
             :class="{ active: selectedElementId === container.elementId }"
-            @click="selectElement(container.elementId)"
+            @click="selectAndReveal(container.elementId)"
           >
             <i>▣</i><span><b>{{ container.label }}</b><small>container</small></span>
           </button>
@@ -757,7 +823,7 @@ defineExpose({
             :key="node.elementId"
             type="button"
             :class="{ active: selectedElementId === node.elementId }"
-            @click="selectElement(node.elementId)"
+            @click="selectAndReveal(node.elementId)"
           >
             <i>●</i><span><b>{{ node.label }}</b><small>{{ compactRef(node.templateRef) }}</small></span>
           </button>
@@ -776,7 +842,7 @@ defineExpose({
           <button type="button" :class="{ active: panel === 'catalog' }" @click="panel = 'catalog'">⌘ Catalog</button>
         </nav>
 
-        <section v-if="panel === 'diagram'" class="iriograph-diagram-panel">
+        <section v-show="panel === 'diagram'" class="iriograph-diagram-panel">
           <div class="iriograph-canvas-toolbar">
             <div class="iriograph-history-actions">
               <button type="button" :disabled="!canUndo || readOnly" title="Undo (Ctrl/Cmd+Z)" @click="undo">↶</button>
@@ -784,10 +850,22 @@ defineExpose({
               <span />
               <small>{{ activeView?.layoutRef }}</small>
             </div>
+            <div class="iriograph-navigation-actions">
+              <button type="button" aria-label="全体を表示" title="Fit to view" @click="fitToView">▣</button>
+              <button
+                type="button"
+                aria-label="選択要素へ移動"
+                title="選択要素をviewportへ表示"
+                :disabled="!selectedElementId"
+                @click="revealSelection"
+              >
+                ◎
+              </button>
+            </div>
             <div class="iriograph-zoom-actions">
-              <button type="button" aria-label="縮小" @click="setZoom(zoom - 0.1)">−</button>
-              <button type="button" class="zoom-value" @click="setZoom(1)">{{ Math.round(zoom * 100) }}%</button>
-              <button type="button" aria-label="拡大" @click="setZoom(zoom + 0.1)">＋</button>
+              <button type="button" aria-label="縮小" @click="zoomTo(zoom - 0.1)">−</button>
+              <button type="button" class="zoom-value" @click="zoomTo(1)">{{ Math.round(zoom * 100) }}%</button>
+              <button type="button" aria-label="拡大" @click="zoomTo(zoom + 0.1)">＋</button>
             </div>
           </div>
           <div
@@ -801,10 +879,12 @@ defineExpose({
             <span v-if="!sceneLoading && sceneError">{{ sceneError.message }}</span>
           </div>
           <DiagramCanvas
+            ref="diagramCanvas"
             :scene="scene"
             :selected-element-id="selectedElementId"
             :zoom="zoom"
             :read-only="readOnly || sceneLoading || applyingTurtle"
+            @zoom-change="setZoomState"
             @select="selectElement"
             @gesture-start="beginGesture"
             @gesture-end="endGesture"
@@ -813,7 +893,7 @@ defineExpose({
           />
         </section>
 
-        <section v-else class="iriograph-source-panel">
+        <section v-if="panel !== 'diagram'" class="iriograph-source-panel">
           <header>
             <div>
               <small>{{ panel.toUpperCase() }}</small>

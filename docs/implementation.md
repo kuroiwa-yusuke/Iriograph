@@ -73,6 +73,8 @@ P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とr
 
 P1では同じTurtleに複数のnamed viewを持ち、ユーザーがviewを選択、追加、複製、削除できます。各viewはprofile、layout、locale、overlayを独立して持ち、profileが表示するsemantic構造を選択します。SPARQLや汎用filter editorは実装しません。一時hideはVue editorのsession stateにだけ保持し、保存documentやsemantic transactionへ含めません。
 
+ViewportもVue editorのsession stateです。`DiagramCanvas`がscroll metrics、mouse/keyboard pan、fit計算、minimapとelement boundsへのrevealを所有し、`IriographEditor`はtoolbarとhost向けnavigation methodを接続します。Navigationはdocument clone、overlay、undo historyを経由せず、Scene再投影後もそのsession内のviewportを維持します。Primary pointerはblank canvasだけをpanに使い、Scene elementと編集handleは既存gestureへ渡します。Middle pointerはread-onlyを含めてpan専用です。Keyboard panはfocusされたscroll viewport自身でeventを停止し、node focusからbubbleするArrow keyはEditorのpresentation editへ渡します。
+
 ## 性能基準
 
 P1の暫定基準は、500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集操作応答を100ms未満、pan/dragを30fps以上、stress規模では初回projectionと標準軽量layoutを合計2秒未満とするbenchmarkをCIで監視します。測定環境、fixture seed、warm-up回数を固定し、絶対時間と前回比の両方を記録します。
@@ -83,7 +85,7 @@ P1の暫定基準は、500 node / 1,000 edgeを通常規模、2,000 node / 4,000
 
 購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。開始・終了event、user/service task、gateway等のdomain typeは構造を独自述語で再定義せず、domain extension catalogからappearanceへ対応付けます。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
 
-Editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、zoom、Turtle編集、document/catalog参照を提供します。Turtleの適用、保存、書出は非同期reconciliationの完了を待ちます。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+Editorはdrag、resize、edge waypoint、座標入力、template/icon override、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。Turtleの適用、保存、書出は非同期reconciliationの完了を待ちます。現行mockは既存Sceneの表示編集が中心で、human semantic commandによるnode/属性/edge/包含作成は未実装です。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
 
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 

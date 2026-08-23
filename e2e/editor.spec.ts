@@ -51,6 +51,48 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   expect(consoleErrors).toEqual([]);
 });
 
+test("viewport navigationをmouse/keyboard、fit、minimap、selection revealでsession内に保つ", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.goto("/");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
+  const viewport = page.locator(".iriograph-canvas-scroll");
+
+  await viewport.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(async () => (await scrollPosition(viewport)).left).toBe(64);
+
+  const grid = page.locator(".iriograph-canvas-grid");
+  await dispatchPointerDrag(page, grid, await requiredBox(grid, "canvas grid"), -48, -32);
+  await expect.poll(async () => (await scrollPosition(viewport)).left).toBeGreaterThan(100);
+
+  await page.locator(".iriograph-minimap svg").click({ position: { x: 150, y: 94 } });
+  const minimapPosition = await scrollPosition(viewport);
+  expect(minimapPosition.left).toBeGreaterThan(300);
+
+  await page.locator(".iriograph-element-list button").filter({ hasNotText: "container" }).first().click();
+  const viewportBox = await requiredBox(viewport, "viewport");
+  const selectedBox = await requiredBox(page.locator(".iriograph-scene-node.selected"), "selected node");
+  expect(selectedBox.x + selectedBox.width).toBeGreaterThan(viewportBox.x);
+  expect(selectedBox.x).toBeLessThan(viewportBox.x + viewportBox.width);
+  expect(selectedBox.y + selectedBox.height).toBeGreaterThan(viewportBox.y);
+  expect(selectedBox.y).toBeLessThan(viewportBox.y + viewportBox.height);
+
+  await page.getByRole("button", { name: "全体を表示" }).click();
+  await expect.poll(async () => Number.parseInt(
+    await page.locator(".zoom-value").textContent() ?? "100",
+    10,
+  )).toBeLessThan(100);
+  await expect(page.locator(".status-cluster .status-pill.neutral")).toContainText("保存済み");
+  await expect(page.locator(".topbar .ghost-button").filter({ hasText: "保存" })).toBeDisabled();
+
+  expect(consoleErrors).toEqual([]);
+});
+
 async function requiredBox(locator: Locator, label: string) {
   const box = await locator.boundingBox();
   if (!box) throw new Error(`${label} does not have a bounding box`);
@@ -77,4 +119,11 @@ async function numericStyle(locator: Locator, property: string): Promise<number>
   return locator.evaluate((element, name) => Number.parseFloat(
     window.getComputedStyle(element).getPropertyValue(name),
   ), property);
+}
+
+async function scrollPosition(locator: Locator): Promise<{ left: number; top: number }> {
+  return locator.evaluate((element) => ({
+    left: element.scrollLeft,
+    top: element.scrollTop,
+  }));
 }

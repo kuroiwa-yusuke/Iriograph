@@ -8,8 +8,8 @@ Iriographはpureなgraph処理、DOM event contract、editor transaction、実br
 
 - Coreのparse、validation、projection、layout、reconciliation、serializer、asset policyのunit test
 - Vue editorのasset lease session test
-- happy-dom上の`DiagramCanvas` pointer component test。dragのzoom換算、resize minimum、waypoint routingとgesture境界を確認する
-- happy-dom上の`IriographEditor` integration component test。overlay transaction、gesture単位のundo/redo、Turtleのaccept/rollback、保存前flushを確認する
+- happy-dom上の`DiagramCanvas` pointer component test。dragのzoom換算、resize minimum、waypoint routing、pan競合、fit、minimap、selection revealとgesture境界を確認する
+- happy-dom上の`IriographEditor` integration component test。overlay transaction、gesture単位のundo/redo、Turtleのaccept/rollback、保存前flush、session navigationとread-only境界を確認する
 - 全workspaceのtypecheck/buildと、packed tarballを使う外部consumer検証
 
 Component testは`@iriograph/core`のsourceへtest時だけaliasし、未buildのclean checkoutでも単独実行できます。配布buildではCoreをexternalのまま保ち、test fileは型宣言とpackage tarballへ含めません。
@@ -31,12 +31,13 @@ docker build -f Dockerfile.e2e -t iriograph-e2e .
 docker run --rm --ipc=host iriograph-e2e
 ```
 
-E2Eはmock fixtureのnode drag、undo/redo、resize、edge waypoint、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、console/page error不在を一つのhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
+E2Eはmock fixtureのnode drag、undo/redo、resize、edge waypoint、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
 
 ## Test追加規則
 
 - CoreにDOMやbrowser mockを持ち込まない
 - Pointerの座標計算は`DiagramCanvas` component test、document revisionやhistoryは`IriographEditor` integration testで検証する
+- Navigation testではviewportの変化と同時に`update:modelValue`とhistoryが不変であること、read-onlyでも利用できることを確認する
 - 一つのgesture内で複数のmove eventが発生してもhistory itemは一つであることを維持する
 - Semantic candidateの失敗testでは、sourceだけでなくSceneと最後にacceptされたdocumentが不変であることを確認する
 - 保存testでは`save` eventだけでなく、その前にpending editがacceptまたはrejectされた結果を確認する

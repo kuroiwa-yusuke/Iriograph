@@ -37,7 +37,7 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
 
-`viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideもsession stateであり、overlayへ書き込みません。
+`viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
 
 overlayには次を保持できます。
 
@@ -201,8 +201,12 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `assetAccess`: 非同期resolver、media/size/URL policy、host revision
 - `pickAsset(request)`: workspace pickerを開き、選択時はassetRefだけを返すhost callback
 - `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映
+- `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作
+- `revealSelection()` / `focusElement(elementId)`: 現在の選択またはstable Scene element IDをviewportへ表示
 
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
+
+Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
 
 Target rich authoring contractでは、hostが解決済みauthoring profile、vocabulary index、
 active viewのprojection capabilityを`authoringContext`として注入します。Editorはこのcontextから
