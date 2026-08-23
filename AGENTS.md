@@ -72,6 +72,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
    hostにNode.jsがない場合は、repositoryをmountしたNode.js Docker imageで同じcommandを実行する。
 4. `docker compose up -d --build`で最新sourceからlocal mockを実際に起動し、HTTP応答を確認する。
    UIまたは操作を変更した場合は、対象画面をbrowserで開き、変更操作と隣接操作、console errorを確認する。
+   Editor UIまたはtransactionを変更した場合は`docs/testing.md`に従って`npm run verify:e2e`も実行する。local browserを用意できない場合は`Dockerfile.e2e`の固定Playwright imageを使う。
 5. `git status`とdiffを確認し、今回の変更だけをcommitする。ユーザーの未commit変更や無関係な変更を混ぜない。
 6. 通常のpushを現在のbranchへ行い、remoteへ反映されたこととworktreeの状態を確認する。
 

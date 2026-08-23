@@ -21,9 +21,11 @@
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "verify": "npm run test && npm run typecheck && npm run build && npm run verify:package-consumer",
+    "verify:e2e": "playwright test",
     "verify:package-consumer": "npm run build:packages && node scripts/verify-package-consumer.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@types/node": "^24.3.0",
     "typescript": "^5.8.3",
     "vitest": "^4.1.8"

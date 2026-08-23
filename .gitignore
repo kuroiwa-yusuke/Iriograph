@@ -3,5 +3,7 @@ dist/
 .vite/
 .tmp/
 coverage/
+playwright-report/
+test-results/
 *.tsbuildinfo
 .DS_Store

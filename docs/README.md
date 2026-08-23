@@ -8,6 +8,7 @@ Iriographの目的は、tripleを単にnode-link図へ変換することでは�
 - [interface.md](./interface.md): document、catalog、Scene、editorの公開契約
 - [implementation.md](./implementation.md): package境界と処理構成
 - [distribution.md](./distribution.md): package配布contractとSemVer方針
+- [testing.md](./testing.md): component test、browser E2Eと完了時の検証手順
 - [backlog.md](./backlog.md): 未実装事項の優先順位、依存、完了条件
 
 設計判断は`theory.md`、semantic構造と投影規則は`rdf-rdfs-profile.md`、semantic write policyは`authoring-profile.md`を正本とします。型定義は`packages/core/src/model.ts`、RDF/RDFS標準catalogは`packages/core/src/standard-catalog.ts`、domain appearanceの実例は`apps/mock/src/mock/catalog.json`にあります。

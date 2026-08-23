@@ -4,7 +4,7 @@
 
 ## 現在の基準点
 
-Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Core/editorは0.1.0の配布contractとtarball consumer検証を持ち、意味編集と表示編集のtransactionも分離されていますが、editor回帰test基盤は未完了であり、API安定版ではありません。
+Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとserializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。Core/editorは0.1.0の配布contract、tarball consumer検証、editor component回帰testとPlaywright browser smokeを持ち、意味編集と表示編集のtransactionも分離されていますが、API安定版ではありません。
 
 Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq、Alt、seeAlsoを使う購入承認例です。Domain語彙はこれらの標準構造を置き換えずnode等のappearanceを選択し、標準catalogとdefaultsを持たないdomain extension catalogを決定的に結合しています。
 
@@ -14,12 +14,6 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従い、Bag、Seq�
 - P1: 最初の実用MVPに必要
 - P2: kuroxiom-cloud・LLM連携と運用に必要
 - P3: 利用領域を広げる拡張
-
-## P0 — Contractと決定性
-
-| ID | 項目 | 依存 | 完了条件 |
-|---|---|---|---|
-| P0-11 | editor操作の回帰test基盤 | P0-10 | drag、resize、routing、undo/redo、Turtle適用、保存flushをcomponent/E2E testで検証する |
 
 ## P1 — 実用MVP
 

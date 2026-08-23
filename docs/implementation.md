@@ -88,3 +88,9 @@ Editorはdrag、resize、edge waypoint、座標入力、template/icon override�
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 
 現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、manual edge routeを決定的に扱います。より高機能なroutingや大規模graph向けengineは、Coreへ依存を追加せずhost注入adapterとして実装します。
+
+## Editor回帰test境界
+
+Canvasのpointer座標変換とgesture eventはhappy-dom上の`DiagramCanvas` component testで検証し、document mutation、history、semantic transaction、保存flushは`IriographEditor` integration component testで検証します。Core sourceへのtest aliasは未build checkoutでtestを独立実行するためだけに使い、配布buildでは従来どおり`@iriograph/core`をexternalにします。Test sourceはpackageの型宣言とtarballから除外します。
+
+実browser DOMのpointer event、SVG waypoint、mock hostのlocalStorage保存、console errorはPlaywright E2Eへ分けます。通常の`npm run verify`はbrowser binaryを要求せず、UI変更時は[testing.md](./testing.md)の`npm run verify:e2e`または固定Docker imageを追加で実行します。
