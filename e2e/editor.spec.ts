@@ -161,6 +161,75 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   expect(consoleErrors).toEqual([]);
 });
 
+test("parallel/self-loopを個別選択しwaypointとlabel routingを編集・resetする", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.goto("/");
+  const parallel = page.getByRole("button", { name: /内容を審査から承認ポリシーへの/ });
+  await expect(parallel).toHaveCount(2);
+  const parallelPaths = await parallel.locator(".iriograph-edge-path").evaluateAll(
+    (paths) => paths.map((path) => path.getAttribute("d")),
+  );
+  expect(new Set(parallelPaths).size).toBe(2);
+  await parallel.nth(0).focus();
+  await page.keyboard.press("Enter");
+  await expect(parallel.nth(0)).toHaveAttribute("aria-selected", "true");
+  await parallel.nth(1).focus();
+  await page.keyboard.press("Enter");
+  await expect(parallel.nth(1)).toHaveAttribute("aria-selected", "true");
+  await expect(parallel.nth(0)).toHaveAttribute("aria-selected", "false");
+
+  const selfLoop = page.getByRole("button", { name: /内容を審査から内容を審査へのretry/ });
+  await expect(selfLoop).toHaveCount(1);
+  await selfLoop.focus();
+  await page.keyboard.press("Enter");
+  await expect(selfLoop).toHaveAttribute("aria-selected", "true");
+  const turtleBefore = await readTurtle(page);
+
+  const derivedHandleCount = await page.locator(".iriograph-waypoints circle").count();
+  expect(derivedHandleCount).toBeGreaterThan(0);
+  await selfLoop.dispatchEvent("dblclick", { clientX: 400, clientY: 300 });
+  await expect.poll(() => page.locator(".iriograph-waypoint-row").count())
+    .toBe(derivedHandleCount + 1);
+
+  const waypoint = page.locator(".iriograph-waypoints circle").first();
+  const waypointX = Number(await waypoint.getAttribute("cx"));
+  await dispatchPointerDrag(page, waypoint, await requiredBox(waypoint, "self-loop waypoint"), 28, 16);
+  await expect.poll(async () => Math.abs(Number(
+    await page.locator(".iriograph-waypoints circle").first().getAttribute("cx"),
+  ) - waypointX)).toBeGreaterThan(10);
+
+  const label = selfLoop.locator(".iriograph-edge-label");
+  await dispatchPointerDrag(page, label, await requiredBox(label, "self-loop label"), 24, -14);
+  const labelInputs = page.locator(".iriograph-routing-inspector .iriograph-geometry-grid input");
+  await expect.poll(async () => Math.abs(Number(await labelInputs.first().inputValue())))
+    .toBeGreaterThan(10);
+  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await expect(labelInputs.first()).toHaveValue("0");
+
+  await dispatchPointerDrag(page, label, await requiredBox(label, "self-loop label"), 18, 10);
+  await page.getByRole("button", { name: "Label位置をリセット" }).click();
+  await expect(labelInputs.first()).toHaveValue("0");
+  await expect(labelInputs.nth(1)).toHaveValue("0");
+
+  while (await page.locator(".iriograph-waypoint-row").count()) {
+    await page.locator('.iriograph-waypoint-row button[aria-label*="を削除"]').first().click();
+  }
+  await expect(page.getByText("automatic", { exact: true })).toBeVisible();
+  await selfLoop.focus();
+  await page.keyboard.press("Delete");
+  await expect(page.getByText("automatic", { exact: true })).toBeVisible();
+  expect(await readTurtle(page)).toBe(turtleBefore);
+
+  await page.getByRole("button", { name: /Document/ }).click();
+  await expect(page.locator(".iriograph-source-panel pre")).not.toContainText('"waypoints": []');
+  expect(consoleErrors).toEqual([]);
+});
+
 test("viewport navigationをmouse/keyboard、fit、minimap、selection revealでsession内に保つ", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -207,6 +276,13 @@ async function requiredBox(locator: Locator, label: string) {
   const box = await locator.boundingBox();
   if (!box) throw new Error(`${label} does not have a bounding box`);
   return box;
+}
+
+async function readTurtle(page: Page): Promise<string> {
+  await page.getByRole("button", { name: /Turtle/ }).click();
+  const source = await page.getByLabel("Turtle source").inputValue();
+  await page.getByRole("button", { name: /Diagram/ }).click();
+  return source;
 }
 
 async function dispatchPointerDrag(

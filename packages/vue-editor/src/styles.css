@@ -637,11 +637,13 @@
   fill: none;
   stroke: transparent;
   stroke-width: 14;
+  vector-effect: non-scaling-stroke;
 }
 
 .iriograph-edge-path {
   fill: none;
   stroke-width: 1.7;
+  vector-effect: non-scaling-stroke;
 }
 
 .iriograph-edge-group.fallback .iriograph-edge-path {
@@ -653,6 +655,11 @@
   stroke-width: 3;
 }
 
+.iriograph-edge-group:focus-visible .iriograph-edge-path {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px rgb(193 141 35 / 65%));
+}
+
 .iriograph-edge-label {
   font-size: 10px;
   font-weight: 600;
@@ -660,6 +667,17 @@
   stroke: var(--iriograph-paper);
   stroke-linejoin: round;
   stroke-width: 5px;
+}
+
+.iriograph-edge-label.editable {
+  pointer-events: all;
+  cursor: move;
+}
+
+.iriograph-edge-label:focus-visible,
+.iriograph-waypoints circle:focus-visible {
+  outline: none;
+  filter: drop-shadow(0 0 3px rgb(193 141 35 / 85%));
 }
 
 .iriograph-waypoints {
@@ -671,6 +689,7 @@
   stroke: #c18d23;
   stroke-width: 2;
   cursor: move;
+  vector-effect: non-scaling-stroke;
 }
 
 .iriograph-scene-node {
@@ -1020,6 +1039,52 @@
 .iriograph-wide-button {
   width: 100%;
   font-size: 9px;
+}
+
+.iriograph-routing-inspector {
+  display: grid;
+  gap: 8px;
+}
+
+.iriograph-routing-inspector > label {
+  margin: 3px 0 0;
+}
+
+.iriograph-waypoint-row {
+  display: grid;
+  grid-template-columns: 16px 1fr 1fr 24px;
+  align-items: center;
+  gap: 4px;
+}
+
+.iriograph-waypoint-row > span {
+  color: #627575;
+  font-size: 8px;
+  text-align: center;
+}
+
+.iriograph-waypoint-row label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: #788887;
+  font-size: 8px;
+}
+
+.iriograph-waypoint-row input {
+  min-width: 0;
+  width: 100%;
+  height: 25px;
+  padding: 2px 4px;
+  border: 1px solid #cbd5d2;
+  border-radius: 4px;
+}
+
+.iriograph-waypoint-row button {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
 }
 
 .iriograph-overlay-preview pre {

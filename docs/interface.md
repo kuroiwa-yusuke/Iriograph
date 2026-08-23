@@ -46,6 +46,11 @@ overlayには次を保持できます。
 - `appearance`: template、icon、style tokenの明示override
 - `routing`: edge waypointとlabel offset
 
+`routing.waypoints`はsource/target attachmentを含まない、ユーザーが確定したmanual中間点だけです。
+空配列はautomatic routingと同じ意味に正規化し、保存時は省略します。`routing.labelOffset`は
+endpoint込みrouteのarc-length 50%地点からの相対値で、labelがないedgeには作成しません。
+Edge routingの編集ではnode/container用の`pinned`、`placement`をedge overlayへ付けません。
+
 `appearance.iconRef`はassetの安定したIRIだけを保持します。workspace path、取得URL、
 認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
 導出する既定値、overlayの`iconRef`はユーザーが個別に選択したoverrideです。
@@ -70,6 +75,11 @@ v1 target catalogは次の宣言を持ちます。
 
 現在のprimitiveは`node`、`edge`、`container`です。`annotation`は型上予約されていますが未投影です。
 
+`SceneEdge.route`はlayoutから導出されるrenderer用polylineで、source/target attachmentを含む
+2点以上の配列です。`SceneEdge.waypoints`はportable overlay由来のmanual中間点だけを表し、
+両者を同じ配列として保存しません。Rendererは`route`を優先し、`route`を持たない旧Scene入力に
+限ってsource/target geometryとlegacy waypointから経路を補います。
+
 Target Sceneの各elementとparent-child関係は、次のedit provenanceを持ちます。これはderived dataでありdocumentには保存しません。
 
 - 元になったstatement identityの集合
@@ -90,7 +100,7 @@ export interface LayoutAdapter {
 }
 ```
 
-Coreはnode-link、LR/TB階層、Bag container、pinned geometryを扱う決定的な標準軽量adapterを提供し、Vue editorはこれをdefaultとして利用します。Hostがlayout adapterを明示注入した場合は同じinterfaceでworkerを使う高機能adapter等へ差し替えます。Adapter未解決、失敗、結果不正はdiagnosticとし、異なるlayoutへ黙ってfallbackしません。
+Coreはnode-link、LR/TB階層、Bag container、pinned geometryを扱う決定的な標準軽量adapterを提供し、Vue editorはこれをdefaultとして利用します。Hostがlayout adapterを明示注入した場合は同じinterfaceでworkerを使う高機能adapter等へ差し替えます。Adapter未解決、失敗、結果不正はdiagnosticとし、異なるlayoutへ黙ってfallbackしません。標準adapterはunordered endpoint pair内をelement IDのcode-point順で束ね、parallel laneを20 unit間隔、右側self-loopを36 unitから兄弟ごとに18 unit拡張して決定的にrouteします。Node attachmentの範囲を超えるparallel laneはnode外stubを使って間隔を維持し、routeの正方向への張り出しをScene boundsへ含めます。
 
 Re-layoutの通常対象は`placement: "generated"`かつ`pinned !== true`の要素だけです。`placement: "user"`または`pinned: true`のgeometryは固定制約としてadapterへ渡します。明示的な「自動配置へ戻す」presentation commandによってplacementをgenerated、pinnedをfalseへ戻した場合に限り、次のlayoutで再配置できます。
 
@@ -208,6 +218,12 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `selectionChanged(primaryElementId)`: 既存のprimary selection通知
 - `selectionSetChanged(elementIds)`: ordered selection集合の通知
 
+公開`IriographDiagramCanvas`はedge編集時に
+`routingUpdate({ elementId, routing?: { waypoints?, labelOffset? } })`を発行します。`routing`は
+その操作後のeditable routing全体を表すsparse valueです。Waypoint操作では旧host向けの
+`routingChange({ elementId, waypoints })`も併発しますが、標準Editorは`routingUpdate`だけを
+購読して二重適用を避けます。
+
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
 
 Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
@@ -215,6 +231,17 @@ Viewport navigationはportable documentを更新せず、`update:modelValue`、p
 Multi-selectionはplain clickで置換、Ctrl/Cmd clickでtoggle、Shift clickで追加、blank clickまたはEscapeでclear、Ctrl/Cmd+Aで全選択します。選択中のnode/containerをdragすると全選択geometryを共通deltaでpreviewし、pointerup時に一つのbatch presentation transactionとして確定します。選択containerの子孫も同deltaで移動し、ancestorとdescendantを同時選択しても二重移動しません。異なるcontainerの要素を同時に動かす場合は、各要素の親container content boundsから許容deltaの共通部分を求め、membershipは変更しません。整列と等間隔も一commandを一transactionとし、Turtleを変更しません。
 
 標準snapは8 canvas unitのgridと、対象要素のleft/center/right、top/middle/bottom guideを使います。対象候補は距離、座標、element IDの順で決定的に解決し、target snapをgridより優先してからcontainer/Scene境界へclampします。Target toleranceの標準値は画面上6pxでzoom変換し、Altを押したdragでは一時的にsnapを無効化します。Snap設定とguide候補はsession stateで、documentやhistoryには保存しません。`readOnly`でもselectionとsnap設定の参照・変更は可能ですが、drag、keyboard move、resize、routing、整列、等間隔、undo/redoはdocumentを変更しません。
+
+Edgeはclick/focusで個別選択し、parallel edgeとself-loopも各routeのhit areaを持ちます。選択edgeの
+generated bend handleを初めて編集するとderived route中間点をmanual waypointへseedします。
+Path double clickとInspectorはwaypoint追加、handle dragとArrow keyは移動、Delete/Backspaceは削除を
+行い、最後のmanual waypoint削除はautomaticへ戻します。Labelはroute全長の中央をbaseとし、drag、
+Arrow key、Inspector数値入力でoffsetを編集し、Home/Delete/BackspaceまたはInspectorでresetします。
+各pointer gestureと各keyboard/Inspector commandは一つのpresentation undo itemです。新規追加・移動座標は
+Scene内側8 unitへclampします。旧documentから読み込んだ負座標は勝手に正規化せず、そのままでは
+Scene原点外がclipされ得るため、handle編集またはautomatic resetで現行境界へ戻します。`readOnly`は
+edge選択を許可しますが編集handleを表示せず、routing eventを受けてもdocumentを変更しません。
+Edge本体のDelete/BackspaceはP1-04のsemantic commandがない段階では何も削除しません。
 
 Target rich authoring contractでは、hostが解決済みauthoring profile、vocabulary index、
 active viewのprojection capabilityを`authoringContext`として注入します。Editorはこのcontextから

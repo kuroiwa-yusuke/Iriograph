@@ -299,6 +299,8 @@ function projectDirectEdge(
     templateRef,
   );
   const fallback = !plan.resolved || plan.resolved.rule.match.kind === "any-iri-object";
+  const waypoints = overlay?.overlay.routing?.waypoints;
+  const manualWaypoints = waypoints?.length ? waypoints : undefined;
   return {
     elementId: overlay?.elementId ?? generatedElementId("edge", semanticRef),
     semanticRef,
@@ -313,9 +315,9 @@ function projectDirectEdge(
     targetElementId,
     templateRef: template.templateRef,
     style: template.style,
-    waypoints: overlay?.overlay.routing?.waypoints,
+    waypoints: manualWaypoints,
     labelOffset: overlay?.overlay.routing?.labelOffset,
-    routingPlacement: overlay?.overlay.routing?.waypoints ? "user" : "generated",
+    routingPlacement: manualWaypoints ? "user" : "generated",
     fallback,
     provenance: {
       sourceStatementRefs: [semanticRef],
@@ -457,6 +459,8 @@ function projectDerivedEdge(
     diagnostics,
     defaultTemplateRef,
   );
+  const waypoints = overlay?.overlay.routing?.waypoints;
+  const manualWaypoints = waypoints?.length ? waypoints : undefined;
   return {
     elementId: overlay?.elementId ?? generatedElementId("edge", semanticRef),
     semanticRef,
@@ -466,9 +470,9 @@ function projectDerivedEdge(
     targetElementId,
     templateRef: template.templateRef,
     style: template.style,
-    waypoints: overlay?.overlay.routing?.waypoints,
+    waypoints: manualWaypoints,
     labelOffset: overlay?.overlay.routing?.labelOffset,
-    routingPlacement: overlay?.overlay.routing?.waypoints ? "user" : "generated",
+    routingPlacement: manualWaypoints ? "user" : "generated",
     fallback: false,
     provenance,
   };

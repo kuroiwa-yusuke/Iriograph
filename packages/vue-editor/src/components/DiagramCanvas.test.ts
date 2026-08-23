@@ -82,8 +82,147 @@ describe("DiagramCanvas pointer gestures", () => {
         elementId: "edge-a-b",
         waypoints: [{ x: 175, y: 112 }],
       });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: { waypoints: [{ x: 175, y: 112 }] },
+    });
     expect(wrapper.emitted("gestureStart")).toHaveLength(1);
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("Scene routeをendpoint込みpolylineとして描画しlegacy edgeだけ旧経路へfallbackする", () => {
+    const scene = sceneFixture();
+    scene.edges.push({
+      ...scene.edges[0]!,
+      elementId: "legacy-edge",
+      route: undefined,
+      waypoints: undefined,
+    });
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+
+    const paths = wrapper.findAll(".iriograph-edge-path");
+    expect(paths[0]!.attributes("d")).toBe("M 140 70 L 140 90 L 300 190");
+    expect(paths[1]!.attributes("d")).toContain(" C ");
+  });
+
+  it("path double-clickでderived bendをseedしnearest segmentへwaypointを追加する", async () => {
+    const scene = generatedRouteScene();
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+    const svg = wrapper.get<SVGSVGElement>(".iriograph-edge-layer");
+    svg.element.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 500,
+      width: 800,
+      height: 500,
+      toJSON: () => undefined,
+    });
+
+    await wrapper.get(".iriograph-edge-group").trigger("dblclick", { clientX: 180, clientY: 76 });
+
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: {
+        waypoints: [{ x: 180, y: 70 }, { x: 220, y: 70 }, { x: 220, y: 190 }],
+      },
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("focused waypointのkeyboard移動と最後のDeleteを一操作ずつ通知する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), selectedElementId: "edge-a-b" },
+    });
+    const handle = wrapper.get(".iriograph-waypoints circle");
+
+    await handle.trigger("keydown", { key: "ArrowRight", shiftKey: true });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: { waypoints: [{ x: 150, y: 90 }] },
+    });
+
+    await handle.trigger("keydown", { key: "Delete" });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: undefined,
+    });
+    expect(lastPayload(wrapper, "routingChange")).toEqual({
+      elementId: "edge-a-b",
+      waypoints: [],
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(2);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(2);
+  });
+
+  it("labelをarc-length midpointに置きpointer/keyboard/resetでoffsetを通知する", async () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.route = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 300 },
+    ];
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene, selectedElementId: "edge-a-b", zoom: 2 },
+    });
+    const label = wrapper.get(".iriograph-edge-label");
+    expect(label.attributes("x")).toBe("100");
+    expect(label.attributes("y")).toBe("100");
+    expect(label.attributes("role")).toBe("button");
+
+    await label.trigger("pointerdown", { button: 0, clientX: 100, clientY: 100 });
+    dispatchPointer("pointermove", 124, 84);
+    dispatchPointer("pointerup", 124, 84);
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: { labelOffset: { x: 12, y: -8 } },
+    });
+
+    await wrapper.setProps({
+      scene: {
+        ...scene,
+        edges: [{ ...scene.edges[0]!, labelOffset: { x: 12, y: -8 } }],
+      },
+    });
+    await label.trigger("keydown", { key: "Home" });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: undefined,
+    });
+  });
+
+  it("parallel/self-loop routeを個別focus・選択しreadOnlyでは編集handleを隠す", async () => {
+    const scene = generatedRouteScene();
+    scene.edges.push(
+      { ...scene.edges[0]!, elementId: "parallel", route: scene.edges[0]!.route!.map((point) => ({ x: point.x, y: point.y + 20 })) },
+      { ...scene.edges[0]!, elementId: "loop", sourceElementId: "node-a", targetElementId: "node-a", route: [{ x: 140, y: 60 }, { x: 190, y: 60 }, { x: 190, y: 80 }, { x: 140, y: 80 }] },
+    );
+    wrapper = mount(DiagramCanvas, { props: { scene, readOnly: true } });
+    const groups = wrapper.findAll(".iriograph-edge-group");
+
+    expect(new Set(groups.map((group) => group.get(".iriograph-edge-path").attributes("d"))).size).toBe(3);
+    expect(groups[0]!.attributes("aria-label")).toContain("AからB");
+    expect(groups[0]!.attributes("aria-selected")).toBe("false");
+    await groups[1]!.trigger("click");
+    expect(wrapper.emitted("select")?.at(-1)?.[0]).toBe("parallel");
+    await groups[1]!.trigger("keydown", { key: "Delete" });
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+    expect(wrapper.find(".iriograph-waypoints").exists()).toBe(false);
+    expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBeUndefined();
+  });
+
+  it("labelのないedgeにはlabel位置handleを作らない", () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.label = "";
+    scene.edges[0]!.labelOffset = { x: 20, y: 10 };
+    wrapper = mount(DiagramCanvas, { props: { scene, selectedElementId: "edge-a-b" } });
+
+    expect(wrapper.find(".iriograph-edge-label").exists()).toBe(false);
   });
 
   it("blank canvasのmouse dragとfocusされたviewportのkeyだけをpanに使う", async () => {
@@ -224,6 +363,111 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureStart")).toHaveLength(1);
   });
 
+  it("generated routeの単一node drag previewでendpointと隣接segmentを追随する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: generatedRouteScene(), snap: disabledSnap() },
+    });
+
+    await wrapper.findAll(".iriograph-scene-node")[0]!.trigger("pointerdown", {
+      button: 0,
+      clientX: 0,
+      clientY: 0,
+    });
+    dispatchPointer("pointermove", 40, 20);
+    await flushPreview();
+
+    const expected = "M 180 90 L 220 90 L 220 190 L 300 190";
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe(expected);
+    expect(wrapper.get(".iriograph-minimap-edge").attributes("d")).toBe(expected);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    dispatchPointer("pointerup", 40, 20);
+  });
+
+  it("generated routeのgroup drag previewではroute全体を共通deltaで移動する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: generatedRouteScene(),
+        selectedElementId: "node-b",
+        selectedElementIds: ["node-a", "node-b"],
+        snap: disabledSnap(),
+      },
+    });
+
+    await wrapper.findAll(".iriograph-scene-node")[0]!.trigger("pointerdown", {
+      button: 0,
+      clientX: 0,
+      clientY: 0,
+    });
+    dispatchPointer("pointermove", 32, 16);
+    await flushPreview();
+
+    const expected = "M 172 86 L 252 86 L 252 206 L 332 206";
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe(expected);
+    expect(wrapper.get(".iriograph-minimap-edge").attributes("d")).toBe(expected);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    dispatchPointer("pointerup", 32, 16);
+  });
+
+  it("manual routeのdrag previewではabsolute waypointを維持してattachmentだけを動かす", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), snap: disabledSnap() },
+    });
+
+    await wrapper.findAll(".iriograph-scene-node")[0]!.trigger("pointerdown", {
+      button: 0,
+      clientX: 0,
+      clientY: 0,
+    });
+    dispatchPointer("pointermove", 30, 12);
+    await flushPreview();
+
+    const expected = "M 170 82 L 140 90 L 300 190";
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe(expected);
+    expect(wrapper.get(".iriograph-minimap-edge").attributes("d")).toBe(expected);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    dispatchPointer("pointerup", 30, 12);
+  });
+
+  it("generated self-loopのnode drag previewではloop全体を追随する", async () => {
+    const scene = generatedRouteScene();
+    scene.edges[0] = {
+      ...scene.edges[0]!,
+      sourceElementId: "node-a",
+      targetElementId: "node-a",
+      route: [
+        { x: 140, y: 58 },
+        { x: 190, y: 58 },
+        { x: 190, y: 82 },
+        { x: 140, y: 82 },
+      ],
+    };
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene, snap: disabledSnap() },
+    });
+
+    await wrapper.findAll(".iriograph-scene-node")[0]!.trigger("pointerdown", {
+      button: 0,
+      clientX: 0,
+      clientY: 0,
+    });
+    dispatchPointer("pointermove", 24, 10);
+    await flushPreview();
+
+    const expected = "M 164 68 L 214 68 L 214 92 L 164 92";
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe(expected);
+    expect(wrapper.get(".iriograph-minimap-edge").attributes("d")).toBe(expected);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    dispatchPointer("pointerup", 24, 10);
+  });
+
   it("異なるcontainerのgroup dragを共通許容deltaへclampし、readOnlyでも選択できる", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
@@ -289,6 +533,17 @@ function dispatchPointer(type: "pointermove" | "pointerup", clientX: number, cli
   window.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX, clientY }));
 }
 
+function flushPreview(): Promise<void> {
+  return new Promise((resolve) => queueMicrotask(resolve));
+}
+
+function disabledSnap() {
+  return {
+    grid: { enabled: false, size: 8 },
+    targets: { enabled: false, tolerance: 6 },
+  };
+}
+
 function lastPayload<T>(wrapper: VueWrapper, eventName: string): T | undefined {
   return wrapper.emitted(eventName)?.at(-1)?.[0] as T | undefined;
 }
@@ -349,11 +604,27 @@ function sceneFixture(): DiagramScene {
       label: "rel",
       templateRef: "urn:test:template:edge",
       style: { fill: "none", stroke: "#000", text: "#000" },
+      route: [{ x: 140, y: 70 }, { x: 140, y: 90 }, { x: 300, y: 190 }],
       waypoints: [{ x: 140, y: 90 }],
       fallback: true,
       projectionRuleId: "fallback",
     }],
   };
+}
+
+function generatedRouteScene(): DiagramScene {
+  const scene = sceneFixture();
+  scene.edges = [{
+    ...scene.edges[0]!,
+    route: [
+      { x: 140, y: 70 },
+      { x: 220, y: 70 },
+      { x: 220, y: 190 },
+      { x: 300, y: 190 },
+    ],
+    waypoints: undefined,
+  }];
+  return scene;
 }
 
 function containedSceneFixture(): DiagramScene {

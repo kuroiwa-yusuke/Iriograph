@@ -165,7 +165,91 @@ describe("StandardLightweightLayoutAdapter", () => {
 
     const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
 
-    expect(result.routes.edge).toEqual([{ x: 12, y: 34 }]);
+    expect(result.routes.edge).toHaveLength(3);
+    expect(result.routes.edge?.[1]).toEqual({ x: 12, y: 34 });
+    expect(result.routes.edge?.[0]).not.toEqual({ x: 12, y: 34 });
+    expect(result.routes.edge?.[2]).not.toEqual({ x: 12, y: 34 });
+  });
+
+  it("routes parallel, reciprocal, and self-loop edges deterministically with bounded lanes", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "a",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 48, y: 48, width: 120, height: 80 },
+        },
+        {
+          elementId: "b",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: -180, y: 48, width: 100, height: 80 },
+        },
+      ],
+      edges: [
+        { elementId: "loop-z", sourceElementId: "a", targetElementId: "a" },
+        { elementId: "reverse", sourceElementId: "b", targetElementId: "a" },
+        { elementId: "forward-z", sourceElementId: "a", targetElementId: "b" },
+        { elementId: "loop-a", sourceElementId: "a", targetElementId: "a" },
+        { elementId: "forward-a", sourceElementId: "a", targetElementId: "b" },
+      ],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:bundles", "LR");
+
+    const first = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const second = await adapter.layout({
+      layoutRef: adapter.layoutRef,
+      scene: { elements: [...scene.elements].reverse(), edges: [...scene.edges].reverse() },
+    });
+
+    expect(first.routes).toEqual(second.routes);
+    expect(Object.values(first.routes).every((route) => route.length >= 2)).toBe(true);
+    expect(new Set([
+      JSON.stringify(first.routes["forward-a"]),
+      JSON.stringify(first.routes["forward-z"]),
+      JSON.stringify(first.routes.reverse),
+    ])).toHaveProperty("size", 3);
+    expect(first.routes["forward-a"]?.[0]?.y).toBe(68);
+    expect(first.routes["forward-z"]?.[0]?.y).toBe(88);
+    expect(first.routes.reverse?.at(-1)?.y).toBe(108);
+    expect(Math.max(...first.routes["loop-a"]!.map((point) => point.x))).toBe(204);
+    expect(Math.max(...first.routes["loop-z"]!.map((point) => point.x))).toBe(222);
+    expect(first.width).toBeGreaterThanOrEqual(270);
+  });
+
+  it("keeps more parallel lanes distinct after attachment offsets reach node bounds", async () => {
+    const edges = Array.from({ length: 9 }, (_, index) => ({
+      elementId: `edge-${index}`,
+      sourceElementId: index % 2 === 0 ? "a" : "b",
+      targetElementId: index % 2 === 0 ? "b" : "a",
+    }));
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "a",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 48, y: 10, width: 100, height: 40 },
+        },
+        {
+          elementId: "b",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 400, y: 10, width: 100, height: 40 },
+        },
+      ],
+      edges,
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:many-lanes", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const signatures = edges.map((edge) => JSON.stringify(result.routes[edge.elementId]));
+
+    expect(new Set(signatures).size).toBe(edges.length);
+    expect(Object.values(result.routes).every((route) => route.length >= 2)).toBe(true);
+    expect(Object.values(result.routes).flat().every((point) => point.y >= 0)).toBe(true);
+    expect(result.height).toBeGreaterThan(98);
   });
 });
 
@@ -252,6 +336,43 @@ describe("LayoutAdapterRegistry", () => {
     expect(result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ severity: "error", code: "layout-result-invalid" }),
     ]));
+  });
+
+  it("rejects adapter routes that omit endpoint-inclusive edge paths", async () => {
+    const invalid: LayoutAdapter = {
+      layoutRef: "urn:test:layout:invalid-route",
+      async layout(request) {
+        return {
+          layoutRef: request.layoutRef,
+          geometries: {
+            a: { x: 0, y: 0, width: 100, height: 50 },
+            b: { x: 200, y: 0, width: 100, height: 50 },
+          },
+          routes: { edge: [{ x: 100, y: 25 }] },
+          width: 300,
+          height: 50,
+          diagnostics: [],
+        };
+      },
+    };
+
+    const result = await layoutProjectedScene({
+      layoutRef: invalid.layoutRef,
+      scene: {
+        elements: [
+          { elementId: "a", structuralKind: "node" },
+          { elementId: "b", structuralKind: "node" },
+        ],
+        edges: [{ elementId: "edge", sourceElementId: "a", targetElementId: "b" }],
+      },
+    }, new LayoutAdapterRegistry([invalid]));
+
+    expect(result.routes).toEqual({});
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      code: "layout-result-invalid",
+      edgeId: "edge",
+    }));
   });
 });
 

@@ -79,17 +79,85 @@ describe("IriographEditor transaction regression", () => {
     const waypoints: Point[] = [{ x: 220, y: 90 }, { x: 260, y: 150 }];
 
     emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { waypoints },
+    });
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { waypoints, labelOffset: { x: 8, y: -6 } },
+    });
+    // Public Canvasはlegacy eventも併発するが、Editorは新eventだけを購読する。
     emitCanvas(canvas, "routingChange", { elementId: edge.elementId, waypoints });
     emitCanvas(canvas, "gestureEnd");
     await settle();
 
-    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toMatchObject({
-      pinned: true,
-      placement: "user",
-      routing: { waypoints },
-    });
+    const routed = overlayFor(latestDocument(wrapper), edge.semanticRef)!;
+    expect(routed.routing).toEqual({ waypoints, labelOffset: { x: 8, y: -6 } });
+    expect(routed.pinned).toBeUndefined();
+    expect(routed.placement).toBeUndefined();
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(2);
 
     await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
+  });
+
+  it("最後のwaypoint削除を空配列なしのautomatic routingとして保存しundoする", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { waypoints: [{ x: 210, y: 95 }] },
+    });
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", { elementId: edge.elementId, routing: undefined });
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    const automatic = latestDocument(wrapper);
+    expect(overlayFor(automatic, edge.semanticRef)).toBeUndefined();
+    expect(JSON.stringify(automatic)).not.toContain('"waypoints":[]');
+
+    exposedHistoryApi(wrapper).undo();
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
+      waypoints: [{ x: 210, y: 95 }],
+    });
+  });
+
+  it("Inspectorからderived routeをseedしてwaypoint追加・label offset・resetする", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+
+    await buttonWithText(wrapper, "Waypointを追加").trigger("click");
+    await settle();
+    const manual = overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.waypoints;
+    expect(manual).toHaveLength((edge.route?.length ?? 2) - 1);
+    expect(manual?.every((point) => point.x >= 8 && point.y >= 8)).toBe(true);
+
+    const labelX = wrapper.get<HTMLInputElement>(
+      ".iriograph-routing-inspector .iriograph-geometry-grid input",
+    );
+    await labelX.setValue("15");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.labelOffset)
+      .toEqual({ x: 15, y: 0 });
+
+    await buttonWithText(wrapper, "Label位置をリセット").trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.labelOffset)
+      .toBeUndefined();
+    expect(buttonWithText(wrapper, "Routingを自動に戻す").attributes("disabled")).toBeUndefined();
+    await buttonWithText(wrapper, "Routingを自動に戻す").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
@@ -364,6 +432,11 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("selectionSetChanged")?.at(-1)?.[0]).toHaveLength(3);
     expect(wrapper.get<HTMLButtonElement>('button[aria-label="左揃え"]').element.disabled).toBe(true);
     exposedHistoryApi(wrapper).undo();
+    const edge = canvas.props("scene").edges[0]!;
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { waypoints: [{ x: 100, y: 100 }] },
+    });
     await nextTick();
     expect(wrapper.emitted("update:modelValue")).toHaveLength(updateCount);
   });

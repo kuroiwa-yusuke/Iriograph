@@ -37,3 +37,11 @@ Ctrl/Cmd+Aの全選択を提供します。Ref APIの`selectElement()`、`select
 一括drag、6方向の整列、水平/垂直の等間隔はTurtleを変更せず、一操作を一つの
 presentation undo itemとして保存します。標準snapは8 unit gridと6px toleranceのtarget guideで、
 `snapSettings` propまたは`setSnapSettings()`からsession内だけ変更できます。
+
+EdgeはCoreが供給するendpoint込み`SceneEdge.route`を描画し、`waypoints`にはmanual中間点だけを
+保持します。選択したedgeはpathのdouble clickまたはInspectorからwaypointを追加でき、handleの
+drag・Arrow key・Delete/Backspace、labelのdrag・Arrow key・resetを利用できます。
+Generated edgeで表示されるbend handleを初めて編集すると、その時点のderived route中間点を
+manual waypointへseedします。
+`IriographDiagramCanvas`は完全なsparse routingを`routingUpdate`で通知します。従来の
+`routingChange({ elementId, waypoints })`もwaypoint操作に限って互換通知されます。

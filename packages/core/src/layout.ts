@@ -65,6 +65,7 @@ export type LayoutDiagnostic = {
 export type LayoutResult = {
   layoutRef: string;
   geometries: Record<string, ElementGeometry>;
+  /** Every route includes its source and target attachment points. */
   routes: Record<string, Point[]>;
   width: number;
   height: number;
@@ -158,6 +159,7 @@ function validateAdapterResult(request: LayoutRequest, result: LayoutResult): La
     diagnostics.push(invalidResult(request, "result bounds must be finite nonnegative numbers"));
   }
   const expectedIds = new Set(request.scene.elements.map((element) => element.elementId));
+  const expectedEdgeIds = new Set(request.scene.edges.map((edge) => edge.elementId));
   for (const element of request.scene.elements) {
     const geometry = result.geometries[element.elementId];
     if (!geometry || !isValidGeometry(geometry)) {
@@ -173,8 +175,22 @@ function validateAdapterResult(request: LayoutRequest, result: LayoutResult): La
       diagnostics.push(invalidResult(request, `geometry refers to an unknown element: ${elementId}`, elementId));
     }
   }
+  for (const edge of request.scene.edges) {
+    const points = result.routes[edge.elementId];
+    if (!points || points.length < 2) {
+      diagnostics.push({
+        ...invalidResult(request, `route is missing or has fewer than two points: ${edge.elementId}`),
+        edgeId: edge.elementId,
+      });
+    }
+  }
   for (const [edgeId, points] of Object.entries(result.routes)) {
-    if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
+    if (!expectedEdgeIds.has(edgeId)) {
+      diagnostics.push({
+        ...invalidResult(request, `route refers to an unknown edge: ${edgeId}`),
+        edgeId,
+      });
+    } else if (points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))) {
       diagnostics.push({
         ...invalidResult(request, `route contains a non-finite point: ${edgeId}`),
         edgeId,
@@ -274,7 +290,11 @@ function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): 
   for (const id of state.children.get(ROOT_GROUP) ?? []) measureElement(id, state);
   placeGroup(ROOT_GROUP, { x: state.spacing.margin, y: state.spacing.margin }, state);
   const routes = routeEdges(state);
-  const bounds = sceneBounds(Object.values(state.geometries), state.spacing.margin);
+  const bounds = sceneBounds(
+    Object.values(state.geometries),
+    Object.values(routes).flat(),
+    state.spacing.margin,
+  );
 
   return {
     layoutRef: request.layoutRef,
@@ -624,42 +644,257 @@ function expandGeneratedContainer(containerId: string, state: LayoutState): void
   };
 }
 
+const PARALLEL_LANE_GAP = 20;
+const SELF_LOOP_BASE = 36;
+const SELF_LOOP_GAP = 18;
+
 function routeEdges(state: LayoutState): Record<string, Point[]> {
   const routes: Record<string, Point[]> = {};
-  for (const edge of state.edges) {
-    if (edge.routingPlacement === "user" && edge.waypoints) {
-      routes[edge.elementId] = edge.waypoints.map(copyPoint);
+  const bundles = edgeBundles(state.edges);
+  for (const edges of bundles.values()) {
+    const first = edges[0]!;
+    if (first.sourceElementId === first.targetElementId) {
+      routeSelfLoopBundle(edges, state, routes);
       continue;
     }
-    const source = state.geometries[edge.sourceElementId];
-    const target = state.geometries[edge.targetElementId];
-    if (!source || !target) {
-      state.diagnostics.push({
-        severity: "warning",
-        code: "layout-edge-endpoint-missing",
-        message: `edge endpoint is not present: ${edge.elementId}`,
-        layoutRef: state.request.layoutRef,
-        edgeId: edge.elementId,
-      });
+    const [canonicalSourceId, canonicalTargetId] = canonicalEndpointPair(first);
+    const canonicalSource = state.geometries[canonicalSourceId];
+    const canonicalTarget = state.geometries[canonicalTargetId];
+    if (!canonicalSource || !canonicalTarget) {
+      for (const edge of edges) reportMissingEndpoint(edge, state);
       continue;
     }
-    routes[edge.elementId] = orthogonalRoute(source, target, state.direction);
+    const laneOffsets = parallelLaneOffsets(
+      edges.length,
+      canonicalSource,
+      canonicalTarget,
+      state.direction,
+    );
+    edges.forEach((edge, index) => {
+      const source = state.geometries[edge.sourceElementId];
+      const target = state.geometries[edge.targetElementId];
+      if (!source || !target) {
+        reportMissingEndpoint(edge, state);
+        return;
+      }
+      const manual = manualWaypoints(edge);
+      if (manual) {
+        routes[edge.elementId] = manualRoute(source, target, manual, false);
+        return;
+      }
+      const canonicalRoute = orthogonalRoute(
+        canonicalSource,
+        canonicalTarget,
+        state.direction,
+        laneOffsets[index]!,
+      );
+      routes[edge.elementId] = edge.sourceElementId === canonicalSourceId
+        ? canonicalRoute
+        : [...canonicalRoute].reverse().map(copyPoint);
+    });
   }
   return routes;
 }
 
-function orthogonalRoute(source: ElementGeometry, target: ElementGeometry, direction: LayoutDirection): Point[] {
-  if (source === target) return [];
+function parallelLaneOffsets(
+  count: number,
+  source: ElementGeometry,
+  target: ElementGeometry,
+  direction: LayoutDirection,
+): number[] {
+  const offsets = Array.from(
+    { length: count },
+    (_, index) => (index - (count - 1) / 2) * PARALLEL_LANE_GAP,
+  );
+  const minimumCenter = direction === "LR"
+    ? Math.min(centerOf(source).y, centerOf(target).y)
+    : Math.min(centerOf(source).x, centerOf(target).x);
+  const correction = Math.max(0, -(minimumCenter + (offsets[0] ?? 0)));
+  return correction === 0 ? offsets : offsets.map((offset) => offset + correction);
+}
+
+function edgeBundles(edges: readonly LayoutEdge[]): Map<string, LayoutEdge[]> {
+  const result = new Map<string, LayoutEdge[]>();
+  for (const edge of edges) {
+    const key = JSON.stringify(canonicalEndpointPair(edge));
+    const bundle = result.get(key) ?? [];
+    bundle.push(edge);
+    result.set(key, bundle);
+  }
+  for (const bundle of result.values()) bundle.sort(compareEdge);
+  return new Map([...result.entries()].sort(([left], [right]) => compareText(left, right)));
+}
+
+function canonicalEndpointPair(edge: LayoutEdge): [string, string] {
+  return compareText(edge.sourceElementId, edge.targetElementId) <= 0
+    ? [edge.sourceElementId, edge.targetElementId]
+    : [edge.targetElementId, edge.sourceElementId];
+}
+
+function routeSelfLoopBundle(
+  edges: readonly LayoutEdge[],
+  state: LayoutState,
+  routes: Record<string, Point[]>,
+): void {
+  const geometry = state.geometries[edges[0]!.sourceElementId];
+  if (!geometry) {
+    for (const edge of edges) reportMissingEndpoint(edge, state);
+    return;
+  }
+  edges.forEach((edge, index) => {
+    const manual = manualWaypoints(edge);
+    routes[edge.elementId] = manual
+      ? manualRoute(geometry, geometry, manual, true)
+      : selfLoopRoute(geometry, SELF_LOOP_BASE + index * SELF_LOOP_GAP);
+  });
+}
+
+function manualWaypoints(edge: LayoutEdge): Point[] | undefined {
+  return edge.routingPlacement === "user" && edge.waypoints && edge.waypoints.length > 0
+    ? edge.waypoints.map(copyPoint)
+    : undefined;
+}
+
+function manualRoute(
+  source: ElementGeometry,
+  target: ElementGeometry,
+  waypoints: readonly Point[],
+  selfLoop: boolean,
+): Point[] {
+  if (selfLoop) {
+    const centerY = source.y + source.height / 2;
+    const inset = Math.max(4, Math.min(12, source.height / 4));
+    return [
+      { x: source.x + source.width, y: centerY - inset },
+      ...waypoints.map(copyPoint),
+      { x: source.x + source.width, y: centerY + inset },
+    ];
+  }
+  const sourceTarget = waypoints[0] ?? centerOf(target);
+  const targetSource = waypoints.at(-1) ?? centerOf(source);
+  return [
+    rectangleBoundaryPoint(source, sourceTarget),
+    ...waypoints.map(copyPoint),
+    rectangleBoundaryPoint(target, targetSource),
+  ];
+}
+
+function selfLoopRoute(geometry: ElementGeometry, extent: number): Point[] {
+  const centerY = geometry.y + geometry.height / 2;
+  const inset = Math.max(4, Math.min(12, geometry.height / 4));
+  const right = geometry.x + geometry.width;
+  const outer = right + extent;
+  return [
+    { x: right, y: centerY - inset },
+    { x: outer, y: centerY - inset },
+    { x: outer, y: centerY + inset },
+    { x: right, y: centerY + inset },
+  ];
+}
+
+function orthogonalRoute(
+  source: ElementGeometry,
+  target: ElementGeometry,
+  direction: LayoutDirection,
+  laneOffset = 0,
+): Point[] {
+  const sourceCenter = centerOf(source);
+  const targetCenter = centerOf(target);
   if (direction === "LR") {
-    const start = { x: source.x + source.width, y: source.y + source.height / 2 };
-    const end = { x: target.x, y: target.y + target.height / 2 };
+    const forward = targetCenter.x >= sourceCenter.x;
+    const sourceAttachmentOffset = boundedLaneOffset(laneOffset, source.height);
+    const targetAttachmentOffset = boundedLaneOffset(laneOffset, target.height);
+    const start = {
+      x: forward ? source.x + source.width : source.x,
+      y: sourceCenter.y + sourceAttachmentOffset,
+    };
+    const end = {
+      x: forward ? target.x : target.x + target.width,
+      y: targetCenter.y + targetAttachmentOffset,
+    };
     const middle = (start.x + end.x) / 2;
+    if (sourceAttachmentOffset !== laneOffset || targetAttachmentOffset !== laneOffset) {
+      const directionSign = forward ? 1 : -1;
+      const sourceStubX = start.x + directionSign * 18;
+      const targetStubX = end.x - directionSign * 18;
+      const sourceLaneY = sourceCenter.y + laneOffset;
+      const targetLaneY = targetCenter.y + laneOffset;
+      return [
+        start,
+        { x: sourceStubX, y: start.y },
+        { x: sourceStubX, y: sourceLaneY },
+        { x: middle, y: sourceLaneY },
+        { x: middle, y: targetLaneY },
+        { x: targetStubX, y: targetLaneY },
+        { x: targetStubX, y: end.y },
+        end,
+      ];
+    }
     return [start, { x: middle, y: start.y }, { x: middle, y: end.y }, end];
   }
-  const start = { x: source.x + source.width / 2, y: source.y + source.height };
-  const end = { x: target.x + target.width / 2, y: target.y };
+  const forward = targetCenter.y >= sourceCenter.y;
+  const sourceAttachmentOffset = boundedLaneOffset(laneOffset, source.width);
+  const targetAttachmentOffset = boundedLaneOffset(laneOffset, target.width);
+  const start = {
+    x: sourceCenter.x + sourceAttachmentOffset,
+    y: forward ? source.y + source.height : source.y,
+  };
+  const end = {
+    x: targetCenter.x + targetAttachmentOffset,
+    y: forward ? target.y : target.y + target.height,
+  };
   const middle = (start.y + end.y) / 2;
+  if (sourceAttachmentOffset !== laneOffset || targetAttachmentOffset !== laneOffset) {
+    const directionSign = forward ? 1 : -1;
+    const sourceStubY = start.y + directionSign * 18;
+    const targetStubY = end.y - directionSign * 18;
+    const sourceLaneX = sourceCenter.x + laneOffset;
+    const targetLaneX = targetCenter.x + laneOffset;
+    return [
+      start,
+      { x: start.x, y: sourceStubY },
+      { x: sourceLaneX, y: sourceStubY },
+      { x: sourceLaneX, y: middle },
+      { x: targetLaneX, y: middle },
+      { x: targetLaneX, y: targetStubY },
+      { x: end.x, y: targetStubY },
+      end,
+    ];
+  }
   return [start, { x: start.x, y: middle }, { x: end.x, y: middle }, end];
+}
+
+function boundedLaneOffset(offset: number, crossSize: number): number {
+  const limit = Math.max(0, crossSize / 2 - 4);
+  return Math.max(-limit, Math.min(offset, limit));
+}
+
+function rectangleBoundaryPoint(geometry: ElementGeometry, toward: Point): Point {
+  const center = centerOf(geometry);
+  const dx = toward.x - center.x;
+  const dy = toward.y - center.y;
+  if (dx === 0 && dy === 0) return { x: geometry.x + geometry.width, y: center.y };
+  const scaleX = dx === 0 ? Number.POSITIVE_INFINITY : geometry.width / 2 / Math.abs(dx);
+  const scaleY = dy === 0 ? Number.POSITIVE_INFINITY : geometry.height / 2 / Math.abs(dy);
+  const scale = Math.min(scaleX, scaleY);
+  return { x: center.x + dx * scale, y: center.y + dy * scale };
+}
+
+function centerOf(geometry: ElementGeometry): Point {
+  return {
+    x: geometry.x + geometry.width / 2,
+    y: geometry.y + geometry.height / 2,
+  };
+}
+
+function reportMissingEndpoint(edge: LayoutEdge, state: LayoutState): void {
+  state.diagnostics.push({
+    severity: "warning",
+    code: "layout-edge-endpoint-missing",
+    message: `edge endpoint is not present: ${edge.elementId}`,
+    layoutRef: state.request.layoutRef,
+    edgeId: edge.elementId,
+  });
 }
 
 function avoidOccupiedGeometry(
@@ -685,11 +920,25 @@ function intersects(left: ElementGeometry, right: ElementGeometry): boolean {
     && left.y + left.height > right.y;
 }
 
-function sceneBounds(geometries: ElementGeometry[], margin: number): { width: number; height: number } {
-  if (geometries.length === 0) return { width: margin * 2, height: margin * 2 };
+function sceneBounds(
+  geometries: ElementGeometry[],
+  routePoints: Point[],
+  margin: number,
+): { width: number; height: number } {
+  if (geometries.length === 0 && routePoints.length === 0) {
+    return { width: margin * 2, height: margin * 2 };
+  }
   return {
-    width: Math.max(...geometries.map((item) => item.x + item.width)) + margin,
-    height: Math.max(...geometries.map((item) => item.y + item.height)) + margin,
+    width: Math.max(
+      0,
+      ...geometries.map((item) => item.x + item.width),
+      ...routePoints.map((point) => point.x),
+    ) + margin,
+    height: Math.max(
+      0,
+      ...geometries.map((item) => item.y + item.height),
+      ...routePoints.map((point) => point.y),
+    ) + margin,
   };
 }
 

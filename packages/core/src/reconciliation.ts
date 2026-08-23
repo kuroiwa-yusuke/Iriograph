@@ -151,9 +151,21 @@ function reconcileViewOverlay(
       diagnostics.push({
         severity: "warning",
         code: "reconcile-edge-endpoints-changed",
-        message: `${element.semanticRef}のendpoint変更によりedge overlayを除去しました。`,
+        message: `${element.semanticRef}のendpoint変更によりroutingを除去しました。`,
         semanticRef: element.semanticRef,
       });
+      const compatible = compatibleOverlay(
+        oldEntry.overlay,
+        element,
+        catalog,
+        diagnostics,
+      );
+      if (compatible) {
+        delete compatible.routing;
+        if (compatible.appearance || compatible.extensions) {
+          overlay[oldElement.elementId] = compatible;
+        }
+      }
       continue;
     }
     const sameKind = oldElement.structuralKind === element.structuralKind;
@@ -207,7 +219,7 @@ function compatibleOverlay(
 ): ViewElementOverlay | undefined {
   const appearance = compatibleAppearance(previous, next, catalog, diagnostics);
   if (next.structuralKind === "edge") {
-    const routing = previous.routing ? clone(previous.routing) : undefined;
+    const routing = normalizeRouting(previous.routing);
     if (!appearance && !routing && !previous.extensions) return undefined;
     return {
       semanticRef: next.semanticRef,
@@ -288,10 +300,20 @@ function persistLayoutGeometry(
     delete entry.geometry;
     delete entry.pinned;
     delete entry.placement;
+    entry.routing = normalizeRouting(entry.routing);
     if (!entry.routing && !entry.appearance && !entry.extensions) continue;
     overlay[previous.elementId] = entry;
   }
   return overlay;
+}
+
+function normalizeRouting(
+  routing: ViewElementOverlay["routing"],
+): ViewElementOverlay["routing"] | undefined {
+  if (!routing) return undefined;
+  const result = clone(routing);
+  if (result.waypoints?.length === 0) delete result.waypoints;
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 function rejected(

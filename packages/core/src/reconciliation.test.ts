@@ -98,6 +98,54 @@ describe("display reconciliation", () => {
       semanticRef: `${NS}a`,
     }));
   });
+
+  it("empty waypointをautomatic routingへ正規化してlabel offsetだけを保持する", async () => {
+    const previous = documentFor(oldSource);
+    for (const view of previous.views) {
+      const edge = overlayFor(view.overlay, directEdgeRef)!;
+      edge.routing = { waypoints: [], labelOffset: { x: 9, y: -5 } };
+    }
+
+    const result = await applySemanticSource(previous, oldSource, runtimeContext());
+
+    expect(result.accepted).toBe(true);
+    expect(overlayFor(result.document.views[0]!.overlay, directEdgeRef)?.routing).toEqual({
+      labelOffset: { x: 9, y: -5 },
+    });
+  });
+
+  it("derived edgeのendpoint変更時はrouting全体を捨てappearanceを保持する", async () => {
+    const previous = documentFor(sequenceEndpointOldSource);
+    for (const view of previous.views) {
+      view.overlay = {
+        sequence: {
+          semanticRef: oldSequenceRef,
+          appearance: { templateRef: "urn:iriograph:template:edge:generic:1" },
+          routing: {
+            waypoints: [{ x: 250, y: 70 }],
+            labelOffset: { x: 4, y: -6 },
+          },
+        },
+      };
+    }
+
+    const result = await applySemanticSource(
+      previous,
+      sequenceEndpointNewSource,
+      runtimeContext(),
+    );
+
+    expect(result.accepted).toBe(true);
+    const reconciled = overlayFor(result.document.views[0]!.overlay, oldSequenceRef);
+    expect(reconciled?.routing).toBeUndefined();
+    expect(reconciled?.appearance).toEqual({
+      templateRef: "urn:iriograph:template:edge:generic:1",
+    });
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "reconcile-edge-endpoints-changed",
+      semanticRef: oldSequenceRef,
+    }));
+  });
 });
 
 const oldSource = `
@@ -122,6 +170,24 @@ const newSource = `
 :b rdfs:label "B"@en, "乙"@ja .
 :d rdfs:label "D"@en, "丁"@ja .
 :inner rdfs:label "Inner"@en, "内部"@ja .
+`;
+
+const sequenceEndpointOldSource = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:flow a rdf:Seq ; rdf:_1 :a ; rdf:_2 :b .
+:a rdfs:label "A" .
+:b rdfs:label "B" .
+`;
+
+const sequenceEndpointNewSource = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:flow a rdf:Seq ; rdf:_1 :a ; rdf:_2 :c .
+:a rdfs:label "A" .
+:c rdfs:label "C" .
 `;
 
 function documentFor(source: string): IriographDocumentV1 {

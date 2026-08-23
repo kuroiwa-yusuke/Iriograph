@@ -403,6 +403,12 @@ export type SceneEdge = {
   targetElementId: string;
   templateRef: string;
   style: VisualTemplate["style"];
+  /**
+   * Renderer-ready polyline including source and target attachment points.
+   * This is derived by layout and is never persisted in a view overlay.
+   */
+  route?: Point[];
+  /** User-authored intermediate points only; endpoints are present in route. */
   waypoints?: Point[];
   labelOffset?: Point;
   projectionRuleId?: string;

@@ -90,10 +90,7 @@ export async function buildIriographView(
   );
 }
 
-/**
- * Converts semantic projection into a renderer Scene. Layout endpoint points
- * are discarded because SceneEdge.waypoints contains intermediate points only.
- */
+/** Converts semantic projection into a renderer Scene with endpoint-inclusive routes. */
 export async function layoutProjectedDiagramScene(
   projected: ProjectedScene,
   layoutRef: string,
@@ -166,10 +163,10 @@ export async function layoutProjectedDiagramScene(
     provenance: container.provenance,
   }));
   const edges: SceneEdge[] = projected.edges.map((edge) => {
-    const automaticRoute = layout.routes[edge.elementId] ?? [];
-    const waypoints = edge.routingPlacement === "user"
-      ? edge.waypoints
-      : intermediatePoints(automaticRoute);
+    const route = layout.routes[edge.elementId];
+    const waypoints = edge.routingPlacement === "user" && edge.waypoints?.length
+      ? edge.waypoints.map((point) => ({ ...point }))
+      : undefined;
     return {
       elementId: edge.elementId,
       semanticRef: edge.semanticRef,
@@ -179,8 +176,9 @@ export async function layoutProjectedDiagramScene(
       targetElementId: edge.targetElementId,
       templateRef: edge.templateRef,
       style: edge.style,
-      waypoints: waypoints && waypoints.length > 0 ? waypoints : undefined,
-      labelOffset: edge.labelOffset,
+      route: route?.map((point) => ({ ...point })),
+      waypoints,
+      labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
       fallback: edge.fallback,
       provenance: edge.provenance,
     };
@@ -229,10 +227,6 @@ export function remapProjectedRuleOrigins(
       provenance: remap(edge.provenance)!,
     })),
   };
-}
-
-function intermediatePoints(points: readonly { x: number; y: number }[]): { x: number; y: number }[] {
-  return points.length > 2 ? points.slice(1, -1).map((point) => ({ ...point })) : [];
 }
 
 function layoutDiagnostic(diagnostic: LayoutDiagnostic): ProjectionDiagnostic {

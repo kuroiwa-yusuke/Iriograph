@@ -30,6 +30,23 @@ describe("Iriograph document v1 schema", () => {
     );
   });
 
+  it("keeps endpoint-free routing overlays in schema version 1", () => {
+    const source = structuredClone(fixture("document.valid.json")) as {
+      schemaVersion: string;
+      views: Array<{ overlay: Record<string, unknown> }>;
+    };
+    source.views[0]!.overlay.edge = {
+      semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
+      routing: {
+        waypoints: [],
+        labelOffset: { x: 6, y: -4 },
+      },
+    };
+
+    expect(source.schemaVersion).toBe("1");
+    expect(validateIriographDocumentV1(source)).toMatchObject({ valid: true, value: source });
+  });
+
   it("requires authoringProfileRef", () => {
     const result = validateIriographDocumentV1(fixture("document.invalid-missing-profile.json"));
 

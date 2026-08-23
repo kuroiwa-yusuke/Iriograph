@@ -17,6 +17,18 @@ import type {
 } from "@iriograph/core";
 
 import {
+  derivedEdgeRoute,
+  editableEdgeWaypoints,
+  edgeLabelBase,
+  insertEdgeWaypoint,
+  moveEdgeWaypoint,
+  previewEdgeRoute,
+  removeEdgeWaypoint,
+  routingWithLabelOffset,
+  routingWithWaypoints,
+  type EdgeRoutingUpdate,
+} from "../edge-routing";
+import {
   diagramFitZoom,
   normalizeDiagramZoom,
   scrollToRevealBounds,
@@ -58,6 +70,8 @@ const emit = defineEmits<{
   geometryChange: [payload: { elementId: string; geometry: ElementGeometry }];
   resizeChange: [payload: { elementId: string; geometry: ElementGeometry }];
   geometryBatchChange: [payload: GeometryChange[]];
+  routingUpdate: [payload: EdgeRoutingUpdate];
+  /** @deprecated Use routingUpdate for the complete sparse routing value. */
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
 
@@ -76,6 +90,10 @@ const previewGeometries = ref<Record<string, ElementGeometry>>({});
 let resizeObserver: ResizeObserver | undefined;
 let stopViewportTracking: (() => void) | undefined;
 
+const originalNodesById = computed(() => new Map(props.scene.nodes.map((node) => [
+  node.elementId,
+  node,
+])));
 const nodesById = computed(() => new Map(props.scene.nodes.map((node) => [
   node.elementId,
   { ...node, geometry: geometryFor(node) },
@@ -130,15 +148,15 @@ watch(
 );
 
 function pathFor(edge: SceneEdge): string {
+  const route = previewedDerivedRoute(edge);
+  if (route.length >= 2) return polylinePath(route);
   const source = nodesById.value.get(edge.sourceElementId);
   const target = nodesById.value.get(edge.targetElementId);
   if (!source || !target) return "";
   const start = centerOf(source.geometry);
   const end = centerOf(target.geometry);
   if (edge.waypoints && edge.waypoints.length > 0) {
-    return [start, ...edge.waypoints, end]
-      .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
-      .join(" ");
+    return polylinePath([start, ...edge.waypoints, end]);
   }
   const bend = Math.max(44, Math.abs(end.x - start.x) * 0.42);
   const direction = end.x >= start.x ? 1 : -1;
@@ -146,21 +164,47 @@ function pathFor(edge: SceneEdge): string {
 }
 
 function edgeLabelPosition(edge: SceneEdge): Point {
-  if (edge.waypoints?.length) return edge.waypoints[Math.floor(edge.waypoints.length / 2)] ?? { x: 0, y: 0 };
-  return defaultWaypoint(edge);
+  const base = edgeLabelBase({ route: renderedRoute(edge) });
+  return {
+    x: base.x + (edge.labelOffset?.x ?? 0),
+    y: base.y + (edge.labelOffset?.y ?? 0),
+  };
 }
 
 function editableWaypoints(edge: SceneEdge): Point[] {
-  return edge.waypoints?.length ? edge.waypoints : [defaultWaypoint(edge)];
+  return editableEdgeWaypoints({ route: renderedRoute(edge), waypoints: edge.waypoints });
 }
 
-function defaultWaypoint(edge: SceneEdge): Point {
+function renderedRoute(edge: SceneEdge): Point[] {
+  const route = previewedDerivedRoute(edge);
+  if (route.length >= 2) return route;
   const source = nodesById.value.get(edge.sourceElementId);
   const target = nodesById.value.get(edge.targetElementId);
-  if (!source || !target) return { x: 0, y: 0 };
+  if (!source || !target) return [];
   const start = centerOf(source.geometry);
   const end = centerOf(target.geometry);
-  return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  return [start, ...(edge.waypoints ?? []), end];
+}
+
+function previewedDerivedRoute(edge: SceneEdge): Point[] {
+  const route = derivedEdgeRoute(edge);
+  if (route.length < 2) return route;
+  const sourceOriginal = originalNodesById.value.get(edge.sourceElementId);
+  const targetOriginal = originalNodesById.value.get(edge.targetElementId);
+  const sourcePreview = nodesById.value.get(edge.sourceElementId);
+  const targetPreview = nodesById.value.get(edge.targetElementId);
+  if (!sourceOriginal || !targetOriginal || !sourcePreview || !targetPreview) return route;
+  return previewEdgeRoute(
+    edge,
+    { original: sourceOriginal.geometry, preview: sourcePreview.geometry },
+    { original: targetOriginal.geometry, preview: targetPreview.geometry },
+  );
+}
+
+function polylinePath(points: readonly Point[]): string {
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
 }
 
 function centerOf(geometry: ElementGeometry): Point {
@@ -251,24 +295,158 @@ function startWaypointMove(event: PointerEvent, edge: SceneEdge, index: number):
   requestSelection({ elementId: edge.elementId, mode: "replace" });
   emit("gestureStart");
   const origin = { x: event.clientX, y: event.clientY };
-  const initial = editableWaypoints(edge).map((point) => ({ ...point }));
+  const initial = editableWaypoints(edge);
 
   trackPointer((moveEvent) => {
-    const waypoints = initial.map((point) => ({ ...point }));
-    const waypoint = waypoints[index];
-    if (!waypoint) return;
-    waypoint.x = clamp(
-      waypoint.x + (moveEvent.clientX - origin.x) / props.zoom,
-      8,
-      props.scene.width - 8,
-    );
-    waypoint.y = clamp(
-      waypoint.y + (moveEvent.clientY - origin.y) / props.zoom,
-      8,
-      props.scene.height - 8,
-    );
-    emit("routingChange", { elementId: edge.elementId, waypoints });
+    const waypoints = moveEdgeWaypoint(initial, index, {
+      x: (moveEvent.clientX - origin.x) / props.zoom,
+      y: (moveEvent.clientY - origin.y) / props.zoom,
+    }, { width: props.scene.width, height: props.scene.height, padding: 8 });
+    emitWaypointRouting(edge, waypoints);
   });
+}
+
+function startLabelMove(event: PointerEvent, edge: SceneEdge): void {
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
+  if (props.readOnly || event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("gestureStart");
+  const origin = { x: event.clientX, y: event.clientY };
+  const initial = { x: edge.labelOffset?.x ?? 0, y: edge.labelOffset?.y ?? 0 };
+  trackPointer((moveEvent) => {
+    emitLabelRouting(edge, {
+      x: initial.x + (moveEvent.clientX - origin.x) / props.zoom,
+      y: initial.y + (moveEvent.clientY - origin.y) / props.zoom,
+    });
+  });
+}
+
+function addWaypointAtPointer(event: MouseEvent, edge: SceneEdge): void {
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
+  if (props.readOnly) return;
+  const requested = canvasPoint(event);
+  if (!requested) return;
+  event.preventDefault();
+  emit("gestureStart");
+  emitWaypointRouting(edge, insertEdgeWaypoint({
+    route: renderedRoute(edge),
+    waypoints: edge.waypoints,
+  }, clampPointToScene(requested)));
+  emit("gestureEnd");
+}
+
+function handleWaypointKeydown(event: KeyboardEvent, edge: SceneEdge, index: number): void {
+  if (props.readOnly) return;
+  const waypoints = editableWaypoints(edge);
+  if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("gestureStart");
+    emitWaypointRouting(edge, removeEdgeWaypoint(waypoints, index));
+    emit("gestureEnd");
+    return;
+  }
+  const step = event.shiftKey ? 10 : 1;
+  const movements: Record<string, Point> = {
+    ArrowLeft: { x: -step, y: 0 },
+    ArrowRight: { x: step, y: 0 },
+    ArrowUp: { x: 0, y: -step },
+    ArrowDown: { x: 0, y: step },
+  };
+  const movement = movements[event.key];
+  if (!movement) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("gestureStart");
+  emitWaypointRouting(edge, moveEdgeWaypoint(
+    waypoints,
+    index,
+    movement,
+    { width: props.scene.width, height: props.scene.height, padding: 8 },
+  ));
+  emit("gestureEnd");
+}
+
+function handleLabelKeydown(event: KeyboardEvent, edge: SceneEdge): void {
+  if (props.readOnly || !edge.label) return;
+  if (event.key === "Home" || event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("gestureStart");
+    emitLabelRouting(edge, undefined);
+    emit("gestureEnd");
+    return;
+  }
+  const step = event.shiftKey ? 10 : 1;
+  const movements: Record<string, Point> = {
+    ArrowLeft: { x: -step, y: 0 },
+    ArrowRight: { x: step, y: 0 },
+    ArrowUp: { x: 0, y: -step },
+    ArrowDown: { x: 0, y: step },
+  };
+  const movement = movements[event.key];
+  if (!movement) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("gestureStart");
+  emitLabelRouting(edge, {
+    x: (edge.labelOffset?.x ?? 0) + movement.x,
+    y: (edge.labelOffset?.y ?? 0) + movement.y,
+  });
+  emit("gestureEnd");
+}
+
+function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    requestSelection({ elementId: edge.elementId, mode: "replace" });
+    return;
+  }
+  if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
+
+function emitWaypointRouting(edge: SceneEdge, waypoints: readonly Point[] | undefined): void {
+  const routing = routingWithWaypoints(edge, waypoints);
+  emit("routingUpdate", { elementId: edge.elementId, routing });
+  emit("routingChange", {
+    elementId: edge.elementId,
+    waypoints: routing?.waypoints?.map((point) => ({ ...point })) ?? [],
+  });
+}
+
+function emitLabelRouting(edge: SceneEdge, labelOffset: Point | undefined): void {
+  if (!edge.label) return;
+  emit("routingUpdate", {
+    elementId: edge.elementId,
+    routing: routingWithLabelOffset(edge, labelOffset),
+  });
+}
+
+function edgeAriaLabel(edge: SceneEdge): string {
+  const source = nodesById.value.get(edge.sourceElementId)?.label ?? edge.sourceElementId;
+  const target = nodesById.value.get(edge.targetElementId)?.label ?? edge.targetElementId;
+  return `${source}から${target}への${edge.label || "edge"}`;
+}
+
+function canvasPoint(event: MouseEvent): Point | undefined {
+  const group = event.currentTarget as SVGGElement | null;
+  const bounds = group?.ownerSVGElement?.getBoundingClientRect();
+  if (!bounds || bounds.width <= 0 || bounds.height <= 0) return undefined;
+  return {
+    x: (event.clientX - bounds.left) * props.scene.width / bounds.width,
+    y: (event.clientY - bounds.top) * props.scene.height / bounds.height,
+  };
+}
+
+function clampPointToScene(point: Point): Point {
+  return {
+    x: clamp(point.x, 8, Math.max(8, props.scene.width - 8)),
+    y: clamp(point.y, 8, Math.max(8, props.scene.height - 8)),
+  };
 }
 
 function startViewportPan(event: PointerEvent): void {
@@ -453,10 +631,8 @@ function elementBounds(elementId: string): ElementGeometry | undefined {
   if (geometryElement) return geometryElement.geometry;
   const edge = props.scene.edges.find((candidate) => candidate.elementId === elementId);
   if (!edge) return undefined;
-  const source = nodesById.value.get(edge.sourceElementId);
-  const target = nodesById.value.get(edge.targetElementId);
-  if (!source || !target) return undefined;
-  const points = [centerOf(source.geometry), ...(edge.waypoints ?? []), centerOf(target.geometry)];
+  const points = renderedRoute(edge);
+  if (points.length === 0) return undefined;
   const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
   const left = Math.min(...xs);
@@ -541,7 +717,9 @@ function snapshotScene(scene: DiagramScene): DiagramScene {
     })),
     edges: scene.edges.map((edge) => ({
       ...edge,
+      route: edge.route?.map((point) => ({ ...point })),
       waypoints: edge.waypoints?.map((point) => ({ ...point })),
+      labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
     })),
     diagnostics: [...scene.diagnostics],
   };
@@ -634,7 +812,14 @@ defineExpose<DiagramCanvasNavigationApi>({
               :key="edge.elementId"
               class="iriograph-edge-group"
               :class="{ selected: selectedElementIdsSet.has(edge.elementId), fallback: edge.fallback }"
+              :data-element-id="edge.elementId"
+              tabindex="0"
+              role="button"
+              :aria-label="edgeAriaLabel(edge)"
+              :aria-selected="selectedElementIdsSet.has(edge.elementId)"
               @click.stop="selectEdge($event, edge)"
+              @keydown="handleEdgeKeydown($event, edge)"
+              @dblclick.stop="addWaypointAtPointer($event, edge)"
             >
               <path class="iriograph-edge-hitarea" :d="pathFor(edge)" />
               <path
@@ -647,10 +832,18 @@ defineExpose<DiagramCanvasNavigationApi>({
               <text
                 v-if="edge.label"
                 class="iriograph-edge-label"
+                :class="{ editable: !readOnly }"
                 :x="edgeLabelPosition(edge).x"
-                :y="edgeLabelPosition(edge).y - 9"
+                :y="edgeLabelPosition(edge).y"
                 :fill="edge.style.text"
                 text-anchor="middle"
+                dominant-baseline="central"
+                :tabindex="readOnly ? undefined : 0"
+                role="button"
+                :aria-label="`${edge.label} label位置`"
+                @pointerdown="startLabelMove($event, edge)"
+                @keydown="handleLabelKeydown($event, edge)"
+                @dblclick.stop
               >
                 {{ edge.label }}
               </text>
@@ -663,7 +856,10 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :cy="point.y"
                 r="6"
                 tabindex="0"
+                role="button"
+                :aria-label="`Waypoint ${index + 1} / ${editableWaypoints(selectedEdge).length}`"
                 @pointerdown="startWaypointMove($event, selectedEdge, index)"
+                @keydown="handleWaypointKeydown($event, selectedEdge, index)"
               />
             </g>
           </svg>

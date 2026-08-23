@@ -34,7 +34,7 @@ describe("normalized RDF/RDFS mock", () => {
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(projected.containers).toHaveLength(2);
     expect(projected.nodes).toHaveLength(8);
-    expect(projected.edges).toHaveLength(8);
+    expect(projected.edges).toHaveLength(10);
     expect(projected.containers.map((item) => item.semanticRef)).toEqual([
       "urn:iriograph:demo:operationsLane",
       "urn:iriograph:demo:requesterLane",
@@ -44,6 +44,14 @@ describe("normalized RDF/RDFS mock", () => {
     expect(projected.edges.some((edge) => edge.provenance.operator === "alternative")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "ordinal-sequence")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "direct-edge")).toBe(true);
+    const review = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:review")!;
+    const policy = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:approvalPolicy")!;
+    expect(projected.edges.filter((edge) => (
+      edge.sourceElementId === review.elementId && edge.targetElementId === policy.elementId
+    ))).toHaveLength(2);
+    expect(projected.edges.filter((edge) => (
+      edge.sourceElementId === review.elementId && edge.targetElementId === review.elementId
+    ))).toHaveLength(1);
   });
 
   it("旧workflow構造語彙をsemantic sourceに残さない", () => {

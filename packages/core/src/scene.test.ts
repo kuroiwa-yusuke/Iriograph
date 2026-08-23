@@ -17,7 +17,7 @@ import {
 import { standardRdfRdfsCatalog } from "./standard-catalog";
 
 describe("ProjectedScene conversion", () => {
-  it("auto routeのendpointをScene intermediate waypointへ混ぜない", async () => {
+  it("auto routeをendpoint込みのderived Scene routeとして渡す", async () => {
     const document = documentFor({});
     const projected = projectSemanticView(document, standardRdfRdfsCatalog);
     const scene = await layoutProjectedDiagramScene(
@@ -27,7 +27,8 @@ describe("ProjectedScene conversion", () => {
     );
 
     expect(scene.diagnostics).toEqual([]);
-    expect(scene.edges[0]?.waypoints).toHaveLength(2);
+    expect(scene.edges[0]?.route).toHaveLength(4);
+    expect(scene.edges[0]?.waypoints).toBeUndefined();
     expect(scene.nodes.every((node) => node.geometry.width > 0)).toBe(true);
   });
 
@@ -45,6 +46,32 @@ describe("ProjectedScene conversion", () => {
     );
 
     expect(scene.edges[0]?.waypoints).toEqual([{ x: 321, y: 123 }]);
+    expect(scene.edges[0]?.route).toHaveLength(3);
+    expect(scene.edges[0]?.route?.[1]).toEqual({ x: 321, y: 123 });
+  });
+
+  it("empty waypointをauto routeへ正規化しlabel offsetを独立して渡す", async () => {
+    const projected = projectSemanticView(documentFor({
+      edge: {
+        semanticRef: statementIdentity("urn:test:scene:a", "urn:test:scene:p", "urn:test:scene:b"),
+        routing: { waypoints: [], labelOffset: { x: 7, y: -9 } },
+      },
+    }), standardRdfRdfsCatalog);
+
+    expect(projected.edges[0]).toMatchObject({
+      routingPlacement: "generated",
+      labelOffset: { x: 7, y: -9 },
+    });
+    expect(projected.edges[0]?.waypoints).toBeUndefined();
+
+    const scene = await layoutProjectedDiagramScene(
+      projected,
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    expect(scene.edges[0]?.route).toHaveLength(4);
+    expect(scene.edges[0]?.waypoints).toBeUndefined();
+    expect(scene.edges[0]?.labelOffset).toEqual({ x: 7, y: -9 });
   });
 
   it("profileとlayoutRefをruntime contextからview単位で解決する", async () => {

@@ -33,6 +33,12 @@ import {
   type AssetPicker,
 } from "../asset-session";
 import {
+  appendEdgeWaypoint,
+  normalizeEditableRouting,
+  removeEdgeWaypoint,
+  type EdgeRoutingUpdate,
+} from "../edge-routing";
+import {
   normalizeDiagramZoom,
   type DiagramCanvasNavigationApi,
   type IriographEditorNavigationApi,
@@ -132,6 +138,13 @@ const selectedOverlay = computed<ViewElementOverlay | undefined>(() => {
   if (!activeView.value || !selectedElementId.value) return undefined;
   return activeView.value.overlay[selectedElementId.value];
 });
+const selectedEdge = computed(() => selectedElement.value?.structuralKind === "edge"
+  ? selectedElement.value
+  : undefined);
+const selectedManualWaypoints = computed(() => selectedEdge.value?.waypoints ?? []);
+const hasSelectedEditableRouting = computed(() => Boolean(
+  selectedEdge.value?.waypoints?.length || selectedEdge.value?.labelOffset,
+));
 const diagnostics = computed(() => [
   ...schemaDiagnostics.value,
   ...applyDiagnostics.value,
@@ -449,22 +462,111 @@ function updateSnapGridSize(event: Event): void {
   } });
 }
 
-function changeRouting(payload: { elementId: string; waypoints: Point[] }): void {
+function changeRouting(payload: EdgeRoutingUpdate, recordHistory = false): void {
   mutateDocument((document) => {
     const edge = scene.value.edges.find((candidate) => candidate.elementId === payload.elementId);
     const view = document.views[0];
     if (!edge || !view) return;
     const current = view.overlay[payload.elementId] ?? { semanticRef: edge.semanticRef };
-    view.overlay[payload.elementId] = {
-      ...current,
-      pinned: true,
-      placement: "user",
-      routing: {
-        ...current.routing,
-        waypoints: payload.waypoints.map(roundPoint),
-      },
+    const requestedRouting = payload.routing && !edge.label
+      ? { ...payload.routing, labelOffset: undefined }
+      : payload.routing;
+    const routingValue = normalizeEditableRouting(requestedRouting);
+    const routing = routingValue || current.routing?.extensions
+      ? {
+          ...routingValue,
+          ...(current.routing?.extensions ? { extensions: clone(current.routing.extensions) } : {}),
+        }
+      : undefined;
+    const entry: ViewElementOverlay = {
+      semanticRef: edge.semanticRef,
+      appearance: clone(current.appearance),
+      routing: routing
+        ? {
+            ...routing,
+            waypoints: routing.waypoints?.map(roundPoint),
+            labelOffset: routing.labelOffset ? roundPoint(routing.labelOffset) : undefined,
+          }
+        : undefined,
+      extensions: clone(current.extensions),
     };
-  }, false);
+    if (!entry.routing && !entry.appearance && !entry.extensions) {
+      delete view.overlay[payload.elementId];
+      return;
+    }
+    view.overlay[payload.elementId] = entry;
+  }, recordHistory);
+}
+
+function addSelectedWaypoint(): void {
+  const edge = selectedEdge.value;
+  if (!edge) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: {
+      waypoints: appendEdgeWaypoint(edge),
+      labelOffset: edge.labelOffset,
+    },
+  }, true);
+}
+
+function removeSelectedWaypoint(index: number): void {
+  const edge = selectedEdge.value;
+  if (!edge) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: {
+      waypoints: removeEdgeWaypoint(edge.waypoints, index),
+      labelOffset: edge.labelOffset,
+    },
+  }, true);
+}
+
+function updateWaypointField(index: number, field: "x" | "y", event: Event): void {
+  const edge = selectedEdge.value;
+  const value = Number((event.target as HTMLInputElement).value);
+  if (!edge?.waypoints?.[index] || !Number.isFinite(value)) return;
+  const waypoints = edge.waypoints.map((point) => ({ ...point }));
+  waypoints[index]![field] = clamp(
+    value,
+    8,
+    Math.max(8, (field === "x" ? scene.value.width : scene.value.height) - 8),
+  );
+  changeRouting({
+    elementId: edge.elementId,
+    routing: { waypoints, labelOffset: edge.labelOffset },
+  }, true);
+}
+
+function updateLabelOffsetField(field: "x" | "y", event: Event): void {
+  const edge = selectedEdge.value;
+  const value = Number((event.target as HTMLInputElement).value);
+  if (!edge?.label || !Number.isFinite(value)) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: {
+      waypoints: edge.waypoints,
+      labelOffset: {
+        x: field === "x" ? value : edge.labelOffset?.x ?? 0,
+        y: field === "y" ? value : edge.labelOffset?.y ?? 0,
+      },
+    },
+  }, true);
+}
+
+function resetSelectedLabelOffset(): void {
+  const edge = selectedEdge.value;
+  if (!edge?.label) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: { waypoints: edge.waypoints },
+  }, true);
+}
+
+function resetSelectedRouting(): void {
+  const edge = selectedEdge.value;
+  if (!edge) return;
+  changeRouting({ elementId: edge.elementId }, true);
 }
 
 function updateGeometryField(field: keyof ElementGeometry, event: Event): void {
@@ -612,9 +714,16 @@ function clearSelectedOverride(): void {
     const view = document.views[0];
     const overlay = view?.overlay[element.elementId];
     if (!overlay) return;
+    if (element.structuralKind === "edge") {
+      delete overlay.routing;
+      delete overlay.geometry;
+      delete overlay.pinned;
+      delete overlay.placement;
+      if (!overlay.appearance && !overlay.extensions) delete view!.overlay[element.elementId];
+      return;
+    }
     overlay.pinned = false;
     overlay.placement = "generated";
-    if (element.structuralKind === "edge") delete overlay.routing;
   });
 }
 
@@ -854,6 +963,10 @@ function roundPoint(point: Point): Point {
   return { x: Math.round(point.x), y: Math.round(point.y) };
 }
 
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(value, maximum));
+}
+
 function compactRef(value: string): string {
   const segments = value.split(/[/:#]/).filter(Boolean);
   const last = segments.at(-1) ?? value;
@@ -903,6 +1016,7 @@ function uniqueDiagnostic(): (diagnostic: ProjectionDiagnostic) => boolean {
 function clone<T>(value: T): T {
   // v-modelから受け取る値はVue Proxyになり得ます。documentはJSON contractなので、
   // cloneと同時にplain dataへ戻してeditor内部へProxyを持ち込みません。
+  if (value === undefined) return value;
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
@@ -1081,7 +1195,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @gesture-end="endGesture"
             @resize-change="changeGeometry"
             @geometry-batch-change="changeGeometryBatch"
-            @routing-change="changeRouting"
+            @routing-update="changeRouting"
           />
         </section>
 
@@ -1195,7 +1309,60 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </div>
             <p>{{ selectedElement.fallback ? "Core fallback arrow" : selectedElement.provenance?.rule?.ruleId ?? selectedElement.projectionRuleId }}</p>
           </section>
-          <section v-if="selectedOverlay?.placement === 'user'">
+          <section v-if="selectedElement.structuralKind === 'edge'" class="iriograph-routing-inspector">
+            <div class="iriograph-section-heading">
+              <label>Manual routing</label>
+              <span>{{ selectedManualWaypoints.length ? `${selectedManualWaypoints.length} points` : "automatic" }}</span>
+            </div>
+            <button
+              type="button"
+              class="iriograph-wide-button"
+              :disabled="readOnly"
+              @click="addSelectedWaypoint"
+            >Waypointを追加</button>
+            <div
+              v-for="(point, index) in selectedManualWaypoints"
+              :key="index"
+              class="iriograph-waypoint-row"
+            >
+              <span>{{ index + 1 }}</span>
+              <label>
+                <span>x</span>
+                <input type="number" :value="Math.round(point.x)" :disabled="readOnly" @change="updateWaypointField(index, 'x', $event)" />
+              </label>
+              <label>
+                <span>y</span>
+                <input type="number" :value="Math.round(point.y)" :disabled="readOnly" @change="updateWaypointField(index, 'y', $event)" />
+              </label>
+              <button type="button" :aria-label="`Waypoint ${index + 1}を削除`" :disabled="readOnly" @click="removeSelectedWaypoint(index)">×</button>
+            </div>
+            <label v-if="selectedElement.label">Label offset</label>
+            <div v-if="selectedElement.label" class="iriograph-geometry-grid">
+              <label v-for="field in (['x', 'y'] as const)" :key="field">
+                <span>{{ field }}</span>
+                <input
+                  type="number"
+                  :value="Math.round(selectedElement.labelOffset?.[field] ?? 0)"
+                  :disabled="readOnly"
+                  @change="updateLabelOffsetField(field, $event)"
+                />
+              </label>
+            </div>
+            <button
+              v-if="selectedElement.label"
+              type="button"
+              class="iriograph-wide-button"
+              :disabled="readOnly || !selectedElement.labelOffset"
+              @click="resetSelectedLabelOffset"
+            >Label位置をリセット</button>
+            <button
+              type="button"
+              class="iriograph-wide-button"
+              :disabled="readOnly || !hasSelectedEditableRouting"
+              @click="resetSelectedRouting"
+            >Routingを自動に戻す</button>
+          </section>
+          <section v-if="selectedElement.structuralKind !== 'edge' && selectedOverlay?.placement === 'user'">
             <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="clearSelectedOverride">ユーザー調整を解除</button>
           </section>
         </template>
