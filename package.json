@@ -1,0 +1,22 @@
+{
+  "name": "iriograph-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @iriograph/mock",
+    "build": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/vue-editor && npm run build --workspace @iriograph/mock",
+    "test": "npm run test --workspace @iriograph/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "npm run test && npm run typecheck && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.8"
+  }
+}
