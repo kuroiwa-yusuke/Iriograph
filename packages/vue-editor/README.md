@@ -34,8 +34,9 @@ import "@iriograph/vue-editor/styles.css";
 サイドバーdraftとして保持し、exact triple差分のPreviewと明示Apply後にだけ`v-model`を更新します。
 Propertyは複数のIRI/literal値を完全置換し、空文字列literalと明示削除を区別します。Seq/Alt等の
 非表示structure resourceもScene provenanceから候補へ戻し、catalogのexact構造設定を保持します。
-Canvasの空白clickで指定する新規resource位置は適用前にはephemeral markerだけを更新し、Core Previewが
-実投影後のboundsを検証してからsemantic作成と一つのundo itemへ確定します。
+標準の意味編集は右Inspectorの4 actionから開始します。新規resourceは名前だけで作成し、host allocatorの
+opaque IRIと`rdfs:label`を一つのsemantic transactionへ確定します。種類、説明、関係、所属は作成後の
+明示操作へ分け、位置指定や領域へのdropからmembershipを推論しません。
 保存前にTurtle draftを確定する場合はcomponent refの`flushPendingEdits()`を`await`してください。
 未確認のstructured draftは自動適用されず、flushは`false`を返します。Workspace、HTTP、認証、
 永続化はhostの責務です。
@@ -58,6 +59,8 @@ Component refは`panBy()`、`zoomTo()`、`fitToView()`、`revealSelection()`、
 `focusElement(elementId)`も公開します。Pan、zoom、minimap、selection revealはeditor session
 だけの状態であり、`v-model` document、overlay、undo history、dirty stateを変更しません。
 `readOnly`でもこれらのnavigationは利用できます。
+Hostが`fit-on-initial-load`を指定した場合は、各document/viewで最初に完成したSceneだけを自動fitし、
+その後の編集では利用者のzoom/scrollを維持します。
 
 Multi-selectionはCtrl/Cmd clickのtoggle、Shift clickの追加、blank/Escapeのclear、
 Ctrl/Cmd+Aの全選択を提供します。Ref APIの`selectElement()`、`selectElements()`、
@@ -67,28 +70,29 @@ presentation undo itemとして保存します。標準snapは8 unit gridと6px 
 `snapSettings` propまたは`setSnapSettings()`からsession内だけ変更できます。
 
 EdgeはCoreが供給するendpoint込み`SceneEdge.route`を描画し、`waypoints`にはmanual中間点だけを
-保持します。選択したedgeはpathのdouble clickまたはInspectorからwaypointを追加でき、handleの
+保持します。選択したedgeは手動modeでInspectorからwaypointを追加でき、handleの
 drag、またはCanvas keyboard commandからwaypointの選択・追加・削除・移動、label位置の変更を利用できます。
 Generated edgeで表示されるbend handleを初めて編集すると、その時点のderived route中間点を
 manual waypointへseedします。
 `IriographDiagramCanvas`は完全なsparse routingを`routingUpdate`で通知します。従来の
 `routingChange({ elementId, waypoints })`もwaypoint操作に限って互換通知されます。
 Edge本体のDelete/Backspaceは即時削除ではなく、Core provenanceからexact semantic commandを
-右Inspectorのauthoring draftへseedします。Source/target endpoint anchorはCanvas handleまたは
-Inspectorの正規化値でnode周囲へ移動でき、waypointと同じsparse routing overlayだけに保存します。
+右Inspectorのauthoring draftへseedします。`ビュー`tabのsource/target endpoint anchorはCanvas handleで
+node周囲へ移動し、waypointと同じsparse routing overlayだけに保存します。`意味`tabで「関係を変更する」
+間だけ、同じ端子を別nodeへdropしてsource/target変更draftを作れます。空白dropは元接続を維持します。
 `readOnly`ではsemantic/presentation write入口を無効にします。
 
-Meaning authoringは右Inspector上部にあり、label-firstのclass/predicate/resource選択と完全IRIの
-Advanced入力を提供します。Canvas resource pickerは明示中だけnode/containerをdraftへseedします。
-Resource作成時はlabel/type、既存resourceとのdirect edge、catalog規定container membership、初期位置を
-一つのPreview/Applyへまとめられます。通常dragからmembershipは推論せず、表示領域と意味上のparentが
-食い違う要素には警告と、semantic draftまたはpresentation-only修正の選択肢を表示します。
+意味編集は右Inspectorの「新しい要素を作る」「関係を作る」「要素を変更する」「関係を変更する」の
+4 actionだけを入口にし、完全IRI、`rdf:type`、`rdfs:label`等を通常UIへ出しません。Predicateは
+catalog/profileの日本語`A（関係）B`候補から選びます。要素の種類・名前・説明、包含の一括変更、Seqの
+追加・並べ替え・除外、resource/edge削除はCanvas選択後に段階表示し、すべて`Preview → 明示Apply`で
+確定します。個別edge説明はRDF標準reificationの`rdfs:comment`としてTurtleへ保存し、ビュー専用captionと
+分離します。
 
-Canvasのコンテキストメニュー、catalog-driven creation palette、details/property dialog、
-appearanceのlive preview、endpoint haloも既存のtransaction境界を共有します。Meaning actionと破壊操作は
-draftを開いて`Preview → Apply`へ進み、表示調整は一つのgestureまたは確定操作を一つのpresentation
-history itemとして保存します。操作名はhuman labelを主表示にし、完全IRIはidentity、tooltip、
-`Advanced`入力として保持します。Region上へのplain dragからmembershipは生成しません。
+Canvas右clickは別menuを出さず、対象を選択して右Inspectorの`ビュー`tabを直接開きます。色・透明度・線、
+template/icon、geometry、region label/z-order、edge route/terminal/caption/anchorを段階表示し、
+一gestureまたは確定操作を一つのpresentation history itemとして保存します。Region上へのplain dragから
+membershipは生成しません。
 利用者操作とhostの注入責務は[Editor interaction guide](../../docs/editor-interactions.md)を参照してください。
 
 ## Keyboard and accessibility

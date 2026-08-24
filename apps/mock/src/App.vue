@@ -423,6 +423,7 @@ function emptyDocument(): IriographDocumentV1 {
           :file-path="activeFilePath"
           :dirty="dirty"
           :saving="saving"
+          fit-on-initial-load
           :save-message="saveMessage"
           :asset-access="assetAccess"
           :pick-asset="pickWorkspaceAsset"

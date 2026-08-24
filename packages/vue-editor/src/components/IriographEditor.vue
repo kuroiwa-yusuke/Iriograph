@@ -26,6 +26,7 @@ import {
   type AssetMediaType,
   type DiagramScene,
   type EdgeRouteMode,
+  type EdgeTerminalMarker,
   type ElementGeometry,
   type IriographDocument,
   type LayoutAdapterRegistry,
@@ -33,6 +34,7 @@ import {
   type ProjectionCatalogV1,
   type ProjectionDiagnostic,
   type ProjectionRuntimeContext,
+  type RegionLabelWritingDirection,
   type ResolvedAuthoringContext,
   type ResolvedSemanticValidationContext,
   type ResourceIriAllocator,
@@ -49,9 +51,15 @@ import {
   type ViewCommand,
 } from "@iriograph/core";
 
-import AuthoringPanel from "./AuthoringPanel.vue";
+import SemanticIntentPanel, {
+  type IntentEdgeDetails,
+  type IntentElementDetails,
+  type IntentMembershipOption,
+  type IntentSequenceOption,
+  type IntentTextValue,
+  type SemanticIntent,
+} from "./SemanticIntentPanel.vue";
 import DiagramCanvas from "./DiagramCanvas.vue";
-import EditorContextMenu from "./EditorContextMenu.vue";
 import ResourceCreationPalette from "./ResourceCreationPalette.vue";
 import ResourceDetailsDialog from "./ResourceDetailsDialog.vue";
 import AppearanceEditor, { type AppearanceEditorValue } from "./AppearanceEditor.vue";
@@ -81,7 +89,6 @@ import {
 import {
   appendEdgeWaypoint,
   normalizeEditableRouting,
-  removeEdgeWaypoint,
   routingWithEndpointAnchor,
   type EdgeRoutingUpdate,
 } from "../edge-routing";
@@ -113,25 +120,22 @@ import {
   type GeometryChange,
   type IriographEditorSelectionApi,
 } from "../selection";
-import {
-  contextActionsFor,
-  type DiagramContextMenuRequest,
-  type EditorContextActionId,
-} from "../context-actions";
+import type { DiagramContextMenuRequest } from "../context-actions";
 import { catalogCreationPalette } from "../creation-palette";
 import { diagnosticGuidance } from "../diagnostic-guidance";
 import { semanticDisplayMetadata } from "../semantic-metadata";
-import { membershipRegionClassIrisAtPoint } from "../region-membership-constraints";
+import {
+  constrainMembershipRegionMovement,
+  membershipRegionClassIrisAtPoint,
+} from "../region-membership-constraints";
 import { reconcilePresentationScene } from "../presentation-scene";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
-type RegionLabelWritingDirection = "horizontal" | "vertical";
 type DocumentRefreshKind = "semantic" | "presentation";
 type DisplayInspectorAction = "appearance" | "geometry" | "region-label" | "routing";
-
-const REGION_LABEL_WRITING_DIRECTION_EXTENSION = "urn:iriograph:vue-editor:region-label-writing-direction";
+type InspectorMode = "semantic" | "appearance";
 
 const props = withDefaults(defineProps<{
   modelValue: IriographDocument;
@@ -149,6 +153,8 @@ const props = withDefaults(defineProps<{
   canSave?: boolean;
   readOnly?: boolean;
   hideHeader?: boolean;
+  /** Fit the first completed Scene for each document/view; later edits preserve the user's viewport. */
+  fitOnInitialLoad?: boolean;
   assetAccess?: AssetAccess;
   pickAsset?: AssetPicker;
   snapSettings?: DiagramSnapSettingsInput;
@@ -164,6 +170,7 @@ const props = withDefaults(defineProps<{
   canSave: true,
   readOnly: false,
   hideHeader: false,
+  fitOnInitialLoad: false,
   assetAccess: undefined,
   pickAsset: undefined,
   layoutRegistry: undefined,
@@ -226,8 +233,8 @@ const rightSidebarId = `${useId()}-right-sidebar`;
 const leftSidebarCollapsed = ref(false);
 const rightSidebarCollapsed = ref(false);
 const displayInspectorAction = ref<DisplayInspectorAction>();
-const contextMenuRequest = ref<DiagramContextMenuRequest>();
-let contextMenuReturnFocus: HTMLElement | undefined;
+const inspectorMode = ref<InspectorMode>("semantic");
+const activeSemanticIntent = ref<SemanticIntent>();
 const detailsDialogElementId = ref("");
 const creationPalette = ref<{
   kind: "node" | "region";
@@ -239,12 +246,14 @@ const appearanceEditorOpen = ref(false);
 const appearanceTargetIds = ref<string[]>([]);
 const appearancePreviewValue = ref<AppearanceEditorValue>();
 const showAllComments = ref(false);
+const showCanvasGrid = ref(true);
 let viewDialogReturnFocus: HTMLElement | undefined;
 const defaultLayoutRegistry = createStandardLayoutRegistry();
 const assetSceneSession = new AssetSceneSession();
 let lastEmittedJson = "";
 let gestureBefore: IriographDocument | undefined;
 let sceneRequestToken = 0;
+const initiallyFittedSceneKeys = new Set<string>();
 let sceneValidationAbortController: AbortController | undefined;
 let semanticRequestToken = 0;
 let semanticAbortController: AbortController | undefined;
@@ -328,13 +337,18 @@ const layoutChoices = computed(() => [...new Set([
 const selectedEdge = computed(() => selectedElement.value?.structuralKind === "edge"
   ? selectedElement.value
   : undefined);
-const selectedManualWaypoints = computed(() => selectedEdge.value?.waypoints ?? []);
 const semanticMetadata = computed(() => semanticDisplayMetadata(draft.value));
 const edgeRouteModes = computed<Record<string, EdgeRouteMode>>(() => Object.fromEntries(
   scene.value.edges.map((edge) => [edge.elementId, routeModeFor(edge)]),
 ));
 const selectedRouteMode = computed<EdgeRouteMode>(() => (
   selectedEdge.value ? routeModeFor(selectedEdge.value) : "auto"
+));
+const selectedWaypointEditingAvailable = computed(() => (
+  selectedRouteMode.value !== "straight" && selectedRouteMode.value !== "curve"
+));
+const selectedManualWaypoints = computed(() => (
+  selectedWaypointEditingAvailable.value ? selectedEdge.value?.waypoints ?? [] : []
 ));
 const selectedEdgeDisplayName = computed(() => {
   const edge = selectedEdge.value;
@@ -360,27 +374,16 @@ const selectedEdgeEndpointLabels = computed(() => {
     target: edgeEndpointLabel(edge.targetElementId, "終点"),
   };
 });
-const selectedEdgeLabelExplanation = computed(() => {
-  const provenance = selectedEdge.value?.labelProvenance;
-  if (provenance?.kind === "predicate") return "この名前はpredicateのlabelから表示しています。意味はTurtleのpredicate IRIに保持されます。";
-  if (provenance?.kind === "derived-structure" && provenance.role === "sequence-transition") return "この線は並び順から導出されています。順序badgeは表示専用で、Turtleへedge labelとして保存しません。";
-  if (provenance?.kind === "derived-structure" && provenance.role === "alternative-branch") return "この名前は分岐または分岐経路のlabelから表示しています。";
-  return "この線の表示名は意味グラフから解決されています。";
-});
-const regionLabelPlacements = computed<Record<string, RegionLabelPlacement>>(() => Object.fromEntries(
-  (scene.value.regions ?? []).map((region) => [region.elementId, regionLabelPlacementFor(region.elementId)]),
-));
-const regionLabelWritingDirections = computed<Record<string, RegionLabelWritingDirection>>(() => Object.fromEntries(
-  (scene.value.regions ?? []).map((region) => [
-    region.elementId,
-    regionLabelWritingDirectionFor(region.elementId),
-  ]),
+const regionZOrders = computed<Record<string, number>>(() => Object.fromEntries(
+  (scene.value.regions ?? []).map((region, index) => [region.elementId, regionZOrderFor(region.elementId, index)]),
 ));
 const hasSelectedEditableRouting = computed(() => Boolean(
   selectedEdge.value?.waypoints?.length
     || selectedEdge.value?.labelOffset
     || selectedEdge.value?.sourceAnchor
-    || selectedEdge.value?.targetAnchor,
+    || selectedEdge.value?.targetAnchor
+    || activeView.value?.overlay[selectedEdge.value?.elementId ?? ""]?.routing?.sourceMarker
+    || activeView.value?.overlay[selectedEdge.value?.elementId ?? ""]?.routing?.targetMarker,
 ));
 const diagnostics = computed(() => [
   ...schemaDiagnostics.value,
@@ -472,12 +475,14 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
   const terms = authoringContext.value?.terms.filter((term) => (
     term.kind === "property"
     && !term.structural
+    && !/^http:\/\/www\.w3\.org\/1999\/02\/22-rdf-syntax-ns#_[1-9][0-9]*$/u.test(term.iri)
     && (!term.objectKinds || term.objectKinds.includes("iri"))
   )) ?? [];
   const graph = parseSemanticGraph(draft.value);
   const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
   const rdfsDomain = "http://www.w3.org/2000/01/rdf-schema#domain";
   const rdfsRange = "http://www.w3.org/2000/01/rdf-schema#range";
+  const rdfsSubClassOf = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
   const rdfsSeeAlso = "http://www.w3.org/2000/01/rdf-schema#seeAlso";
   const typesOf = (iri: string) => new Set(graph.quads.filter((quad) => (
     quad.subject.termType === "NamedNode"
@@ -491,22 +496,41 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
     && quad.predicate.value === relationIri
     && quad.object.termType === "NamedNode"
   )).map((quad) => quad.object.value);
-  const sourceTypes = typesOf(authoringDraft.value.sourceIri);
-  const targetTypes = typesOf(authoringDraft.value.targetIri);
+  const expandTypes = (initial: Set<string>) => {
+    const result = new Set(initial);
+    const queue = [...initial];
+    while (queue.length) {
+      const typeIri = queue.shift()!;
+      for (const parent of relationIris(typeIri, rdfsSubClassOf)) {
+        if (result.has(parent)) continue;
+        result.add(parent);
+        queue.push(parent);
+      }
+    }
+    return result;
+  };
+  const sourceTypes = expandTypes(typesOf(
+    authoringDraft.value.sourceIri || selectedAuthoringResources.value[0]?.iri || "",
+  ));
+  const targetTypes = expandTypes(typesOf(
+    authoringDraft.value.targetIri || selectedAuthoringResources.value[1]?.iri || "",
+  ));
   const labelFor = (iri: string) => semanticMetadata.value[iri]?.labels[0]?.value ?? iri;
-  return terms.map((term) => {
+  return terms.flatMap((term): AuthoringChoice[] => {
     const { iri, label } = term;
     const domains = relationIris(iri, rdfsDomain);
     const ranges = relationIris(iri, rdfsRange);
+    if (domains.length && sourceTypes.size && !domains.every((value) => sourceTypes.has(value))) return [];
+    if (ranges.length && targetTypes.size && !ranges.every((value) => targetTypes.has(value))) return [];
     let priority = 0;
-    if (domains.length && sourceTypes.size) priority += domains.some((value) => sourceTypes.has(value)) ? 20 : -20;
-    if (ranges.length && targetTypes.size) priority += ranges.some((value) => targetTypes.has(value)) ? 10 : -10;
+    if (domains.length && sourceTypes.size) priority += 20;
+    if (ranges.length && targetTypes.size) priority += 10;
     const exampleQuad = graph.quads.find((quad) => (
       quad.subject.termType === "NamedNode"
       && quad.predicate.value === iri
       && quad.object.termType === "NamedNode"
     ));
-    return {
+    return [{
       iri,
       label: label ?? semanticMetadata.value[iri]?.labels[0]?.value,
       description: term.description
@@ -516,7 +540,7 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
         ? `${labelFor(exampleQuad.subject.value)} → ${labelFor(exampleQuad.object.value)}`
         : undefined),
       priority,
-    };
+    }];
   }).sort((left, right) => (
     (right.priority ?? 0) - (left.priority ?? 0)
     || (left.label ?? left.iri).localeCompare(right.label ?? right.iri, "ja")
@@ -588,6 +612,145 @@ const selectedAuthoringResources = computed<AuthoringChoice[]>(() => {
   return choices.filter((choice, index) => (
     choices.findIndex((candidate) => candidate.iri === choice.iri) === index
   ));
+});
+const intentElementDetails = computed<IntentElementDetails | undefined>(() => {
+  if (selectedAuthoringResources.value.length !== 1) return undefined;
+  const selected = selectedElement.value;
+  if (!selected || selected.structuralKind === "edge") return undefined;
+  const graph = parseSemanticGraph(draft.value);
+  const classIris = graph.quads.filter((quad) => (
+    quad.subject.termType === "NamedNode"
+    && quad.subject.value === selected.semanticRef
+    && quad.predicate.value === "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+    && quad.object.termType === "NamedNode"
+  )).map((quad) => quad.object.value);
+  const semanticText = selected.semanticText;
+  const toValue = (item: NonNullable<typeof semanticText>["labels"][number]): IntentTextValue => ({
+    value: item.value,
+    ...(item.language ? { language: item.language } : {}),
+    ...(item.datatypeIri ? { datatypeIri: item.datatypeIri } : {}),
+  });
+  const primaryStatementRef = semanticText?.primaryLabel?.statementRef;
+  const labels = semanticText?.labels ?? [];
+  const orderedLabels = primaryStatementRef
+    ? [...labels].sort((left, right) => Number(right.statementRef === primaryStatementRef) - Number(left.statementRef === primaryStatementRef))
+    : labels;
+  return {
+    iri: selected.semanticRef,
+    label: selected.label,
+    labelValues: orderedLabels.length ? orderedLabels.map(toValue) : [{ value: selected.label }],
+    commentValues: (semanticText?.comments ?? []).map(toValue),
+    classIris: [...new Set(classIris)],
+  };
+});
+const intentEdgeDetails = computed<IntentEdgeDetails | undefined>(() => {
+  const edge = selectedEdge.value;
+  if (!edge) return undefined;
+  const source = geometryElement(edge.sourceElementId);
+  const target = geometryElement(edge.targetElementId);
+  const capability = edge.provenance?.editCapability;
+  const removable = capability?.command === "remove-statement" ? capability : undefined;
+  const provenance = edge.labelProvenance;
+  let derivedReason: string | undefined;
+  if (provenance?.kind === "derived-structure") {
+    derivedReason = provenance.role === "sequence-transition"
+      ? "この線は並び順から自動生成されています。関係として直接編集せず、元の並び順を編集してください。"
+      : "この線は分岐構造から自動生成されています。関係として直接編集せず、元の分岐を編集してください。";
+  } else if (!removable) {
+    derivedReason = "この線には元のRDF文を特定できる編集情報がないため、直接変更できません。";
+  }
+  return {
+    label: selectedEdgeDisplayName.value,
+    sourceIri: removable?.subject ?? source?.semanticRef ?? "",
+    sourceLabel: source?.label ?? "始点",
+    predicateIri: removable?.predicate
+      ?? (provenance?.kind === "predicate" ? provenance.labelSemanticRef : edge.semanticRef),
+    targetIri: removable?.object ?? target?.semanticRef ?? "",
+    targetLabel: target?.label ?? "終点",
+    statementComments: (edge.statementComments ?? []).map((comment) => ({
+      value: comment.value,
+      ...(comment.language ? { language: comment.language } : {}),
+      ...(comment.datatypeIri ? { datatypeIri: comment.datatypeIri } : {}),
+    })),
+    capability: removable,
+    derivedReason,
+  };
+});
+const intentMembershipOptions = computed<IntentMembershipOption[]>(() => {
+  const result: IntentMembershipOption[] = [];
+  const candidates = [...scene.value.containers, ...(scene.value.regions ?? [])];
+  for (const container of candidates) {
+    const memberships = (scene.value.memberships ?? []).filter((membership) => (
+      membership.containerElementId === container.elementId
+      || membership.regionElementId === container.elementId
+    ));
+    const capability = memberships.map((item) => item.provenance.editCapability)
+      .find((item): item is Extract<SemanticEditCapability, { command: "set-membership" }> => item?.command === "set-membership");
+    const ruleId = container.provenance?.rule?.ruleId;
+    const rule = activeCatalog.value?.rules.find((item) => item.ruleId === ruleId);
+    const operator = rule?.project;
+    if (!capability && operator?.operator !== "membership-container" && operator?.operator !== "membership-region") continue;
+    const memberIris = memberships.flatMap((membership) => {
+      const member = geometryElement(membership.memberElementId);
+      return member ? [member.semanticRef] : [];
+    });
+    result.push({
+      containerIri: container.semanticRef,
+      label: container.label,
+      containerTypeIri: capability?.containerTypeIri
+        ?? (rule?.match.kind === "type" ? rule.match.iri : ""),
+      predicateIri: capability?.predicate
+        ?? (operator?.operator === "membership-container" || operator?.operator === "membership-region"
+          ? operator.membershipPredicate
+          : ""),
+      containerPosition: capability?.containerPosition
+        ?? (operator?.operator === "membership-region" ? operator.containerPosition : "subject"),
+      memberIris: [...new Set(memberIris)],
+    });
+  }
+  return result.filter((option) => option.containerTypeIri && option.predicateIri);
+});
+const intentSequenceOptions = computed<IntentSequenceOption[]>(() => {
+  if (selectedAuthoringResources.value.length === 0) return [];
+  const selectedIris = new Set(selectedAuthoringResources.value.map((resource) => resource.iri));
+  const result: IntentSequenceOption[] = [];
+  for (const sequence of scene.value.containers.filter((container) => container.groupRole === "sequence")) {
+    const memberships = (scene.value.memberships ?? [])
+      .filter((membership) => (
+        membership.role === "sequence-member"
+        && membership.containerElementId === sequence.elementId
+      ))
+      .sort((left, right) => (
+        (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER)
+        || left.semanticRef.localeCompare(right.semanticRef)
+      ));
+    if (!selectedIris.has(sequence.semanticRef) && !memberships.some((membership) => {
+      const member = geometryElement(membership.memberElementId);
+      return member ? selectedIris.has(member.semanticRef) : false;
+    })) continue;
+    const capability = memberships.map((membership) => membership.provenance.editCapability)
+      .find((item): item is Extract<SemanticEditCapability, { command: "set-sequence" }> => item?.command === "set-sequence");
+    const rule = activeCatalog.value?.rules.find((item) => item.ruleId === sequence.provenance?.rule?.ruleId);
+    const operator = rule?.project;
+    const sequenceTypeIri = capability?.sequenceTypeIri
+      ?? (rule?.match.kind === "type" ? rule.match.iri : "");
+    const ordinalPredicatePrefix = capability?.ordinalPredicatePrefix
+      ?? (operator?.operator === "ordinal-sequence" ? operator.ordinalPredicatePrefix : "");
+    if (!sequenceTypeIri || !ordinalPredicatePrefix) continue;
+    const members = memberships.flatMap((membership) => {
+      const member = geometryElement(membership.memberElementId);
+      return member ? [{ iri: member.semanticRef, label: member.label }] : [];
+    });
+    result.push({
+      sequenceIri: sequence.semanticRef,
+      label: sequence.label,
+      sequenceTypeIri,
+      ordinalPredicatePrefix,
+      memberIris: members.map((member) => member.iri),
+      members,
+    });
+  }
+  return result;
 });
 const authoringResourcePickerLabel = computed(() => {
   const target = authoringResourcePicker.value;
@@ -753,6 +916,7 @@ function authoringPreviewResourceChips(
     case "connect-resources":
       add(value.sourceIri, "始点");
       add(value.targetIri, "終点");
+      for (const targetIri of value.targetIris) add(targetIri, "終点");
       break;
     case "set-membership":
       add(value.containerIri, "領域");
@@ -808,9 +972,43 @@ function authoringPreviewRelations(
   }
   return [];
 }
+
+function patchPreviewRelations(preview: AuthoringPreview): AuthoringPreviewView["relations"] {
+  const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+  const labelForResource = (iri: string) => authoringResourceChoices.value.find(
+    (item) => item.iri === iri,
+  )?.label ?? semanticMetadata.value[iri]?.labels[0]?.value ?? compactRef(iri);
+  const labelForPredicate = (iri: string) => authoringContext.value?.terms.find(
+    (term) => term.iri === iri,
+  )?.label ?? semanticMetadata.value[iri]?.labels[0]?.value ?? compactRef(iri);
+  const convert = (
+    change: AuthoringTripleChange,
+    action: "add" | "remove",
+  ): AuthoringPreviewView["relations"][number] | undefined => {
+    if (change.subject.termType !== "NamedNode" || change.object.termType !== "NamedNode") return undefined;
+    if (change.predicateIri === rdfType) return undefined;
+    return {
+      kind: change.predicateIri === "http://www.w3.org/2000/01/rdf-schema#member"
+        ? "membership"
+        : "edge",
+      action,
+      label: `${labelForResource(change.subject.value)}（${labelForPredicate(change.predicateIri)}）${labelForResource(change.object.value)}`,
+    };
+  };
+  const relations = [
+    ...preview.patch.removed.map((change) => convert(change, "remove")),
+    ...preview.patch.added.map((change) => convert(change, "add")),
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  return relations.filter((relation, index) => relations.findIndex((candidate) => (
+    candidate.action === relation.action
+    && candidate.kind === relation.kind
+    && candidate.label === relation.label
+  )) === index);
+}
 const authoringPreviewView = computed<AuthoringPreviewView | undefined>(() => {
   const preview = authoringPreview.value;
   if (!preview) return undefined;
+  const patchRelations = patchPreviewRelations(preview);
   return {
     confirmationId: preview.confirmationId,
     valid: preview.valid,
@@ -820,10 +1018,21 @@ const authoringPreviewView = computed<AuthoringPreviewView | undefined>(() => {
     candidateSource: preview.candidateSource ?? "",
     operationLabel: authoringPreviewDescriptor.value?.operationLabel
       ?? authoringOperationLabel(authoringDraft.value.kind),
-    resourceChips: authoringPreviewDescriptor.value?.resourceChips
-      ?? authoringPreviewResourceChips(authoringDraft.value),
-    relations: authoringPreviewRelations(authoringDraft.value),
+    resourceChips: authoringPreviewDescriptor.value?.resourceChips.length
+      ? authoringPreviewDescriptor.value.resourceChips
+      : authoringPreviewResourceChips(authoringDraft.value),
+    relations: patchRelations.length ? patchRelations : authoringPreviewRelations(authoringDraft.value),
   };
+});
+const authoringDeletionPreview = computed(() => {
+  const preview = authoringPreview.value;
+  if (!preview) return undefined;
+  const resourceSemanticRefs = preview.commands.flatMap((command) => (
+    command.type === "delete-resource" ? [command.resourceIri] : []
+  ));
+  const statementRefs = preview.patch.removed.map((change) => change.statementRef);
+  if (resourceSemanticRefs.length === 0 && statementRefs.length === 0) return undefined;
+  return { resourceSemanticRefs, statementRefs };
 });
 const authoringDraftPosition = computed<Point | undefined>(() => {
   if (authoringDraft.value.kind !== "create-resource") return undefined;
@@ -898,10 +1107,6 @@ const selectedElementDiagnostics = computed(() => {
 const selectedContainmentWarnings = computed(() => containmentWarnings.value.filter((warning) => (
   warning.elementId === selectedElementId.value
 )));
-const contextMenuActions = computed(() => contextActionsFor(
-  contextMenuRequest.value?.kind ?? "blank",
-  props.readOnly,
-));
 const detailsDialogTarget = computed(() => {
   const element = [
   ...scene.value.nodes,
@@ -1101,6 +1306,7 @@ async function refreshScene(): Promise<void> {
     rawScene.value = committed.scene;
     sceneLoading.value = false;
     clearMissingSelection(scene.value);
+    await fitInitialSceneIfNeeded(document.documentId, viewId);
     return;
   }
 
@@ -1142,8 +1348,21 @@ async function refreshScene(): Promise<void> {
       }
       sceneLoading.value = false;
       clearMissingSelection(scene.value);
+      await fitInitialSceneIfNeeded(document.documentId, viewId);
     }
   }
+}
+
+async function fitInitialSceneIfNeeded(documentId: string, viewId: string): Promise<void> {
+  if (!props.fitOnInitialLoad) return;
+  const key = `${documentId}\u0000${viewId}`;
+  if (initiallyFittedSceneKeys.has(key)) return;
+  if (scene.value.nodes.length + scene.value.containers.length + (scene.value.regions?.length ?? 0) === 0) return;
+  await nextTick();
+  const canvas = diagramCanvas.value;
+  if (!canvas) return;
+  initiallyFittedSceneKeys.add(key);
+  await canvas.fitToView();
 }
 
 async function refreshPresentationScene(): Promise<void> {
@@ -1398,26 +1617,30 @@ function endGesture(): void {
 }
 
 function changeGeometry(payload: { elementId: string; geometry: ElementGeometry }): void {
-  mutateDocument((document) => {
-    const element = geometryElement(payload.elementId);
-    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
-    if (!element || !view) return;
-    const current = view.overlay[payload.elementId] ?? { semanticRef: element.semanticRef };
-    view.overlay[payload.elementId] = {
-      ...current,
-      geometry: roundGeometry(payload.geometry),
-      pinned: true,
-      placement: "user",
-    };
-  }, false);
+  changeGeometryBatch([payload], false);
 }
 
 function changeGeometryBatch(changes: readonly GeometryChange[], recordHistory = false): void {
   if (changes.length === 0) return;
+  const constrained = constrainMembershipRegionMovement(scene.value, changes);
+  applyDiagnostics.value = applyDiagnostics.value.filter((diagnostic) => (
+    diagnostic.code !== "membership-region-missing"
+    && diagnostic.code !== "membership-region-intersection-empty"
+  ));
+  if (constrained.issue) {
+    applyDiagnostics.value.push({
+      severity: "warning",
+      category: "layout",
+      code: constrained.issue.code,
+      message: constrained.issue.message,
+      semanticRef: geometryElement(constrained.issue.elementId)?.semanticRef,
+    });
+  }
+  if (constrained.changes.length === 0) return;
   mutateDocument((document) => {
     const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     if (!view) return;
-    for (const change of changes) {
+    for (const change of constrained.changes) {
       const element = geometryElement(change.elementId);
       if (!element) continue;
       const current = view.overlay[change.elementId];
@@ -1474,16 +1697,29 @@ function changeRouting(
     const requestedRouting = payload.routing && !edge.label
       ? { ...payload.routing, labelOffset: undefined }
       : payload.routing;
-    const routingValue = normalizeEditableRouting(requestedRouting);
+    const effectiveRouteMode = current.routing?.routeMode ?? edge.routeMode;
+    const waypointSafeRouting = requestedRouting
+      && (effectiveRouteMode === "straight" || effectiveRouteMode === "curve")
+      ? { ...requestedRouting, waypoints: undefined }
+      : requestedRouting;
+    const routingValue = normalizeEditableRouting(waypointSafeRouting);
     const routeMode: EdgeRouteMode | undefined = preserveRouteMode
       ? current.routing?.routeMode === "manual"
         ? routingValue?.waypoints?.length ? "manual" : undefined
         : current.routing?.routeMode
       : undefined;
-    const routing = routingValue || current.routing?.extensions || routeMode
+    const sourceMarker = preserveRouteMode
+      ? routingValue?.sourceMarker ?? current.routing?.sourceMarker
+      : routingValue?.sourceMarker;
+    const targetMarker = preserveRouteMode
+      ? routingValue?.targetMarker ?? current.routing?.targetMarker
+      : routingValue?.targetMarker;
+    const routing = routingValue || current.routing?.extensions || routeMode || sourceMarker || targetMarker
       ? {
           ...routingValue,
           ...(routeMode ? { routeMode } : {}),
+          ...(sourceMarker ? { sourceMarker } : {}),
+          ...(targetMarker ? { targetMarker } : {}),
           ...(current.routing?.extensions ? { extensions: clone(current.routing.extensions) } : {}),
         }
       : undefined;
@@ -1509,7 +1745,7 @@ function changeRouting(
 
 function addSelectedWaypoint(): void {
   const edge = selectedEdge.value;
-  if (!edge) return;
+  if (!edge || !selectedWaypointEditingAvailable.value) return;
   changeRouting({
     elementId: edge.elementId,
     routing: {
@@ -1517,59 +1753,6 @@ function addSelectedWaypoint(): void {
       labelOffset: edge.labelOffset,
       sourceAnchor: edge.sourceAnchor,
       targetAnchor: edge.targetAnchor,
-    },
-  }, true);
-}
-
-function removeSelectedWaypoint(index: number): void {
-  const edge = selectedEdge.value;
-  if (!edge) return;
-  changeRouting({
-    elementId: edge.elementId,
-    routing: {
-      waypoints: removeEdgeWaypoint(edge.waypoints, index),
-      labelOffset: edge.labelOffset,
-      sourceAnchor: edge.sourceAnchor,
-      targetAnchor: edge.targetAnchor,
-    },
-  }, true);
-}
-
-function updateWaypointField(index: number, field: "x" | "y", event: Event): void {
-  const edge = selectedEdge.value;
-  const value = Number((event.target as HTMLInputElement).value);
-  if (!edge?.waypoints?.[index] || !Number.isFinite(value)) return;
-  const waypoints = edge.waypoints.map((point) => ({ ...point }));
-  waypoints[index]![field] = clamp(
-    value,
-    8,
-    Math.max(8, (field === "x" ? scene.value.width : scene.value.height) - 8),
-  );
-  changeRouting({
-    elementId: edge.elementId,
-    routing: {
-      waypoints,
-      labelOffset: edge.labelOffset,
-      sourceAnchor: edge.sourceAnchor,
-      targetAnchor: edge.targetAnchor,
-    },
-  }, true);
-}
-
-function updateLabelOffsetField(field: "x" | "y", event: Event): void {
-  const edge = selectedEdge.value;
-  const value = Number((event.target as HTMLInputElement).value);
-  if (!edge?.label || !Number.isFinite(value)) return;
-  changeRouting({
-    elementId: edge.elementId,
-    routing: {
-      waypoints: edge.waypoints,
-      sourceAnchor: edge.sourceAnchor,
-      targetAnchor: edge.targetAnchor,
-      labelOffset: {
-        x: field === "x" ? value : edge.labelOffset?.x ?? 0,
-        y: field === "y" ? value : edge.labelOffset?.y ?? 0,
-      },
     },
   }, true);
 }
@@ -1584,19 +1767,6 @@ function resetSelectedLabelOffset(): void {
       sourceAnchor: edge.sourceAnchor,
       targetAnchor: edge.targetAnchor,
     },
-  }, true);
-}
-
-function updateEndpointAnchor(
-  endpoint: "source" | "target",
-  event: Event,
-): void {
-  const edge = selectedEdge.value;
-  const value = Number((event.target as HTMLInputElement).value);
-  if (!edge || !Number.isFinite(value) || value < 0 || value >= 1) return;
-  changeRouting({
-    elementId: edge.elementId,
-    routing: routingWithEndpointAnchor(edge, endpoint, { position: value }),
   }, true);
 }
 
@@ -1641,6 +1811,8 @@ function setSelectedRouteMode(mode: EdgeRouteMode): void {
       || routing.labelOffset
       || routing.sourceAnchor
       || routing.targetAnchor
+      || routing.sourceMarker
+      || routing.targetMarker
       || routing.extensions,
     );
     const entry: ViewElementOverlay = { ...current, semanticRef: edge.semanticRef };
@@ -1648,6 +1820,25 @@ function setSelectedRouteMode(mode: EdgeRouteMode): void {
     else delete entry.routing;
     if (!entry.routing && !entry.appearance && !entry.geometry && !entry.extensions) delete view.overlay[edge.elementId];
     else view.overlay[edge.elementId] = entry;
+  }, true);
+}
+
+function setSelectedTerminalMarker(
+  endpoint: "source" | "target",
+  marker: EdgeTerminalMarker,
+): void {
+  const edge = selectedEdge.value;
+  if (!edge || props.readOnly) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: {
+      waypoints: edge.waypoints,
+      labelOffset: edge.labelOffset,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
+      sourceMarker: endpoint === "source" ? marker : undefined,
+      targetMarker: endpoint === "target" ? marker : undefined,
+    },
   }, true);
 }
 
@@ -1669,17 +1860,74 @@ function defaultRegionLabelPlacement(element: SceneRegion): RegionLabelPlacement
 function defaultRegionLabelWritingDirection(
   placement: RegionLabelPlacement,
 ): RegionLabelWritingDirection {
-  return placement === "left" || placement === "right" ? "vertical" : "horizontal";
+  return placement === "left" || placement === "right" ? "vertical-down" : "horizontal-right";
 }
 
 function regionLabelWritingDirectionFor(elementId: string): RegionLabelWritingDirection {
   const placement = regionLabelPlacementFor(elementId);
-  const value = activeView.value?.overlay[elementId]?.appearance?.extensions?.[
-    REGION_LABEL_WRITING_DIRECTION_EXTENSION
-  ];
-  return value === "horizontal" || value === "vertical"
+  const value = (scene.value.regions ?? []).find((candidate) => (
+    candidate.elementId === elementId
+  ))?.regionLabelWritingDirection;
+  return value === "horizontal-right" || value === "vertical-down"
     ? value
     : defaultRegionLabelWritingDirection(placement);
+}
+
+function regionLabelAnchorFor(elementId: string): number {
+  const region = (scene.value.regions ?? []).find((candidate) => candidate.elementId === elementId);
+  const value = region?.regionLabelAnchor;
+  if (typeof value === "number" && Number.isFinite(value)) return clamp(value, 0, .999999);
+  if (!region) return .125;
+  const perimeter = Math.max(1, 2 * (region.geometry.width + region.geometry.height));
+  const placement = regionLabelPlacementFor(elementId);
+  if (placement === "right") return (region.geometry.width + region.geometry.height / 2) / perimeter;
+  if (placement === "bottom") return (region.geometry.width + region.geometry.height + region.geometry.width / 2) / perimeter;
+  if (placement === "left") return (2 * region.geometry.width + region.geometry.height + region.geometry.height / 2) / perimeter;
+  return (region.geometry.width / 2) / perimeter;
+}
+
+function regionZOrderFor(elementId: string, fallback: number): number {
+  const value = (scene.value.regions ?? []).find((candidate) => (
+    candidate.elementId === elementId
+  ))?.regionZOrder;
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : fallback;
+}
+
+function updateRegionAppearance(
+  element: SceneRegion,
+  key: "regionLabelAnchor" | "regionLabelWritingDirection" | "regionZOrder",
+  value: RegionLabelWritingDirection | number | undefined,
+  recordHistory: boolean,
+): void {
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
+    const appearance = { ...current.appearance };
+    if (value === undefined) delete appearance[key];
+    else if (key === "regionLabelWritingDirection") appearance[key] = value as RegionLabelWritingDirection;
+    else appearance[key] = value as number;
+    if (Object.keys(appearance).length) current.appearance = appearance;
+    else delete current.appearance;
+    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[element.elementId];
+    else view.overlay[element.elementId] = current;
+  }, recordHistory);
+}
+
+function updateRegionLabelAnchor(payload: { elementId: string; anchor: number }): void {
+  const region = (scene.value.regions ?? []).find((candidate) => candidate.elementId === payload.elementId);
+  if (!region || props.readOnly || !Number.isFinite(payload.anchor)) return;
+  updateRegionAppearance(region, "regionLabelAnchor", clamp(payload.anchor, 0, .999999), false);
+}
+
+function moveSelectedRegionLayer(direction: "back" | "front"): void {
+  const region = selectedElement.value;
+  if (region?.structuralKind !== "region" || props.readOnly) return;
+  const values = Object.values(regionZOrders.value);
+  const value = direction === "front"
+    ? Math.max(-1, ...values) + 1
+    : Math.min(1, ...values) - 1;
+  updateRegionAppearance(region, "regionZOrder", value, true);
 }
 
 function updateSelectedRegionLabelPlacement(event: Event): void {
@@ -1706,27 +1954,15 @@ function updateSelectedRegionLabelWritingDirection(event: Event): void {
   if (
     element?.structuralKind !== "region"
     || props.readOnly
-    || (direction !== "horizontal" && direction !== "vertical")
+    || (direction !== "horizontal-right" && direction !== "vertical-down")
   ) return;
-  mutateDocument((document) => {
-    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
-    if (!view) return;
-    const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
-    const appearance = { ...current.appearance };
-    const extensions = { ...appearance.extensions };
-    const placement = regionLabelPlacementFor(element.elementId);
-    if (direction === defaultRegionLabelWritingDirection(placement)) {
-      delete extensions[REGION_LABEL_WRITING_DIRECTION_EXTENSION];
-    } else {
-      extensions[REGION_LABEL_WRITING_DIRECTION_EXTENSION] = direction;
-    }
-    if (Object.keys(extensions).length) appearance.extensions = extensions;
-    else delete appearance.extensions;
-    if (Object.keys(appearance).length) current.appearance = appearance;
-    else delete current.appearance;
-    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[element.elementId];
-    else view.overlay[element.elementId] = current;
-  }, true);
+  const placement = regionLabelPlacementFor(element.elementId);
+  updateRegionAppearance(
+    element,
+    "regionLabelWritingDirection",
+    direction === defaultRegionLabelWritingDirection(placement) ? undefined : direction,
+    true,
+  );
 }
 
 function updateGeometryField(field: keyof ElementGeometry, event: Event): void {
@@ -1867,6 +2103,24 @@ function updateAppearance(
   });
 }
 
+function updateSelectedEdgeCaption(event: Event): void {
+  const edge = selectedEdge.value;
+  if (!edge || props.readOnly) return;
+  const value = (event.target as HTMLTextAreaElement).value.trimEnd();
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[edge.elementId] ?? { semanticRef: edge.semanticRef };
+    const appearance = { ...current.appearance };
+    if (value) appearance.edgeCaption = value;
+    else delete appearance.edgeCaption;
+    if (Object.keys(appearance).length) current.appearance = appearance;
+    else delete current.appearance;
+    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[edge.elementId];
+    else view.overlay[edge.elementId] = current;
+  }, true);
+}
+
 function openAppearanceEditor(): void {
   const available = new Set([
     ...scene.value.nodes,
@@ -1914,7 +2168,7 @@ function applyAppearance(value: AppearanceEditorValue): void {
       };
       if (!appearance.styleRef) delete appearance.styleRef;
       if (!appearance.style) delete appearance.style;
-      if (!appearance.templateRef && !appearance.iconRef && !appearance.styleRef && !appearance.styleToken && !appearance.style && !appearance.extensions) {
+      if (Object.keys(appearance).length === 0) {
         delete current.appearance;
       } else {
         current.appearance = appearance;
@@ -2088,6 +2342,94 @@ async function previewDetailsCommands(commands: AuthoringCommand[]): Promise<voi
   }
 }
 
+function previewIntentDraft(next: EditorAuthoringDraft, operationLabel: string): void {
+  if (props.readOnly) return;
+  updateAuthoringDraft(next);
+  authoringPreviewDescriptor.value = {
+    operationLabel,
+    resourceChips: authoringPreviewResourceChips(next),
+  };
+  void previewStructuredAuthoring();
+}
+
+async function previewIntentCommands(
+  commands: AuthoringCommand[],
+  operationLabel: string,
+  resources: Array<{ iri: string; label: string; role: string }>,
+): Promise<void> {
+  const context = authoringContext.value;
+  if (!context || !authoringEnabled.value || authoringBusy.value) return;
+  if (commands.length === 0) {
+    applyDiagnostics.value = [{
+      severity: "warning",
+      code: "authoring-no-change",
+      message: "変更する項目を選んでから、もう一度確認してください。",
+    }];
+    return;
+  }
+  cancelAuthoringRequest();
+  const requestToken = ++authoringRequestToken;
+  const controller = new AbortController();
+  authoringAbortController = controller;
+  const sourceDocument = clone(draft.value);
+  const sourceJson = JSON.stringify(sourceDocument);
+  authoringBusy.value = true;
+  try {
+    const preview = await previewAuthoringCommands(sourceDocument, commands, context, {
+      allocator: props.resourceIriAllocator ?? context.allocator,
+      signal: controller.signal,
+    });
+    if (
+      requestToken !== authoringRequestToken
+      || controller.signal.aborted
+      || props.readOnly
+      || JSON.stringify(draft.value) !== sourceJson
+    ) return;
+    authoringDraft.value = draftFromAuthoringCommand(commands[0]!) ?? emptyAuthoringDraft();
+    authoringPreviewDescriptor.value = { operationLabel, resourceChips: resources };
+    authoringPreview.value = preview;
+    applyDiagnostics.value = clone(preview.diagnostics);
+  } catch (cause) {
+    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
+    authoringPreview.value = undefined;
+    authoringPreviewDescriptor.value = undefined;
+    applyDiagnostics.value = [authoringFailureDiagnostic("intent-preview-failed", cause)];
+  } finally {
+    if (requestToken === authoringRequestToken) {
+      authoringAbortController = undefined;
+      authoringBusy.value = false;
+    }
+  }
+}
+
+function beginIntentResourcePicking(field: "sourceIri" | "targetIri"): void {
+  const edge = intentEdgeDetails.value;
+  if (edge && authoringDraft.value.kind !== "connect-resources") {
+    const next = emptyAuthoringDraft("connect-resources", edge.sourceIri);
+    next.sourceIri = edge.sourceIri;
+    next.targetIri = edge.targetIri;
+    next.predicateIri = edge.predicateIri;
+    updateAuthoringDraft(next);
+  }
+  beginResourcePicking({ field });
+}
+
+function seedSemanticEdgeEndpoint(payload: {
+  edgeElementId: string;
+  endpoint: "source" | "target";
+  targetSemanticRef: string;
+}): void {
+  if (
+    inspectorMode.value !== "semantic"
+    || activeSemanticIntent.value !== "edit-relation"
+    || selectedEdge.value?.elementId !== payload.edgeElementId
+    || intentEdgeDetails.value?.derivedReason
+  ) return;
+  const field = payload.endpoint === "source" ? "sourceIri" : "targetIri";
+  beginIntentResourcePicking(field);
+  seedDraftResource(payload.targetSemanticRef);
+}
+
 async function applyStructuredAuthoring(): Promise<void> {
   const context = authoringContext.value;
   const preview = authoringPreview.value;
@@ -2190,97 +2532,19 @@ function seedSemanticEdit(elementId: string): void {
 }
 
 function openContextMenu(request: DiagramContextMenuRequest): void {
-  contextMenuReturnFocus = document.activeElement instanceof HTMLElement
-    ? document.activeElement
-    : undefined;
-  contextMenuRequest.value = {
-    ...request,
-    clientX: Math.max(8, Math.min(request.clientX, window.innerWidth - 228)),
-    clientY: Math.max(8, Math.min(request.clientY, window.innerHeight - 328)),
-  };
-}
-
-function closeContextMenu(restoreFocus = true): void {
-  contextMenuRequest.value = undefined;
-  const target = contextMenuReturnFocus;
-  contextMenuReturnFocus = undefined;
-  if (restoreFocus) void nextTick(() => target?.isConnected && target.focus());
-}
-
-function runContextAction(actionId: EditorContextActionId): void {
-  const request = contextMenuRequest.value;
-  const element = request?.elementId
+  if (request.kind === "blank") return;
+  const element = request.elementId
     ? [...scene.value.nodes, ...scene.value.containers, ...(scene.value.regions ?? []), ...scene.value.edges]
       .find((candidate) => candidate.elementId === request.elementId)
     : undefined;
-  closeContextMenu(false);
-  switch (actionId) {
-    case "edit-name":
-    case "edit-details":
-      if (element && element.structuralKind !== "edge") openDetailsDialog(element.elementId);
-      return;
-    case "create-relation":
-      if (element && element.structuralKind !== "edge") seedRelationFrom(element.semanticRef);
-      return;
-    case "edit-containment":
-      if (element && element.structuralKind !== "edge") seedMembershipFor(element.semanticRef);
-      return;
-    case "edit-appearance":
-      openAppearanceEditor();
-      return;
-    case "delete-resource":
-      if (element && element.structuralKind !== "edge") {
-        updateAuthoringDraft({
-          ...emptyAuthoringDraft("delete-resource"),
-          resourceIri: element.semanticRef,
-        });
-      }
-      return;
-    case "delete-relation":
-      if (element?.structuralKind === "edge") seedSemanticEdit(element.elementId);
-      return;
-    case "edit-routing":
-      if (element?.structuralKind === "edge" && !element.waypoints?.length) addSelectedWaypoint();
-      return;
-    case "edit-endpoints":
-      appearanceEditorOpen.value = false;
-      void nextTick(() => document.querySelector<HTMLElement>(".iriograph-endpoint-anchor-fields input")?.focus());
-      return;
-    case "inspect-edge":
-      if (element?.structuralKind === "edge" && element.labelProvenance?.kind === "predicate") {
-        openDetailsDialog(element.elementId);
-      } else {
-        appearanceEditorOpen.value = false;
-        void nextTick(() => document.querySelector<HTMLElement>(".iriograph-endpoint-anchor-fields input")?.focus());
-      }
-      return;
-    case "create-node":
-      creationPalette.value = {
-        kind: "node",
-        position: request?.canvasPosition,
-        classIris: request?.canvasPosition
-          ? membershipRegionClassIrisAtPoint(scene.value, request.canvasPosition)
-          : [],
-      };
-      return;
-    case "create-region":
-      creationPalette.value = { kind: "region", position: request?.canvasPosition };
-      return;
-    case "add-contained-element":
-      if (element && element.structuralKind !== "edge") {
-        const position = request?.canvasPosition ?? ("geometry" in element ? {
-          x: element.geometry.x + element.geometry.width / 2,
-          y: element.geometry.y + element.geometry.height / 2,
-        } : undefined);
-        const classIris = position ? membershipRegionClassIrisAtPoint(scene.value, position) : [];
-        creationPalette.value = {
-          kind: "node",
-          position,
-          classIris,
-          ...(classIris.length === 0 ? { containerIri: element.semanticRef } : {}),
-        };
-      }
-  }
+  if (!element) return;
+  rightSidebarCollapsed.value = false;
+  inspectorMode.value = "appearance";
+  displayInspectorAction.value = element.structuralKind === "edge"
+    ? "routing"
+    : element.structuralKind === "region"
+      ? "region-label"
+      : "appearance";
 }
 
 function seedRelationFrom(sourceIri: string): void {
@@ -3468,9 +3732,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :containment-warning-element-ids="containmentWarningElementIds"
             :semantic-metadata="semanticMetadata"
             :show-all-comments="showAllComments"
+            :show-grid="showCanvasGrid"
             :edge-route-modes="edgeRouteModes"
-            :region-label-placements="regionLabelPlacements"
-            :region-label-writing-directions="regionLabelWritingDirections"
+            :semantic-endpoint-reconnect="inspectorMode === 'semantic' && activeSemanticIntent === 'edit-relation' && Boolean(intentEdgeDetails && !intentEdgeDetails.derivedReason)"
+            :deletion-preview-resource-refs="authoringDeletionPreview?.resourceSemanticRefs"
+            :deletion-preview-statement-refs="authoringDeletionPreview?.statementRefs"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
             @selection-set-request="selectElements"
@@ -3479,9 +3745,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @resize-change="changeGeometry"
             @geometry-batch-change="changeGeometryBatch"
             @routing-update="changeRouting"
-            @semantic-edit-request="seedSemanticEdit"
+            @region-label-update="updateRegionLabelAnchor"
             @semantic-position-request="seedDraftPosition"
             @semantic-resource-request="seedDraftResource"
+            @semantic-endpoint-reconnect-request="seedSemanticEdgeEndpoint"
             @semantic-pick-cancel="cancelAuthoringPicking"
             @context-menu-request="openContextMenu"
           />
@@ -3535,55 +3802,50 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </main>
 
       <aside v-show="!rightSidebarCollapsed" :id="rightSidebarId" class="iriograph-inspector">
-        <section v-if="selectedEdge && displayInspectorAction === 'routing'" class="iriograph-edge-routing-quick" aria-label="選択した関係の経路">
-          <header><div><small>SELECTED RELATION</small><strong>{{ selectedEdgeDisplayName }}</strong></div><span>{{ selectedManualWaypoints.length }} waypoint</span></header>
-          <div class="iriograph-edge-contract"><span>{{ selectedEdgeEndpointLabels.source }}</span><b>→</b><span>{{ selectedEdgeEndpointLabels.target }}</span></div>
-          <p>{{ selectedEdgeLabelExplanation }}</p>
-          <button v-if="selectedEdge.labelProvenance?.kind === 'predicate'" type="button" class="iriograph-wide-button" :disabled="readOnly || !authoringEnabled" @click="openDetailsDialog(selectedEdge.elementId)">関係名・説明を編集</button>
-          <label><span>線の形式</span><select :value="selectedRouteMode" :disabled="readOnly" @change="setSelectedRouteMode(($event.target as HTMLSelectElement).value as EdgeRouteMode)"><option value="auto">自動</option><option value="straight">直線（waypointなし）</option><option value="orthogonal">直交線</option><option value="curve">曲線</option><option value="manual">waypointで調整</option></select></label>
-          <button v-if="selectedRouteMode === 'manual'" type="button" class="iriograph-wide-button" :disabled="readOnly" @click="addSelectedWaypoint">Waypointを追加</button>
-          <small>接点と詳細な座標は下の「経路・接点」で調整できます。</small>
-        </section>
-        <AuthoringPanel
-          :model-value="authoringDraft"
+        <nav class="iriograph-inspector-mode-tabs" aria-label="編集する情報">
+          <button type="button" :class="{ selected: inspectorMode === 'semantic' }" :aria-pressed="inspectorMode === 'semantic'" @click="inspectorMode = 'semantic'">意味</button>
+          <button type="button" :class="{ selected: inspectorMode === 'appearance' }" :aria-pressed="inspectorMode === 'appearance'" @click="inspectorMode = 'appearance'">ビュー</button>
+        </nav>
+        <SemanticIntentPanel
+          v-show="inspectorMode === 'semantic'"
           :enabled="authoringEnabled"
           :blocked-reason="authoringBlockedReason"
           :busy="authoringBusy"
-          :classes="authoringClassChoices"
-          :properties="authoringPropertyChoices"
-          :edge-predicates="authoringEdgeChoices"
           :resources="authoringResourceChoices"
-          :containers="authoringContainerChoices"
-          :capabilities="authoringCapabilityChoices"
-          :structures="authoringStructureChoices"
-          :selected-resource="selectedAuthoringResource"
           :selected-resources="selectedAuthoringResources"
-          :picker-target="authoringResourcePicker"
+          :selected-edge="intentEdgeDetails"
+          :element-details="intentElementDetails"
+          :classes="authoringClassChoices"
+          :predicates="authoringEdgeChoices"
+          :memberships="intentMembershipOptions"
+          :sequences="intentSequenceOptions"
+          :picked-source-iri="authoringDraft.sourceIri"
+          :picked-target-iri="authoringDraft.targetIri"
           :preview="authoringPreviewView"
-          :diagnostics="applyDiagnostics"
-          @update:model-value="updateAuthoringDraft"
-          @preview="previewStructuredAuthoring"
+          @preview-draft="previewIntentDraft"
+          @preview-commands="previewIntentCommands"
           @apply="applyStructuredAuthoring"
           @cancel="cancelAuthoringDraft"
-          @pick-position="beginDraftPositionPicking"
-          @pick-resource="beginResourcePicking"
-          @seed-selection="seedSelectedResource"
-          @open-details="selectedElement && selectedElement.structuralKind !== 'edge' && openDetailsDialog(selectedElement.elementId)"
-          @open-palette="creationPalette = { kind: 'node' }"
+          @pick-resource="beginIntentResourcePicking"
+          @intent-change="activeSemanticIntent = $event"
         />
-        <div class="iriograph-inspector-divider"><small>DISPLAY INSPECTOR</small><span>View overlay</span></div>
+        <div v-show="inspectorMode === 'appearance'" class="iriograph-display-inspector">
+        <section class="iriograph-grid-visibility">
+          <label><span>Canvasグリッド</span><button type="button" :aria-pressed="showCanvasGrid" @click="showCanvasGrid = !showCanvasGrid">{{ showCanvasGrid ? '表示中' : '非表示' }}</button></label>
+          <small>Snap間隔 {{ snapSettings.grid.size }}。表示設定はファイルへ保存しません。</small>
+        </section>
         <header>
-          <div><small>DISPLAY</small><strong>{{ selectedElement?.label ?? "No selection" }}</strong></div>
+          <div><small>VIEW</small><strong>{{ selectedElement?.label ?? "選択なし" }}</strong></div>
           <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択` : selectedElement.structuralKind === 'edge' ? '関係' : selectedElement.structuralKind === 'node' ? '要素' : '領域' }}</span>
         </header>
         <template v-if="selectedElement">
-          <nav class="iriograph-display-actions" aria-label="表示の編集操作">
+          <nav class="iriograph-display-actions" aria-label="ビューの編集操作">
             <button
               type="button"
               :class="{ selected: displayInspectorAction === 'appearance' }"
               :aria-current="displayInspectorAction === 'appearance' ? 'step' : undefined"
               @click="selectDisplayInspectorAction('appearance', $event)"
-            >見た目</button>
+            >スタイル</button>
             <button
               v-if="'geometry' in selectedElement"
               type="button"
@@ -3597,62 +3859,15 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :class="{ selected: displayInspectorAction === 'region-label' }"
               :aria-current="displayInspectorAction === 'region-label' ? 'step' : undefined"
               @click="selectDisplayInspectorAction('region-label', $event)"
-            >領域名</button>
+            >ラベルの配置</button>
             <button
               v-if="selectedElement.structuralKind === 'edge'"
               type="button"
               :class="{ selected: displayInspectorAction === 'routing' }"
               :aria-current="displayInspectorAction === 'routing' ? 'step' : undefined"
               @click="selectDisplayInspectorAction('routing', $event)"
-            >経路・接点</button>
+            >線の表示</button>
           </nav>
-          <section class="iriograph-semantic-reference">
-            <details><summary>Advanced: Semantic reference</summary><code>{{ selectedElement.semanticRef }}</code></details>
-            <button
-              v-if="selectedElement.structuralKind !== 'edge' && selectedElement.structuralKind !== 'region' && selectedElement.parentProvenance?.editCapability"
-              type="button"
-              class="iriograph-wide-button"
-              :disabled="readOnly || authoringBusy || turtlePending"
-              @click="seedParentRemoval"
-            >包含から外す</button>
-          </section>
-          <section v-if="selectedContainmentWarnings.length" class="iriograph-containment-warnings">
-            <label>Containment consistency</label>
-            <article
-              v-for="warning in selectedContainmentWarnings"
-              :key="warning.diagnosticId"
-              role="status"
-            >
-              <b>表示と意味の包含が一致していません</b>
-              <span>{{ containmentWarningMessage(warning) }}</span>
-              <div>
-                <template v-if="warning.kind === 'visual-only'">
-                  <button
-                    type="button"
-                    :disabled="!authoringEnabled || authoringBusy"
-                    @click="seedContainmentAddition(warning)"
-                  >意味包含のdraftを作成</button>
-                  <button
-                    type="button"
-                    :disabled="readOnly"
-                    @click="applyContainmentPresentationFix(warning, 'outside')"
-                  >表示だけ領域外へ移動</button>
-                </template>
-                <template v-else>
-                  <button
-                    type="button"
-                    :disabled="readOnly"
-                    @click="applyContainmentPresentationFix(warning, 'inside')"
-                  >表示を意味上の領域へ戻す</button>
-                  <button
-                    type="button"
-                    :disabled="!authoringEnabled || authoringBusy || !canSeedContainmentRemoval(warning)"
-                    @click="seedContainmentRemoval(warning)"
-                  >意味包含を外すdraftを作成</button>
-                </template>
-              </div>
-            </article>
-          </section>
           <section v-if="selectedElementDiagnostics.length" class="iriograph-element-diagnostics">
             <label>Diagnostics</label>
             <article
@@ -3667,7 +3882,20 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </article>
           </section>
           <section v-if="displayInspectorAction === 'appearance'">
-            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="openAppearanceEditor">見た目を調整</button>
+            <button v-if="!appearanceEditorOpen" type="button" class="iriograph-wide-button" :disabled="readOnly" @click="openAppearanceEditor">ビューを編集</button>
+            <AppearanceEditor
+              v-else-if="appearancePrimaryElement"
+              inline
+              :element-kind="appearancePrimaryElement.structuralKind"
+              :selection-count="appearanceTargetIds.length"
+              :current-style="appearancePrimaryElement.style"
+              :current-style-ref="appearancePrimaryOverlay?.styleRef"
+              :current-override="appearancePrimaryOverlay?.style"
+              :presets="appearancePresetStyles"
+              @preview="previewAppearance"
+              @apply="applyAppearance"
+              @close="closeAppearanceEditor"
+            />
             <label>Template</label>
             <select
               v-if="selectedElement.structuralKind !== 'edge'"
@@ -3680,17 +3908,15 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <code v-else>{{ selectedElement.templateRef }}</code>
           </section>
           <section v-if="displayInspectorAction === 'appearance' && selectedElement.structuralKind === 'node'">
-            <label>Icon IRI</label>
-            <input
-              list="iriograph-asset-refs"
+            <label>アイコン</label>
+            <select
               :value="selectedElement.iconRef ?? ''"
               :disabled="readOnly"
-              placeholder="urn:example:icon:…"
               @change="updateIcon"
-            />
-            <datalist id="iriograph-asset-refs">
-              <option v-for="assetRef in assetRefs" :key="assetRef" :value="assetRef" />
-            </datalist>
+            >
+              <option value="">アイコンなし</option>
+              <option v-for="assetRef in assetRefs" :key="assetRef" :value="assetRef">{{ compactRef(assetRef) }}</option>
+            </select>
             <button
               v-if="pickAsset"
               type="button"
@@ -3702,16 +3928,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </button>
           </section>
           <section v-if="displayInspectorAction === 'region-label' && selectedElement.structuralKind === 'region'">
-            <label>領域名の位置</label>
-            <select :value="regionLabelPlacements[selectedElement.elementId] ?? 'top'" :disabled="readOnly" @change="updateSelectedRegionLabelPlacement">
-              <option value="top">上</option><option value="right">右</option><option value="bottom">下</option><option value="left">左</option>
-            </select>
+            <p>Canvas上のラベルをドラッグすると、領域の枠線に沿って自由に移動できます。</p>
             <label>文字方向</label>
-            <select aria-label="Region label writing direction" :value="regionLabelWritingDirections[selectedElement.elementId]" :disabled="readOnly" @change="updateSelectedRegionLabelWritingDirection">
-              <option value="horizontal">横書き（左から右）</option>
-              <option value="vertical">縦書き（上から下）</option>
+            <select aria-label="Region label writing direction" :value="regionLabelWritingDirectionFor(selectedElement.elementId)" :disabled="readOnly" @change="updateSelectedRegionLabelWritingDirection">
+              <option value="horizontal-right">横書き（左から右）</option>
+              <option value="vertical-down">縦書き（上から下）</option>
             </select>
-            <small>上下逆転や180度回転は保存しません。</small>
+            <small>横書きは右向き、縦書きは下向きに統一します。</small>
+            <div class="iriograph-region-layer-actions">
+              <button type="button" :disabled="readOnly" @click="moveSelectedRegionLayer('back')">領域を背面へ</button>
+              <button type="button" :disabled="readOnly" @click="moveSelectedRegionLayer('front')">領域を前面へ</button>
+            </div>
           </section>
           <section v-if="displayInspectorAction === 'geometry' && 'geometry' in selectedElement">
             <div class="iriograph-section-heading">
@@ -3730,91 +3957,73 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               </label>
             </div>
           </section>
-          <section v-if="displayInspectorAction === 'routing' && selectedElement.structuralKind === 'edge'">
-            <label>Projection</label>
-            <div class="iriograph-edge-contract">
-              <span>{{ edgeEndpointLabel(selectedElement.sourceElementId, '始点') }}</span><b>→</b><span>{{ edgeEndpointLabel(selectedElement.targetElementId, '終点') }}</span>
-            </div>
-            <p>{{ selectedElement.fallback ? "標準の矢印として表示" : "定義済みの関係表示" }}</p>
-            <details><summary>Advanced: projection rule</summary><code>{{ selectedElement.provenance?.rule?.ruleId ?? selectedElement.projectionRuleId }}</code></details>
-          </section>
           <section v-if="displayInspectorAction === 'routing' && selectedElement.structuralKind === 'edge'" class="iriograph-routing-inspector">
-            <div class="iriograph-section-heading">
-              <label>Manual routing</label>
-              <span>{{ selectedManualWaypoints.length ? `${selectedManualWaypoints.length} points` : "automatic" }}</span>
-            </div>
-            <button
-              type="button"
-              class="iriograph-wide-button"
-              :disabled="readOnly"
-              @click="addSelectedWaypoint"
-            >Waypointを追加</button>
-            <div
-              v-for="(point, index) in selectedManualWaypoints"
-              :key="index"
-              class="iriograph-waypoint-row"
-            >
-              <span>{{ index + 1 }}</span>
-              <label>
-                <span>x</span>
-                <input type="number" :value="Math.round(point.x)" :disabled="readOnly" @change="updateWaypointField(index, 'x', $event)" />
-              </label>
-              <label>
-                <span>y</span>
-                <input type="number" :value="Math.round(point.y)" :disabled="readOnly" @change="updateWaypointField(index, 'y', $event)" />
-              </label>
-              <button type="button" :aria-label="`Waypoint ${index + 1}を削除`" :disabled="readOnly" @click="removeSelectedWaypoint(index)">×</button>
-            </div>
-            <label v-if="selectedElement.label">Label offset</label>
-            <div v-if="selectedElement.label" class="iriograph-geometry-grid">
-              <label v-for="field in (['x', 'y'] as const)" :key="field">
-                <span>{{ field }}</span>
-                <input
-                  type="number"
-                  :value="Math.round(selectedElement.labelOffset?.[field] ?? 0)"
+            <header class="iriograph-edge-view-summary">
+              <strong>{{ selectedEdgeDisplayName }}</strong>
+              <div class="iriograph-edge-contract"><span>{{ selectedEdgeEndpointLabels.source }}</span><b>→</b><span>{{ selectedEdgeEndpointLabels.target }}</span></div>
+            </header>
+            <label><span>線の形式</span><select aria-label="線の形式" :value="selectedRouteMode" :disabled="readOnly" @change="setSelectedRouteMode(($event.target as HTMLSelectElement).value as EdgeRouteMode)"><option value="auto">自動</option><option value="straight">直線</option><option value="orthogonal">折れ線</option><option value="curve">曲線</option><option value="manual">手動で調整</option></select></label>
+            <template v-if="selectedRouteMode === 'manual'">
+              <button
+                type="button"
+                class="iriograph-wide-button"
+                :disabled="readOnly"
+                @click="addSelectedWaypoint"
+              >Waypointを追加</button>
+              <small>{{ selectedManualWaypoints.length }}個の点。Canvas上の点をドラッグして調整します。</small>
+            </template>
+            <label>端子の形</label>
+            <div class="iriograph-endpoint-marker-fields">
+              <label v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
+                <span>{{ endpoint === 'source' ? '始点' : '終点' }}</span>
+                <select
+                  :aria-label="`${endpoint} terminal marker`"
+                  :value="selectedElement[endpoint === 'source' ? 'sourceMarker' : 'targetMarker'] ?? (endpoint === 'source' ? 'none' : 'arrow')"
                   :disabled="readOnly"
-                  @change="updateLabelOffsetField(field, $event)"
-                />
+                  @change="setSelectedTerminalMarker(endpoint, ($event.target as HTMLSelectElement).value as EdgeTerminalMarker)"
+                >
+                  <option value="none">なし</option><option value="arrow">矢印</option><option value="open-arrow">開いた矢印</option><option value="triangle">三角</option><option value="diamond">ひし形</option><option value="circle">丸</option>
+                </select>
               </label>
             </div>
-            <button
-              v-if="selectedElement.label"
-              type="button"
-              class="iriograph-wide-button"
-              :disabled="readOnly || !selectedElement.labelOffset"
-              @click="resetSelectedLabelOffset"
-            >Label位置をリセット</button>
-            <label>Endpoint anchors</label>
-            <div class="iriograph-endpoint-anchor-fields">
-              <div v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
-                <label>
-                  <span>{{ endpoint }}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="0.999999"
-                    step="0.01"
-                    :aria-label="`${endpoint} endpoint anchor`"
-                    :value="selectedElement[endpoint === 'source' ? 'sourceAnchor' : 'targetAnchor']?.position ?? ''"
-                    :placeholder="'automatic'"
-                    :disabled="readOnly"
-                    @change="updateEndpointAnchor(endpoint, $event)"
-                  />
-                </label>
-                <button
-                  type="button"
-                  :aria-label="`${endpoint} endpoint anchorをリセット`"
-                  :disabled="readOnly || !selectedElement[endpoint === 'source' ? 'sourceAnchor' : 'targetAnchor']"
-                  @click="resetEndpointAnchor(endpoint)"
-                >Reset</button>
-              </div>
-            </div>
+            <details class="iriograph-view-disclosure">
+              <summary>ラベルと補足を調整</summary>
+              <p v-if="selectedElement.label">Canvas上の関係名をドラッグして位置を調整できます。</p>
+              <button
+                v-if="selectedElement.label"
+                type="button"
+                class="iriograph-wide-button"
+                :disabled="readOnly || !selectedElement.labelOffset"
+                @click="resetSelectedLabelOffset"
+              >ラベル位置をリセット</button>
+              <label>このビューだけの補足</label>
+              <textarea
+                :value="selectedElement.caption ?? ''"
+                :disabled="readOnly"
+                maxlength="2000"
+                rows="3"
+                aria-label="選択した関係のビュー上の補足"
+                placeholder="意味グラフには含めない表示用の補足"
+                @change="updateSelectedEdgeCaption"
+              />
+              <small>共有する意味や説明は「意味」タブで編集します。</small>
+            </details>
+            <details class="iriograph-view-disclosure">
+              <summary>接続位置を調整</summary>
+              <p>Canvas上の始点・終点ハンドルをnodeの周囲へドラッグします。数値入力は必要ありません。</p>
+              <button
+                type="button"
+                class="iriograph-wide-button"
+                :disabled="readOnly || (!selectedElement.sourceAnchor && !selectedElement.targetAnchor)"
+                @click="resetEndpointAnchor('source'); resetEndpointAnchor('target')"
+              >接続位置を自動に戻す</button>
+            </details>
             <button
               type="button"
               class="iriograph-wide-button"
               :disabled="readOnly || !hasSelectedEditableRouting"
               @click="resetSelectedRouting"
-            >Routingを自動に戻す</button>
+            >線の調整をすべてリセット</button>
           </section>
           <section v-if="displayInspectorAction === 'geometry' && selectedElement.structuralKind !== 'edge' && selectedOverlay?.placement === 'user'">
             <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="clearSelectedOverride">ユーザー調整を解除</button>
@@ -3824,6 +4033,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <summary>Advanced: View overlay ({{ Object.keys(activeView?.overlay ?? {}).length }})</summary>
           <pre>{{ overlayJson }}</pre>
         </details>
+        </div>
       </aside>
       <button
         type="button"
@@ -3885,14 +4095,6 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </form>
     </div>
 
-    <EditorContextMenu
-      v-if="contextMenuRequest"
-      :actions="contextMenuActions"
-      :x="contextMenuRequest.clientX"
-      :y="contextMenuRequest.clientY"
-      @select="runContextAction"
-      @close="closeContextMenu"
-    />
     <ResourceCreationPalette
       v-if="creationPalette"
       :kind="creationPalette.kind"
@@ -3920,18 +4122,5 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       @preview="previewDetailsCommands"
       @close="detailsDialogElementId = ''"
     />
-    <div v-if="appearanceEditorOpen && appearancePrimaryElement" class="iriograph-appearance-popover">
-      <AppearanceEditor
-        :element-kind="appearancePrimaryElement.structuralKind"
-        :selection-count="appearanceTargetIds.length"
-        :current-style="appearancePrimaryElement.style"
-        :current-style-ref="appearancePrimaryOverlay?.styleRef"
-        :current-override="appearancePrimaryOverlay?.style"
-        :presets="appearancePresetStyles"
-        @preview="previewAppearance"
-        @apply="applyAppearance"
-        @close="closeAppearanceEditor"
-      />
-    </div>
   </article>
 </template>

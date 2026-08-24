@@ -3,7 +3,6 @@ import type { Literal, Quad } from "n3";
 import {
   alternativeBranchIdentity,
   generatedElementId,
-  sequenceTransitionIdentity,
   statementIdentityFromQuad,
 } from "./identity.js";
 import { resolveAppearance } from "./appearance.js";
@@ -41,12 +40,20 @@ import {
   type ResolvedProjectionRule,
 } from "./rule-resolution.js";
 import { catalogRef, type RdfRdfsVocabulary } from "./standard-catalog.js";
+import {
+  collectStatementComments,
+  namedStatementReifierIris,
+} from "./statement-reification.js";
 
 type OverlayEntry = { elementId: string; overlay: ViewElementOverlay };
+const LEGACY_REGION_LABEL_ANCHOR = "urn:iriograph:vue-editor:region-label-anchor";
+const LEGACY_REGION_LABEL_WRITING_DIRECTION = "urn:iriograph:vue-editor:region-label-writing-direction";
+const LEGACY_REGION_Z_ORDER = "urn:iriograph:vue-editor:region-z-order";
 type ParentBinding = {
   parentIri: string;
   quad: Quad;
   rule: ResolvedProjectionRule;
+  ordinal?: number;
 };
 type DirectEdgePlan = {
   quad: Quad;
@@ -75,9 +82,11 @@ export function executeProjectionOperators(
       .filter((plan) => plan.resolved?.rule.project.operator === "suppress")
       .map((plan) => plan.semanticRef),
   );
+  for (const iri of namedStatementReifierIris(graph)) suppressedResources.add(iri);
   const overlays = overlaysForSemantic(view, diagnostics);
   const consumed = new Set<string>();
   const candidates = new Set(distinctNamedSubjects(graph));
+  for (const iri of suppressedResources) candidates.delete(iri);
   const parentsByChild = new Map<string, ParentBinding[]>();
 
   collectStructuralStatements(
@@ -237,14 +246,26 @@ function collectStructuralStatements(
         parentsByChild.set(member.value, bindings);
       }
     } else if (operator.operator === "ordinal-sequence" || operator.operator === "alternative") {
-      if (operator.operator === "alternative") candidates.add(plan.semanticRef);
+      candidates.add(plan.semanticRef);
       for (const member of collectOrdinalMembers(
         graph,
         plan.semanticRef,
         operator.ordinalPredicatePrefix,
       )) {
         consumed.add(statementIdentityFromQuad(member.quad));
-        if (member.memberIri) candidates.add(member.memberIri);
+        if (member.memberIri) {
+          candidates.add(member.memberIri);
+          if (operator.operator === "ordinal-sequence" && member.ordinal !== undefined) {
+            const bindings = parentsByChild.get(member.memberIri) ?? [];
+            bindings.push({
+              parentIri: plan.semanticRef,
+              quad: member.quad,
+              rule: resolved,
+              ordinal: member.ordinal,
+            });
+            parentsByChild.set(member.memberIri, bindings);
+          }
+        }
       }
     }
   }
@@ -261,8 +282,10 @@ function projectResource(
   options: ProjectionOptions | undefined,
 ): ProjectedNode | ProjectedContainer | ProjectedRegion | undefined {
   const operator = plan.resolved?.rule.project;
-  if (operator?.operator === "ordinal-sequence" || operator?.operator === "suppress") return undefined;
-  const structuralKind = operator?.operator === "membership-container"
+  if (operator?.operator === "suppress") return undefined;
+  const structuralKind = operator?.operator === "ordinal-sequence"
+    ? "container"
+    : operator?.operator === "membership-container"
     ? view.kind === "region" ? "region" : "container"
     : operator?.operator === "membership-region"
       ? view.kind === "region" ? "region" : "node"
@@ -330,11 +353,21 @@ function projectResource(
     return {
       ...common,
       structuralKind,
+      ...(operator?.operator === "ordinal-sequence" ? { groupRole: "sequence" as const } : {}),
       headerPosition: template.headerPosition ?? "top",
     };
   }
 
-  if (structuralKind === "region") return { ...common, structuralKind };
+  if (structuralKind === "region") {
+    const appearance = overlayEntry?.overlay.appearance;
+    return {
+      ...common,
+      structuralKind,
+      regionLabelAnchor: regionLabelAnchor(appearance),
+      regionLabelWritingDirection: regionLabelWritingDirection(appearance),
+      regionZOrder: regionZOrder(appearance),
+    };
+  }
 
   const iconRef = overlayEntry?.overlay.appearance?.iconRef ?? template.iconRef;
   return {
@@ -396,7 +429,13 @@ function projectDirectEdge(
     semanticRef,
     structuralKind: "edge",
     label: semanticText.primaryLabel?.value ?? compactIri(plan.quad.predicate.value),
+    caption: overlay?.overlay.appearance?.edgeCaption,
     semanticText,
+    statementComments: collectStatementComments(graph, {
+      subjectIri: plan.quad.subject.value,
+      predicateIri: plan.quad.predicate.value,
+      objectIri: plan.quad.object.value,
+    }),
     labelProvenance: {
       kind: "predicate",
       labelSemanticRef: plan.quad.predicate.value,
@@ -417,8 +456,8 @@ function projectDirectEdge(
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
     targetAnchor: overlay?.overlay.routing?.targetAnchor,
     routeMode,
-    sourceMarker: template.sourceMarker ?? "none",
-    targetMarker: template.targetMarker ?? "arrow",
+    sourceMarker: overlay?.overlay.routing?.sourceMarker ?? template.sourceMarker ?? "none",
+    targetMarker: overlay?.overlay.routing?.targetMarker ?? template.targetMarker ?? "arrow",
     routingPlacement: manualWaypoints ? "user" : "generated",
     fallback,
     provenance: {
@@ -454,59 +493,10 @@ function projectDerivedEdges(
     const operator = resolved?.rule.project;
     if (!resolved || !operator) continue;
     if (operator.operator === "ordinal-sequence") {
-      const members = collectOrdinalMembers(graph, plan.semanticRef, operator.ordinalPredicatePrefix);
-      for (let index = 0; index < members.length - 1; index += 1) {
-        const from = members[index]!;
-        const to = members[index + 1]!;
-        if (!from.memberIri || !to.memberIri || from.ordinal === undefined || to.ordinal === undefined) continue;
-        const semanticRef = sequenceTransitionIdentity(plan.semanticRef, from.ordinal, to.ordinal);
-        const semanticText = collectSemanticText(
-          graph,
-          plan.semanticRef,
-          vocabulary.labelPredicate,
-          vocabulary.commentPredicate,
-          view.locale,
-        );
-        const edge = projectDerivedEdge(
-          catalog,
-          semanticRef,
-          "",
-          semanticText,
-          {
-            kind: "derived-structure",
-            role: "sequence-transition",
-            structureSemanticRef: plan.semanticRef,
-            fromOrdinal: from.ordinal,
-            toOrdinal: to.ordinal,
-            sourceStatementRefs: semanticText.labels.map((value) => value.statementRef),
-          },
-          from.memberIri,
-          to.memberIri,
-          semanticToElement,
-          overlays,
-          {
-            sourceStatementRefs: [
-              statementIdentityFromQuad(from.quad),
-              statementIdentityFromQuad(to.quad),
-            ],
-            operator: "ordinal-sequence",
-            rule: ruleReference(resolved),
-            derivation: "derived",
-            editCapability: resolved.rule.match.kind === "type" && resolved.matchedIri
-              ? {
-                  command: "set-sequence",
-                  sequence: plan.semanticRef,
-                  sequenceTypeIri: resolved.matchedIri,
-                  ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
-                }
-              : undefined,
-          },
-          diagnostics,
-          resolved.rule.templateRef,
-          suppressedResources,
-        );
-        if (edge) edges.push(edge);
-      }
+      // rdf:_n denotes membership in an ordered structure. It is deliberately
+      // projected as a selectable group plus ordinal member metadata, never as
+      // a synthetic predicate edge.
+      continue;
     } else if (operator.operator === "alternative") {
       const sourceElementId = semanticToElement.get(plan.semanticRef);
       if (!sourceElementId) continue;
@@ -633,6 +623,7 @@ function projectDerivedEdge(
     semanticRef,
     structuralKind: "edge",
     label,
+    caption: overlay?.overlay.appearance?.edgeCaption,
     semanticText,
     labelProvenance,
     sourceElementId,
@@ -650,8 +641,8 @@ function projectDerivedEdge(
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
     targetAnchor: overlay?.overlay.routing?.targetAnchor,
     routeMode,
-    sourceMarker: template.sourceMarker ?? "none",
-    targetMarker: template.targetMarker ?? "arrow",
+    sourceMarker: overlay?.overlay.routing?.sourceMarker ?? template.sourceMarker ?? "none",
+    targetMarker: overlay?.overlay.routing?.targetMarker ?? template.targetMarker ?? "arrow",
     routingPlacement: manualWaypoints ? "user" : "generated",
     fallback: false,
     provenance,
@@ -687,7 +678,13 @@ function applyMembershipBindings(
         semanticRef: statementIdentityFromQuad(binding.quad),
         containerElementId: parentElementId,
         memberElementId: child.elementId,
-        ...(view.kind === "region" ? { regionElementId: parentElementId } : {}),
+        ...(view.kind === "region" && binding.rule.rule.project.operator !== "ordinal-sequence"
+          ? { regionElementId: parentElementId }
+          : {}),
+        role: binding.rule.rule.project.operator === "ordinal-sequence"
+          ? "sequence-member"
+          : "membership",
+        ...(binding.ordinal !== undefined ? { ordinal: binding.ordinal } : {}),
         provenance,
       });
     }
@@ -697,14 +694,22 @@ function applyMembershipBindings(
         parentBindings.set(entry.parentElementId, entry.binding);
       }
     }
-    const hierarchicalParents = new Map(
+    const sequenceParents = new Map(
+      [...parentBindings].filter(([, binding]) => (
+        binding.rule.rule.project.operator === "ordinal-sequence"
+      )),
+    );
+    const membershipParents = new Map(
       [...parentBindings].filter(([, binding]) => (
         binding.rule.rule.project.operator === "membership-container"
       )),
     );
-    if (view.kind !== "node-link" || hierarchicalParents.size === 0) continue;
+    const hierarchicalParents = sequenceParents.size > 0
+      ? sequenceParents
+      : view.kind === "node-link" ? membershipParents : new Map<string, ParentBinding>();
+    if (hierarchicalParents.size === 0) continue;
     if (hierarchicalParents.size > 1) {
-      diagnostics.push({
+      if (sequenceParents.size === 0) diagnostics.push({
         severity: "warning",
         code: "multiple-container-memberships-not-hierarchical",
         message: `${childIri}の${hierarchicalParents.size}件のcontainer membershipはhierarchy parentへ縮約せず保持します。`,
@@ -724,20 +729,28 @@ function membershipProvenance(
   childIri: string,
   binding: ParentBinding,
 ): ProjectionProvenance {
+  const operator = binding.rule.rule.project;
   return {
       sourceStatementRefs: [statementIdentityFromQuad(binding.quad)],
       operator: binding.rule.rule.project.operator,
       rule: ruleReference(binding.rule),
       derivation: "derived",
       editCapability: binding.rule.rule.match.kind === "type" && binding.rule.matchedIri
-        ? {
+        ? operator.operator === "ordinal-sequence"
+          ? {
+              command: "set-sequence",
+              sequence: binding.parentIri,
+              sequenceTypeIri: binding.rule.matchedIri,
+              ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
+            }
+          : {
             command: "set-membership",
             container: binding.parentIri,
             member: childIri,
             containerTypeIri: binding.rule.matchedIri,
             predicate: binding.quad.predicate.value,
-            containerPosition: binding.rule.rule.project.operator === "membership-region"
-              ? binding.rule.rule.project.containerPosition
+            containerPosition: operator.operator === "membership-region"
+              ? operator.containerPosition
               : "subject",
           }
         : undefined,
@@ -847,6 +860,34 @@ function collectSemanticText(
     labels,
     comments,
   };
+}
+
+function regionLabelAnchor(
+  appearance: ViewElementOverlay["appearance"] | undefined,
+): number | undefined {
+  const value = appearance?.regionLabelAnchor
+    ?? appearance?.extensions?.[LEGACY_REGION_LABEL_ANCHOR];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value < 1
+    ? value
+    : undefined;
+}
+
+function regionLabelWritingDirection(
+  appearance: ViewElementOverlay["appearance"] | undefined,
+): "horizontal-right" | "vertical-down" | undefined {
+  if (appearance?.regionLabelWritingDirection) return appearance.regionLabelWritingDirection;
+  const legacy = appearance?.extensions?.[LEGACY_REGION_LABEL_WRITING_DIRECTION];
+  if (legacy === "horizontal") return "horizontal-right";
+  if (legacy === "vertical") return "vertical-down";
+  return undefined;
+}
+
+function regionZOrder(
+  appearance: ViewElementOverlay["appearance"] | undefined,
+): number | undefined {
+  const value = appearance?.regionZOrder
+    ?? appearance?.extensions?.[LEGACY_REGION_Z_ORDER];
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
 }
 
 function compactIri(value: string): string {

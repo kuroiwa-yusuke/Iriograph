@@ -31,6 +31,7 @@ export type LayoutExternalReservation = {
 export type LayoutElement = {
   elementId: string;
   structuralKind: "node" | "container" | "region" | "annotation";
+  groupRole?: "sequence";
   parentElementId?: string;
   geometry?: ElementGeometry;
   size?: { width: number; height: number };
@@ -49,6 +50,8 @@ export type LayoutMembership = {
   containerElementId: string;
   memberElementId: string;
   regionElementId?: string;
+  role?: "membership" | "sequence-member";
+  ordinal?: number;
 };
 
 export type LayoutEdge = {
@@ -189,10 +192,10 @@ export async function layoutProjectedScene(
 }
 
 /**
- * Completes the adapter result with overlap-region geometry. Regions are not
- * hierarchy parents: each generated region encloses all of its visible
- * members, so a multiply-associated member lies in the geometric intersection.
- * User/pinned region geometry is a hard constraint and is only diagnosed.
+ * Completes structural enclosure geometry for overlap regions and ordered
+ * sequence groups. Regions are not hierarchy parents: each generated region
+ * encloses all visible members, so a multiply-associated member lies in the
+ * geometric intersection. User/pinned geometry remains a hard constraint.
  */
 export function completeRegionLayout(
   request: LayoutRequest,
@@ -201,7 +204,10 @@ export function completeRegionLayout(
   const regionCandidates = request.scene.elements
     .filter((element) => element.structuralKind === "region")
     .sort((left, right) => compareText(left.elementId, right.elementId));
-  if (regionCandidates.length === 0) return candidate;
+  const sequenceCandidates = request.scene.elements
+    .filter((element) => element.structuralKind === "container" && element.groupRole === "sequence")
+    .sort((left, right) => compareText(left.elementId, right.elementId));
+  if (regionCandidates.length === 0 && sequenceCandidates.length === 0) return candidate;
   const geometries = Object.fromEntries(Object.entries(candidate.geometries).map(([id, geometry]) => [
     id,
     copyGeometry(geometry),
@@ -210,8 +216,31 @@ export function completeRegionLayout(
   const memberships = [...(request.scene.memberships ?? [])]
     .filter((membership) => membership.regionElementId)
     .sort((left, right) => compareText(left.semanticRef, right.semanticRef));
-  const regions = regionCompletionOrder(regionCandidates, memberships);
+  const regions = groupCompletionOrder(regionCandidates, memberships);
   const spacing = { ...DEFAULT_SPACING, ...request.spacing };
+
+  const sequenceMemberships = [...(request.scene.memberships ?? [])]
+    .filter((membership) => membership.role === "sequence-member")
+    .sort((left, right) => (
+      (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER)
+      || compareText(left.semanticRef, right.semanticRef)
+    ));
+  for (const sequence of groupCompletionOrder(sequenceCandidates, sequenceMemberships)) {
+    if (isFixed(sequence)) {
+      if (sequence.geometry) geometries[sequence.elementId] = copyGeometry(sequence.geometry);
+      continue;
+    }
+    const members = sequenceMemberships
+      .filter((membership) => membership.containerElementId === sequence.elementId)
+      .map((membership) => geometries[membership.memberElementId])
+      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+    if (members.length === 0) continue;
+    geometries[sequence.elementId] = enclosureGeometry(
+      members,
+      sequence.size ?? sequence.geometry ?? { width: 360, height: 160 },
+      spacing,
+    );
+  }
 
   for (const region of regions) {
     if (isFixed(region)) {
@@ -223,23 +252,11 @@ export function completeRegionLayout(
       .map((membership) => geometries[membership.memberElementId])
       .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
     if (members.length === 0) continue;
-    const padding = spacing.containerPadding;
-    const header = spacing.containerHeader;
-    const left = Math.min(...members.map((geometry) => geometry.x)) - padding;
-    const top = Math.min(...members.map((geometry) => geometry.y)) - padding - header;
-    const right = Math.max(...members.map((geometry) => geometry.x + geometry.width)) + padding;
-    const bottom = Math.max(...members.map((geometry) => geometry.y + geometry.height)) + padding;
     const minimum = region.size ?? region.geometry ?? { width: 240, height: 160 };
-    const natural = { x: left, y: top, width: right - left, height: bottom - top };
-    const width = Math.max(minimum.width, natural.width);
-    const height = Math.max(minimum.height, natural.height);
-    geometries[region.elementId] = {
-      x: natural.x - (width - natural.width) / 2,
-      y: natural.y - (height - natural.height) / 2,
-      width,
-      height,
-    };
+    geometries[region.elementId] = enclosureGeometry(members, minimum, spacing);
   }
+
+  packEmptyGeneratedRegions(regionCandidates, memberships, geometries, spacing);
 
   validateRegionMembershipGeometry(request, geometries, memberships, diagnostics);
   const routes = adjustRegionRouteEndpoints(request, candidate.routes, geometries);
@@ -258,18 +275,105 @@ export function completeRegionLayout(
   };
 }
 
-/** Orders nested regions from member to owner; profile validation rejects cycles. */
-function regionCompletionOrder(
+function enclosureGeometry(
+  members: readonly ElementGeometry[],
+  minimum: { width: number; height: number },
+  spacing: LayoutSpacing,
+): ElementGeometry {
+  const padding = spacing.containerPadding;
+  const header = spacing.containerHeader;
+  const left = Math.min(...members.map((geometry) => geometry.x)) - padding;
+  const top = Math.min(...members.map((geometry) => geometry.y)) - padding - header;
+  const right = Math.max(...members.map((geometry) => geometry.x + geometry.width)) + padding;
+  const bottom = Math.max(...members.map((geometry) => geometry.y + geometry.height)) + padding;
+  const natural = { x: left, y: top, width: right - left, height: bottom - top };
+  const width = Math.max(minimum.width, natural.width);
+  const height = Math.max(minimum.height, natural.height);
+  return {
+    x: natural.x - (width - natural.width) / 2,
+    y: natural.y - (height - natural.height) / 2,
+    width,
+    height,
+  };
+}
+
+function packEmptyGeneratedRegions(
   regions: readonly LayoutElement[],
   memberships: readonly LayoutMembership[],
+  geometries: Record<string, ElementGeometry>,
+  spacing: LayoutSpacing,
+): void {
+  const populated = new Set(memberships.map((membership) => membership.regionElementId));
+  const empty = regions.filter((region) => !isFixed(region) && !populated.has(region.elementId));
+  if (empty.length === 0) return;
+  const emptyIds = new Set(empty.map((region) => region.elementId));
+  const occupied = Object.entries(geometries)
+    .filter(([id]) => !emptyIds.has(id))
+    .map(([, geometry]) => copyGeometry(geometry));
+  let bounds = geometryUnion(occupied) ?? {
+    x: spacing.margin,
+    y: spacing.margin,
+    width: 0,
+    height: 0,
+  };
+  for (const region of empty) {
+    const current = geometries[region.elementId];
+    const size = region.size ?? current ?? { width: 240, height: 160 };
+    const right = {
+      x: bounds.x + bounds.width + spacing.itemGap,
+      y: bounds.y,
+      width: size.width,
+      height: size.height,
+    };
+    const below = {
+      x: bounds.x,
+      y: bounds.y + bounds.height + spacing.itemGap,
+      width: size.width,
+      height: size.height,
+    };
+    const geometry = [right, below].sort((left, rightCandidate) => (
+      comparePackingQuality(
+        geometryUnion([...occupied, left])!,
+        geometryUnion([...occupied, rightCandidate])!,
+      )
+      || compareGeometry(left, rightCandidate)
+    ))[0]!;
+    geometries[region.elementId] = geometry;
+    occupied.push(copyGeometry(geometry));
+    bounds = geometryUnion(occupied)!;
+  }
+}
+
+function geometryUnion(values: readonly ElementGeometry[]): ElementGeometry | undefined {
+  if (values.length === 0) return undefined;
+  const left = Math.min(...values.map((value) => value.x));
+  const top = Math.min(...values.map((value) => value.y));
+  const right = Math.max(...values.map((value) => value.x + value.width));
+  const bottom = Math.max(...values.map((value) => value.y + value.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function comparePackingQuality(left: ElementGeometry, right: ElementGeometry): number {
+  const leftAspect = Math.max(left.width / left.height, left.height / left.width);
+  const rightAspect = Math.max(right.width / right.height, right.height / right.width);
+  return leftAspect - rightAspect
+    || left.width * left.height - right.width * right.height
+    || Math.max(left.width, left.height) - Math.max(right.width, right.height);
+}
+
+/** Orders nested structural groups from member to owner. */
+function groupCompletionOrder(
+  groups: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
 ): LayoutElement[] {
-  const byId = new Map(regions.map((region) => [region.elementId, region]));
+  const byId = new Map(groups.map((group) => [group.elementId, group]));
   const dependencies = new Map<string, string[]>();
   for (const membership of memberships) {
-    if (!membership.regionElementId || !byId.has(membership.memberElementId)) continue;
-    const values = dependencies.get(membership.regionElementId) ?? [];
+    const ownerElementId = membership.regionElementId ?? membership.containerElementId;
+    if (!byId.has(ownerElementId) || !byId.has(membership.memberElementId)) continue;
+    const values = dependencies.get(ownerElementId) ?? [];
     values.push(membership.memberElementId);
-    dependencies.set(membership.regionElementId, values);
+    dependencies.set(ownerElementId, values);
   }
   for (const [regionId, values] of dependencies) {
     dependencies.set(regionId, [...new Set(values)].sort(compareText));
@@ -285,7 +389,7 @@ function regionCompletionOrder(
     visited.add(regionId);
     ordered.push(byId.get(regionId)!);
   };
-  for (const region of regions) visit(region.elementId);
+  for (const group of groups) visit(group.elementId);
   return ordered;
 }
 
@@ -332,14 +436,13 @@ function validateRegionMembershipGeometry(
       });
       continue;
     }
-    const center = centerOf(member);
-    if (!containsPoint(intersection, center)) {
+    if (!containsRectangle(intersection, member)) {
       diagnostics.push({
         severity: "warning",
         code: regionGeometries.length > 1
           ? "region-member-outside-intersection"
           : "region-member-outside",
-        message: `${memberId}の中心がmembership region${regionGeometries.length > 1 ? "の交差" : ""}内にありません。`,
+        message: `${memberId}の全体がmembership region${regionGeometries.length > 1 ? "の交差" : ""}内にありません。`,
         layoutRef: request.layoutRef,
         elementId: memberId,
       });
@@ -357,11 +460,11 @@ function geometryIntersection(values: readonly ElementGeometry[]): ElementGeomet
     : undefined;
 }
 
-function containsPoint(geometry: ElementGeometry, point: Point): boolean {
-  return point.x >= geometry.x
-    && point.x <= geometry.x + geometry.width
-    && point.y >= geometry.y
-    && point.y <= geometry.y + geometry.height;
+function containsRectangle(container: ElementGeometry, member: ElementGeometry): boolean {
+  return member.x >= container.x
+    && member.y >= container.y
+    && member.x + member.width <= container.x + container.width
+    && member.y + member.height <= container.y + container.height;
 }
 
 function adjustRegionRouteEndpoints(
@@ -534,6 +637,17 @@ function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): 
 
   for (const id of state.children.get(ROOT_GROUP) ?? []) measureElement(id, state);
   placeGroup(ROOT_GROUP, { x: state.spacing.margin, y: state.spacing.margin }, state);
+  // Regions are derived membership geometry. Complete them before routing so
+  // they do not consume a layered rank yet region-incident edges still route
+  // from their final boundary.
+  state.geometries = completeRegionLayout(request, {
+    layoutRef: request.layoutRef,
+    geometries: state.geometries,
+    routes: {},
+    width: 0,
+    height: 0,
+    diagnostics: [],
+  }).geometries;
   const routes = routeEdges(state);
   const bounds = sceneBounds(
     layoutBounds(state),
@@ -688,6 +802,14 @@ function placeGroup(groupId: string, origin: Point, state: LayoutState): void {
     let geometry: ElementGeometry;
     if (isFixed(element) && element.geometry) {
       geometry = copyGeometry(element.geometry);
+    } else if (element.structuralKind === "region" && !isFixed(element)) {
+      const visualSize = state.measured.get(childId)!;
+      geometry = {
+        x: origin.x,
+        y: origin.y,
+        width: visualSize.width,
+        height: visualSize.height,
+      };
     } else {
       if (isFixed(element)) {
         state.diagnostics.push({
@@ -736,7 +858,11 @@ function naturalGroupLayout(
   groupId: string,
   state: LayoutState,
 ): { placements: Map<string, ElementGeometry>; bounds: { width: number; height: number } } {
-  const ids = state.children.get(groupId) ?? [];
+  const allIds = state.children.get(groupId) ?? [];
+  const ids = allIds.filter((id) => {
+    const element = state.elements.get(id)!;
+    return element.structuralKind !== "region" || isFixed(element);
+  });
   const ranks = hierarchicalRanks(ids, groupId, state);
   const byRank = new Map<number, string[]>();
   for (const id of ids) {
@@ -768,6 +894,11 @@ function naturalGroupLayout(
     primary += rankPrimary + state.spacing.rankGap;
   }
   const primaryExtent = Math.max(0, primary - state.spacing.rankGap);
+  for (const id of allIds) {
+    if (placements.has(id)) continue;
+    const size = elementLayoutSize(id, state);
+    placements.set(id, { x: 0, y: 0, width: size.width, height: size.height });
+  }
   return {
     placements,
     bounds: state.direction === "LR"
@@ -798,6 +929,38 @@ function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): 
     const target = immediateChildInGroup(edge.targetElementId, groupId, state.parents);
     if (source && target && source !== target && idSet.has(source) && idSet.has(target)) {
       pairs.add(`${source}\u0000${target}`);
+    }
+  }
+  const sequenceMembers = (state.request.scene.memberships ?? [])
+    .filter((membership) => (
+      membership.role === "sequence-member"
+      && membership.containerElementId === groupId
+      && Number.isSafeInteger(membership.ordinal)
+      && idSet.has(membership.memberElementId)
+    ))
+    .sort((left, right) => (
+      left.ordinal! - right.ordinal!
+      || compareText(left.memberElementId, right.memberElementId)
+      || compareText(left.semanticRef, right.semanticRef)
+    ));
+  for (let index = 0; index < sequenceMembers.length - 1; index += 1) {
+    const source = sequenceMembers[index]!.memberElementId;
+    const target = sequenceMembers[index + 1]!.memberElementId;
+    if (source !== target) pairs.add(`${source}\u0000${target}`);
+  }
+  const membersByRegion = new Map<string, string[]>();
+  for (const membership of state.request.scene.memberships ?? []) {
+    if (!membership.regionElementId) continue;
+    const member = immediateChildInGroup(membership.memberElementId, groupId, state.parents);
+    if (!member || !idSet.has(member)) continue;
+    const members = membersByRegion.get(membership.regionElementId) ?? [];
+    members.push(member);
+    membersByRegion.set(membership.regionElementId, members);
+  }
+  for (const members of membersByRegion.values()) {
+    const ordered = [...new Set(members)].sort(compareText);
+    for (let index = 0; index < ordered.length - 1; index += 1) {
+      pairs.add(`${ordered[index]}\u0000${ordered[index + 1]}`);
     }
   }
   const adjacency = new Map(ids.map((id) => [id, [] as string[]]));

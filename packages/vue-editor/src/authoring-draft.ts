@@ -47,6 +47,8 @@ export type EditorAuthoringDraft = {
   propertyValues: EditorPropertyValueDraft[];
   sourceIri: string;
   targetIri: string;
+  /** Additional Canvas-selected targets for one-to-many relation authoring. */
+  targetIris: string[];
   containerIri: string;
   memberIri: string;
   memberIris: string[];
@@ -124,7 +126,7 @@ export type AuthoringPreviewView = {
   candidateSource: string;
   operationLabel: string;
   resourceChips: Array<{ iri: string; label: string; role: string }>;
-  relations: Array<{ kind: "edge" | "membership"; label: string }>;
+  relations: Array<{ kind: "edge" | "membership"; label: string; action?: "add" | "remove" }>;
 };
 
 export function emptyPropertyValueDraft(
@@ -151,6 +153,7 @@ export function emptyAuthoringDraft(
     propertyValues: [emptyPropertyValueDraft()],
     sourceIri: semanticRef,
     targetIri: "",
+    targetIris: [],
     containerIri: "",
     memberIri: semanticRef,
     memberIris: [],
@@ -326,14 +329,19 @@ export function compileAuthoringDraft(
           : draft.propertyValues.map(objectValue),
       }));
     }
-    case "connect-resources":
-      return [{
+    case "connect-resources": {
+      const targets = [...new Set([
+        draft.targetIri.trim(),
+        ...draft.targetIris.map((iri) => iri.trim()),
+      ].filter(Boolean))];
+      return targets.map((objectIri, index) => ({
         type: "connect-resources",
-        commandId,
+        commandId: targets.length === 1 ? commandId : `${commandId}-${index + 1}`,
         subjectIri: draft.sourceIri.trim(),
         predicateIri: draft.predicateIri.trim(),
-        objectIri: draft.targetIri.trim(),
-      }];
+        objectIri,
+      }));
+    }
     case "set-membership": {
       const members = [...new Set([
         draft.memberIri.trim(),

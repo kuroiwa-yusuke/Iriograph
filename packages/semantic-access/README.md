@@ -9,7 +9,7 @@ Labelは発見と説明に使いますが、identityには使いません。検�
 ## Install
 
 ```sh
-npm install @iriograph/core@0.3.0 @iriograph/semantic-access@0.3.0
+npm install @iriograph/core@0.4.0 @iriograph/semantic-access@0.4.0
 ```
 
 ## Read
@@ -36,7 +36,8 @@ const related = semantic.subgraph({
 
 - `searchResources`、`searchPredicates` / `searchRelations`: label、SKOS alias、comment、IRIの決定的なlexical検索
 - `describe`: localeに適合する表示名、全label/comment、type、class/property階層、近傍件数
-- `neighbors`、`subgraph`: incoming/outgoing relationとdepth制限付き部分graph
+- `neighbors`、`subgraph`: incoming/outgoing relationとdepth制限付き部分graph。各relationはexact statement identityと個別commentを保持
+- `statementComments`: revision aliasでexact S/P/Oを照合して個別commentを取得
 - `memberships`: `rdfs:member`とsubproperty closure。`rdf:_n`系は`kind: "ordinal-membership"`で区別し、`includeOrdinals: false`で除外可能
 
 ## Safe write

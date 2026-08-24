@@ -41,11 +41,21 @@ import {
   isOrdinalPredicate,
   isProtectedVocabularyResource,
   RDF_TYPE,
+  RDFS_COMMENT,
   RDFS_MEMBER,
   validateAuthoringGraphPolicy,
   validateLiteralInput,
   validateResolvedAuthoringContext,
 } from "./authoring-validation.js";
+import {
+  RDF_REIFICATION_OBJECT,
+  RDF_REIFICATION_PREDICATE,
+  RDF_REIFICATION_SUBJECT,
+  allocateStatementReifier,
+  findStatementReifiers,
+  standardReificationQuads,
+  statementReificationClosure,
+} from "./statement-reification.js";
 
 const { namedNode, literal, quad } = DataFactory;
 
@@ -144,6 +154,10 @@ export async function compileAuthoringCommands(
       case "remove-statement":
         resolvedCommands.push(clone(command));
         applyRemoveStatement(store, command, diagnostics);
+        break;
+      case "set-statement-comments":
+        resolvedCommands.push(clone(command));
+        applySetStatementComments(store, command, diagnostics);
         break;
     }
   }
@@ -689,7 +703,10 @@ function applyDeleteResource(
   const removed = command.cascade
     ? impact
     : impact.filter((value) => isNamedNode(value.subject) && value.subject.value === command.resourceIri);
-  store.removeQuads(removed);
+  const reificationClosure = removed
+    .filter(isNamedDirectQuad)
+    .flatMap((value) => statementReificationClosure(store, namedDirectStatement(value)));
+  store.removeQuads(uniqueQuads([...removed, ...reificationClosure]));
   for (const affected of affectedOrdinals.values()) {
     if (affected.subjectIri === command.resourceIri) continue;
     renumberOrdinals(store, affected.subjectIri, affected.prefix, diagnostics);
@@ -708,6 +725,7 @@ function applyRemoveStatement(
     diagnostics,
   );
   if (!value) return;
+  if (!isNamedDirectQuad(value)) return;
   if (statementIdentityFromQuad(value) !== command.statementRef) {
     diagnostics.push(error(
       "provenance-statement-mismatch",
@@ -724,7 +742,107 @@ function applyRemoveStatement(
     ));
     return;
   }
-  store.removeQuad(value);
+  const closure = statementReificationClosure(store, namedDirectStatement(value));
+  store.removeQuads([value, ...closure]);
+}
+
+function applySetStatementComments(
+  store: Store,
+  command: Extract<AuthoringCommand, { type: "set-statement-comments" }>,
+  diagnostics: ProjectionDiagnostic[],
+): void {
+  const asserted = authoringQuad(
+    command.subjectIri,
+    command.predicateIri,
+    { kind: "iri", iri: command.objectIri },
+    diagnostics,
+  );
+  if (!asserted) return;
+  if (!isNamedDirectQuad(asserted)) return;
+  if (statementIdentityFromQuad(asserted) !== command.statementRef) {
+    diagnostics.push(error(
+      "provenance-statement-mismatch",
+      "The statement identity does not match its RDF terms.",
+      command.subjectIri,
+    ));
+    return;
+  }
+  if (!store.has(asserted)) {
+    diagnostics.push(error(
+      "provenance-statement-stale",
+      `The asserted statement no longer exists: ${command.statementRef}`,
+      command.subjectIri,
+    ));
+    return;
+  }
+  for (const comment of command.comments) {
+    diagnostics.push(...validateLiteralInput(comment, command.statementRef));
+  }
+  if (hasErrors(diagnostics)) return;
+
+  const statement = namedDirectStatement(asserted);
+  const existing = findStatementReifiers(store, statement);
+  for (const { term } of existing) {
+    store.removeQuads(store.getQuads(term, RDFS_COMMENT, null, null));
+  }
+
+  if (command.comments.length === 0) {
+    for (const { term } of existing) removeEmptyGeneratedReifier(store, term);
+    return;
+  }
+
+  const primary = existing[0]?.term
+    ?? allocateStatementReifier(store, command.statementRef);
+  if (!existing[0]) store.addQuads(standardReificationQuads(primary, statement));
+  for (const comment of command.comments) {
+    const object = comment.language
+      ? literal(comment.value.normalize("NFC"), comment.language.toLowerCase())
+      : comment.datatypeIri
+        ? literal(comment.value.normalize("NFC"), namedNode(comment.datatypeIri))
+        : literal(comment.value.normalize("NFC"));
+    store.addQuad(quad(primary, namedNode(RDFS_COMMENT), object));
+  }
+  for (const { term } of existing.slice(1)) removeEmptyGeneratedReifier(store, term);
+}
+
+const REIFICATION_STRUCTURE_PREDICATES = new Set([
+  RDF_TYPE,
+  RDF_REIFICATION_SUBJECT,
+  RDF_REIFICATION_PREDICATE,
+  RDF_REIFICATION_OBJECT,
+]);
+
+function removeEmptyGeneratedReifier(
+  store: Store,
+  term: import("n3").NamedNode | import("n3").BlankNode,
+): void {
+  if (term.termType !== "BlankNode") return;
+  const outbound = store.getQuads(term, null, null, null);
+  if (
+    outbound.some((value) => !REIFICATION_STRUCTURE_PREDICATES.has(value.predicate.value))
+    || store.countQuads(null, null, term, null) > 0
+  ) return;
+  store.removeQuads(outbound);
+}
+
+function isNamedDirectQuad(
+  value: Quad,
+): value is Quad & { subject: NamedNode; object: NamedNode } {
+  return isNamedNode(value.subject) && isNamedNode(value.object);
+}
+
+function namedDirectStatement(
+  value: Quad & { subject: NamedNode; object: NamedNode },
+): { subjectIri: string; predicateIri: string; objectIri: string } {
+  return {
+    subjectIri: value.subject.value,
+    predicateIri: value.predicate.value,
+    objectIri: value.object.value,
+  };
+}
+
+function uniqueQuads(values: readonly Quad[]): Quad[] {
+  return [...new Map(values.map((value) => [canonicalQuad(value), value])).values()];
 }
 
 function replaceOrdinals(

@@ -78,6 +78,7 @@ describe("ProjectedScene conversion", () => {
     const projected = projectSemanticView(documentFor({
       edge: {
         semanticRef: statementIdentity("urn:test:scene:a", "urn:test:scene:p", "urn:test:scene:b"),
+        appearance: { edgeCaption: "図だけの注記" },
         routing: {
           sourceAnchor: { position: 0 },
           targetAnchor: { position: .5 },
@@ -88,6 +89,7 @@ describe("ProjectedScene conversion", () => {
     expect(projected.edges[0]).toMatchObject({
       sourceAnchor: { position: 0 },
       targetAnchor: { position: .5 },
+      caption: "図だけの注記",
       routingPlacement: "generated",
     });
 
@@ -101,6 +103,7 @@ describe("ProjectedScene conversion", () => {
     const target = scene.nodes.find((node) => node.elementId === edge.targetElementId)!;
     expect(edge.sourceAnchor).toEqual({ position: 0 });
     expect(edge.targetAnchor).toEqual({ position: .5 });
+    expect(edge.caption).toBe("図だけの注記");
     expect(edge.route?.[0]).toEqual({
       x: source.geometry.x + source.geometry.width / 2,
       y: source.geometry.y,
@@ -147,9 +150,56 @@ describe("ProjectedScene conversion", () => {
     expect(scene.height).toBeGreaterThan(commented.geometry.y + commented.geometry.height + 100);
   });
 
+  it("direct edgeへ個別statement commentを渡し、named/blank reifierを通常要素に投影しない", async () => {
+    const document = documentFor({});
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :a rdfs:label "A" ; :p :b .
+      :b rdfs:label "B" .
+      :edge-note a rdf:Statement ;
+        rdf:subject :a ; rdf:predicate :p ; rdf:object :b ;
+        rdfs:comment "個別の\\n日本語説明"@ja .
+      [] a rdf:Statement ;
+        rdf:subject :a ; rdf:predicate :p ; rdf:object :b ;
+        rdfs:comment "English note"@en .
+    `;
+
+    const scene = await buildIriographView(document, "main", {
+      catalogsByProfile: new Map([[
+        standardRdfRdfsCatalog.profileRef,
+        { catalog: standardRdfRdfsCatalog },
+      ]]),
+      layouts: createStandardLayoutRegistry(),
+    });
+
+    expect(scene.nodes.map((node) => node.semanticRef).sort()).toEqual([
+      "urn:test:scene:a",
+      "urn:test:scene:b",
+    ]);
+    expect(scene.edges).toHaveLength(1);
+    expect(scene.edges[0]?.statementComments?.map((comment) => ({
+      value: comment.value,
+      language: comment.language,
+    }))).toEqual([
+      { value: "English note", language: "en" },
+      { value: "個別の\n日本語説明", language: "ja" },
+    ]);
+    expect(scene.edges[0]?.semanticText?.comments).toEqual([]);
+  });
+
   it("region viewで多対多membershipを重なり領域としてend-to-end投影する", async () => {
     const document = documentFor({});
     document.views[0]!.kind = "region";
+    document.views[0]!.overlay["left-region"] = {
+      semanticRef: "urn:test:scene:left",
+      appearance: {
+        regionLabelAnchor: .3,
+        regionLabelWritingDirection: "vertical-down",
+        regionZOrder: 7,
+      },
+    };
     document.semantic.source = `
       @prefix : <urn:test:scene:> .
       @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -170,6 +220,11 @@ describe("ProjectedScene conversion", () => {
     });
 
     expect(scene.regions).toHaveLength(2);
+    expect(scene.regions?.find((region) => region.semanticRef.endsWith(":left"))).toMatchObject({
+      regionLabelAnchor: .3,
+      regionLabelWritingDirection: "vertical-down",
+      regionZOrder: 7,
+    });
     expect(scene.containers).toEqual([]);
     expect(scene.memberships).toHaveLength(4);
     expect(scene.memberships?.filter((entry) => (

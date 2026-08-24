@@ -191,12 +191,27 @@ export const iriographDocumentSchema = {
         style: { $ref: "#/$defs/styleOverride" },
         styleToken: { type: "string", minLength: 1 },
         labelPlacement: { enum: ["top", "right", "bottom", "left", "center"] },
+        regionLabelAnchor: { type: "number", minimum: 0, exclusiveMaximum: 1 },
+        regionLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },
+        regionZOrder: {
+          type: "integer",
+          minimum: -9007199254740991,
+          maximum: 9007199254740991,
+        },
+        edgeCaption: { type: "string", maxLength: 2000 },
         extensions: extensionProperty,
       },
     },
     routing: {
       type: "object",
       additionalProperties: false,
+      allOf: [{
+        if: {
+          required: ["routeMode"],
+          properties: { routeMode: { enum: ["straight", "curve"] } },
+        },
+        then: { properties: { waypoints: false } },
+      }],
       properties: {
         routeMode: { enum: ["auto", "straight", "orthogonal", "curve", "manual"] },
         waypoints: {
@@ -206,6 +221,8 @@ export const iriographDocumentSchema = {
         labelOffset: { $ref: "#/$defs/point" },
         sourceAnchor: { $ref: "#/$defs/endpointAnchor" },
         targetAnchor: { $ref: "#/$defs/endpointAnchor" },
+        sourceMarker: { enum: ["none", "arrow", "open-arrow", "triangle", "diamond", "circle"] },
+        targetMarker: { enum: ["none", "arrow", "open-arrow", "triangle", "diamond", "circle"] },
         extensions: extensionProperty,
       },
     },
@@ -614,7 +631,6 @@ function validateCatalogReferences(catalog: ProjectionCatalogV1): RuntimeValidat
       ));
     } else if (
       rule.project.operator !== "suppress"
-      && rule.project.operator !== "ordinal-sequence"
       && !rule.templateRef
     ) {
       issues.push(customIssue(

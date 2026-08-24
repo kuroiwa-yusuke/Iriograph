@@ -1,6 +1,7 @@
 import type {
   AuthoringApplyResult,
   AuthoringCommand,
+  AuthoringLiteralValue,
   AuthoringObjectValue,
   AuthoringPreview,
   IriographDocument,
@@ -78,9 +79,19 @@ export type SemanticResourceDescription = SemanticResourceSummary & {
 };
 
 export type SemanticRelation = {
+  statementRef: string;
   subject: SemanticResourceSummary;
   predicate: SemanticPredicateSummary;
   object: SemanticResourceSummary;
+  /** Comments on this exact S/P/O, distinct from predicate.description. */
+  comments: readonly LocalizedText[];
+};
+
+export type StatementCommentQuery = {
+  statementRef: string;
+  subject: RevisionAlias;
+  predicate: RevisionAlias;
+  object: RevisionAlias;
 };
 
 export type NeighborQuery = {
@@ -200,6 +211,14 @@ export type AliasedAuthoringOperation =
       subject: RevisionAlias;
       predicate: RevisionAlias;
       object: RevisionAlias;
+    })
+  | (AliasedOperationBase & {
+      type: "set-statement-comments";
+      statementRef: string;
+      subject: RevisionAlias;
+      predicate: RevisionAlias;
+      object: RevisionAlias;
+      comments: readonly AuthoringLiteralValue[];
     });
 
 export type SemanticWritePreview = {

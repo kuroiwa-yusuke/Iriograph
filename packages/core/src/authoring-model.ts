@@ -212,6 +212,17 @@ export type RemoveStatementCommand = AuthoringCommandBase & {
   objectIri: string;
 };
 
+export type SetStatementCommentsCommand = AuthoringCommandBase & {
+  type: "set-statement-comments";
+  /** Exact asserted direct statement identity; never inferred from a visible edge label. */
+  statementRef: string;
+  subjectIri: string;
+  predicateIri: string;
+  objectIri: string;
+  /** Complete replacement. An empty list deletes this statement's semantic comments. */
+  comments: readonly AuthoringLiteralValue[];
+};
+
 export type AuthoringCommand =
   | CreateResourceCommand
   | SetPropertyCommand
@@ -221,7 +232,8 @@ export type AuthoringCommand =
   | SetSequenceCommand
   | SetAlternativesCommand
   | DeleteResourceCommand
-  | RemoveStatementCommand;
+  | RemoveStatementCommand
+  | SetStatementCommentsCommand;
 
 export type ResolvedCreateResourceCommand = Omit<CreateResourceCommand, "resourceIri"> & {
   resourceIri: string;

@@ -4,6 +4,7 @@ export * from "./document.js";
 export * from "./projection.js";
 export * from "./diagnostics.js";
 export * from "./identity.js";
+export * from "./statement-reification.js";
 export * from "./operators.js";
 export * from "./profile-validation.js";
 export * from "./structural-predicate.js";

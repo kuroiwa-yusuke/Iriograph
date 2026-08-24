@@ -140,6 +140,30 @@ describe("IriographEditor transaction regression", () => {
     expect(layout.mock.calls.length).toBeGreaterThan(initialLayoutCalls);
   });
 
+  it("region label anchor・writing direction・z-orderをtyped appearanceへ保存する", async () => {
+    wrapper = await mountEditor({ modelValue: regionDocumentFixture() }, 1);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const region = (canvas.props("scene") as DiagramScene).regions![0]!;
+
+    emitCanvas(canvas, "regionLabelUpdate", { elementId: region.elementId, anchor: .4 });
+    await settle();
+    exposedSelectionApi(wrapper).selectElement(region.elementId);
+    await openAppearanceInspector(wrapper);
+    await buttonWithText(wrapper, "ラベルの配置").trigger("click");
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Region label writing direction"]')
+      .setValue("vertical-down");
+    await buttonWithText(wrapper, "領域を前面へ").trigger("click");
+    await settle();
+
+    expect(overlayFor(latestDocument(wrapper), region.semanticRef)?.appearance).toMatchObject({
+      regionLabelAnchor: .4,
+      regionLabelWritingDirection: "vertical-down",
+      regionZOrder: 1,
+    });
+    expect(overlayFor(latestDocument(wrapper), region.semanticRef)?.appearance?.extensions)
+      .toBeUndefined();
+  });
+
   it("edge routing gestureをmanual overlayとして保存しundoできる", async () => {
     wrapper = await mountEditor();
     const canvas = wrapper.getComponent(DiagramCanvas);
@@ -230,14 +254,25 @@ describe("IriographEditor transaction regression", () => {
     const edge = canvas.props("scene").edges[0]!;
     exposedSelectionApi(wrapper).selectElement(edge.elementId);
     await nextTick();
-    await wrapper.get<HTMLSelectElement>(".iriograph-edge-routing-quick select").setValue("curve");
+    await openAppearanceInspector(wrapper);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="線の形式"]').setValue("manual");
+    await buttonWithText(wrapper, "Waypointを追加").trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.waypoints?.length)
+      .toBeGreaterThan(0);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="線の形式"]').setValue("curve");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.routeMode).toBe("curve");
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.waypoints).toBeUndefined();
+    expect(wrapper.findAll("button").some((button) => button.text() === "Waypointを追加")).toBe(false);
 
     emitCanvas(canvas, "gestureStart");
     emitCanvas(canvas, "routingUpdate", {
       elementId: edge.elementId,
-      routing: { sourceAnchor: { position: .25 } },
+      routing: {
+        waypoints: [{ x: 123, y: 234 }],
+        sourceAnchor: { position: .25 },
+      },
     });
     emitCanvas(canvas, "gestureEnd");
     await settle();
@@ -245,69 +280,92 @@ describe("IriographEditor transaction regression", () => {
       routeMode: "curve",
       sourceAnchor: { position: .25 },
     });
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.waypoints).toBeUndefined();
 
-    await buttonWithText(wrapper, "Routingを自動に戻す").trigger("click");
+    await buttonWithText(wrapper, "線の調整をすべてリセット").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
 
-  it("Inspectorからderived routeをseedしてwaypoint追加・label offset・resetする", async () => {
+  it("Inspectorからderived routeをmanualへseedしlabel座標を隠してresetする", async () => {
     wrapper = await mountEditor();
     const canvas = wrapper.getComponent(DiagramCanvas);
     const edge = canvas.props("scene").edges[0]!;
     exposedSelectionApi(wrapper).selectElement(edge.elementId);
     await nextTick();
+    await openAppearanceInspector(wrapper);
 
+    await wrapper.get<HTMLSelectElement>('select[aria-label="線の形式"]').setValue("manual");
     await buttonWithText(wrapper, "Waypointを追加").trigger("click");
     await settle();
     const manual = overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.waypoints;
     expect(manual).toHaveLength((edge.route?.length ?? 2) - 1);
     expect(manual?.every((point) => point.x >= 8 && point.y >= 8)).toBe(true);
 
-    const labelX = wrapper.get<HTMLInputElement>(
-      ".iriograph-routing-inspector .iriograph-geometry-grid input",
-    );
-    await labelX.setValue("15");
+    expect(wrapper.find(".iriograph-routing-inspector .iriograph-geometry-grid").exists()).toBe(false);
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { waypoints: manual, labelOffset: { x: 15, y: 0 } },
+    });
+    emitCanvas(canvas, "gestureEnd");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.labelOffset)
       .toEqual({ x: 15, y: 0 });
 
-    await buttonWithText(wrapper, "Label位置をリセット").trigger("click");
+    await wrapper.get(".iriograph-view-disclosure summary").trigger("click");
+    await buttonWithText(wrapper, "ラベル位置をリセット").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.labelOffset)
       .toBeUndefined();
-    expect(buttonWithText(wrapper, "Routingを自動に戻す").attributes("disabled")).toBeUndefined();
-    await buttonWithText(wrapper, "Routingを自動に戻す").trigger("click");
+    expect(buttonWithText(wrapper, "線の調整をすべてリセット").attributes("disabled")).toBeUndefined();
+    await buttonWithText(wrapper, "線の調整をすべてリセット").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
 
-  it("Inspectorからendpoint anchorsを数値編集・個別reset・routing全resetする", async () => {
+  it("Inspectorはendpoint anchorの数値を隠し、Canvas調整と一括resetだけを提供する", async () => {
     wrapper = await mountEditor();
     const canvas = wrapper.getComponent(DiagramCanvas);
     const edge = canvas.props("scene").edges[0]!;
     exposedSelectionApi(wrapper).selectElement(edge.elementId);
     await nextTick();
+    await openAppearanceInspector(wrapper);
 
-    const inputs = wrapper.findAll<HTMLInputElement>(".iriograph-endpoint-anchor-fields input");
-    expect(inputs).toHaveLength(2);
-    await inputs[0]!.setValue("0.25");
-    await settle();
-    await inputs[1]!.setValue("0.5");
+    expect(wrapper.find(".iriograph-endpoint-anchor-fields").exists()).toBe(false);
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { sourceAnchor: { position: .25 }, targetAnchor: { position: .5 } },
+    });
+    emitCanvas(canvas, "gestureEnd");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
       sourceAnchor: { position: .25 },
       targetAnchor: { position: .5 },
     });
 
-    const resets = wrapper.findAll(".iriograph-endpoint-anchor-fields button");
-    await resets[0]!.trigger("click");
+    const markers = wrapper.findAll<HTMLSelectElement>(".iriograph-endpoint-marker-fields select");
+    expect(markers).toHaveLength(2);
+    await markers[0]!.setValue("diamond");
     await settle();
-    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
-      targetAnchor: { position: .5 },
+    await markers[1]!.setValue("open-arrow");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toMatchObject({
+      sourceMarker: "diamond",
+      targetMarker: "open-arrow",
     });
 
-    await buttonWithText(wrapper, "Routingを自動に戻す").trigger("click");
+    const disclosures = wrapper.findAll(".iriograph-view-disclosure");
+    await disclosures[1]!.get("summary").trigger("click");
+    await buttonWithText(wrapper, "接続位置を自動に戻す").trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
+      sourceMarker: "diamond",
+      targetMarker: "open-arrow",
+    });
+
+    await buttonWithText(wrapper, "線の調整をすべてリセット").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
@@ -806,38 +864,111 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("update:modelValue")).toHaveLength(updateCount);
   });
 
-  it("structured draftをPreview後に初期位置ごと一つのsemantic historyへ適用する", async () => {
+  it("右Inspectorは4つの意味intentから始まり意味と見た目を同時表示しない", async () => {
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(documentFixture()) });
+    expect(wrapper.findAll(".iriograph-intent-grid button").map((button) => button.text())).toEqual([
+      "＋新しい要素を作る",
+      "→関係を作る",
+      "✎要素を変更する",
+      "⌘関係を変更する",
+    ]);
+    expect(wrapper.find(".iriograph-display-inspector").isVisible()).toBe(false);
+    expect(wrapper.find('select[aria-label="Semantic operation"]').exists()).toBe(false);
+    await openAppearanceInspector(wrapper);
+    expect(wrapper.find(".iriograph-intent-panel").isVisible()).toBe(false);
+    expect(wrapper.find(".iriograph-display-inspector").isVisible()).toBe(true);
+  });
+
+  it("意味と見た目を切り替えても未Previewの段階入力を失わない", async () => {
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(documentFixture()) });
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("入力途中");
+    await openAppearanceInspector(wrapper);
+    expect(wrapper.find(".iriograph-intent-panel").isVisible()).toBe(false);
+    await wrapper.findAll("button").find((candidate) => candidate.text() === "意味")!.trigger("click");
+    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').element.value)
+      .toBe("入力途中");
+  });
+
+  it("relation pickerへ関係語彙だけをlabel文型で示し制約predicateを除外する", async () => {
+    const fixture = documentFixture();
+    const context = testAuthoringContext(fixture);
+    context.terms = [...context.terms,
+      { iri: "http://www.w3.org/2000/01/rdf-schema#domain", kind: "property", label: "主語にできる種類", objectKinds: ["iri"], structural: true },
+      { iri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#_1", kind: "property", label: "順序1", objectKinds: ["iri"] },
+      { iri: "http://www.w3.org/2002/07/owl#sameAs", kind: "property", label: "同一である", objectKinds: ["iri"] },
+    ];
+    wrapper = await mountEditor({ authoringContext: context });
+    const nodes = wrapper.getComponent(DiagramCanvas).props("scene").nodes;
+    exposedSelectionApi(wrapper).selectElements(nodes.map((node) => node.elementId));
+    await nextTick();
+    await buttonWithText(wrapper, "関係を作る").trigger("click");
+    const cards = wrapper.get(".iriograph-predicate-cards");
+    expect(cards.text()).toContain("A（Rel）B");
+    expect(cards.text()).toContain("A（同一である）B");
+    expect(cards.text()).not.toContain("主語にできる種類");
+    expect(cards.text()).not.toContain("順序1");
+    expect(cards.text()).not.toContain("http://");
+  });
+
+  it("relation pickerは選択要素のRDFS型closureとdomain/rangeが明確に不適合な候補を除外する", async () => {
+    const fixture = documentFixture();
+    fixture.semantic.source += `
+<${NS}a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <${NS}ChildSource> .
+<${NS}ChildSource> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <${NS}Source> .
+<${NS}b> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <${NS}Target> .
+<${NS}good> <http://www.w3.org/2000/01/rdf-schema#domain> <${NS}Source> ;
+  <http://www.w3.org/2000/01/rdf-schema#range> <${NS}Target> .
+<${NS}bad> <http://www.w3.org/2000/01/rdf-schema#domain> <${NS}Other> .
+<${NS}ChildSource> rdfs:label "Child source" .
+<${NS}Source> rdfs:label "Source" .
+<${NS}Target> rdfs:label "Target" .
+<${NS}Other> rdfs:label "Other" .
+<${NS}good> rdfs:label "Good relation" .
+<${NS}bad> rdfs:label "Bad relation" .
+`;
+    const context = testAuthoringContext(fixture);
+    context.terms = [...context.terms,
+      { iri: `${NS}good`, kind: "property", label: "適合する", objectKinds: ["iri"] },
+      { iri: `${NS}bad`, kind: "property", label: "不適合", objectKinds: ["iri"] },
+    ];
+    wrapper = await mountEditor({ modelValue: fixture, authoringContext: context }, 8);
+    const nodes = wrapper.getComponent(DiagramCanvas).props("scene").nodes;
+    exposedSelectionApi(wrapper).selectElements([
+      nodes.find((node) => node.semanticRef === `${NS}a`)!.elementId,
+      nodes.find((node) => node.semanticRef === `${NS}b`)!.elementId,
+    ]);
+    await nextTick();
+    await buttonWithText(wrapper, "関係を作る").trigger("click");
+    const cards = wrapper.get(".iriograph-predicate-cards").text();
+    expect(cards).toContain("適合する");
+    expect(cards).not.toContain("不適合");
+  });
+
+  it("label一文の新規要素をPreview後に一つのsemantic historyへ適用する", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({
       authoringContext: testAuthoringContext(fixture),
       resourceIriAllocator: fixedAllocator(`${NS}created`),
     });
 
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("Created task");
-    await buttonWithText(wrapper, "図の上で位置を指定").trigger("click");
-    emitCanvas(wrapper.getComponent(DiagramCanvas), "semanticPositionRequest", { x: 320, y: 160 });
-    await nextTick();
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Initial x"]').element.value).toBe("320");
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Initial y"]').element.value).toBe("88");
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("Created task");
+    expect(wrapper.find('input[aria-label="Resource class"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("配置位置");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
 
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
-    expect(wrapper.text()).toContain("追加する関係 2件");
     expect(wrapper.text()).toContain("適用可能");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
 
-    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-preview .primary").trigger("click");
     await waitUntil(() => Boolean(wrapper!.emitted("update:modelValue")?.length));
     const created = latestDocument(wrapper);
     expect(created.semantic.source).toMatch(/(?:<urn:test:editor:created>|:created)\s/);
     expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
-    expect(overlayFor(created, `${NS}created`)).toMatchObject({
-      geometry: { x: 320, y: 88 },
-      pinned: true,
-      placement: "user",
-    });
+    expect(overlayFor(created, `${NS}created`)).toMatchObject({ pinned: false, placement: "generated" });
 
     exposedHistoryApi(wrapper).undo();
     await settle();
@@ -845,31 +976,26 @@ describe("IriographEditor transaction regression", () => {
     expect(overlayFor(latestDocument(wrapper), `${NS}created`)).toBeUndefined();
   });
 
-  it("Meaning authoringを右Inspector上部へ置きlabel-first selectから完全IRIをdraftへ渡す", async () => {
+  it("Meaning authoringを右Inspectorの4 intentへ置き通常UIにIRIを出さない", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
 
-    expect(wrapper.find(".iriograph-elements-panel .iriograph-authoring-panel").exists()).toBe(false);
     const inspector = wrapper.get(".iriograph-inspector");
-    expect(inspector.find(".iriograph-authoring-panel").exists()).toBe(true);
-    expect(inspector.element.firstElementChild?.classList.contains("iriograph-authoring-panel"))
-      .toBe(true);
-    expect(inspector.text()).toContain("DISPLAY INSPECTOR");
-
-    const classes = wrapper.get<HTMLSelectElement>('select[aria-label="Resource class choice"]');
-    expect(classes.text()).toContain("Task");
-    await classes.setValue(TASK_CLASS);
-    await nextTick();
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').element.value)
-      .toBe(TASK_CLASS);
+    expect(inspector.find(".iriograph-intent-grid").exists()).toBe(true);
+    expect(inspector.find(".iriograph-authoring-panel").exists()).toBe(false);
+    expect(inspector.text()).not.toContain(TASK_CLASS);
+    expect(inspector.find('input[placeholder*="urn:"]').exists()).toBe(false);
   });
 
-  it("pendingDraftsChangedでstructured/Turtle draftの現在値をimmediate通知する", async () => {
+  it("pendingDraftsChangedで確認中semantic/Turtle draftの現在値をimmediate通知する", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
 
     expect(wrapper.emitted("pendingDraftsChanged")?.[0]).toEqual([false]);
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("未適用");
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("未適用");
+    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
     expect(wrapper.emitted("pendingDraftsChanged")?.at(-1)).toEqual([true]);
     await buttonWithText(wrapper, "キャンセル").trigger("click");
     expect(wrapper.emitted("pendingDraftsChanged")?.at(-1)).toEqual([false]);
@@ -882,11 +1008,13 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("pendingDraftsChanged")?.at(-1)).toEqual([false]);
   });
 
-  it("context menuの破壊操作はdocumentを変えず削除Preview draftだけをseedする", async () => {
+  it("右クリックは別menuを出さず右Inspectorのビューtabを直接開く", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
     const canvas = wrapper.getComponent(DiagramCanvas);
     const node = canvas.props("scene").nodes.find((item) => item.semanticRef === `${NS}a`)!;
+    exposedSelectionApi(wrapper).selectElement(node.elementId);
+    await nextTick();
 
     emitCanvas(canvas, "contextMenuRequest", {
       kind: "node",
@@ -895,49 +1023,45 @@ describe("IriographEditor transaction regression", () => {
       clientY: 80,
     });
     await nextTick();
-    expect(wrapper.get('[role="menu"]').text()).toContain("要素を削除");
-    await buttonWithText(wrapper, "要素を削除").trigger("click");
-
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Delete resource IRI"]').element.value)
-      .toBe(`${NS}a`);
+    expect(wrapper.find('[role="menu"]').exists()).toBe(false);
+    expect(wrapper.find(".iriograph-display-inspector").isVisible()).toBe(true);
+    expect(wrapper.find(".iriograph-appearance-editor").exists()).toBe(false);
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
-  it("direct edgeの名前・説明をpredicate resourceの詳細として開く", async () => {
+  it("direct edgeをCanvas選択して関係変更へ進みlabel文型で表示する", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
     const edge = wrapper.getComponent(DiagramCanvas).props("scene").edges[0]!;
     exposedSelectionApi(wrapper).selectElement(edge.elementId);
     await nextTick();
-    const quickContract = wrapper.get(".iriograph-edge-routing-quick .iriograph-edge-contract");
-    expect(quickContract.text()).toContain("A");
-    expect(quickContract.text()).toContain("B");
-    expect(quickContract.text()).not.toContain(edge.sourceElementId);
-    expect(quickContract.text()).not.toContain(edge.targetElementId);
-    await buttonWithText(wrapper, "関係名・説明を編集").trigger("click");
-    const dialog = wrapper.get(".iriograph-resource-details-dialog");
-    expect(dialog.text()).toContain("名前・説明");
-    expect(dialog.text()).toContain(`${NS}rel`);
-    expect(dialog.text()).toContain("すべてのedge表示に反映");
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    const panel = wrapper.get(".iriograph-intent-fields");
+    expect(panel.text()).toContain("A");
+    expect(panel.text()).toContain("B");
+    expect(panel.text()).toContain("A（Rel）B");
+    expect(panel.text()).not.toContain(edge.sourceElementId);
+    expect(panel.text()).not.toContain(`${NS}rel`);
   });
 
-  it("details dialogの複数属性変更を一つのPreview batchへまとめる", async () => {
+  it("要素の名前・説明・種類変更を一つのPreview batchへまとめる", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
     const node = wrapper.getComponent(DiagramCanvas).props("scene").nodes
       .find((item) => item.semanticRef === `${NS}a`)!;
     exposedSelectionApi(wrapper).selectElement(node.elementId);
     await nextTick();
-    await buttonWithText(wrapper, "詳細・属性").trigger("click");
-    const dialog = wrapper.get(".iriograph-resource-details-dialog");
-    const labelInput = dialog.findAll<HTMLInputElement | HTMLTextAreaElement>('input:not([type="checkbox"]), textarea')
-      .find((input) => input.element.value === "A")!;
+    await buttonWithText(wrapper, "要素を変更する").trigger("click");
+    const labelInput = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="要素の名前"]');
     await labelInput.setValue("A renamed");
-    await dialog.get("button.primary").trigger("click");
+    await buttonWithText(wrapper, "説明を追加").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="要素の説明 1"]').setValue("説明");
+    await wrapper.get<HTMLInputElement>('fieldset input[type="checkbox"]').setValue(true);
+    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
 
-    expect(wrapper.text()).toContain("詳細・属性を編集");
-    expect(wrapper.text()).toContain("追加する関係 1件");
+    expect(wrapper.text()).toContain("Aを編集");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
@@ -947,8 +1071,10 @@ describe("IriographEditor transaction regression", () => {
     const nodes = canvas.props("scene").nodes;
     exposedSelectionApi(wrapper).selectElements(nodes.map((node) => node.elementId));
     await nextTick();
-    await buttonWithText(wrapper, "見た目を調整").trigger("click");
-    const editor = wrapper.get(".iriograph-appearance-editor");
+    await openAppearanceInspector(wrapper);
+    await buttonWithText(wrapper, "ビューを編集").trigger("click");
+    const editor = wrapper.get(".iriograph-inspector .iriograph-appearance-editor.inline");
+    expect(wrapper.find(".iriograph-appearance-popover").exists()).toBe(false);
     await editor.findAll<HTMLInputElement>('input[type="checkbox"]')[0]!.setValue(true);
     await editor.get<HTMLInputElement>('input[aria-label="fill color"]').setValue("#ff0000");
     await nextTick();
@@ -969,24 +1095,59 @@ describe("IriographEditor transaction regression", () => {
       .toEqual([undefined, undefined]);
   });
 
-  it("明示Canvas pickerだけが対象fieldへresource IRIをseedしEscape/readOnlyで解除する", async () => {
+  it("Canvas grid toggleはsession表示だけを変え、edge注記はsparse overlayへround-tripする", async () => {
+    wrapper = await mountEditor();
+    const initial = documentFixture().semantic.source;
+    expect(wrapper.find(".iriograph-canvas-grid").exists()).toBe(true);
+    await openAppearanceInspector(wrapper);
+    await wrapper.get(".iriograph-grid-visibility button").trigger("click");
+    expect(wrapper.find(".iriograph-canvas-grid").exists()).toBe(false);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    const edge = wrapper.getComponent(DiagramCanvas).props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    const caption = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="選択した関係のビュー上の補足"]');
+    await caption.setValue("監査向け\n補足");
+    await settle();
+    const annotated = latestDocument(wrapper);
+    expect(annotated.semantic.source).toBe(initial);
+    expect(overlayFor(annotated, edge.semanticRef)?.appearance?.edgeCaption).toBe("監査向け\n補足");
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").edges[0]?.caption).toBe("監査向け\n補足");
+    expect(wrapper.findAll(".iriograph-edge-caption").map((item) => item.text())).toEqual(["監査向け", "補足"]);
+
+    await caption.setValue("");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
+  });
+
+  it("関係変更の端子dropと明示Canvas pickerはdraftだけをseedしEscape/readOnlyで解除する", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
-    await wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]')
-      .setValue("connect-resources");
-    await nextTick();
-    const targetPicker = wrapper.findAll(".iriograph-pick-resource")
-      .find((button) => button.text().includes("終点"))!;
-    await targetPicker.trigger("click");
     const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    expect(canvas.props("semanticEndpointReconnect")).toBe(true);
+    const targetNode = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}b`)!;
+    emitCanvas(canvas, "semanticEndpointReconnectRequest", {
+      edgeElementId: edge.elementId,
+      endpoint: "source",
+      targetSemanticRef: targetNode.semanticRef,
+    });
+    await nextTick();
+    expect(wrapper.get(".iriograph-intent-selection").text()).toContain("始点B");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    const targetPicker = buttonWithText(wrapper, "終点をCanvasから選択");
+    await targetPicker.trigger("click");
     expect(canvas.props("semanticResourcePicking")).toBe(true);
 
-    const targetNode = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}b`)!;
     emitCanvas(canvas, "semanticResourceRequest", targetNode.semanticRef);
     await nextTick();
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Edge target"]').element.value)
-      .toBe(`${NS}b`);
     expect(canvas.props("semanticResourcePicking")).toBe(false);
+    expect(wrapper.get(".iriograph-intent-selection").text()).toContain("B");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
 
     await targetPicker.trigger("click");
@@ -997,81 +1158,58 @@ describe("IriographEditor transaction regression", () => {
     expect(targetPicker.attributes("disabled")).toBeDefined();
   });
 
-  it("container背景のposition seedはcreate membershipもcatalog structure付きで補完する", async () => {
-    const fixture = containedDocumentFixture();
-    wrapper = await mountEditor({
-      modelValue: fixture,
-      authoringContext: testAuthoringContext(fixture),
-    }, 1);
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("Inside");
-    await buttonWithText(wrapper, "図の上で位置を指定").trigger("click");
-    emitCanvas(
-      wrapper.getComponent(DiagramCanvas),
-      "semanticPositionRequest",
-      { x: 180, y: 100 },
-      `${NS}lane`,
-    );
+  it("関係固有の説明はビュー補足でなく標準RDF reificationとしてTurtleへ保存する", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
     await nextTick();
-
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Create membership enabled"]').element.checked)
-      .toBe(true);
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Create membership container"]').element.value)
-      .toBe(`${NS}lane`);
-    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Create membership structure"]').element.value)
-      .not.toBe("");
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    await buttonWithText(wrapper, "説明を追加").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="この関係だけの説明 1"]')
+      .setValue("承認後に\n通知する");
+    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
+    await waitUntil(() => wrapper!.text().includes("適用可能"));
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-preview .primary").trigger("click");
+    await settle();
+
+    const applied = latestDocument(wrapper);
+    expect(applied.semantic.source).toContain("rdf:Statement");
+    expect(applied.semantic.source).toContain("承認後に\\n通知する");
+    expect(applied.semantic.source).toContain("rdf:subject");
+    expect(applied.semantic.source).toContain("rdf:predicate");
+    expect(applied.semantic.source).toContain("rdf:object");
+    expect(overlayFor(applied, edge.semanticRef)?.appearance?.edgeCaption).toBeUndefined();
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").edges[0]?.statementComments?.[0]?.value)
+      .toBe("承認後に\n通知する");
   });
 
-  it("create resource＋edge＋membershipを一preview/applyでTurtleとgenerated displayへatomic反映する", async () => {
+  it("新規要素作成時はCanvas位置や包含を暗黙seedしない", async () => {
     const fixture = containedDocumentFixture();
-    wrapper = await mountEditor({
-      modelValue: fixture,
-      authoringContext: testAuthoringContext(fixture),
-      resourceIriAllocator: fixedAllocator(`${NS}composite`),
-    }, 1);
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("Composite task");
-    await buttonWithText(wrapper, "図の上で位置を指定").trigger("click");
-    emitCanvas(
-      wrapper.getComponent(DiagramCanvas),
-      "semanticPositionRequest",
-      { x: 180, y: 100 },
-      `${NS}lane`,
-    );
-    await nextTick();
-    await wrapper.get<HTMLInputElement>('input[aria-label="Create edge enabled"]').setValue(true);
-    await nextTick();
-    await wrapper.get<HTMLInputElement>('input[aria-label="Create edge predicate"]').setValue(`${NS}rel`);
-    await wrapper.get<HTMLInputElement>('input[aria-label="Create edge resource"]').setValue(`${NS}a`);
+    wrapper = await mountEditor({ modelValue: fixture, authoringContext: testAuthoringContext(fixture) }, 1);
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    expect(wrapper.find('button[aria-label*="位置"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("包含する領域");
+    expect(wrapper.getComponent(DiagramCanvas).props("semanticPositionPicking")).toBe(false);
+  });
 
+  it("関係作成はCanvasのbaseと複数partnerを一previewへまとめる", async () => {
+    const fixture = threeNodeDocumentFixture();
+    wrapper = await mountEditor({ modelValue: fixture, authoringContext: testAuthoringContext(fixture) }, 3);
+    const nodes = wrapper.getComponent(DiagramCanvas).props("scene").nodes;
+    exposedSelectionApi(wrapper).selectElements(nodes.map((node) => node.elementId));
+    await nextTick();
+    await buttonWithText(wrapper, "関係を作る").trigger("click");
+    await wrapper.get<HTMLInputElement>('.iriograph-predicate-cards input[type="radio"]').setValue(true);
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
-    expect(wrapper.text()).toContain("要素を作成");
-    expect(wrapper.text()).toContain("Composite task");
-    expect(wrapper.text()).toContain("Rel");
-    expect(wrapper.text()).toContain("追加する関係 4件");
+    expect(wrapper.text()).toContain("追加 2件");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
-
-    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
-    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").nodes.some(
-      (node) => node.semanticRef === `${NS}composite`,
-    ));
-    const document = latestDocument(wrapper);
-    expect(document.semantic.source).toMatch(/(?:composite).*rel|rel.*(?:composite)/su);
-    expect(document.semantic.source).toMatch(/member.*(?:composite)/su);
-    const canvas = wrapper.getComponent(DiagramCanvas);
-    const created = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}composite`)!;
-    const lane = canvas.props("scene").containers.find((container) => container.semanticRef === `${NS}lane`)!;
-    expect(created.parentElementId).toBe(lane.elementId);
-    expect(overlayFor(document, `${NS}composite`)).toMatchObject({
-      geometry: { x: 180, y: 100 },
-      pinned: true,
-      placement: "user",
-    });
-    expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
   });
 
-  it("見た目だけ領域内のresourceを警告し、意味draftかpresentation修正を明示選択させる", async () => {
+  it("見た目だけ領域内のresourceをCanvas警告し所属変更intentから明示追加する", async () => {
     const fixture = visualContainmentMismatchFixture();
     wrapper = await mountEditor({
       modelValue: fixture,
@@ -1084,32 +1222,17 @@ describe("IriographEditor transaction regression", () => {
 
     expect(wrapper.get(`[data-element-id="${resource.elementId}"]`).classes())
       .toContain("containment-warning");
-    expect(wrapper.text()).toContain("表示と意味の包含が一致していません");
-    expect(wrapper.text()).toContain("見た目上 Lane の中");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
 
-    await buttonWithText(wrapper, "意味包含のdraftを作成").trigger("click");
-    await nextTick();
-    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]').element.value)
-      .toBe("set-membership");
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Membership container"]').element.value)
-      .toBe(`${NS}lane`);
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Membership member"]').element.value)
-      .toBe(`${NS}b`);
-    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Membership structure config"]').element.value)
-      .not.toBe("");
-    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
-
-    await buttonWithText(wrapper, "キャンセル").trigger("click");
-    await buttonWithText(wrapper, "表示だけ領域外へ移動").trigger("click");
-    await waitUntil(() => Boolean(wrapper!.emitted("update:modelValue")?.length));
-    const changed = latestDocument(wrapper);
-    expect(changed.semantic.source).toBe(fixture.semantic.source);
-    expect(overlayFor(changed, `${NS}b`)?.placement).toBe("user");
-    await waitUntil(() => !wrapper!.find(`[data-element-id="${resource.elementId}"].containment-warning`).exists());
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    expect(wrapper.text()).toContain("Lane（未所属）");
+    await wrapper.get(".iriograph-intent-fields select").setValue("add");
+    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
+    expect(wrapper.text()).toContain("追加 1件");
   });
 
-  it("Turtle draftとstructured draftを排他にし未確認draftを保存flushしない", async () => {
+  it("Turtle draftと4-intent semantic previewを排他にし未確認previewを保存flushしない", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({
       authoringContext: testAuthoringContext(fixture),
@@ -1118,11 +1241,13 @@ describe("IriographEditor transaction regression", () => {
     await openTurtlePanel(wrapper);
     const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
     await textarea.setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
-    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]').element.disabled)
-      .toBe(true);
+    expect(wrapper.findAll(".iriograph-intent-grid button").every((button) => button.attributes("disabled") !== undefined)).toBe(true);
     await buttonWithText(wrapper, "元に戻す").trigger("click");
 
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource label"]').setValue("Pending");
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("Pending");
+    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
+    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
     expect(textarea.element.readOnly).toBe(true);
     expect(await exposedApi(wrapper).flushPendingEdits()).toBe(false);
     expect(wrapper.text()).toContain("Preview/Applyされていないsemantic draft");
@@ -1130,7 +1255,7 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
-  it("Canvas Deleteはdirect edgeのprovenanceをexact remove draftへseedする", async () => {
+  it("Canvas Deleteは意味変更を開始せず4つ目のintentがdirect edgeをexact removeする", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
     const canvas = wrapper.getComponent(DiagramCanvas);
@@ -1138,15 +1263,20 @@ describe("IriographEditor transaction regression", () => {
 
     emitCanvas(canvas, "semanticEditRequest", edge.elementId);
     await nextTick();
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Statement ref"]').element.value)
-      .toBe(edge.provenance?.sourceStatementRefs[0]);
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
 
-    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    await buttonWithText(wrapper, "この関係を削除").trigger("click");
     await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
-    expect(wrapper.text()).toContain("削除する関係 1件");
+    expect(wrapper.text()).toContain("削除 1件");
     expect(wrapper.text()).toContain("適用可能");
-    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
+    expect(wrapper.getComponent(DiagramCanvas).props("deletionPreviewStatementRefs"))
+      .toContain(edge.provenance?.sourceStatementRefs[0]);
+    expect(wrapper.get(`[data-element-id="${edge.elementId}"]`).classes()).toContain("deletion-preview");
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-preview .primary").trigger("click");
     await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").edges.length === 0);
     expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
   });
@@ -1165,7 +1295,8 @@ describe("IriographEditor transaction regression", () => {
       authoringContext: testAuthoringContext(fixture),
       resourceIriAllocator: allocator,
     });
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("Stale");
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => Boolean(allocationRequest));
 
@@ -1223,7 +1354,8 @@ describe("IriographEditor transaction regression", () => {
       authoringContext: testAuthoringContext(fixture),
       resourceIriAllocator: allocator,
     });
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("Cancelled");
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => Boolean(request));
     await wrapper.setProps({ readOnly: true });
@@ -1252,10 +1384,11 @@ describe("IriographEditor transaction regression", () => {
       authoringContext: testAuthoringContext(fixture),
       resourceIriAllocator: allocator,
     });
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("Late");
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => Boolean(request));
-    const cancel = buttonWithText(wrapper, "キャンセル");
+    const cancel = wrapper.get<HTMLButtonElement>('button[aria-label="4つの操作へ戻る"]');
     expect(cancel.attributes("disabled")).toBeUndefined();
     await cancel.trigger("click");
     resolveAllocation!({
@@ -1266,7 +1399,7 @@ describe("IriographEditor transaction regression", () => {
     });
     await settle();
     expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').element.value).toBe("");
+    expect(wrapper.find('textarea[aria-label="新しい要素の名前"]').exists()).toBe(false);
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
@@ -1297,11 +1430,12 @@ describe("IriographEditor transaction regression", () => {
       authoringContext: context,
       resourceIriAllocator: fixedAllocator(`${NS}delayed-created`),
     });
-    await wrapper.get<HTMLInputElement>('input[aria-label="Resource class"]').setValue(TASK_CLASS);
+    await buttonWithText(wrapper, "新しい要素を作る").trigger("click");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]').setValue("Delayed");
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => wrapper!.text().includes("適用可能"));
     delayed.arm();
-    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-actions .primary").trigger("click");
+    await wrapper.get<HTMLButtonElement>(".iriograph-authoring-preview .primary").trigger("click");
     await delayed.started;
     await wrapper.setProps({ readOnly: true });
     delayed.release();
@@ -1329,7 +1463,7 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
 
-  it("parent provenanceから包含解除をexact configでseedしPreviewする", async () => {
+  it("parent provenanceから所属解除をexact configでbatch Previewする", async () => {
     const fixture = containedDocumentFixture();
     wrapper = await mountEditor({
       modelValue: fixture,
@@ -1339,45 +1473,40 @@ describe("IriographEditor transaction regression", () => {
     const member = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}a`)!;
     exposedSelectionApi(wrapper).selectElement(member.elementId);
     await nextTick();
-    await buttonWithText(wrapper, "包含から外す").trigger("click");
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Membership member"]').element.value)
-      .toBe(`${NS}a`);
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Membership present"]').element.checked)
-      .toBe(false);
-    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Membership structure config"]').element.value)
-      .not.toBe("");
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    expect(wrapper.text()).toContain("Lane（全件所属）");
+    await wrapper.get(".iriograph-intent-fields select").setValue("remove");
     await buttonWithText(wrapper, "変更内容を確認").trigger("click");
     await waitUntil(() => wrapper!.text().includes("適用可能"));
-    expect(wrapper.text()).toContain("削除する関係 1件");
+    expect(wrapper.text()).toContain("削除 1件");
   });
 
-  it("RDFS subclass Seq provenanceを現在のexact configと全ordinal memberへseedする", async () => {
+  it("RDFS subclass Seqを選択可能な順序付きgroupとして編集する", async () => {
     const fixture = sequenceDocumentFixture();
     wrapper = await mountEditor({
       modelValue: fixture,
       authoringContext: testAuthoringContext(fixture),
     }, 4);
     const canvas = wrapper.getComponent(DiagramCanvas);
-    const sequenceEdge = canvas.props("scene").edges.find((edge) => (
-      edge.provenance?.editCapability?.command === "set-sequence"
+    const sequenceGroup = canvas.props("scene").containers.find((container) => (
+      container.groupRole === "sequence"
     ))!;
-    emitCanvas(canvas, "semanticEditRequest", sequenceEdge.elementId);
+    expect(canvas.props("scene").edges.some((edge) => (
+      edge.provenance?.operator === "ordinal-sequence"
+    ))).toBe(false);
+    expect((canvas.props("scene").memberships ?? []).filter((membership) => (
+      membership.role === "sequence-member"
+    )).map((membership) => membership.ordinal)).toEqual([1, 2, 3]);
+    exposedSelectionApi(wrapper).selectElement(sequenceGroup.elementId);
     await nextTick();
-    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]').element.value)
-      .toBe(`${NS}a\n${NS}b\n${NS}a`);
-    expect(datalistValuesFor(wrapper, 'input[aria-label="Structure IRI"]'))
-      .toContain(`${NS}seq`);
-    const config = wrapper.get<HTMLSelectElement>('select[aria-label="Ordinal structure config"]');
-    expect(config.element.value).not.toBe("");
-    expect(config.text()).toContain("現在の並び方");
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]')
-      .setValue(`${NS}b\n${NS}a\n${NS}a`);
-    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
-    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
-    expect(wrapper.text()).toContain("適用可能");
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    expect(wrapper.text()).toContain("通常の関係線とは別の構造");
+    expect(wrapper.text()).toContain("A");
+    expect(wrapper.text()).toContain("B");
+    expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
   });
 
-  it("objectKinds未指定propertyをedge候補に含めliteral-onlyを除外する", async () => {
+  it("objectKinds未指定propertyを関係候補に含めliteral-onlyを除外する", async () => {
     const fixture = documentFixture();
     const context = testAuthoringContext(fixture);
     context.terms = [
@@ -1391,16 +1520,16 @@ describe("IriographEditor transaction regression", () => {
       },
     ];
     wrapper = await mountEditor({ authoringContext: context });
-    await wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]')
-      .setValue("connect-resources");
+    const nodes = wrapper.getComponent(DiagramCanvas).props("scene").nodes;
+    exposedSelectionApi(wrapper).selectElements(nodes.map((node) => node.elementId));
     await nextTick();
-
-    const predicates = datalistValuesFor(wrapper, 'input[aria-label="Edge predicate"]');
-    expect(predicates).toContain(`${NS}unconstrained`);
-    expect(predicates).not.toContain(`${NS}literalOnly`);
+    await buttonWithText(wrapper, "関係を作る").trigger("click");
+    const predicates = wrapper.get(".iriograph-predicate-cards").text();
+    expect(predicates).toContain("Unconstrained");
+    expect(predicates).not.toContain("Literal only");
   });
 
-  it("Alt provenanceから重複memberとdefault ordinal slotをlosslessにseedする", async () => {
+  it("Alt provenanceのderived edgeを理由付きで直接編集不可にする", async () => {
     const fixture = alternativeDocumentFixture();
     wrapper = await mountEditor({
       modelValue: fixture,
@@ -1410,32 +1539,21 @@ describe("IriographEditor transaction regression", () => {
     const alternativeEdge = canvas.props("scene").edges.find((edge) => (
       edge.provenance?.editCapability?.command === "set-alternatives"
     ))!;
-    emitCanvas(canvas, "semanticEditRequest", alternativeEdge.elementId);
+    exposedSelectionApi(wrapper).selectElement(alternativeEdge.elementId);
     await nextTick();
-    expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]').element.value)
-      .toBe(`${NS}a\n${NS}b\n${NS}a`);
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Default ordinal"]').element.value)
-      .toBe("1");
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Default member IRI"]').element.value)
-      .toBe(`${NS}a`);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Structure members"]')
-      .setValue(`${NS}b\n${NS}a\n${NS}a`);
-    expect(wrapper.get<HTMLInputElement>('input[aria-label="Default member IRI"]').element.value)
-      .toBe(`${NS}b`);
-    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
-    await waitUntil(() => wrapper!.find(".iriograph-authoring-preview").exists());
-    expect(wrapper.text()).toContain("適用可能");
+    await buttonWithText(wrapper, "関係を変更する").trigger("click");
+    expect(wrapper.text()).toContain("分岐構造から自動生成");
+    expect(wrapper.text()).toContain("元の分岐を編集");
   });
 
-  it("readOnlyではstructured authoringの全write入口を無効化する", async () => {
+  it("readOnlyでは4 intentの全write入口を無効化する", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({
       authoringContext: testAuthoringContext(fixture),
       readOnly: true,
     });
-    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Semantic operation"]').element.disabled)
-      .toBe(true);
-    await buttonWithText(wrapper, "変更内容を確認").trigger("click");
+    expect(wrapper.findAll(".iriograph-intent-grid button")).toHaveLength(4);
+    expect(wrapper.findAll(".iriograph-intent-grid button").every((button) => button.attributes("disabled") !== undefined)).toBe(true);
     expect(wrapper.find(".iriograph-authoring-preview").exists()).toBe(false);
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
   });
@@ -1643,6 +1761,13 @@ async function openTurtlePanel(wrapper: VueWrapper): Promise<void> {
   await nextTick();
 }
 
+async function openAppearanceInspector(wrapper: VueWrapper): Promise<void> {
+  const button = wrapper.findAll("button").find((candidate) => candidate.text() === "ビュー");
+  if (!button) throw new Error("ビューInspector tab was not found");
+  await button.trigger("click");
+  await nextTick();
+}
+
 function emitCanvas(
   canvas: unknown,
   event: string,
@@ -1767,6 +1892,21 @@ function containedDocumentFixture(): IriographDocumentV1 {
 :lane a rdf:Bag ; rdfs:label "Lane" ; rdfs:member :a .
 :a rdfs:label "A" .
 `;
+  return document;
+}
+
+function regionDocumentFixture(): IriographDocumentV1 {
+  const document = containedDocumentFixture();
+  document.documentId = "editor-region-appearance";
+  document.views[0]!.kind = "region";
+  document.views[0]!.overlay = {
+    lane: {
+      semanticRef: `${NS}lane`,
+      geometry: { x: 40, y: 40, width: 420, height: 240 },
+      pinned: true,
+      placement: "user",
+    },
+  };
   return document;
 }
 

@@ -111,6 +111,16 @@ export function compileAliasedOperation(
         predicateIri: index.resolveAlias(operation.predicate, "predicate"),
         objectIri: index.resolveAlias(operation.object, "resource"),
       };
+    case "set-statement-comments":
+      return {
+        type: "set-statement-comments",
+        commandId: operation.operationId,
+        statementRef: operation.statementRef,
+        subjectIri: index.resolveAlias(operation.subject, "resource"),
+        predicateIri: index.resolveAlias(operation.predicate, "predicate"),
+        objectIri: index.resolveAlias(operation.object, "resource"),
+        comments: operation.comments.map((comment) => ({ ...comment })),
+      };
   }
 }
 

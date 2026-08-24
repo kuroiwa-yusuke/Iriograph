@@ -73,6 +73,14 @@ export type ViewElementOverlay = {
     styleToken?: string;
     /** Sparse, view-local label placement. The semantic label remains in RDF. */
     labelPlacement?: LabelPlacement;
+    /** Normalized clockwise position on a region perimeter: 0 is top-left. */
+    regionLabelAnchor?: number;
+    /** Region label glyph flow, independent of its perimeter position. */
+    regionLabelWritingDirection?: RegionLabelWritingDirection;
+    /** View-local stacking order among regions. */
+    regionZOrder?: number;
+    /** View-local annotation for one projected edge; never semantic identity. */
+    edgeCaption?: string;
     extensions?: IriographExtensions;
   };
   routing?: {
@@ -82,6 +90,9 @@ export type ViewElementOverlay = {
     labelOffset?: Point;
     sourceAnchor?: EdgeEndpointAnchor;
     targetAnchor?: EdgeEndpointAnchor;
+    /** Sparse terminal overrides; omitted values resolve from the catalog template. */
+    sourceMarker?: EdgeTerminalMarker;
+    targetMarker?: EdgeTerminalMarker;
     extensions?: IriographExtensions;
   };
   extensions?: IriographExtensions;
@@ -112,6 +123,8 @@ export type EdgeEndpointAnchor = {
 export type EdgeEndpointShape = NonNullable<VisualTemplate["shape"]> | "container" | "region";
 
 export type LabelPlacement = "top" | "right" | "bottom" | "left" | "center";
+
+export type RegionLabelWritingDirection = "horizontal-right" | "vertical-down";
 
 export type EdgeRouteMode = "auto" | "straight" | "orthogonal" | "curve" | "manual";
 
@@ -413,6 +426,10 @@ export type ProjectedMembership = {
   memberElementId: string;
   /** Region identity in a region view; absent in a hierarchy-only view. */
   regionElementId?: string;
+  /** Semantic structure represented by this membership, not a predicate edge. */
+  role?: "membership" | "sequence-member";
+  /** One-based rdf:_n position when role is sequence-member. */
+  ordinal?: number;
   provenance: ProjectionProvenance;
 };
 
@@ -441,6 +458,8 @@ export type ProjectedContainer = {
   elementId: string;
   semanticRef: string;
   structuralKind: "container";
+  /** Renderer-neutral grouping grammar derived from the catalog operator. */
+  groupRole?: "sequence";
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
@@ -463,6 +482,9 @@ export type ProjectedRegion = {
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  regionLabelAnchor?: number;
+  regionLabelWritingDirection?: RegionLabelWritingDirection;
+  regionZOrder?: number;
   templateRef: string;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
@@ -477,7 +499,10 @@ export type ProjectedEdge = {
   semanticRef: string;
   structuralKind: "edge";
   label: string;
+  caption?: string;
   semanticText?: SceneSemanticText;
+  /** Comments on this exact asserted S/P/O via RDF 1.1 standard reification. */
+  statementComments?: StatementSemanticComment[];
   labelProvenance?: EdgeLabelProvenance;
   sourceElementId: string;
   targetElementId: string;
@@ -536,6 +561,8 @@ export type SceneContainer = {
   elementId: string;
   semanticRef: string;
   structuralKind: "container";
+  /** Renderer-neutral grouping grammar derived from the catalog operator. */
+  groupRole?: "sequence";
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
@@ -558,6 +585,9 @@ export type SceneRegion = {
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  regionLabelAnchor?: number;
+  regionLabelWritingDirection?: RegionLabelWritingDirection;
+  regionZOrder?: number;
   templateRef: string;
   geometry: ElementGeometry;
   style: VisualStyle;
@@ -571,7 +601,10 @@ export type SceneEdge = {
   semanticRef: string;
   structuralKind: "edge";
   label: string;
+  caption?: string;
   semanticText?: SceneSemanticText;
+  /** Comments on this exact asserted S/P/O via RDF 1.1 standard reification. */
+  statementComments?: StatementSemanticComment[];
   labelProvenance?: EdgeLabelProvenance;
   sourceElementId: string;
   targetElementId: string;
@@ -593,6 +626,10 @@ export type SceneEdge = {
   projectionRuleId?: string;
   fallback: boolean;
   provenance?: ProjectionProvenance;
+};
+
+export type StatementSemanticComment = SemanticTextValue & {
+  reifierRef: string;
 };
 
 export type ProjectionDiagnostic = {

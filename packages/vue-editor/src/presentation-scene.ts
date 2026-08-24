@@ -95,6 +95,7 @@ function reconcileEdge(
     semanticRef: projected.semanticRef,
     structuralKind: "edge",
     label: projected.label,
+    caption: projected.caption,
     semanticText: projected.semanticText,
     labelProvenance: projected.labelProvenance,
     sourceElementId: projected.sourceElementId,

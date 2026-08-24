@@ -58,6 +58,7 @@ const baseRdfRdfsCatalog: ProjectionCatalogV1 = {
         operator: "ordinal-sequence",
         ordinalPredicatePrefix: `${RDF}_`,
       },
+      templateRef: "urn:iriograph:template:container:sequence:1",
     },
     {
       ruleId: "rdf-alt",
@@ -143,6 +144,20 @@ const baseRdfRdfsCatalog: ProjectionCatalogV1 = {
       shape: "diamond",
       style: { fill: "#fff7ed", stroke: "#c2410c", text: "#7c2d12" },
       defaultSize: { width: 104, height: 104 },
+    },
+    "urn:iriograph:template:container:sequence:1": {
+      templateRef: "urn:iriograph:template:container:sequence:1",
+      structuralKind: "container",
+      headerPosition: "top",
+      style: {
+        fill: "#ffffff",
+        stroke: "#64748b",
+        text: "#334155",
+        fillOpacity: 0.16,
+        strokeWidth: 1,
+        dash: "5 5",
+      },
+      defaultSize: { width: 360, height: 160 },
     },
     "urn:iriograph:template:node:class:1": {
       templateRef: "urn:iriograph:template:node:class:1",

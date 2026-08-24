@@ -53,5 +53,6 @@ exact IDだけを起点とし、containerの場合だけ全structural descendant
 
 v1はviewごとのSPARQL、filter DSL、predicate条件式、非表示nodeを跨ぐedge再接続を持ちません。
 表示構造の違いはcatalog profileで宣言し、個別要素の表示調整はoverlay、一時的な絞り込みは
-session-only hideで扱います。Structured authoringの構造候補と初期位置はactive viewの
-profile/catalog/viewIdへbindします。
+session-only hideで扱います。Structured authoringの構造候補はactive viewの
+profile/catalog/viewIdへbindします。Standard editorの`新しい要素を作る`は初期位置を入力せず、
+active viewの標準layoutがgenerated geometryを補完します。

@@ -150,6 +150,39 @@ describe("authoring draft", () => {
       .toEqual(["urn:test:a", "urn:test:b"]);
   });
 
+  it("関係作成の複数対象を重複なく個別commandへcompileする", () => {
+    const commands = compileAuthoringDraft({
+      ...emptyAuthoringDraft("connect-resources"),
+      sourceIri: "urn:test:a",
+      predicateIri: "urn:test:relates",
+      targetIri: "urn:test:b",
+      targetIris: ["urn:test:c", "urn:test:b", "urn:test:d"],
+    }, "main");
+    expect(commands).toEqual([
+      {
+        type: "connect-resources",
+        commandId: "editor-semantic-command-1",
+        subjectIri: "urn:test:a",
+        predicateIri: "urn:test:relates",
+        objectIri: "urn:test:b",
+      },
+      {
+        type: "connect-resources",
+        commandId: "editor-semantic-command-2",
+        subjectIri: "urn:test:a",
+        predicateIri: "urn:test:relates",
+        objectIri: "urn:test:c",
+      },
+      {
+        type: "connect-resources",
+        commandId: "editor-semantic-command-3",
+        subjectIri: "urn:test:a",
+        predicateIri: "urn:test:relates",
+        objectIri: "urn:test:d",
+      },
+    ]);
+  });
+
   it("空literalと明示的なproperty削除を区別する", () => {
     const draft = {
       ...emptyAuthoringDraft("set-property"),

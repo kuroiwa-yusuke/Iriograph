@@ -1,6 +1,7 @@
 import {
   isValidEdgeEndpointAnchor,
   type EdgeEndpointAnchor,
+  type EdgeTerminalMarker,
   type ElementGeometry,
   type Point,
   type SceneEdge,
@@ -11,6 +12,8 @@ export type EditableEdgeRouting = {
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
+  sourceMarker?: EdgeTerminalMarker;
+  targetMarker?: EdgeTerminalMarker;
 };
 
 export type EdgeRoutingUpdate = {
@@ -219,13 +222,22 @@ export function normalizeEditableRouting(
   const targetAnchor = isValidEdgeEndpointAnchor(routing.targetAnchor)
     ? { ...routing.targetAnchor }
     : undefined;
-  if (!waypoints && !labelOffset && !sourceAnchor && !targetAnchor) return undefined;
+  const sourceMarker = isEdgeTerminalMarker(routing.sourceMarker) ? routing.sourceMarker : undefined;
+  const targetMarker = isEdgeTerminalMarker(routing.targetMarker) ? routing.targetMarker : undefined;
+  if (!waypoints && !labelOffset && !sourceAnchor && !targetAnchor && !sourceMarker && !targetMarker) return undefined;
   return {
     ...(waypoints ? { waypoints } : {}),
     ...(labelOffset ? { labelOffset } : {}),
     ...(sourceAnchor ? { sourceAnchor } : {}),
     ...(targetAnchor ? { targetAnchor } : {}),
+    ...(sourceMarker ? { sourceMarker } : {}),
+    ...(targetMarker ? { targetMarker } : {}),
   };
+}
+
+function isEdgeTerminalMarker(value: unknown): value is EdgeTerminalMarker {
+  return typeof value === "string"
+    && ["none", "arrow", "open-arrow", "triangle", "diamond", "circle"].includes(value);
 }
 
 export function routingWithWaypoints(

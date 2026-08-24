@@ -17,6 +17,7 @@ import {
   applyAuthoringPreview,
   applyViewCommand,
   standardRdfRdfsCatalog,
+  statementIdentityForNamedStatement,
   validateIriographDocumentV1,
 } from "@iriograph/core";
 
@@ -67,6 +68,25 @@ if (preview.valid) {
 
 Structured authoringは必ずpreviewと明示confirmationを経由します。Apply時にはcommand、
 document/context revision、exact graph patchを再計算し、staleまたは改変されたpreviewを拒否します。
+
+個々のdirect relationへ意味上の説明を付ける場合は、predicate resourceの説明やview captionではなく
+`set-statement-comments`を使います。Coreはasserted S/P/Oを残し、RDF 1.1標準reificationの
+`rdfs:comment`として保存します。
+
+```ts
+const statement = {
+  subjectIri: "urn:example:request",
+  predicateIri: "urn:example:approvedBy",
+  objectIri: "urn:example:manager",
+};
+const command = {
+  type: "set-statement-comments" as const,
+  commandId: "describe-approval",
+  statementRef: statementIdentityForNamedStatement(statement),
+  ...statement,
+  comments: [{ kind: "literal" as const, value: "金額条件を満たす場合", language: "ja" }],
+};
+```
 
 直接Turtleをcontrolled writeとして適用する場合はactorを必須指定します。
 

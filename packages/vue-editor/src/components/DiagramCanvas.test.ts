@@ -16,6 +16,106 @@ describe("DiagramCanvas pointer gestures", () => {
     document.body.innerHTML = "";
   });
 
+  it("薄いCanvas gridをsnap sizeと同期し表示だけ切り替える", async () => {
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene: sceneFixture(),
+        snap: { grid: { enabled: true, size: 12 }, targets: { enabled: true, tolerance: 6 } },
+        showGrid: true,
+      },
+    });
+    expect(wrapper.get(".iriograph-diagram-canvas").attributes("style")).toContain("--iriograph-grid-size: 12px");
+    expect(wrapper.get(".iriograph-canvas-grid").attributes("aria-hidden")).toBe("true");
+    await wrapper.setProps({ showGrid: false });
+    expect(wrapper.find(".iriograph-canvas-grid").exists()).toBe(false);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+  });
+
+  it("削除previewはresourceとexact provenanceの影響edge・membershipを一時表示する", async () => {
+    const scene = sceneFixture();
+    const directProvenance = (statementRef: string) => ({
+      sourceStatementRefs: [statementRef],
+      operator: "implicit-direct-edge" as const,
+      derivation: "direct" as const,
+    });
+    scene.edges[0]!.provenance = directProvenance("urn:test:statement:removed-edge");
+    scene.edges.push({
+      ...structuredClone(scene.edges[0]!),
+      elementId: "edge-same-predicate-not-removed",
+      semanticRef: "urn:test:canvas:statement:not-removed",
+      provenance: directProvenance("urn:test:statement:not-removed"),
+    });
+    scene.edges.push({
+      ...structuredClone(scene.edges[0]!),
+      elementId: "edge-derived-removed",
+      semanticRef: "urn:test:canvas:statement:derived-removed",
+      provenance: {
+        sourceStatementRefs: ["urn:test:statement:removed-derived"],
+        operator: "ordinal-sequence",
+        derivation: "derived",
+      },
+    });
+    scene.regions = [{
+      elementId: "region-a",
+      semanticRef: "urn:test:canvas:region-a",
+      structuralKind: "region",
+      label: "領域A",
+      templateRef: "urn:test:template:region",
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      geometry: { x: 0, y: 0, width: 480, height: 280 },
+      pinned: false,
+      placement: "generated",
+      provenance: {
+        sourceStatementRefs: ["urn:test:statement:region-a"],
+        operator: "membership-region",
+        derivation: "resource",
+      },
+    }];
+    scene.memberships = [{
+      semanticRef: "urn:test:membership:a",
+      containerElementId: "region-a",
+      regionElementId: "region-a",
+      memberElementId: "node-a",
+      provenance: {
+        sourceStatementRefs: ["urn:test:statement:removed-membership"],
+        operator: "membership-region",
+        derivation: "derived",
+      },
+    }];
+    const original = structuredClone(scene);
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene,
+        deletionPreviewResourceRefs: ["urn:test:canvas:a"],
+        deletionPreviewStatementRefs: [
+          "urn:test:statement:removed-edge",
+          "urn:test:statement:removed-derived",
+          "urn:test:statement:removed-membership",
+        ],
+      },
+    });
+
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').classes())
+      .toContain("deletion-preview");
+    expect(wrapper.get('.iriograph-edge-group[data-element-id="edge-a-b"]').classes())
+      .toContain("deletion-preview");
+    expect(wrapper.get('.iriograph-edge-group[data-element-id="edge-derived-removed"]').classes())
+      .toContain("deletion-preview");
+    expect(wrapper.get('.iriograph-edge-group[data-element-id="edge-same-predicate-not-removed"]').classes())
+      .not.toContain("deletion-preview");
+    expect(wrapper.get('.iriograph-deletion-preview-membership[data-semantic-ref="urn:test:membership:a"]')
+      .attributes("d")).toMatch(/^M /u);
+    expect(scene).toEqual(original);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+
+    await wrapper.setProps({
+      deletionPreviewResourceRefs: [],
+      deletionPreviewStatementRefs: [],
+    });
+    expect(wrapper.find(".deletion-preview").exists()).toBe(false);
+    expect(wrapper.find(".iriograph-deletion-preview-membership").exists()).toBe(false);
+  });
+
   it("semantic/provenance statement diagnosticをScene elementへannotationする", () => {
     const scene = sceneFixture();
     scene.nodes[0]!.provenance = {
@@ -62,13 +162,69 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("zoomChange")).toBeUndefined();
   });
 
+  it("node dragがviewport端へ近づくと表示領域を同じ方向へ追従する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), snap: disabledSnap() },
+    });
+    configureViewport(wrapper, 260, 180);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    await wrapper.get(".iriograph-scene-node").trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 80,
+    });
+    dispatchPointer("pointermove", 254, 174);
+    expect(viewport.element.scrollLeft).toBeGreaterThan(0);
+    expect(viewport.element.scrollTop).toBeGreaterThan(0);
+    dispatchPointer("pointerup", 254, 174);
+  });
+
+  it("意味編集の端子dropはnodeだけを接続先draftとして通知しview routingを変更しない", async () => {
+    const scene = sceneFixture();
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "edge-a-b",
+        selectedElementIds: ["edge-a-b"],
+        semanticEndpointReconnect: true,
+      },
+    });
+    const edgeLayer = wrapper.get<SVGSVGElement>(".iriograph-edge-layer").element;
+    Object.defineProperty(edgeLayer, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: 800, bottom: 500, width: 800, height: 500, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    const sourceHandle = wrapper.get(".iriograph-endpoint-anchors circle.source");
+    await sourceHandle.trigger("pointerdown", { button: 0, clientX: 140, clientY: 70 });
+    dispatchPointer("pointermove", 330, 180);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-b"]').classes())
+      .toContain("semantic-reconnect-target");
+    expect(wrapper.get(".iriograph-semantic-reconnect-preview").attributes("d")).toMatch(/^M /u);
+    dispatchPointer("pointerup", 330, 180);
+    expect(lastPayload(wrapper, "semanticEndpointReconnectRequest")).toEqual({
+      edgeElementId: "edge-a-b",
+      endpoint: "source",
+      targetSemanticRef: "urn:test:canvas:b",
+    });
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+
+    await sourceHandle.trigger("pointerdown", { button: 0, clientX: 140, clientY: 70 });
+    dispatchPointer("pointermove", 700, 450);
+    dispatchPointer("pointerup", 700, 450);
+    expect(wrapper.emitted("semanticEndpointReconnectRequest")).toHaveLength(1);
+  });
+
   it("selected nodeをminimum sizeまでresizeしてgestureを閉じる", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
       props: { scene: sceneFixture(), selectedElementId: "node-a" },
     });
 
-    await wrapper.get(".iriograph-resize-handle").trigger("pointerdown", {
+    expect(wrapper.findAll(".iriograph-resize-handle")).toHaveLength(8);
+    await wrapper.get('.iriograph-resize-handle[data-handle="se"]').trigger("pointerdown", {
       button: 0,
       clientX: 200,
       clientY: 160,
@@ -189,6 +345,39 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
   });
 
+  it.each(["straight", "curve"] as const)(
+    "%s routeではgenerated waypoint handleもdouble-click追加も無効にする",
+    async (routeMode) => {
+      const scene = generatedRouteScene();
+      wrapper = mount(DiagramCanvas, {
+        attachTo: document.body,
+        props: {
+          scene,
+          selectedElementId: "edge-a-b",
+          edgeRouteModes: { "edge-a-b": routeMode },
+        },
+      });
+      const svg = wrapper.get<SVGSVGElement>(".iriograph-edge-layer");
+      svg.element.getBoundingClientRect = () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 500,
+        width: 800,
+        height: 500,
+        toJSON: () => undefined,
+      });
+
+      expect(wrapper.find(".iriograph-waypoints").exists()).toBe(false);
+      await wrapper.get(".iriograph-edge-group").trigger("dblclick", { clientX: 180, clientY: 76 });
+
+      expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+      expect(wrapper.emitted("gestureStart")).toBeUndefined();
+    },
+  );
+
   it("focused waypointのkeyboard移動と最後のDeleteを一操作ずつ通知する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
@@ -274,21 +463,20 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBe("-1");
   });
 
-  it("Deleteはsemantic graphを直接変更せずauthoring draft seedだけを通知する", async () => {
+  it("DeleteとBackspaceはsemantic edit eventを通知しない", async () => {
     wrapper = mount(DiagramCanvas, { props: { scene: sceneFixture() } });
 
     await wrapper.get(".iriograph-edge-group").trigger("keydown", { key: "Delete" });
     await wrapper.get(".iriograph-scene-node").trigger("keydown", { key: "Backspace" });
+    await wrapper.get(".iriograph-canvas-scroll").trigger("keydown", { key: "Delete" });
+    await wrapper.get(".iriograph-canvas-scroll").trigger("keydown", { key: "Backspace" });
 
-    expect(wrapper.emitted("semanticEditRequest")).toEqual([
-      ["edge-a-b"],
-      ["node-a"],
-    ]);
+    expect(wrapper.emitted("semanticEditRequest")).toBeUndefined();
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
 
     await wrapper.setProps({ readOnly: true });
     await wrapper.get(".iriograph-edge-group").trigger("keydown", { key: "Delete" });
-    expect(wrapper.emitted("semanticEditRequest")).toHaveLength(2);
+    expect(wrapper.emitted("semanticEditRequest")).toBeUndefined();
   });
 
   it("labelのないedgeにはlabel位置handleを作らない", () => {
@@ -970,6 +1158,100 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.get(".iriograph-region-label").classes()).toContain("label-right");
   });
 
+  it("region labelを枠線上でdragし、z-order順に領域を描画する", async () => {
+    const scene = sceneFixture();
+    const region = {
+      elementId: "region-a",
+      semanticRef: "urn:test:ClassA",
+      structuralKind: "region" as const,
+      label: "A",
+      templateRef: "urn:test:region",
+      geometry: { x: 0, y: 0, width: 250, height: 220 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      pinned: false,
+      placement: "generated" as const,
+      regionLabelAnchor: 0,
+      regionZOrder: 2,
+    };
+    scene.regions = [region, {
+      ...region,
+      elementId: "region-b",
+      semanticRef: "urn:test:ClassB",
+      label: "B",
+      regionZOrder: 1,
+    }];
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene },
+    });
+    wrapper.get<HTMLElement>(".iriograph-canvas-stage").element.getBoundingClientRect = () => ({
+      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 500,
+      width: 800, height: 500, toJSON: () => undefined,
+    });
+
+    expect(wrapper.findAll(".iriograph-scene-region").map((item) => item.attributes("data-element-id")))
+      .toEqual(["region-b", "region-a"]);
+    expect(wrapper.get('[data-element-id="region-a"] .iriograph-region-label').attributes("style"))
+      .toContain("left: 0px");
+
+    await wrapper.get('[data-element-id="region-a"] .iriograph-region-label').trigger("pointerdown", {
+      button: 0,
+      clientX: 0,
+      clientY: 0,
+    });
+    dispatchPointer("pointermove", 250, 110);
+    dispatchPointer("pointerup", 250, 110);
+
+    expect(lastPayload<{ elementId: string; anchor: number }>(wrapper, "regionLabelUpdate"))
+      .toEqual({ elementId: "region-a", anchor: 360 / 940 });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("選択中regionだけをinteraction前面へ上げ、選択解除時に永続順へ戻す", async () => {
+    const scene = sceneFixture();
+    const region = {
+      elementId: "region-a",
+      semanticRef: "urn:test:ClassA",
+      structuralKind: "region" as const,
+      label: "A",
+      templateRef: "urn:test:region",
+      geometry: { x: 0, y: 0, width: 250, height: 220 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      pinned: false,
+      placement: "generated" as const,
+      regionZOrder: 1,
+    };
+    scene.regions = [region, {
+      ...region,
+      elementId: "region-b",
+      semanticRef: "urn:test:ClassB",
+      label: "B",
+      regionZOrder: 2,
+    }];
+    wrapper = mount(DiagramCanvas, {
+      props: { scene, selectedElementId: "region-a", selectedElementIds: ["region-a"] },
+    });
+
+    const regionA = wrapper.get('[data-element-id="region-a"]');
+    expect(regionA.classes()).toContain("interaction-front");
+    expect(regionA.findAll(".iriograph-resize-handle")).toHaveLength(8);
+    expect(wrapper.findAll(".iriograph-scene-region").map((item) => item.attributes("data-element-id")))
+      .toEqual(["region-a", "region-b"]);
+    expect(scene.regions[0]!.regionZOrder).toBe(1);
+
+    await wrapper.setProps({ selectedElementId: "", selectedElementIds: [] });
+    expect(wrapper.get('[data-element-id="region-a"]').classes()).not.toContain("interaction-front");
+    expect(scene.regions[0]!.regionZOrder).toBe(1);
+  });
+
+  it("node labelの改行をCanvas文字列として保持する", () => {
+    const scene = sceneFixture();
+    scene.nodes[0]!.label = "受付\n担当確認";
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+    expect(wrapper.get(".iriograph-node-label").text()).toBe("受付\n担当確認");
+  });
+
   it("membership-regionのnode dragを複数領域のintersection内へclampする", async () => {
     const scene = sceneFixture();
     const provenance = {
@@ -995,19 +1277,66 @@ describe("DiagramCanvas pointer gestures", () => {
       .toMatchObject({ elementId: "node-a", geometry: { x: 210, y: 90, width: 40, height: 30 } });
   });
 
-  it("labelなしsequence edgeへ表示専用の順序badgeを出す", () => {
+  it("node dragが一方のregion内でも他方から外れる場合はintersection境界で止める", async () => {
     const scene = sceneFixture();
-    scene.edges[0]!.label = "";
-    scene.edges[0]!.labelProvenance = {
-      kind: "derived-structure",
-      role: "sequence-transition",
-      structureSemanticRef: "urn:test:seq",
-      sourceStatementRefs: ["urn:test:seq-1", "urn:test:seq-2"],
-      fromOrdinal: 1,
-      toOrdinal: 2,
+    const provenance = {
+      sourceStatementRefs: ["urn:test:membership"],
+      operator: "membership-region" as const,
+      derivation: "direct" as const,
     };
+    scene.edges = [];
+    scene.nodes = [{ ...scene.nodes[0]!, geometry: { x: 120, y: 90, width: 40, height: 30 } }];
+    scene.regions = [
+      { elementId: "region-a", semanticRef: "urn:test:ClassA", structuralKind: "region", label: "A", templateRef: "urn:test:region", geometry: { x: 0, y: 0, width: 250, height: 220 }, style: { fill: "#fff", stroke: "#000", text: "#000" }, pinned: false, placement: "generated", provenance },
+      { elementId: "region-b", semanticRef: "urn:test:ClassB", structuralKind: "region", label: "B", templateRef: "urn:test:region", geometry: { x: 100, y: 50, width: 250, height: 220 }, style: { fill: "#fff", stroke: "#000", text: "#000" }, pinned: false, placement: "generated", provenance },
+    ];
+    scene.memberships = [
+      { semanticRef: "urn:test:m1", containerElementId: "region-a", memberElementId: "node-a", regionElementId: "region-a", provenance },
+      { semanticRef: "urn:test:m2", containerElementId: "region-b", memberElementId: "node-a", regionElementId: "region-b", provenance },
+    ];
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene, snap: disabledSnap() } });
+
+    await wrapper.get(".iriograph-scene-node").trigger("pointerdown", { button: 0, clientX: 120, clientY: 90 });
+    dispatchPointer("pointermove", 40, 90);
+    dispatchPointer("pointerup", 40, 90);
+
+    expect(lastPayload<{ elementId: string; geometry: ElementGeometry }>(wrapper, "geometryChange"))
+      .toMatchObject({ elementId: "node-a", geometry: { x: 100, y: 90, width: 40, height: 30 } });
+  });
+
+  it("Seqを薄いgroupとmember ordinal badgeで通常edgeから分ける", () => {
+    const scene = sceneFixture();
+    scene.edges = [];
+    scene.containers = [{
+      elementId: "sequence-a",
+      semanticRef: "urn:test:seq",
+      structuralKind: "container",
+      groupRole: "sequence",
+      label: "審査手順",
+      templateRef: "urn:test:template:sequence",
+      headerPosition: "top",
+      style: { fill: "#fff", stroke: "#64748b", text: "#334155", dash: "5 5" },
+      geometry: { x: 8, y: 8, width: 480, height: 180 },
+      pinned: false,
+      placement: "generated",
+    }];
+    scene.nodes[0]!.parentElementId = "sequence-a";
+    scene.memberships = [{
+      semanticRef: "urn:test:seq-1",
+      containerElementId: "sequence-a",
+      memberElementId: "node-a",
+      role: "sequence-member",
+      ordinal: 1,
+      provenance: {
+        operator: "ordinal-sequence",
+        derivation: "derived",
+        sourceStatementRefs: ["urn:test:seq-1"],
+      },
+    }];
     wrapper = mount(DiagramCanvas, { props: { scene } });
-    expect(wrapper.get(".iriograph-edge-label").text()).toBe("1→2");
+    expect(wrapper.get(".iriograph-scene-container").classes()).toContain("sequence-group");
+    expect(wrapper.get('.iriograph-scene-node .iriograph-sequence-badges').text()).toBe("1");
+    expect(wrapper.find(".iriograph-edge-group").exists()).toBe(false);
   });
 });
 
@@ -1036,6 +1365,10 @@ function configureViewport(wrapper: VueWrapper, width: number, height: number): 
   Object.defineProperties(viewport, {
     clientWidth: { configurable: true, value: width },
     clientHeight: { configurable: true, value: height },
+    getBoundingClientRect: {
+      configurable: true,
+      value: () => ({ left: 0, top: 0, right: width, bottom: height, width, height, x: 0, y: 0, toJSON: () => ({}) }),
+    },
   });
   Object.defineProperties(stage, {
     offsetLeft: { configurable: true, value: 20 },

@@ -37,7 +37,7 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
 
-`viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、選択集合とprimary selection、snap設定、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
+`viewId`はdocument内で一意なnamed viewのidentityです。Active viewの選択はeditor session stateとし、portable documentへactive flagを保存しません。v1のviewは`profileRef`によって表示する構造文法を選び、SPARQL queryまたは汎用filter式を保存しません。要素の一時hideに加え、選択集合とprimary selection、snap設定、grid表示toggle、viewportのscroll位置、zoom、pan状態もsession stateであり、overlayへ書き込みません。
 
 標準RDF/RDFS catalogの公開presetは次のとおりです。
 
@@ -59,16 +59,23 @@ overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
 - `pinned`と`placement`: 自動配置かユーザー固定か
-- `appearance`: template、icon、catalog style preset、sparse styleの明示override、region等の`labelPlacement`
-- `routing`: edgeの`routeMode`、manual waypoint、label offset、source/target anchor
+- `appearance`: template、icon、catalog style preset、sparse styleの明示override、`regionLabelAnchor`、`regionLabelWritingDirection`、`regionZOrder`、edgeごとの`edgeCaption`
+- `routing`: edgeの`routeMode`、manual waypoint、label offset、source/target anchor、terminal override、curveのsparse curvature
 
 `routing.waypoints`はsource/target attachmentを含まない、ユーザーが確定したmanual中間点だけです。
 空配列はautomatic routingと同じ意味に正規化し、保存時は省略します。`routing.labelOffset`は
 endpoint込みrouteのarc-length 50%地点からの相対値で、labelがないedgeには作成しません。
 Edge routingの編集ではnode/container用の`pinned`、`placement`をedge overlayへ付けません。
-`routeMode`は`auto`、`straight`、`orthogonal`、`curve`、`manual`の閉じた値です。`straight`以外の
-自動modeはlayoutが返す障害物回避routeを利用し、`curve`はそのcorridor内のbendだけをrendererが
-滑らかにします。自動生成した補助点はoverlayへ保存しません。
+`routeMode`は`auto`、`straight`、`orthogonal`、`curve`、`manual`の閉じた値です。`straight`と
+`curve`はportable waypointを持ちません。`curve`の制御点はendpoint、layout corridor、任意のsparseな
+curvatureから導出します。`orthogonal`等の自動modeが生成した障害物回避用の補助点もoverlayへ保存せず、
+`manual`へ明示変換した場合だけmanual waypointとして保存します。
+
+Region labelの`regionLabelAnchor`は外周上の0以上1未満の正規化位置、
+`regionLabelWritingDirection`は`horizontal-right`または`vertical-down`の
+閉じた値です。Region z-orderは同じviewのregion背景間だけを並べ、node、edge interaction layer、
+focus indicatorを隠しません。Edgeの`appearance.edgeCaption`はview overlayだけに保存し、predicate label、
+semantic search、LLM contextへ昇格しません。
 
 `appearance.iconRef`はassetの安定したIRIだけを保持します。workspace path、取得URL、
 認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
@@ -108,11 +115,22 @@ exact predicateはmembership provenanceと`set-membership`逆編集へ保持し�
 viewの階層化可否にかかわらず全membershipとprovenanceを保持します。複数containerに属する要素へ
 一つの`parentElementId`を恣意的に選びません。
 
+`rdf:Seq`は`SceneContainer.groupRole: "sequence"`として投影します。各`rdf:_n`は
+`memberships[]`の`role: "sequence-member"`、1始まりの`ordinal`、元statement provenanceとして
+保持し、`SceneEdge`にはしません。Rendererは薄いgroup枠とmember badgeで通常predicate edgeから
+視覚的に分け、layoutは同一Seq内のordinal順を配置制約として利用できます。
+
 `membership-region`はmembershipの向きを明示し、class regionでは`rdf:type`のobjectをregion、
 subjectをmemberとして投影します。複数membershipの交差cellはSceneから導出するだけで、新しい
 semantic resourceやoverlay identityを作りません。各elementの`semanticText`は全label/commentと
 localeで選択したprimary labelを保持し、language、datatype、元statement identityを失いません。
-Edgeの`labelProvenance`はpredicate、Seq transition、Alt branchのどこから表示名を得たかを区別します。
+Edgeの`labelProvenance`はpredicateまたはAlt branchのどこから表示名を得たかを区別します。Seqの名前と説明はgroupの`semanticText`、順序はordinal membershipのprovenanceに保持します。
+
+Direct edgeの`semanticText`はpredicate resource自体のlabel/commentです。これとは別に、
+`ProjectedEdge.statementComments` / `SceneEdge.statementComments`はそのexact S/P/Oに対する
+説明をRDF 1.1標準reificationから返します。各値はlanguage、datatype、comment statement identity、
+reifier参照を保持しますが、reifier自身を通常のnode/edgeへ投影しません。Rendererはこのfieldだけを
+読めばよく、RDF datasetやblank nodeを解釈しません。
 
 `SceneEdge.route`はlayoutから導出されるrenderer用polylineで、source/target attachmentを含む
 2点以上の配列です。`SceneEdge.waypoints`はportable overlay由来のmanual中間点だけを表し、
@@ -129,7 +147,7 @@ Target Sceneの各elementとparent-child関係は、次のedit provenanceを持�
 - 直接tripleからの投影か、構造からのderived elementか
 - 削除・置換時に使えるsemantic edit capabilityとそのparameter
 
-Editorはderived edgeやcontainer所属を「Scene上の線やparent ID」として削除しません。このprovenanceから、直接statementの削除、sequence/alternativeの再構成、membershipの削除など、元の意味構造に対応するsemantic commandを発行します。
+Editorはderived edgeやcontainer所属を「Scene上の線やparent ID」として削除しません。このprovenanceから、直接statementの削除、sequence/alternativeの再構成、membershipの削除など、元の意味構造に対応するsemantic commandを発行します。SeqはgroupまたはそのmemberをCanvas選択した後だけ、追加・並べ替え・除外を`set-sequence`のatomic Previewとして提示します。
 
 ### Layout adapter
 
@@ -197,7 +215,7 @@ semantic transaction成功時は、更新したTurtleとreconcile済みview over
 
 - 存続element identityのuser overlayを、変更後primitiveと互換な範囲で維持する
 - 新規elementをlayoutし、保存が必要な初期geometryに`placement: "generated"`を付ける
-- `create-resource`のPreviewでuserが初期位置を明示した場合は、意味statementと同じatomic transactionでそのgeometryを`placement: "user"`、`pinned: true`として保存する
+- Standard editorの`create-resource`は初期位置を受け取らず、新規elementを`placement: "generated"`としてlayoutする。作成後の位置変更は独立したpresentation transactionにする
 - 消滅elementのoverlayと、primitive変更後に互換性がないfieldを除去しdiagnosticを返す
 - Catalogで導出できるtemplate、style、iconをoverlayへ複製しない
 
@@ -211,23 +229,42 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 |---|---|---|
 | `create-resource` | named resourceと初期statementを追加 | named IRIと、そのresourceをsubjectまたはobjectに含む少なくとも1tripleが同一transactionに必要。node作成UIではtarget viewでnode/containerに投影できることも検証 |
 | `set-property` | literalまたはIRI propertyを追加・置換・削除 | predicate、datatype/language、cardinalityはprofile/domain validationの対象 |
-| `connect-resources` | subjectからobjectへの関係を追加 | predicate必須。直接IRI-object tripleまたはcapability定義のgraph patchとし、generic predicateを暗黙生成しない |
+| `connect-resources` | subjectからobjectへの関係を作る | predicate必須。直接IRI-object tripleまたはcapability定義のgraph patchとし、generic predicateを暗黙生成しない |
+| `set-statement-comments` | exact direct statementの説明集合を置換・削除 | `statementRef`とnamed S/P/Oの一致、元tripleの存在を必須とする。複数language・複数行literalを許可し、空配列は個別説明を削除する |
 | `set-membership` | containerとmemberの所属を追加・削除 | Bagではcontainer-subject、class分類ではclass-objectの向きをcatalogから解決する。複数membershipを許容し、hierarchy container間cycleを検証 |
 | `set-sequence` | 順序付きmemberを再構成 | `rdf:Seq`と`rdf:_n`を一括更新し、連番制約を途中状態に適用しない |
 | `set-alternatives` | 選択肢と既定選択を再構成 | `memberIris`を最終ordinal順の正本として`rdf:Alt`と`rdf:_n`を一括更新。2件以上かつ`memberIris[defaultOrdinal - 1] === defaultMemberIri`を要求し、重複IRIを保持 |
-| `delete-resource` | resourceをsubjectとする記述statementとresourceを削除 | 他subjectからresourceへの参照がある場合は既定で拒否。影響statementのpreview付き明示cascadeだけを許可し、Seq/Alt member削除は同じpatchで再採番 |
+| `delete-resource` | resourceをsubjectとする記述statementとresourceを削除 | Coreでcascade省略時は他subjectからの参照があれば拒否。標準Editorは常に影響statementのpreview付き明示cascadeを使い、Seq/Alt member削除は同じpatchで再採番 |
 
-v1のnode作成UIはnamed IRIと、作成resourceをsubjectまたはobjectに含む少なくとも1tripleが確定するまで保存しません。作成resource自身のtype/labelに加え、既存resourceとのdirect edge、既存containerへのcatalog規定membership、初期位置を一つの`create-resource.initialStatements`と位置patchへcompileできます。任意欄を有効にしたままpredicate、相手resource、またはmembership構成が欠けている場合は部分適用せずPreviewをerrorにします。全statementと初期位置が検証を通った場合だけ一つのrevisionとして確定します。
+`set-statement-comments`は独自語彙を作らず、assertedな`S P O`を残したまま次の標準形を使います。
 
-`create-resource.initialStatements`で構造predicateを一般に迂回することはできません。唯一のv1例外は、subjectが既存named resource、objectが作成resource、predicateとcontainer typeがresolved context内の同じ`membership-container`規則へexact matchする場合です。作成resourceをsubjectにした構造statement、ordinal predicate、型が一致しないcontainerは拒否し、cycleは最終candidate graphのprofile検証へ委ねます。作成後の包含編集は通常どおり`set-membership`を使います。Edgeはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属を暗黙変更しません。
+```turtle
+[] a rdf:Statement ;
+  rdf:subject :S ;
+  rdf:predicate :P ;
+  rdf:object :O ;
+  rdfs:comment "この関係だけの説明"@ja .
+```
 
-Node、edge、属性、包含、削除は対象objectまたはCanvas背景のcontext menuと作成paletteから開始し、右Inspectorの上部に`Meaning` command draftを開きます。属性一覧は選択objectのdetails dialogでも編集でき、その下の`Display Inspector`とは責務を分けます。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はlabel、説明、形のpreviewを主表示にし、完全IRIをoption value、tooltip、Advanced overrideとして保持します。Coreへ渡す値は常に完全IRIであり、同名labelをidentityとして使いません。順序・選択肢・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
+既存のmatching reifierが複数ある場合は決定的な順で読み、置換commentはその先頭へ集約します。
+既存named reifierのidentityや標準外metadataは黙って削除せず、空になったblank標準scaffoldだけを整理します。新規reifierはblank nodeです。`remove-statement`とresource cascadeは対応reifierのclosureも同じatomic patchから
+除去します。UI/hostはN3 termを構築せず、`statementIdentityForNamedStatement({ subjectIri,
+predicateIri, objectIri })`でexact identityを得られます。同一command列で先に新statementを接続し、
+続けてその説明を設定できます。
+
+Standard editorの`新しい要素を作る`は、label一項目、host allocatorが返すopaque named IRI、そのIRIをsubjectにしたactive localeの`rdfs:label`一文だけを`create-resource`へcompileします。空label、allocator失敗、IRI衝突、namespace違反は一件も保存せず作成を拒否します。Type、comment、上位概念、既存resourceとのedge、membership、初期位置は作成formに含めず、作成Apply後の`要素を変更する`、`関係を変更する`、`ビュー`で別transactionとして追加します。Generic node fallbackと標準layoutが初期displayを補完します。
+
+Coreの一般`create-resource.initialStatements` contractはhost/LLM adapter向けに複数statementを扱えますが、standard editorが複合作成formを公開する理由にしません。構造predicateを一般initial statementで迂回できず、ordinal predicate等は専用commandを使います。Edgeはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属を暗黙変更しません。
+
+右Inspectorの初期状態は`新しい要素を作る`、`関係を作る`、`要素を変更する`、`関係を変更する`の4 actionだけを意味編集入口とし、選択後に必要な対象と値を段階表示します。`新しい要素を作る`だけはlabel一項目でApplyまで進み、種類や関係を尋ねません。Details dialogは`要素を変更する`選択後の段階UIであり、第5の入口にしません。意味入力とビュー入力は同時表示せず、`意味`と`ビュー`のtabで片方だけを表示します。Tabを往復しても未適用の段階入力を黙って破棄しません。右クリック、Context Menu key、Shift+F10は別menuを表示せず、選択対象のビューtabと該当段階を直接開き、semantic commandを開始しません。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はlabel、説明、形のpreviewを主表示にし、完全IRIを内部option value、tooltip、read-only Advanced参照情報として保持します。Standard editorの通常UIとAdvancedにIRI入力欄を置かず、Coreへ渡す値はallocatorまたは選択肢が保持する完全IRIとします。同名labelをidentityとして使いません。順序・選択肢・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
+
+Relation pickerはsource/targetのprimary labelとcatalog/vocabularyの日本語文型metadataから`A（predicate）B`を生成します。候補はresolved profile内のRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の標準predicateを、source/targetの明示型、限定subclass closure、`rdfs:domain`/`rdfs:range`、object/literal kind、semantic capabilityで絞ります。型不明は後順位に残し、完全OWL推論やlabel推測を行わず、candidate validationを最終判定とします。同じpredicateを使う個別edge captionはview overlay annotationであり、semantic commandを生成しません。
 
 主要なresource欄は明示的な「Canvasから選択」modeを持ちます。このmode中だけnode/container clickを対象fieldへseedし、通常のselection、drag、container内配置からsubject、predicate、membershipを推論しません。位置指定modeではblank canvas clickが位置だけをseedし、container背景clickは位置と、そのcontainerにexact matchするcatalog membershipをdraftへseedできます。いずれも即時commitせず、同じfieldのpicker再押下、Escape、Cancel、`readOnly`への切替、Scene交換で解除します。Picker中のnode/container clickは通常の選択・geometry gestureを開始しません。
 
 通常のpresentation dragからsemantic membershipを推論しません。Editorは、意味上のparentを持たない要素のcenterがcontainer content上にある場合と、意味上のchild geometryがparent contentからはみ出す場合をdisplay/semantic containment不一致として警告します。前者は`set-membership` draftまたは領域外へのpresentation移動、後者は意味上の領域内へのpresentation移動またはprovenance由来のmembership削除draftを明示選択できます。警告検出とpresentation修正はTurtleを変更せず、semantic修正は必ず通常のPreviewと明示Applyを通します。
 
-Previewは操作名、label付きresource chip、predicate矢印またはmembership、追加・削除triple件数、validation/warningを先に示します。完全IRI、exact triple、candidate Turtleは詳細表示へ残し、削除では対象labelと影響件数をraw Turtleより先に示します。ユーザーの明示適用までdraftとmarkerはeditor内部のephemeral stateであり、portable document、Scene正本、overlay、historyへ入りません。
+Previewは操作名、label付きresource chip、predicate矢印またはmembership、追加・削除triple件数、validation/warningを先に示します。完全IRI、exact triple、candidate Turtleは詳細表示へ残し、削除では対象labelと影響件数をraw Turtleより先に示します。ユーザーの明示適用までdraft、marker、削除対象の赤線・赤破線はeditor内部のephemeral session stateであり、portable document、Scene正本、overlay、historyへ入りません。
 
 `set-property`はsubjectとpredicateに対応する既存値をすべて置換し、値配列が空なら明示削除します。空文字列literalは削除ではなく有効な一値です。IRI/literalの複数値を保持し、Literalのlanguageとdatatypeは同時指定できません。Property参照の削除は、そのstatementだけを除去し、参照先blank nodeのclosureが孤立しても推測cascadeしません。`rdfs:member`と正規の正整数suffixを持つ`rdf:_n`等の構造predicateはproperty UIから変更せず、membership、sequence、alternative専用commandを使います。`set-alternatives`は上記の最終ordinal順とdefault slotの一致を必須にします。
 
@@ -235,9 +272,11 @@ Capabilityのparameterは`required: false`の場合だけoptionalです。Option
 
 Allowed resource namespaceはcreate-resourceだけでなく、全structured commandおよびdirect source editで新規導入されるinstance IRIの各出現位置へ適用します。Editorは既存resourceの候補選択と明示createを優先しますが、Coreは特定command専用のnamespace例外を持ちません。
 
-Resource delete previewはresourceがsubject、object、predicateのいずれとして現れるstatementも影響集合へ含めます。既定操作は外部参照が一つでもあれば拒否し、explicit cascadeはpreviewに列挙されたstatement集合だけをconfirmation対象にします。削除後のSeqは1件以上、Altは2件以上を満たし、残るordinalは同じatomic patchで1から再採番します。Authoring contextが既知class/predicateとして定義する語彙resource自体は削除できません。
+Resource delete previewはresourceがsubject、object、predicateのいずれとして現れるstatementも影響集合へ含めます。低水準Core commandはcascade省略時に外部参照が一つでもあれば拒否します。標準Editorの削除actionは常にexplicit cascadeを発行し、previewに列挙されたstatement集合だけをconfirmation対象にします。削除後のSeqは1件以上、Altは2件以上を満たし、残るordinalは同じatomic patchで1から再採番します。Authoring contextが既知class/predicateとして定義する語彙resource自体は削除できません。
 
-Canvasで指定した新規resource位置はauthoring draft内のephemeral markerです。明示した位置指定modeのblank canvas背景だけが位置をseedし、container自身の背景は位置に加えて上記のcatalog規定membershipをseedできます。子nodeやcontainer内の別要素のclickはcontainer背景clickとして扱いません。Editorの既知template sizeによる補正は入力補助にすぎず、実際に投影されたtemplate sizeとparent/Scene boundsへ収まるかはCore Previewで検証し、収まらなければ補正commitせずtransactionを拒否します。Preview/Apply前はportable document、Scene、historyを変更せず、semantic作成と位置patchが両方成功した場合だけ一つのrevisionとしてcommitします。
+Resource deletionの永続結果は、確認済みexplicit cascadeをApplyしたsemantic revisionだけです。Pending delete、soft delete、赤線appearanceをdocumentへ保存しません。Edge、property、membershipの削除もexact statement/structure patchをApplyして初めて永続化し、presentation-only deletionは定義しません。
+
+新規resourceの初期geometryはstandard layoutが`placement: "generated"`として補完し、`新しい要素を作る`draftに位置指定modeやcontainer membership seedを持ちません。作成後の明示dragはpresentation transaction、所属追加は`関係を変更する`のsemantic transactionとして分けます。Preview/Apply前はportable document、Scene、historyを変更せず、label statementが成功した場合だけ一つのsemantic revisionとしてcommitします。
 
 Literal propertyはv1で独立Scene elementを生成しない場合もありますが、inspector等の語彙駆動UIで編集でき、Turtleには失わず保持します。表示primitiveがないことをsemantic属性が存在しないことと同一視しません。
 
@@ -284,6 +323,7 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `authoringContext`: hostが解決した語彙・capability・policy・projection runtime
 - `semanticValidationContext`: hostが解決したdomain validation identity/revision/port。省略時は`authoringContext.semanticValidation`を利用可能
 - `resourceIriAllocator`: resource IRI省略時の同期または非同期allocator。返却IRIはCoreが再検証する
+- `fitOnInitialLoad`: 各document/viewで最初に完成したSceneだけをviewportへfitするhost opt-in。後続のsemantic/presentation編集では利用者のviewportを維持する
 - `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映する。未確認のstructured draftは自動適用せず保存を拒否する
 - `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作
 - `revealSelection()` / `focusElement(elementId)`: 現在の選択またはstable Scene element IDをviewportへ表示
@@ -301,14 +341,19 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
 
-Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
+Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node drag中にpointerがviewport端へ近づいた場合は同じ方向へsession scrollを進め、geometry transactionとは分離します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
 
 Multi-selectionはplain clickで置換、Ctrl/Cmd clickでtoggle、Shift clickで追加、blank clickまたはEscapeでclear、Ctrl/Cmd+Aで全選択します。選択中のnode/containerをdragすると全選択geometryを共通deltaでpreviewし、pointerup時に一つのbatch presentation transactionとして確定します。選択containerの子孫も同deltaで移動し、ancestorとdescendantを同時選択しても二重移動しません。異なるcontainerの要素を同時に動かす場合は、各要素の親container content boundsから許容deltaの共通部分を求め、membershipは変更しません。整列と等間隔も一commandを一transactionとし、Turtleを変更しません。
 
+Resize可能なnode、container、regionは選択時に四隅と四辺中央の8 handleをinteraction layerへ表示します。Handleはelementの塗りや他要素より前面でhit testし、keyboard操作にも同じ制約を適用します。Regionのmove/resizeは意味上のnode、container、region memberの全boundsとpaddingを包含し、複数region memberに必要なintersectionを壊さない範囲へclampします。Pointer/keyboard gesture、Inspector数値入力、align、distributeを含む全geometry保存入口で同じ制約を再検証し、制約を満たさない候補geometryはoverlayへcommitしません。
+
 標準snapは8 canvas unitのgridと、対象要素のleft/center/right、top/middle/bottom guideを使います。対象候補は距離、座標、element IDの順で決定的に解決し、target snapをgridより優先してからcontainer/Scene境界へclampします。Target toleranceの標準値は画面上6pxでzoom変換し、Altを押したdragでは一時的にsnapを無効化します。Snap設定とguide候補はsession stateで、documentやhistoryには保存しません。`readOnly`でもselectionとsnap設定の参照・変更は可能ですが、drag、keyboard move、resize、routing、整列、等間隔、undo/redoはdocumentを変更しません。
 
+Canvas gridはsnapの`gridSize`と同じcanvas unit間隔を描画し、既定値8を重複定義しません。Gridの原点とpattern offsetはCanvas座標変換から求め、zoom、scroll、panへ追従します。描画layerはhit-test対象外で、表示toggleは`ビュー`tabから変更できるsession stateです。Toggle操作は`update:modelValue`、presentation history、dirty stateを発生させず、Turtle、overlay、portable documentへ保存しません。
+
 Edgeはclick/focusで個別選択し、parallel edgeとself-loopも各routeのhit areaを持ちます。選択edgeの
-generated bend handleを初めて編集するとderived route中間点をmanual waypointへseedします。
+ビューtabはroute modeとsource/target terminalを先に表示し、captionとendpoint anchor操作は折り畳み段階へ分けます。Anchorの正規化数値とprojection ruleは通常UIへ出しません。`straight`と`curve`ではwaypoint追加UIを表示せず、portable waypointを必ず除去します。
+`orthogonal`または`auto`のgenerated bend handleを初めて編集するとderived route中間点をmanual waypointへseedします。
 Path double clickとInspectorはwaypoint追加、handle dragとArrow keyは移動、Delete/Backspaceは削除を
 行い、最後のmanual waypoint削除はautomaticへ戻します。Labelはroute全長の中央をbaseとし、drag、
 Arrow key、Inspector数値入力でoffsetを編集し、Home/Delete/BackspaceまたはInspectorでresetします。
@@ -316,6 +361,8 @@ Arrow key、Inspector数値入力でoffsetを編集し、Home/Delete/Backspace�
 Scene内側8 unitへclampします。旧documentから読み込んだ負座標は勝手に正規化せず、そのままでは
 Scene原点外がclipされ得るため、handle編集またはautomatic resetで現行境界へ戻します。`readOnly`は
 edge選択を許可しますが編集handleを表示せず、routing eventを受けてもdocumentを変更しません。
+
+Canvasの`semanticEndpointReconnectRequest({ edgeElementId, endpoint, targetSemanticRef })`は、`関係を変更する`中のdirect edge端子を別nodeへdropした場合だけ発行するtyped draft requestです。空白、container、region、同じendpoint nodeへのdropでは発行しません。標準Editorはこのeventをsource/target置換draftへseedし、`update:modelValue`やpresentation historyを直接発生させません。ビューtabで同じhaloをdragした場合は従来どおり`routingUpdate`だけを発行します。
 Edge本体のDelete/BackspaceはSceneやTurtleを即時削除せず、provenanceから復元できるexact semantic commandをサイドバーdraftへseedします。直接edgeは元statementだけを削除候補にし、sequence/alternative等で構造全体の入力が必要な場合は不足値をユーザーに要求します。Provenanceがない場合はpredicateや構造を見た目から推測しません。
 
 Rich authoring contractでは、hostが解決済みauthoring profile、vocabulary index、

@@ -1,4 +1,11 @@
-import { parseSemanticGraph, type IriographDocument } from "@iriograph/core";
+import {
+  canonicalTerm,
+  collectStatementComments,
+  parseSemanticGraph,
+  statementIdentityForNamedStatement,
+  statementReifiers,
+  type IriographDocument,
+} from "@iriograph/core";
 import type { Literal, Quad, Term } from "n3";
 
 import type {
@@ -17,6 +24,7 @@ import type {
   SemanticResourceSummary,
   SemanticSearchMatch,
   SemanticSubgraph,
+  StatementCommentQuery,
   SubgraphQuery,
 } from "./model.js";
 import {
@@ -75,6 +83,7 @@ export class SemanticAccessIndex {
   readonly #superProperties: ReadonlyMap<string, readonly string[]>;
   readonly #membershipClassifications: ReadonlyMap<string, MembershipClassification>;
   readonly #predicateUsage: ReadonlyMap<string, number>;
+  readonly #statementComments: ReadonlyMap<string, readonly LocalizedText[]>;
 
   constructor(document: IriographDocument, revision: string, options: SemanticAccessOptions = {}) {
     if (!revision) throw new TypeError("Semantic access revision must not be empty.");
@@ -102,7 +111,30 @@ export class SemanticAccessIndex {
     const commentSet = new Set(commentPredicates);
 
     const graph = parseSemanticGraph(document);
-    this.#quads = graph.quads;
+    const reifierRefs = new Set(statementReifiers(graph).map((value) => value.reifierRef));
+    this.#quads = graph.quads.filter((value) => (
+      !reifierRefs.has(canonicalTerm(value.subject))
+      && !reifierRefs.has(canonicalTerm(value.object))
+    ));
+    const statementComments = new Map<string, readonly LocalizedText[]>();
+    for (const value of this.#quads) {
+      if (value.subject.termType !== "NamedNode" || value.object.termType !== "NamedNode") continue;
+      const statement = {
+        subjectIri: value.subject.value,
+        predicateIri: value.predicate.value,
+        objectIri: value.object.value,
+      };
+      const comments = collectStatementComments(graph, statement).map((comment): LocalizedText => ({
+        value: comment.value,
+        ...(comment.language ? { language: comment.language } : {}),
+        predicateIri: comment.predicateIri,
+        kind: "comment",
+      }));
+      if (comments.length > 0) {
+        statementComments.set(statementIdentityForNamedStatement(statement), comments);
+      }
+    }
+    this.#statementComments = statementComments;
     const resourceIris = new Set<string>();
     const predicateIris = new Set<string>();
     const predicateUsage = new Map<string, number>();
@@ -119,7 +151,7 @@ export class SemanticAccessIndex {
       return record;
     };
 
-    for (const quad of graph.quads) {
+    for (const quad of this.#quads) {
       predicateIris.add(quad.predicate.value);
       predicateUsage.set(quad.predicate.value, (predicateUsage.get(quad.predicate.value) ?? 0) + 1);
       if (quad.subject.termType === "NamedNode") {
@@ -367,6 +399,19 @@ export class SemanticAccessIndex {
     return memberships.sort(compareMemberships);
   }
 
+  statementComments(query: StatementCommentQuery): readonly LocalizedText[] {
+    const statement = {
+      subjectIri: this.resolveAlias(query.subject, "resource"),
+      predicateIri: this.resolveAlias(query.predicate, "predicate"),
+      objectIri: this.resolveAlias(query.object, "resource"),
+    };
+    const expected = statementIdentityForNamedStatement(statement);
+    if (query.statementRef !== expected) {
+      throw new TypeError("Statement comment query identity does not match its exact S/P/O aliases.");
+    }
+    return [...(this.#statementComments.get(expected) ?? [])];
+  }
+
   #searchMatch(iri: string, query: string): SemanticSearchMatch | undefined {
     const summary = this.#resourceSummary(iri);
     if (!query) {
@@ -435,10 +480,17 @@ export class SemanticAccessIndex {
   }
 
   #relation(subjectIri: string, predicateIri: string, objectIri: string): SemanticRelation {
+    const statementRef = statementIdentityForNamedStatement({
+      subjectIri,
+      predicateIri,
+      objectIri,
+    });
     return {
+      statementRef,
       subject: this.#resourceSummary(subjectIri),
       predicate: this.#predicateSummary(predicateIri),
       object: this.#resourceSummary(objectIri),
+      comments: [...(this.#statementComments.get(statementRef) ?? [])],
     };
   }
 

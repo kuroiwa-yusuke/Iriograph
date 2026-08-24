@@ -16,6 +16,19 @@ export function statementIdentity(
   ]);
 }
 
+/** N3-free public helper for UI/host command composition from exact named S/P/O. */
+export function statementIdentityForNamedStatement(statement: {
+  subjectIri: string;
+  predicateIri: string;
+  objectIri: string;
+}): string {
+  return statementIdentity(
+    statement.subjectIri,
+    statement.predicateIri,
+    statement.objectIri,
+  );
+}
+
 export function statementIdentityFromQuad(quad: Quad): string {
   return encodedIdentity("statement", [
     termIdentity(quad.subject),

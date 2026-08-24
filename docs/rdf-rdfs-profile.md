@@ -37,9 +37,10 @@ Iriograph documentは次の三層を分離します。
 | `rdf:type` | resourceの意味上の分類 | classが存在する場合はtemplate ruleと構造ruleの照合に使い、edgeとしては表示しない |
 | `rdfs:label` | 人向け表示名 | node、container、edgeのlabel候補 |
 | `rdfs:comment` | 説明 | resourceに紐づくhover説明と任意のannotation calloutへ導出する |
+| `rdf:Statement`、`rdf:subject`、`rdf:predicate`、`rdf:object` | asserted tripleの標準reification | reifier自体は非表示にし、exact direct edgeの`statementComments`へ`rdfs:comment`を導出する |
 | `rdf:Bag` | 順不同の包含集合 | node-link viewでは階層`container`、region viewでは重なり可能な`region`として表示する |
 | `rdfs:member` | containerからmemberへの所属 | 全membershipを保持し、選択した空間文法で包含または領域所属として表示する |
-| `rdf:Seq` | 順序付きresource列 | resource自体は既定で非表示とし、連続member間に有向edgeを導出する |
+| `rdf:Seq` | 順序付きresource列 | 薄い外枠を持つ選択可能な`container`として表示し、memberへordinal badgeを付ける |
 | `rdf:Alt` | 選択肢の集合 | 選択nodeと各選択肢へのbranch edgeを導出する |
 | `rdf:_1`、`rdf:_2`、… | `rdf:Seq`または`rdf:Alt`の順序付きmember | ordinal membershipとして消費する |
 | `rdfs:seeAlso` | 追加情報への参照 | dashed reference edgeとして表示する |
@@ -108,7 +109,7 @@ Region viewは各Bagを独立した半透明領域として投影し、複数Bag
 - member resourceの重複は許可します。これにより同じresourceへの再訪を表現できます。
 - `rdf:_n`はsequence resourceをsubject、memberをobjectとします。
 
-`rdf:Seq`のmemberが`m1, m2, …, mn`の場合、`m1 -> m2`から`m(n-1) -> mn`までのderived edgeを生成します。sequence resource自体は既定ではnodeにしません。
+`rdf:Seq`のmemberが`m1, m2, …, mn`の場合、sequence resourceを順序付きgroupとして投影し、各memberへ`1, 2, …, n`のbadgeを表示します。`rdf:_n`はpredicate edgeではなくordinal membershipとしてSceneに保持し、通常のrelation pickerへ出しません。Layoutはこのordinalをgroup内の配置順へ利用できますが、member間に意味上存在しないtripleやderived edgeを生成しません。同じresourceが複数ordinalへ現れる場合も、各membership identityとbadgeを保持します。
 
 ### 4.4 Altと分岐
 
@@ -126,6 +127,7 @@ Region viewは各Bagを独立した半透明領域として投影し、複数Bag
 ベースプロファイルは次のnamed resourceを表示候補にします。
 
 - `rdf:Bag` resource
+- `rdf:Seq` resource
 - `rdf:Alt` resource
 - Bag、Seq、Altのmember
 - suppressされていないIRI-object tripleのsubjectとobject
@@ -167,7 +169,7 @@ profileはTurtleの利用制約を定義し、catalogはsemantic patternをScene
 | `resource` | named resource | `node`または`container` |
 | `direct-edge` | IRI-object triple | `edge` |
 | `membership-container` | container typeとmembership predicate・向き | 全membership、およびviewに応じた`container`/`region` |
-| `ordinal-sequence` | container typeとordinal predicate pattern | member間のderived `edge` |
+| `ordinal-sequence` | container typeとordinal predicate pattern | 選択可能なsequence `container`とordinal付きmembership |
 | `alternative` | container typeとordinal predicate pattern | choice `node`とbranch `edge` |
 | `suppress` | typeまたはpredicate | Scene生成を抑止しmetadataとして消費 |
 
@@ -223,7 +225,7 @@ catalogのprojection部分は、現行prototypeの`nodeRules`、`relationRules`�
 | Match | Operator | 既定appearance |
 |---|---|---|
 | type `rdf:Bag` | `membership-container` | region/container |
-| type `rdf:Seq` | `ordinal-sequence` | sequence自体はhidden、derived edgeは共通線＋target arrow |
+| type `rdf:Seq` | `ordinal-sequence` | 薄いsequence groupとmember ordinal badge。通常edgeは生成しない |
 | type `rdf:Alt` | `alternative` | choice nodeとbranch共通線＋target arrow |
 | predicate `rdfs:seeAlso` | `direct-edge` | 共通線＋target open-arrow |
 | predicate `rdfs:isDefinedBy` | `direct-edge` | 共通線＋target open-arrow |
@@ -272,11 +274,11 @@ Coreは`createStandardRdfRdfsCatalog(preset)`、`standardRdfRdfsCatalog`、`stan
 
 - named resourceから生成するnode/containerの`semanticRef`はresource IRIです。
 - 直接tripleのedge identityはsubject IRI、predicate IRI、object IRIから決定的に生成します。
-- sequence derived edgeのidentityはsequence IRIと隣接するordinalの組から生成します。
+- sequence groupのidentityはsequence IRI、ordinal membershipのidentityは対応する`rdf:_n` statementから生成します。
 - alternative branch edgeのidentityはalternative IRIとordinalから生成します。
 - Turtleの行番号、prefix表記、記述順、labelをidentityに含めてはなりません。
 
-sequenceの順序を変えた場合、変更されたordinal transitionは意味変更なので、該当edgeのmanual routingが失われても構いません。resource IRIが存続するnode/containerのoverlayは維持します。
+sequenceの順序を変えた場合、変更されたordinal membershipは意味変更なので、該当badgeは新しい`rdf:_n` statementへ追従します。resource IRIが存続するnode/containerのoverlayは維持します。
 
 overlayにlabelを複製しません。既定template、shape、色、iconもcatalogから再生成できる限り複製しません。ユーザーが明示的に変更した場合だけappearance overrideを保持します。
 

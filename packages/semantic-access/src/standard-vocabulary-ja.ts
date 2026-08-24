@@ -10,6 +10,7 @@ import {
 const RDFS = "http://www.w3.org/2000/01/rdf-schema#";
 const DCTERMS = "http://purl.org/dc/terms/";
 const PROV = "http://www.w3.org/ns/prov#";
+const OWL = "http://www.w3.org/2002/07/owl#";
 
 /**
  * A compact, reusable Japanese picker catalog for broadly useful standard
@@ -21,8 +22,8 @@ export const standardPredicateVocabularyJa = Object.freeze([
   property(`${RDFS}isDefinedBy`, "定義元", "参照", "このresourceを定義するresourceを示します。", "業務用語から語彙定義を参照する"),
   property(RDFS_SUBCLASS_OF, "上位概念", "分類", "より一般的なclassとの概念階層を示します。", "承認作業を業務項目の下位概念にする"),
   property(RDFS_SUBPROPERTY_OF, "上位の関係", "分類", "より一般的なpredicateとの関係階層を示します。", "担当範囲を包含関係の下位にする"),
-  property(`${RDFS}domain`, "主語にできる種類", "語彙定義", "predicateのsubject側で想定するclassを示します。", "承認する関係の主語を担当者にする"),
-  property(`${RDFS}range`, "値にできる種類", "語彙定義", "predicateのobject側で想定するclassを示します。", "承認する関係の対象を申請にする"),
+  property(`${RDFS}domain`, "主語にできる種類", "語彙定義", "predicateのsubject側で想定するclassを示します。", "承認する関係の主語を担当者にする", true),
+  property(`${RDFS}range`, "値にできる種類", "語彙定義", "predicateのobject側で想定するclassを示します。", "承認する関係の対象を申請にする", true),
   property(RDFS_MEMBER, "領域に含む", "包含", "順序を持たない集合・領域への所属を示します。", "担当領域に確認工程を含める", true),
 
   property(`${DCTERMS}relation`, "関連する", "一般関係", "他のresourceとの一般的な関係を示します。", "同じ案件の補足資料を関連付ける"),
@@ -49,6 +50,13 @@ export const standardPredicateVocabularyJa = Object.freeze([
   property(`${SKOS_NAMESPACE}related`, "関連する概念", "概念関係", "階層ではない関連概念を示します。", "承認と監査を関連概念にする"),
   property(`${SKOS_NAMESPACE}exactMatch`, "同じ意味の概念", "概念対応", "別の概念体系で同一とみなせる概念を示します。", "社内語彙と標準語彙の同一概念を対応させる"),
   property(`${SKOS_NAMESPACE}closeMatch`, "近い意味の概念", "概念対応", "完全同一ではないが近い概念を示します。", "二つの部署で近い意味の業務用語を対応させる"),
+
+  property(`${OWL}sameAs`, "同一である", "同一性", "二つのresourceが同じ対象を表すことを示します。", "社内IDと外部IDが同じ取引先を表す"),
+  property(`${OWL}differentFrom`, "異なる", "同一性", "二つのresourceが異なる対象であることを明示します。", "同名の二つの部署が別組織であることを示す"),
+  property(`${OWL}equivalentClass`, "同等の概念", "概念対応", "二つのclassが同じ範囲の対象を表すことを示します。", "社内の申請者classと標準語彙の申請者classを対応させる"),
+  property(`${OWL}equivalentProperty`, "同等の関係", "関係対応", "二つのpredicateが同じ関係を表すことを示します。", "社内の担当関係を標準語彙の担当関係に対応させる"),
+  property(`${OWL}inverseOf`, "逆向きの関係", "関係対応", "subjectとobjectを入れ替えた関係になるpredicateを示します。", "承認するの逆向きを承認されるとして定義する"),
+  property(`${OWL}imports`, "語彙を取り込む", "語彙定義", "ontologyが別のontologyを取り込むことを示します。", "業務語彙から共通組織語彙を取り込む"),
 ] satisfies readonly ResolvedAuthoringTerm[]);
 
 export function standardPredicateTermsJa(

@@ -1,5 +1,6 @@
 import {
   StandardLightweightLayoutAdapter,
+  completeRegionLayout,
   edgeEndpointAnchorFromPoint,
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
@@ -80,6 +81,8 @@ export type ElkLayeredLayoutAdapterOptions = {
   engine?: ElkLayoutEngine;
   /** A lazy factory, useful when browser Worker construction is host-owned. */
   engineFactory?: ElkLayoutEngineFactory;
+  /** Versioned failure policy. `standard` is the backward-compatible default. */
+  fallbackPolicy?: "standard" | "none";
 };
 
 const DEFAULT_SPACING: LayoutSpacing = {
@@ -119,6 +122,7 @@ export function createBundledElkEngine(): ElkLayoutEngine {
 /** ELK Layered adapter for a single stable layout reference and direction. */
 export class ElkLayeredLayoutAdapter implements LayoutAdapter {
   readonly #engineFactory: ElkLayoutEngineFactory;
+  readonly #fallbackPolicy: "standard" | "none";
   #enginePromise: Promise<ElkLayoutEngine> | undefined;
 
   constructor(
@@ -132,6 +136,7 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
     this.#engineFactory = options.engineFactory ?? {
       create: () => options.engine ?? createBundledElkEngine(),
     };
+    this.#fallbackPolicy = options.fallbackPolicy ?? "standard";
   }
 
   async layout(request: LayoutRequest): Promise<LayoutResult> {
@@ -155,6 +160,15 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
       const output = await engine.layout(prepared.graph);
       const parsed = parseEngineOutput(request, prepared, output, this.direction);
       if (!parsed.invalidGeometry) {
+        const regionCompleted = completeRegionLayout(request, {
+          layoutRef: request.layoutRef,
+          geometries: parsed.geometries,
+          routes: parsed.routes,
+          width: 0,
+          height: 0,
+          diagnostics: [],
+        });
+        parsed.geometries = regionCompleted.geometries;
         // ELK owns placement, while Core's route-only pass applies the same
         // endpoint clipping, manual-route hard constraints, comment obstacles,
         // and graph-global deterministic refinement used by the fallback.
@@ -224,13 +238,33 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
     request: LayoutRequest,
     diagnostics: LayoutDiagnostic[],
   ): Promise<LayoutResult> {
+    if (this.#fallbackPolicy === "none") {
+      return {
+        layoutRef: request.layoutRef,
+        geometries: {},
+        routes: {},
+        width: 0,
+        height: 0,
+        diagnostics: [...diagnostics, {
+          severity: "error",
+          code: "elk-fallback-disabled",
+          message: "ELK did not produce an acceptable result and this adapter policy forbids another engine",
+          layoutRef: request.layoutRef,
+        }],
+      };
+    }
     const fallback = await new StandardLightweightLayoutAdapter(
       request.layoutRef,
       this.direction,
     ).layout(request);
     return ensureCompleteResult(request, this.direction, {
       ...fallback,
-      diagnostics: [...diagnostics, ...fallback.diagnostics],
+      diagnostics: [...diagnostics, {
+        severity: "warning",
+        code: "elk-standard-fallback-selected",
+        message: "The adapter's declared standard fallback policy selected the Core layout engine",
+        layoutRef: request.layoutRef,
+      }, ...fallback.diagnostics],
     });
   }
 }
@@ -256,9 +290,9 @@ async function routeWithFixedGeometry(
 
 function prepareGraph(request: LayoutRequest, direction: LayoutDirection): PreparedGraph {
   const diagnostics: LayoutDiagnostic[] = [];
-  const elements = new Map<string, LayoutElement>();
+  const allElements = new Map<string, LayoutElement>();
   for (const element of [...request.scene.elements].sort(compareElement)) {
-    if (elements.has(element.elementId)) {
+    if (allElements.has(element.elementId)) {
       diagnostics.push({
         severity: "warning",
         code: "elk-duplicate-element-id",
@@ -268,8 +302,16 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
       });
       continue;
     }
-    elements.set(element.elementId, element);
+    allElements.set(element.elementId, element);
   }
+
+  // Regions are geometric projections of membership, not hierarchy parents.
+  // Let Core synthesize them after ELK has placed the semantic members so an
+  // empty or initially remote region cannot distort ranks or scene aspect.
+  const deferredRegions = new Set([...allElements.values()]
+    .filter((element) => element.structuralKind === "region" && !isFixed(element))
+    .map((element) => element.elementId));
+  const elements = new Map([...allElements].filter(([id]) => !deferredRegions.has(id)));
 
   const parents = validParents(elements, request.layoutRef, diagnostics);
   const children = new Map<string, string[]>();
@@ -351,13 +393,15 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
   };
   for (const edge of [...request.scene.edges].sort(compareEdge)) {
     if (!elements.has(edge.sourceElementId) || !elements.has(edge.targetElementId)) {
-      diagnostics.push({
-        severity: "warning",
-        code: "elk-edge-endpoint-missing",
-        message: `edge was omitted from ELK input because an endpoint is missing: ${edge.elementId}`,
-        layoutRef: request.layoutRef,
-        edgeId: edge.elementId,
-      });
+      if (!deferredRegions.has(edge.sourceElementId) && !deferredRegions.has(edge.targetElementId)) {
+        diagnostics.push({
+          severity: "warning",
+          code: "elk-edge-endpoint-missing",
+          message: `edge was omitted from ELK input because an endpoint is missing: ${edge.elementId}`,
+          layoutRef: request.layoutRef,
+          edgeId: edge.elementId,
+        });
+      }
       continue;
     }
     const occurrence = duplicateCounts.get(edge.elementId) ?? 0;
@@ -383,6 +427,26 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
     });
   }
 
+  const layoutOnlyIds = new Set<string>();
+  const membershipsByRegion = new Map<string, string[]>();
+  for (const membership of request.scene.memberships ?? []) {
+    if (!membership.regionElementId || !elements.has(membership.memberElementId)) continue;
+    const members = membershipsByRegion.get(membership.regionElementId) ?? [];
+    members.push(membership.memberElementId);
+    membershipsByRegion.set(membership.regionElementId, members);
+  }
+  for (const [regionId, inputMembers] of [...membershipsByRegion].sort(([left], [right]) => (
+    compareText(left, right)
+  ))) {
+    const members = [...new Set(inputMembers)].sort(compareText);
+    for (let index = 0; index < members.length - 1; index += 1) {
+      let id = `urn:iriograph:elk-layout-only:${encodeURIComponent(regionId)}:${index}`;
+      while (elements.has(id) || edgesByEngineId.has(id) || layoutOnlyIds.has(id)) id += ":edge";
+      layoutOnlyIds.add(id);
+      edges.push({ id, sources: [members[index]!], targets: [members[index + 1]!] });
+    }
+  }
+
   let rootId = "urn:iriograph:layout-elk:root";
   while (elements.has(rootId)) rootId += ":root";
   return {
@@ -399,6 +463,10 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
         "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
         "elk.layered.crossingMinimization.greedySwitch.type": "TWO_SIDED",
         "elk.layered.crossingMinimization.greedySwitchHierarchical.type": "TWO_SIDED",
+        "elk.layered.crossingMinimization.greedySwitch.activationThreshold": "0",
+        "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+        "elk.layered.nodePlacement.bk.fixedAlignment": "NONE",
+        "elk.layered.nodePlacement.bk.edgeStraightening": "IMPROVE_STRAIGHTNESS",
         "elk.layered.nodePlacement.favorStraightEdges": "true",
         "elk.layered.thoroughness": "20",
         "elk.layered.unnecessaryBendpoints": "false",
@@ -679,12 +747,17 @@ function ensureCompleteResult(
     const fixedGeometry = isFixed(element) && isValidGeometry(element.geometry)
       ? element.geometry
       : undefined;
+    const deferredRegion = element.structuralKind === "region"
+      && !fixedGeometry
+      && !isValidGeometry(candidateGeometry);
     let geometry = fixedGeometry
       ? copyGeometry(fixedGeometry)
       : isValidGeometry(candidateGeometry)
         ? copyGeometry(candidateGeometry)
-        : fallbackGeometry(element, index, direction, spacing);
-    if (!fixedGeometry && !isValidGeometry(candidateGeometry)) {
+        : deferredRegion
+          ? { x: spacing.margin, y: spacing.margin, ...elementSize(element) }
+          : fallbackGeometry(element, index, direction, spacing);
+    if (!fixedGeometry && !isValidGeometry(candidateGeometry) && !deferredRegion) {
       geometry = avoidElementOccupied(element, geometry, occupied, direction, spacing.itemGap);
       diagnostics.push({
         severity: "warning",
@@ -695,7 +768,7 @@ function ensureCompleteResult(
       });
     }
     geometries[element.elementId] = geometry;
-    occupied.push(layoutElementFootprintGeometry(element, geometry));
+    if (!deferredRegion) occupied.push(layoutElementFootprintGeometry(element, geometry));
   });
 
   const routes: Record<string, Point[]> = {};

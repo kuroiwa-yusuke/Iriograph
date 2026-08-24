@@ -8,7 +8,7 @@ request into ELK's graph model.
 ## Install
 
 ```sh
-npm install @iriograph/core@0.3.0 @iriograph/layout-elk@0.3.0
+npm install @iriograph/core@0.4.0 @iriograph/layout-elk@0.4.0
 ```
 
 ## Use the bundled engine
@@ -60,7 +60,10 @@ returns diagnostics describing the fallback or an impossible fixed constraint.
 Manual waypoints are retained as view geometry. Every result contains geometry
 for every input element and a complete source-to-target route for every edge;
 missing, invalid, or failed engine output is diagnosed and completed through a
-deterministic fallback.
+deterministic fallback. This is the adapter's declared, backward-compatible
+`fallbackPolicy: "standard"`. A host that requires ELK-only execution can set
+`fallbackPolicy: "none"`; failures then return diagnostics and never invoke a
+different layout engine.
 
 ## License notice
 

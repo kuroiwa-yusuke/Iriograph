@@ -15,6 +15,8 @@ export type GeometryChange = {
   geometry: ElementGeometry;
 };
 
+export type ResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw";
+
 export type DiagramSelectionRequest = {
   elementId: string;
   mode: "replace" | "add" | "toggle" | "preserve";
@@ -135,6 +137,20 @@ export function resizeGeometryElement(
   elementId: string,
   requestedSize: { width: number; height: number },
 ): GeometryChange | undefined {
+  const element = geometryIndex(scene).get(elementId);
+  if (!element) return undefined;
+  return resizeGeometryElementFromHandle(scene, elementId, "se", {
+    x: requestedSize.width - element.geometry.width,
+    y: requestedSize.height - element.geometry.height,
+  });
+}
+
+export function resizeGeometryElementFromHandle(
+  scene: DiagramScene,
+  elementId: string,
+  handle: ResizeHandle,
+  delta: Point,
+): GeometryChange | undefined {
   const index = geometryIndex(scene);
   const element = index.get(elementId);
   if (!element) return undefined;
@@ -143,21 +159,9 @@ export function resizeGeometryElement(
     : { width: 44, height: 36 };
   const children = element.structuralKind === "container"
     ? [...index.values()].filter((candidate) => parentElementId(candidate) === element.elementId)
-    : [];
-  const minimum = {
-    width: Math.max(
-      minimumBase.width,
-      ...children.map((child) => (
-        child.geometry.x + child.geometry.width - element.geometry.x + 16
-      )),
-    ),
-    height: Math.max(
-      minimumBase.height,
-      ...children.map((child) => (
-        child.geometry.y + child.geometry.height - element.geometry.y + 16
-      )),
-    ),
-  };
+    : element.structuralKind === "region"
+      ? semanticRegionMembers(scene, element.elementId, index)
+      : [];
   const elementParentId = parentElementId(element);
   const parent = elementParentId ? index.get(elementParentId) : undefined;
   const outer = parent?.structuralKind === "container"
@@ -168,21 +172,64 @@ export function resizeGeometryElement(
         width: scene.width - SCENE_INSET * 2,
         height: scene.height - SCENE_INSET * 2,
       };
-  const maximum = {
-    width: outer.x + outer.width - element.geometry.x,
-    height: outer.y + outer.height - element.geometry.y,
-  };
-  if (maximum.width < minimum.width || maximum.height < minimum.height) return undefined;
-  const geometry = {
-    ...element.geometry,
-    width: clampToInterval(requestedSize.width, minimum.width, maximum.width),
-    height: clampToInterval(requestedSize.height, minimum.height, maximum.height),
-  };
+  const outerRight = outer.x + outer.width;
+  const outerBottom = outer.y + outer.height;
+  const originalRight = element.geometry.x + element.geometry.width;
+  const originalBottom = element.geometry.y + element.geometry.height;
+  let left = handle.includes("w") ? element.geometry.x + delta.x : element.geometry.x;
+  let right = handle.includes("e") ? originalRight + delta.x : originalRight;
+  let top = handle.includes("n") ? element.geometry.y + delta.y : element.geometry.y;
+  let bottom = handle.includes("s") ? originalBottom + delta.y : originalBottom;
+
+  if (handle.includes("w")) left = clampToInterval(left, outer.x, right - minimumBase.width);
+  if (handle.includes("e")) right = clampToInterval(right, left + minimumBase.width, outerRight);
+  if (handle.includes("n")) top = clampToInterval(top, outer.y, bottom - minimumBase.height);
+  if (handle.includes("s")) bottom = clampToInterval(bottom, top + minimumBase.height, outerBottom);
+
+  if (children.length > 0) {
+    const padding = element.structuralKind === "container" ? 16 : 4;
+    const requiredLeft = Math.min(...children.map((child) => child.geometry.x)) - padding;
+    const requiredTop = Math.min(...children.map((child) => child.geometry.y)) - padding;
+    const requiredRight = Math.max(...children.map((child) => child.geometry.x + child.geometry.width)) + padding;
+    const requiredBottom = Math.max(...children.map((child) => child.geometry.y + child.geometry.height)) + padding;
+    if (handle.includes("w")) left = Math.min(left, requiredLeft);
+    if (handle.includes("e")) right = Math.max(right, requiredRight);
+    if (handle.includes("n")) top = Math.min(top, requiredTop);
+    if (handle.includes("s")) bottom = Math.max(bottom, requiredBottom);
+  }
+
+  left = clampToInterval(left, outer.x, right - minimumBase.width);
+  right = clampToInterval(right, left + minimumBase.width, outerRight);
+  top = clampToInterval(top, outer.y, bottom - minimumBase.height);
+  bottom = clampToInterval(bottom, top + minimumBase.height, outerBottom);
+  const geometry = { ...element.geometry, x: left, y: top, width: right - left, height: bottom - top };
+  if (children.some((child) => (
+    child.geometry.x < geometry.x
+    || child.geometry.y < geometry.y
+    || child.geometry.x + child.geometry.width > geometry.x + geometry.width
+    || child.geometry.y + child.geometry.height > geometry.y + geometry.height
+  ))) return undefined;
   if (
     geometry.width === element.geometry.width
     && geometry.height === element.geometry.height
   ) return undefined;
   return { elementId, geometry };
+}
+
+function semanticRegionMembers(
+  scene: DiagramScene,
+  regionElementId: string,
+  index: ReadonlyMap<string, GeometryElement>,
+): GeometryElement[] {
+  const memberIds = new Set((scene.memberships ?? [])
+    .filter((membership) => (
+      membership.regionElementId === regionElementId
+      && membership.provenance.operator === "membership-region"
+    ))
+    .map((membership) => membership.memberElementId));
+  return [...memberIds].map((elementId) => index.get(elementId)).filter(
+    (element): element is GeometryElement => Boolean(element),
+  );
 }
 
 export function alignSelection(

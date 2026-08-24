@@ -11,6 +11,7 @@ import {
   distributeSelection,
   normalizeSceneSelection,
   resizeGeometryElement,
+  resizeGeometryElementFromHandle,
   translateSelection,
 } from "./selection";
 
@@ -86,6 +87,20 @@ describe("selection geometry policy", () => {
         elementId: "container-a",
         geometry: { x: 8, y: 8, width: 240, height: 120 },
       });
+  });
+
+  it("8方向resizeでもregionの意味上のmemberを枠外へ残さない", () => {
+    const scene = sceneFixture();
+    const provenance = { sourceStatementRefs: ["urn:test:s"], operator: "membership-region" as const, derivation: "direct" as const };
+    scene.regions = [{
+      elementId: "region-a", semanticRef: "urn:test:Class", structuralKind: "region", label: "Class",
+      templateRef: "urn:test:region", geometry: { x: 10, y: 10, width: 300, height: 180 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" }, pinned: false, placement: "generated", provenance,
+    }];
+    scene.nodes[0]!.geometry = { x: 80, y: 70, width: 40, height: 30 };
+    scene.memberships = [{ semanticRef: "urn:test:m", containerElementId: "region-a", regionElementId: "region-a", memberElementId: "node-a", provenance }];
+    expect(resizeGeometryElementFromHandle(scene, "region-a", "nw", { x: 200, y: 120 }))
+      .toEqual({ elementId: "region-a", geometry: { x: 70, y: 66, width: 240, height: 124 } });
   });
 });
 

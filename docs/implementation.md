@@ -6,7 +6,7 @@
 |---|---|---|
 | `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、human semantic commandのatomic graph patch/preview/apply、非同期layout adapter契約と標準軽量layout、asset lease/policy検証 | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
 | `@iriograph/semantic-access` | Turtle由来のlabel/comment/構造索引、検索・describe・近傍/subgraph、revision alias、Core commandへcompileする注入WritePort | LLM provider、MCP transport、overlay、永続化、認証 |
-| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、context menu/details dialogから右Inspectorへ繋ぐstructured semantic authoring | 語彙判定、永続化、認証、catalog取得 |
+| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、右Inspectorの4 actionとその段階detailsによるstructured semantic authoring、appearance専用context entry | 語彙判定、永続化、認証、catalog取得 |
 | `@iriograph/layout-elk` | ELK.js Layeredへのoptional adapter、compound hierarchy、直交route、host engine/Worker注入 | semantic解釈、document内のengine固有option、hard pinの近似 |
 | `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocator例 | 投影規則、editor内部state |
 
@@ -16,7 +16,7 @@
 2. RDF/RDFSベースプロファイルの構造制約を検証する
 3. 明示された`rdfs:subClassOf`と`rdfs:subPropertyOf`からrule matching用の限定的なclosureを作る
 4. catalog ruleをpriorityとspecificityで一意に解決する
-5. `membership-container`、`ordinal-sequence`、`alternative`等の汎用operatorでgeometry未確定のScene構造とedit provenanceを導出する。Membershipは多対多の全組を保持し、node-linkの単一parent階層とregionの重なり表現をviewごとに選ぶ
+5. `membership-container`、`ordinal-sequence`、`alternative`等の汎用operatorでgeometry未確定のScene構造とedit provenanceを導出する。Membershipは多対多の全組を保持し、node-linkの単一parent階層とregionの重なり表現をviewごとに選ぶ。`ordinal-sequence`は通常edgeを作らず、選択可能なgroupとordinal付きmembershipを導出する
 6. 消費されていないIRI-object tripleをfallback edgeへ投影する
 7. view overlayをsemanticRefで照合し、user geometry、appearance、manual routingを制約として構成する
 8. `layoutRef`に対応する非同期layout adapterを呼び、generated elementのgeometryとendpoint込みrouteを決定する
@@ -76,7 +76,7 @@ Controlled source transactionは`applyAuthoringSource`でactorを`human`また�
 Rich editorのnode、属性、edge、包含、順序、選択編集は次のパイプラインで実行します。
 
 1. Editorが入力中のformやedge previewをephemeral UI stateとして持つ。Sceneやdocument overlayに仮node/edgeを保存しない
-2. Canvas gestureまたはサイドバー操作からcommand draftを作る。Canvasはsource/target、候補container、作成位置等をseedするだけでsemantic transactionを開始しない
+2. Canvas gestureまたは右Inspector操作からcommand draftを作る。Canvasはsource/target、候補container等をseedするだけでsemantic transactionを開始しない。`新しい要素を作る`はCanvas位置を受け取らない
 3. 解決済みauthoring contextとprojection capabilityから選択できるclass、predicate、構造操作を提示し、追加・削除予定triple/graph patchとvalidationをサイドバーでpreviewする
 4. ユーザーの明示適用後、Coreが一つのUI操作に含まれるstructured command群をRDF datasetのatomic graph patchへ変換する。`create-resource`はnamed IRIと少なくとも1triple、`connect-resources`はpredicateを必須にする
 5. Graph patchからcandidate datasetを構成する。Structured commandまたはLLM editはversioned serializerで決定的なcandidate Turtleへ再生成し、Turtle直接編集は入力原文をcandidate sourceとして保持してprepared pipelineへ合流する
@@ -85,19 +85,21 @@ Rich editorのnode、属性、edge、包含、順序、選択編集は次のパ�
 8. Reconcile済みcandidate datasetをhost注入のengine-independent portでdomain validationする。Domain errorまたはadapter contract errorならcandidate全体をrollbackする
 9. Candidate Turtleとreconcile済みoverlayを一つのdocument revisionとして確定し、semantic diffとpresentation diffを別々に返す
 
-Meaning authoringは右Inspector上部、display overlay編集はその下へ置きます。Resource/class/predicateはlabelを主表示にし、完全IRIはselect value、tooltip、Advanced入力として保持します。Canvas pickerは明示modeでresource IRIをdraftへseedするだけです。Container背景での作成位置指定は、そのcontainerのprojection provenanceとexactに一致するmembership ruleが一意な場合だけ構造設定も補完し、候補が曖昧ならユーザー選択を要求します。
+右Inspectorの初期状態は`新しい要素を作る`、`関係を作る`、`要素を変更する`、`関係を変更する`だけを表示し、intent選択後に必要fieldを段階表示します。`新しい要素を作る`はlabelだけを受け取り、allocatorのopaque IRIと`rdfs:label`一文を確定します。Meaning authoringとdisplay overlay編集は`意味`/`ビュー`tabの片方だけを表示し、縦に併置しません。右clickは別menuを出さず、対象選択と右Inspectorのビュー段階を直接開きます。Style editorも右Inspector内へinline表示し、Canvas横のpopoverを作りません。Resource/class/predicateはlabelを主表示にし、完全IRIは内部value、tooltip、read-only Advanced参照情報として保持し、通常UIとAdvancedにIRI入力を置きません。Canvas pickerは明示modeで既存resource IRIをdraftへseedするだけで、新規resourceの位置やmembershipを補完しません。
+
+Direct edgeのendpoint haloはtabでgestureを分けます。`ビュー`では同一node外周上のanchorだけをrouting overlayへ保存します。`意味`の`関係を変更する`では別nodeへのdropをsource/target replacement draftへ変換します。後者は空白・region・container dropを拒否し、Canvasからsemantic sourceを直接変更せず、既存statement削除と新statement追加のPreviewへ渡します。
 
 Geometryとsemantic parentの不一致はVue editorのderived warningです。Node/container centerが意味上無関係なcontainer content上にある場合、またはsemantic child全体がparent contentから外れる場合に警告し、通常dragからmembershipを自動生成しません。表示位置の修正はpresentation historyだけへ入り、包含の追加・削除はprovenance/catalogから作るstructured draftのPreview/Applyへ送ります。
 
-Step 7で新規geometryを保存する場合は`placement: "generated"`とし、userがdrag、resize、作成位置指定をした後の`placement: "user"`と区別します。Template、style、iconなどcatalog由来のappearanceはSceneへ導出し、overlayには複製しません。P1-08でprepared pipeline内のparse結果共有やvalidation/projection順を最適化しても、phase別diagnostic、domain error時のatomic rollback、warning確認、最終documentの結果契約は変えません。
+Step 7で新規geometryを保存する場合は`placement: "generated"`とし、作成後にuserがdrag、resizeした`placement: "user"`と区別します。Template、style、iconなどcatalog由来のappearanceはSceneへ導出し、overlayには複製しません。P1-08でprepared pipeline内のparse結果共有やvalidation/projection順を最適化しても、phase別diagnostic、domain error時のatomic rollback、warning確認、最終documentの結果契約は変えません。
 
 再serializeはcanonical blank node labelを決定し、expanded subject/predicate/object tupleでdedupe・sortしてから表記をcompactします。`rdf`/`rdfs`/`xsd`の固定binding、base IRI由来のdefault prefix、妥当な入力prefixの優先順を固定し、実際に使用する宣言だけを出力します。`rdf:type`は`a`、Turtleの有効なprefixed nameへ変換できないIRIだけをfull IRIにします。Prefix alias/collisionやquad入力順がstatement順を変えてはなりません。Comment、空白、property list、source上のtriple順は保持保証しません。v1はRDF Dataset Canonicalizationを実装せず、構造的に区別できないblank node間では入力IDをtie-breakに使います。Human textareaのdirect sourceはこのserializerを通さず、妥当な原文を保持します。
 
-「resourceを作成して指定位置へ置く」のようにsemantic commandとpresentation patchを含む一つのUI操作は、先にsemantic resultとreconcile済みdocumentを候補として作り、その結果へpresentation patchを検証適用してから一つのdocument revisionとundo itemとしてcommitします。どちらかが失敗した場合はTurtle、overlayとも元documentを維持します。
+Standard editorはresource作成と位置指定を一つのUI操作へ結合しません。Label作成のsemantic resultを確定してgenerated geometryを得た後、利用者のdragをpresentation historyへ別に記録します。一般hostがsemantic commandとpresentation patchを協調させる場合も、片方の失敗で部分commitしてはなりません。
 
-Canvasからのedge削除やcontainerからの取り出しは、Scene elementを直接消去する処理ではありません。Projection operatorは元statement identityとsemantic edit capabilityをScene provenanceとして返し、Editorはそれを直接triple削除、`rdfs:member`削除、Seq/Altのatomic再構成などのcommandへ戻します。これによりderived edgeの表示編集がTurtleの孤立した不整合な削除になることを防ぎます。
+Canvasからのedge削除やcontainerからの取り出しは、Scene elementを直接消去する処理ではありません。Projection operatorは元statement identityとsemantic edit capabilityをScene provenanceとして返し、Editorはそれを直接triple削除、`rdfs:member`削除、Seq/Altのatomic再構成などのcommandへ戻します。Seqの`rdf:_n`はedgeでなくordinal membershipなので、groupまたはmemberの選択から`set-sequence`を開始します。これにより表示要素の削除がTurtleの孤立した不整合な削除になることを防ぎます。
 
-Resource自体の削除では、そのresourceをsubjectとするtype、label、property等を削除対象に含めます。別のsubjectからresourceをobjectとして参照するstatementまたはstructure membershipが残る場合は既定で拒否します。明示cascadeではそれらの影響statementをサイドバーでpreviewし、承認された集合だけを一つのgraph patchで削除します。Seq/Alt memberを除く場合は残る`rdf:_n`も同じpatchで連番へ再構成し、最終candidateが構造制約を満たさなければ全体をrollbackします。
+Resource自体の削除では、そのresourceをsubjectとするtype、label、property等を削除対象に含めます。低水準Core commandは別subjectからの参照やstructure membershipが残る場合にcascade省略を拒否します。標準Editorの削除actionは常に明示cascadeのサイドバーPreviewを作り、resourceを始点・終点・所属・順序として使う関係をCanvasの赤線と人向け一覧で示し、承認された集合だけを一つのgraph patchで削除します。Seq/Alt memberを除く場合は残る`rdf:_n`も同じpatchで連番へ再構成し、最終candidateが構造制約を満たさなければ全体をrollbackします。
 
 P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とresource IRI allocatorを受け取ります。Editorはcommand draftをportable documentと別のsession stateとして保持し、Coreのpreviewでcandidate dataset、graph patch、diagnostic、confirmation IDを得ます。Applyは同じ元source、document fingerprint、context identity、正規化command、追加・削除statement集合からconfirmation IDを再計算し、preview結果を再compileしてから既存の全view reconciliationへ渡します。
 
@@ -135,7 +137,7 @@ ViewportもVue editorのsession stateです。`DiagramCanvas`がscroll metrics�
 
 購入承認フローを例に、`rdf:Bag`と`rdfs:member`によるlane containment、`rdf:Seq`と`rdf:_n`による順序、`rdf:Alt`とbranch Seqによる選択、`rdfs:seeAlso`による参照を一画面に表示します。`relatedTo`と`retry`は業務上意味のあるdomain edgeとしてTurtleに残します。開始・終了event、user/service task、gateway等の外観だけを選ぶdomain typeは持たず、両named viewのoverlayがdomain appearance libraryのtemplateを参照します。Mock validatorは旧appearance typeではなく、`rdf:Bag`とその直接memberという可視・構造的な集合へlabel制約を適用します。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
 
-Editorはdrag、resize、edge route mode・waypoint追加/削除/移動、edge label位置、source/target endpoint anchor、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、region label位置、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。加えて、host注入のstatic authoring context/allocatorを使い、resource、分類/属性、直接edge、包含、Seq、Alt、profile定義済み操作、resource削除を右Inspectorでpreviewして明示適用できます。作成時は複数class、上位概念、既存resourceとのedgeと複数membershipも同じatomic previewへ含められ、見た目と意味の包含不一致はCanvasとInspectorに警告されます。名前・説明は複数言語・複数行をdetails dialogから編集でき、commentはhover/全表示を切り替えます。Turtleの適用、semantic authoring、保存、書出は非同期reconciliationの完了を待ちます。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+Editorはdrag、resize、edge route mode・waypoint追加/削除/移動、edge label位置、source/target endpoint anchor、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、region label位置、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。加えて、host注入のstatic authoring context/allocatorを使い、resource、分類/属性、直接edge、包含、Seq、Alt、profile定義済み操作、resource削除を右Inspectorでpreviewして明示適用できます。`新しい要素を作る`はlabelだけを入力し、allocatorのopaque IRIと`rdfs:label`一文を確定します。Class、上位概念、edge、membershipは作成後の別actionとし、見た目と意味の包含不一致はCanvasとInspectorに警告します。名前・説明は複数言語・複数行をdetails dialogから編集でき、commentはhover/全表示を切り替えます。Turtleの適用、semantic authoring、保存、書出は非同期reconciliationの完了を待ちます。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
 
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 

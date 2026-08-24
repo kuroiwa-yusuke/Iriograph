@@ -22,11 +22,12 @@ import {
   RDF_SEQ,
   RDF_TYPE,
   RDFS_CLASS,
+  RDFS_COMMENT,
   RDFS_LABEL,
   RDFS_MEMBER,
   XSD_NAMESPACE,
 } from "./authoring-validation";
-import { statementIdentity } from "./identity";
+import { statementIdentity, statementIdentityForNamedStatement } from "./identity";
 import {
   createStandardLayoutRegistry,
   type LayoutAdapter,
@@ -67,7 +68,7 @@ describe("structured semantic authoring", () => {
             object: { kind: "literal", value: "D" },
           },
         ],
-        initialPosition: { viewId: "main", x: 400, y: 100 },
+        initialPosition: { viewId: "main", x: 400, y: 400 },
       },
       {
         type: "set-property",
@@ -123,6 +124,7 @@ describe("structured semantic authoring", () => {
 
     const preview = await previewAuthoringCommands(document, commands, context);
 
+    expect(preview.diagnostics).toEqual([]);
     expect(preview.valid).toBe(true);
     expect(preview.requiresConfirmation).toBe(true);
     expect(preview.confirmationId).toBe((
@@ -153,7 +155,7 @@ describe("structured semantic authoring", () => {
     const mainD = Object.values(result.document.views[0]!.overlay)
       .find((entry) => entry.semanticRef === `${NS}d`)!;
     expect(mainD).toMatchObject({
-      geometry: { x: 400, y: 100 },
+      geometry: { x: 400, y: 400 },
       pinned: true,
       placement: "user",
     });
@@ -678,6 +680,129 @@ ex:b rdfs:label "B" .
     expect(protectedTerm.diagnostics).toContainEqual(expect.objectContaining({
       code: "vocabulary-resource-delete-denied",
     }));
+  });
+
+  it("exact direct statementの多言語・複数行commentを標準reificationで置換・削除する", async () => {
+    const source = `${baseSource}
+[] a rdf:Statement ;
+  rdf:subject ex:a ; rdf:predicate ex:rel ; rdf:object ex:b ;
+  rdfs:comment "old English"@en .
+[] a rdf:Statement ;
+  rdf:subject ex:a ; rdf:predicate ex:rel ; rdf:object ex:b ;
+  rdfs:comment "古い説明"@ja .
+`;
+    const document = documentFor(source);
+    const statement = {
+      subjectIri: `${NS}a`,
+      predicateIri: `${NS}rel`,
+      objectIri: `${NS}b`,
+    };
+    const statementRef = statementIdentityForNamedStatement(statement);
+    const replace = await previewAuthoringCommands(document, [{
+      type: "set-statement-comments",
+      commandId: "replace-edge-comments",
+      statementRef,
+      ...statement,
+      comments: [
+        { kind: "literal", value: "承認後に\n通知する", language: "ja" },
+        { kind: "literal", value: "Notify after approval", language: "en" },
+      ],
+    }], contextFor("revision-1"));
+
+    expect(replace.valid).toBe(true);
+    expect(replace.patch.removed.filter((value) => value.predicateIri === RDFS_COMMENT))
+      .toHaveLength(2);
+    const replaced = graphFor(replace.candidateSource!);
+    expect(replaced.getQuads(null, RDFS_COMMENT, null, null).map((value) => ({
+      value: value.object.value,
+      language: value.object.termType === "Literal" ? value.object.language : "",
+    }))).toEqual(expect.arrayContaining([
+      { value: "承認後に\n通知する", language: "ja" },
+      { value: "Notify after approval", language: "en" },
+    ]));
+    expect(replaced.countQuads(null, RDF_TYPE, "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement", null))
+      .toBe(1);
+
+    const applied = await applyAuthoringPreview(document, replace, contextFor("revision-1"), {
+      confirmationId: replace.confirmationId,
+    });
+    const remove = await previewAuthoringCommands(applied.document, [{
+      type: "set-statement-comments",
+      commandId: "delete-edge-comments",
+      statementRef,
+      ...statement,
+      comments: [],
+    }], contextFor("revision-1"));
+    expect(remove.valid).toBe(true);
+    const removed = graphFor(remove.candidateSource!);
+    expect(removed.countQuads(null, RDFS_COMMENT, null, null)).toBe(0);
+    expect(removed.countQuads(null, RDF_TYPE, "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement", null))
+      .toBe(0);
+  });
+
+  it("同一batchの先行connect後にN3非依存statementRefでcommentを付ける", async () => {
+    const statement = {
+      subjectIri: `${NS}b`,
+      predicateIri: `${NS}rel`,
+      objectIri: `${NS}c`,
+    };
+    const preview = await previewAuthoringCommands(documentFor(baseSource), [{
+      type: "connect-resources",
+      commandId: "connect-b-c",
+      ...statement,
+    }, {
+      type: "set-statement-comments",
+      commandId: "comment-b-c",
+      statementRef: statementIdentityForNamedStatement(statement),
+      ...statement,
+      comments: [{ kind: "literal", value: "この接続だけの説明", language: "ja" }],
+    }], contextFor("revision-1"));
+
+    expect(preview.valid).toBe(true);
+    const graph = graphFor(preview.candidateSource!);
+    expect(graph.countQuads(`${NS}b`, `${NS}rel`, `${NS}c`, null)).toBe(1);
+    expect(graph.getObjects(null, RDFS_COMMENT, null).map((value) => value.value))
+      .toContain("この接続だけの説明");
+  });
+
+  it("statement/resourceのcascade削除で対応reifier closureも同じpatchから除去する", async () => {
+    const reifiedSource = `${baseSource}
+[] a rdf:Statement ;
+  rdf:subject ex:a ; rdf:predicate ex:rel ; rdf:object ex:b ;
+  rdfs:comment "edge comment"@en .
+`;
+    const statement = {
+      subjectIri: `${NS}a`,
+      predicateIri: `${NS}rel`,
+      objectIri: `${NS}b`,
+    };
+    const removeStatement = await previewAuthoringCommands(documentFor(reifiedSource), [{
+      type: "remove-statement",
+      commandId: "remove-reified-edge",
+      statementRef: statementIdentityForNamedStatement(statement),
+      ...statement,
+    }], contextFor("revision-1"));
+    expect(removeStatement.valid).toBe(true);
+    expect(graphFor(removeStatement.candidateSource!).countQuads(
+      null,
+      RDF_TYPE,
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement",
+      null,
+    )).toBe(0);
+
+    const removeResource = await previewAuthoringCommands(documentFor(reifiedSource), [{
+      type: "delete-resource",
+      commandId: "remove-reified-target",
+      resourceIri: `${NS}b`,
+      cascade: true,
+    }], contextFor("revision-1"));
+    expect(removeResource.valid).toBe(true);
+    expect(graphFor(removeResource.candidateSource!).countQuads(
+      null,
+      RDF_TYPE,
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement",
+      null,
+    )).toBe(0);
   });
 
   it("blank nodeを保持し、cascade impactではexact blank termとしてpreviewする", async () => {
@@ -1452,8 +1577,10 @@ ex:b rdfs:label "B" .
     }));
 
     const scene = await buildIriographView(document, "main", context.runtime);
-    const membership = scene.nodes.find((node) => node.semanticRef === `${NS}a`)!
-      .parentProvenance!.editCapability!;
+    const membership = scene.memberships!.find((entry) => (
+      entry.provenance.editCapability?.command === "set-membership"
+      && entry.provenance.editCapability.member === `${NS}a`
+    ))!.provenance.editCapability!;
     expect(membership).toMatchObject({
       command: "set-membership",
       containerTypeIri: `${NS}CustomLane`,
@@ -1465,9 +1592,9 @@ ex:b rdfs:label "B" .
         enabled: false,
         containerTypeIri: `${NS}CustomLane`,
       });
-    const sequenceCapability = scene.edges.find((edge) => (
-      edge.provenance?.editCapability?.command === "set-sequence"
-    ))!.provenance!.editCapability!;
+    const sequenceCapability = scene.memberships!.find((entry) => (
+      entry.provenance.editCapability?.command === "set-sequence"
+    ))!.provenance.editCapability!;
     expect(seedAuthoringCommandFromProvenance(document, sequenceCapability, "seed-seq").command)
       .toMatchObject({
         type: "set-sequence",

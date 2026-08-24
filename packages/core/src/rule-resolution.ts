@@ -289,8 +289,9 @@ function expectedTemplateKind(
       return "node";
     case "alternative":
       return "node";
-    case "direct-edge":
     case "ordinal-sequence":
+      return "container";
+    case "direct-edge":
       return "edge";
     case "suppress":
       return undefined;
@@ -298,8 +299,7 @@ function expectedTemplateKind(
 }
 
 function templateRequired(rule: ProjectionRule): boolean {
-  return rule.project.operator !== "ordinal-sequence"
-    && rule.project.operator !== "suppress";
+  return rule.project.operator !== "suppress";
 }
 
 function validateTemplateReference(

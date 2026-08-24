@@ -22,6 +22,10 @@ export const RDF_BAG = `${RDF_NAMESPACE}Bag`;
 export const RDF_SEQ = `${RDF_NAMESPACE}Seq`;
 export const RDF_ALT = `${RDF_NAMESPACE}Alt`;
 export const RDF_PROPERTY = `${RDF_NAMESPACE}Property`;
+export const RDF_STATEMENT = `${RDF_NAMESPACE}Statement`;
+export const RDF_SUBJECT = `${RDF_NAMESPACE}subject`;
+export const RDF_PREDICATE = `${RDF_NAMESPACE}predicate`;
+export const RDF_OBJECT = `${RDF_NAMESPACE}object`;
 export const RDF_ORDINAL_PREFIX = `${RDF_NAMESPACE}_`;
 export const RDFS_CLASS = `${RDFS_NAMESPACE}Class`;
 export const RDFS_LABEL = `${RDFS_NAMESPACE}label`;
@@ -35,6 +39,10 @@ const STANDARD_TERM_ROLES = new Map<string, readonly AuthoringTermRole[]>([
   [RDF_SEQ, ["type-object"]],
   [RDF_ALT, ["type-object"]],
   [RDF_PROPERTY, ["type-object"]],
+  [RDF_STATEMENT, ["type-object"]],
+  [RDF_SUBJECT, ["predicate"]],
+  [RDF_PREDICATE, ["predicate"]],
+  [RDF_OBJECT, ["predicate"]],
   [RDFS_CLASS, ["type-object"]],
   [RDFS_LABEL, ["predicate"]],
   [RDFS_COMMENT, ["predicate"]],

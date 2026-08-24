@@ -1,4 +1,9 @@
-import type { AuthoringCommand, AuthoringPreview, IriographDocumentV1 } from "@iriograph/core";
+import {
+  statementIdentityForNamedStatement,
+  type AuthoringCommand,
+  type AuthoringPreview,
+  type IriographDocumentV1,
+} from "@iriograph/core";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -40,6 +45,11 @@ ex:bag rdfs:member ex:b ;
   ex:contains ex:a ;
   ex:deepContains ex:unlabeled ;
   rdf:_1 ex:c .
+
+[] a rdf:Statement ;
+  rdf:subject ex:a ; rdf:predicate ex:rel ; rdf:object ex:b ;
+  rdfs:comment "この承認関係だけの説明\\n二行目"@ja,
+    "Statement-specific note"@en .
 `;
 
 const REORDERED_SOURCE = `
@@ -134,13 +144,39 @@ describe("SemanticAccessIndex", () => {
     const neighbors = index.neighbors({ resource: a, direction: "outgoing", predicate: relation });
     expect(neighbors).toHaveLength(1);
     expect(neighbors[0]).toMatchObject({
+      statementRef: statementIdentityForNamedStatement({
+        subjectIri: `${NS}a`,
+        predicateIri: `${NS}rel`,
+        objectIri: `${NS}b`,
+      }),
       subject: { iri: `${NS}a` },
       predicate: { iri: `${NS}rel`, label: "承認する" },
       object: { iri: `${NS}b` },
+      comments: [{
+        value: "Statement-specific note",
+        language: "en",
+      }, {
+        value: "この承認関係だけの説明\n二行目",
+        language: "ja",
+      }],
     });
     const subgraph = index.subgraph({ root: a, depth: 1, predicates: [relation] });
     expect(subgraph.resources.map((resource) => resource.iri)).toEqual([`${NS}a`, `${NS}b`]);
     expect(subgraph.relations).toHaveLength(1);
+    expect(index.searchResources("Statement")).toEqual([]);
+
+    expect(index.statementComments({
+      statementRef: neighbors[0]!.statementRef,
+      subject: a,
+      predicate: relation,
+      object: required(index.resourceAlias(`${NS}b`)),
+    })).toEqual(neighbors[0]!.comments);
+    expect(() => index.statementComments({
+      statementRef: "wrong",
+      subject: a,
+      predicate: relation,
+      object: required(index.resourceAlias(`${NS}b`)),
+    })).toThrow("does not match");
   });
 
   it("rdfs:member・subproperty closure・rdf:_nをmembershipへ正規化し元predicateを保つ", () => {
@@ -244,6 +280,33 @@ describe("alias authoring facade", () => {
     await expect(facade.apply(wrapped, { revision: "write-rev", confirmationId: "wrong" }))
       .rejects.toThrow(SemanticWriteConfirmationError);
     expect(applyCall).not.toHaveBeenCalled();
+  });
+
+  it("個別statement comment operationをexact aliasからCore commandへcompileする", () => {
+    const index = indexFor(SOURCE, "comment-rev");
+    const statement = {
+      subjectIri: `${NS}a`,
+      predicateIri: `${NS}rel`,
+      objectIri: `${NS}b`,
+    };
+    const operation: AliasedAuthoringOperation = {
+      type: "set-statement-comments",
+      operationId: "comment-edge",
+      revision: "comment-rev",
+      statementRef: statementIdentityForNamedStatement(statement),
+      subject: required(index.resourceAlias(statement.subjectIri)),
+      predicate: required(index.predicateAlias(statement.predicateIri)),
+      object: required(index.resourceAlias(statement.objectIri)),
+      comments: [{ kind: "literal", value: "更新した説明\n二行目", language: "ja" }],
+    };
+
+    expect(compileAliasedOperation(index, operation)).toEqual({
+      type: "set-statement-comments",
+      commandId: "comment-edge",
+      statementRef: operation.statementRef,
+      ...statement,
+      comments: [{ kind: "literal", value: "更新した説明\n二行目", language: "ja" }],
+    });
   });
 });
 

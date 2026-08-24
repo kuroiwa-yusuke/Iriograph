@@ -30,7 +30,7 @@ Turtle parseはCoreの`parseSemanticGraph`を使い、quad順に依存しないc
 - incoming/outgoingのnamed-resource relation
 - `rdfs:member`とそのsubproperty
 
-Blank nodeとliteralはalias対象にしません。Literalはlabel/commentまたはrelation外の属性としてRDF datasetには残りますが、v1のneighbor relationはnamed resource間だけを返します。
+Blank nodeとliteralはalias対象にしません。Literalはlabel/commentまたはrelation外の属性としてRDF datasetには残りますが、v1のneighbor relationはnamed resource間だけを返します。RDF標準reifierはblank/namedを問わず通常resource、neighbor relation、検索結果から除外し、対応するexact S/P/Oのstatement commentとして索引化します。
 
 ## 3. Label、説明、検索
 
@@ -77,9 +77,10 @@ Index revisionと一致しないaliasは`StaleSemanticRevisionError`、該当nam
 | `searchResources(query)` | label、comment、IRIを検索し、完全IRI、`rN`、選択label、typeを返す |
 | `searchPredicates(query)` / `searchRelations(query)` | predicateだけを検索し、完全IRI、`pN`、resource alias、usage countを返す |
 | `describe(rN)` | 全label/comment、direct type、上位class/property closure、incoming/outgoing件数を返す |
-| `neighbors(query)` | direction、predicate、limitでnamed-resource tripleを返す |
-| `subgraph(query)` | root、0〜10のdepth、direction、predicate、最大relation数を指定して部分graphを返す |
+| `neighbors(query)` | direction、predicate、limitでnamed-resource tripleを返し、exact statement identityと個別commentを保持する |
+| `subgraph(query)` | root、0〜10のdepth、direction、predicate、最大relation数を指定し、個別comment付きの部分graphを返す |
 | `memberships(query)` | container/memberの向き、元predicate、`rdfs:member`までのdistanceを返す |
+| `statementComments(query)` | revision aliasで指定したexact S/P/Oとstatement identityを照合し、その関係だけの多言語commentを返す |
 
 `subgraph`は最大relation数に達した場合`truncated: true`を返します。Host/MCPはこの値を隠さず、追加探索が必要であることをLLMへ伝えます。
 
@@ -104,8 +105,9 @@ Index revisionと一致しないaliasは`StaleSemanticRevisionError`、該当nam
 - membership、sequence、alternative更新
 - resource削除
 - exact statement削除
+- exact statement comment集合の置換・削除
 
-Predicateは必ず`pN`から解決し、空欄時にgeneric relationを作りません。Literalは値、language、datatypeを構造化したまま渡します。新規resource IRI、term policy、structural constraintの判断はCoreのresolved authoring contextが行います。
+Predicateは必ず`pN`から解決し、空欄時にgeneric relationを作りません。Literalは値、language、datatypeを構造化したまま渡します。個別関係説明は`set-statement-comments`へcompileし、predicate resourceのcommentやview overlayへ変換しません。新規resource IRI、term policy、structural constraintの判断はCoreのresolved authoring contextが行います。
 
 `SemanticAuthoringFacade`の処理順は次です。
 

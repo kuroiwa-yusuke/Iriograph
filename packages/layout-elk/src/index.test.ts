@@ -59,6 +59,10 @@ describe("ElkLayeredLayoutAdapter", () => {
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.crossingMinimization.greedySwitch.type": "TWO_SIDED",
       "elk.layered.crossingMinimization.greedySwitchHierarchical.type": "TWO_SIDED",
+      "elk.layered.crossingMinimization.greedySwitch.activationThreshold": "0",
+      "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+      "elk.layered.nodePlacement.bk.fixedAlignment": "NONE",
+      "elk.layered.nodePlacement.bk.edgeStraightening": "IMPROVE_STRAIGHTNESS",
       "elk.layered.nodePlacement.favorStraightEdges": "true",
       "elk.layered.thoroughness": "20",
       "elk.layered.unnecessaryBendpoints": "false",
@@ -369,6 +373,58 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   });
 
+  test("defers regions and adds deterministic membership-only ordering edges to ELK", async () => {
+    const firstEngine = new RecordingEngine();
+    const secondEngine = new RecordingEngine();
+    const firstAdapter = new ElkLayeredLayoutAdapter("urn:test:region-projection", "LR", {
+      engine: firstEngine,
+    });
+    const secondAdapter = new ElkLayeredLayoutAdapter("urn:test:region-projection", "LR", {
+      engine: secondEngine,
+    });
+    const layoutRequest = request([
+      element("left", "region", undefined, { width: 240, height: 160 }),
+      element("right", "region", undefined, { width: 240, height: 160 }),
+      element("a"),
+      element("shared"),
+      element("b"),
+      element("empty", "region", undefined, { width: 240, height: 160 }),
+    ], [], "urn:test:region-projection");
+    layoutRequest.scene.memberships = [
+      membership("left-a", "left", "a"),
+      membership("left-shared", "left", "shared"),
+      membership("right-shared", "right", "shared"),
+      membership("right-b", "right", "b"),
+    ];
+    const reversed: LayoutRequest = {
+      ...layoutRequest,
+      scene: {
+        ...layoutRequest.scene,
+        elements: [...layoutRequest.scene.elements].reverse(),
+        memberships: [...layoutRequest.scene.memberships!].reverse(),
+      },
+    };
+
+    const first = await firstAdapter.layout(layoutRequest);
+    const second = await secondAdapter.layout(reversed);
+    const graph = firstEngine.inputs[0]!;
+    const childIds = graph.children?.map((child) => child.id) ?? [];
+    const layoutOnly = graph.edges?.filter((item) => item.id.startsWith("urn:iriograph:elk-layout-only:")) ?? [];
+    const aspect = Math.max(first.width / first.height, first.height / first.width);
+
+    expect(firstEngine.inputs[0]).toEqual(secondEngine.inputs[0]);
+    expect(first.geometries).toEqual(second.geometries);
+    expect(childIds).toEqual(["a", "b", "shared"]);
+    expect(layoutOnly.map((item) => [item.sources?.[0], item.targets?.[0]])).toEqual([
+      ["a", "shared"],
+      ["b", "shared"],
+    ]);
+    expect(containsCenter(first.geometries.left!, first.geometries.shared!)).toBe(true);
+    expect(containsCenter(first.geometries.right!, first.geometries.shared!)).toBe(true);
+    expect(aspect).toBeLessThan(4);
+    expect(first.diagnostics.some((item) => item.code === "elk-result-geometry-completed")).toBe(false);
+  });
+
   test("preserves user region geometry and only diagnoses an empty intersection", async () => {
     const adapter = new ElkLayeredLayoutAdapter("urn:test:manual-regions", "LR", {
       engine: { layout: vi.fn<ElkLayoutEngine["layout"]>() },
@@ -456,6 +512,28 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(result.geometries.a).toBeDefined();
     expect(result.geometries.b).toBeDefined();
     expect(result.routes.edge).toBeDefined();
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "elk-standard-fallback-selected",
+    }));
+  });
+
+  test("declared no-fallback policy reports failure without silently selecting Core", async () => {
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:no-fallback", "LR", {
+      fallbackPolicy: "none",
+      engine: { layout: async () => { throw new Error("engine unavailable"); } },
+    });
+    const result = await adapter.layout(request(
+      [element("a"), element("b")],
+      [edge("edge", "a", "b")],
+      "urn:test:no-fallback",
+    ));
+    expect(result.geometries).toEqual({});
+    expect(result.routes).toEqual({});
+    expect(result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "elk-engine-failed" }),
+      expect.objectContaining({ code: "elk-fallback-disabled" }),
+    ]));
+    expect(result.diagnostics.some((item) => item.code === "elk-standard-fallback-selected")).toBe(false);
   });
 
   test("runs a bounded smoke layout with the bundled ELK engine", async () => {
@@ -474,6 +552,34 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(result.geometries.start).toBeDefined();
     expect(result.geometries.finish).toBeDefined();
     expect(result.routes.flow!.length).toBeGreaterThanOrEqual(2);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  }, 5_000);
+
+  test("keeps a bundled-ELK region matrix compact and node-collision free", async () => {
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:bundled-region-matrix", "LR");
+    const layoutRequest = request([
+      element("left", "region", undefined, { width: 240, height: 160 }),
+      element("right", "region", undefined, { width: 240, height: 160 }),
+      element("a"),
+      element("b"),
+      element("shared"),
+      element("empty", "region", undefined, { width: 240, height: 160 }),
+    ], [], "urn:test:bundled-region-matrix");
+    layoutRequest.scene.memberships = [
+      membership("left-a", "left", "a"),
+      membership("left-shared", "left", "shared"),
+      membership("right-b", "right", "b"),
+      membership("right-shared", "right", "shared"),
+    ];
+
+    const result = await adapter.layout(layoutRequest);
+    const nodes = [result.geometries.a!, result.geometries.b!, result.geometries.shared!];
+    const aspect = Math.max(result.width / result.height, result.height / result.width);
+
+    expect(containsCenter(result.geometries.left!, result.geometries.shared!)).toBe(true);
+    expect(containsCenter(result.geometries.right!, result.geometries.shared!)).toBe(true);
+    expect(pairwiseOverlapCount(nodes)).toBe(0);
+    expect(aspect).toBeLessThan(4);
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   }, 5_000);
 });
@@ -530,6 +636,25 @@ function containsCenter(
   const y = inner.y + inner.height / 2;
   return x >= outer.x && x <= outer.x + outer.width
     && y >= outer.y && y <= outer.y + outer.height;
+}
+
+function pairwiseOverlapCount(
+  geometries: readonly { x: number; y: number; width: number; height: number }[],
+): number {
+  let count = 0;
+  for (let left = 0; left < geometries.length; left += 1) {
+    for (let right = left + 1; right < geometries.length; right += 1) {
+      const a = geometries[left]!;
+      const b = geometries[right]!;
+      if (
+        a.x < b.x + b.width
+        && a.x + a.width > b.x
+        && a.y < b.y + b.height
+        && a.y + a.height > b.y
+      ) count += 1;
+    }
+  }
+  return count;
 }
 
 function polylineCrossesBox(

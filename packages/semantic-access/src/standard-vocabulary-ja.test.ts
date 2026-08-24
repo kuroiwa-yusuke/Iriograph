@@ -30,7 +30,11 @@ describe("standardPredicateVocabularyJa", () => {
     expect(new Set(iris).size).toBe(iris.length);
     expect(iris.every((iri) => /^https?:\/\//u.test(iri))).toBe(true);
     expect(standardPredicateVocabularyJa.filter((term) => term.structural).map((term) => term.iri))
-      .toEqual(["http://www.w3.org/2000/01/rdf-schema#member"]);
+      .toEqual([
+        "http://www.w3.org/2000/01/rdf-schema#domain",
+        "http://www.w3.org/2000/01/rdf-schema#range",
+        "http://www.w3.org/2000/01/rdf-schema#member",
+      ]);
     expect(standardPredicateVocabularyJa.every((term) => (
       Boolean(term.label?.trim())
       && Boolean(term.description?.trim())
@@ -41,5 +45,23 @@ describe("standardPredicateVocabularyJa", () => {
       .toMatchObject({ label: "担当者・組織" });
     expect(standardPredicateVocabularyJa.find((term) => term.iri.endsWith("#actedOnBehalfOf")))
       .toMatchObject({ label: "代理元" });
+  });
+
+  it("通常の関係候補に使えるOWL関係を日本語metadata付きで提供しRestriction語彙は含めない", () => {
+    const owl = standardPredicateVocabularyJa.filter((term) => term.iri.startsWith("http://www.w3.org/2002/07/owl#"));
+    expect(owl.map((term) => term.iri)).toEqual(expect.arrayContaining([
+      "http://www.w3.org/2002/07/owl#sameAs",
+      "http://www.w3.org/2002/07/owl#differentFrom",
+      "http://www.w3.org/2002/07/owl#equivalentClass",
+      "http://www.w3.org/2002/07/owl#equivalentProperty",
+      "http://www.w3.org/2002/07/owl#inverseOf",
+    ]));
+    expect(owl.every((term) => term.label && term.description && term.category)).toBe(true);
+    expect(owl.some((term) => /Restriction|cardinality/u.test(term.iri))).toBe(false);
+    expect(owl.map((term) => term.iri)).not.toEqual(expect.arrayContaining([
+      "http://www.w3.org/2002/07/owl#complementOf",
+      "http://www.w3.org/2002/07/owl#disjointWith",
+      "http://www.w3.org/2002/07/owl#propertyDisjointWith",
+    ]));
   });
 });

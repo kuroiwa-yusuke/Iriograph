@@ -28,9 +28,9 @@ describe("RDF/RDFS standard projection", () => {
     const scene = projectSemanticView(documentFor(workflowSource), standardRdfRdfsCatalog);
 
     expect(scene.diagnostics).toEqual([]);
-    expect(scene.containers).toHaveLength(2);
+    expect(scene.containers).toHaveLength(5);
     expect(scene.nodes).toHaveLength(8);
-    expect(scene.edges).toHaveLength(9);
+    expect(scene.edges).toHaveLength(4);
     expect(scene.nodes.every((node) => node.geometry === undefined)).toBe(true);
     expect(scene.nodes.find((node) => node.semanticRef === "urn:test:workflow:decision")).toMatchObject({
       label: "判断",
@@ -53,7 +53,10 @@ describe("RDF/RDFS standard projection", () => {
         rule: { ruleId: "iri-object-fallback" },
       },
     });
-    expect(scene.edges.filter((edge) => edge.provenance.operator === "ordinal-sequence")).toHaveLength(5);
+    expect(scene.edges.filter((edge) => edge.provenance.operator === "ordinal-sequence")).toHaveLength(0);
+    expect(scene.containers.filter((container) => container.groupRole === "sequence")).toHaveLength(3);
+    expect(scene.memberships?.filter((membership) => membership.role === "sequence-member"))
+      .toHaveLength(8);
     expect(scene.edges.filter((edge) => edge.provenance.operator === "alternative")).toHaveLength(2);
   });
 
@@ -121,7 +124,7 @@ describe("RDF/RDFS standard projection", () => {
     const region = projectSemanticView(regionDocument, standardRdfRdfsCatalog);
     expect(region.containers).toEqual([]);
     expect(region.regions).toHaveLength(2);
-    expect(region.memberships?.every((membership) => (
+    expect(region.memberships?.filter((membership) => membership.role === "membership").every((membership) => (
       membership.regionElementId === membership.containerElementId
     ))).toBe(true);
     expect(region.diagnostics).toEqual([]);
@@ -190,10 +193,12 @@ describe("RDF/RDFS standard projection", () => {
     expect(edge.labelProvenance?.sourceStatementRefs).toHaveLength(2);
   });
 
-  it("derived edgeの表示labelがどの構造resource由来かを公開する", () => {
+  it("Altはderived edge、Seqはordinal membershipとして由来を公開する", () => {
     const scene = projectSemanticView(documentFor(workflowSource), standardRdfRdfsCatalog);
     const branch = scene.edges.find((edge) => edge.label === "承認")!;
-    const transition = scene.edges.find((edge) => edge.provenance.operator === "ordinal-sequence")!;
+    const firstMember = scene.memberships?.find((membership) => (
+      membership.role === "sequence-member" && membership.ordinal === 1
+    ))!;
 
     expect(branch.labelProvenance).toMatchObject({
       kind: "derived-structure",
@@ -201,11 +206,13 @@ describe("RDF/RDFS standard projection", () => {
       structureSemanticRef: "urn:test:workflow:decision",
       labelSemanticRef: "urn:test:workflow:approvedPath",
     });
-    expect(transition.labelProvenance).toMatchObject({
-      kind: "derived-structure",
-      role: "sequence-transition",
-      fromOrdinal: 1,
-      toOrdinal: 2,
+    expect(firstMember).toMatchObject({
+      role: "sequence-member",
+      ordinal: 1,
+      provenance: {
+        operator: "ordinal-sequence",
+        editCapability: { command: "set-sequence" },
+      },
     });
   });
 
@@ -233,21 +240,21 @@ describe("RDF/RDFS standard projection", () => {
     });
   });
 
-  it("ordinal-sequence ruleの任意edge templateをderived edgeへ適用する", () => {
-    const edgeTemplateRef = "urn:iriograph:template:edge:reference:1";
+  it("ordinal-sequence ruleのcontainer templateを順序付きgroupへ適用する", () => {
+    const templateRef = "urn:iriograph:template:container:region:1";
     const catalog: ProjectionCatalogV1 = {
       ...standardRdfRdfsCatalog,
       rules: standardRdfRdfsCatalog.rules.map((rule) => (
-        rule.ruleId === "rdf-seq" ? { ...rule, templateRef: edgeTemplateRef } : rule
+        rule.ruleId === "rdf-seq" ? { ...rule, templateRef } : rule
       )),
     };
 
     const scene = projectSemanticView(documentFor(workflowSource), catalog);
 
     expect(scene.diagnostics).toEqual([]);
-    expect(scene.edges
-      .filter((edge) => edge.provenance.operator === "ordinal-sequence")
-      .every((edge) => edge.templateRef === edgeTemplateRef)).toBe(true);
+    expect(scene.containers
+      .filter((container) => container.groupRole === "sequence")
+      .every((container) => container.templateRef === templateRef)).toBe(true);
   });
 
   it("標準predicateのedge線は共通にしterminal markerだけをcatalogで区別する", () => {
@@ -370,13 +377,13 @@ describe("RDF/RDFS standard projection", () => {
       "urn:test:profile:task",
     ]);
     expect(scene.containers.map((value) => value.semanticRef)).toEqual([
+      "urn:test:profile:flow",
       "urn:test:profile:team",
     ]);
-    expect(scene.edges).toHaveLength(2);
-    expect(scene.edges.map((value) => value.provenance.operator).sort()).toEqual([
-      "direct-edge",
-      "ordinal-sequence",
-    ]);
+    expect(scene.edges).toHaveLength(1);
+    expect(scene.edges.map((value) => value.provenance.operator)).toEqual(["direct-edge"]);
+    expect(scene.memberships?.filter((value) => value.role === "sequence-member"))
+      .toHaveLength(2);
     const taskElementId = scene.nodes.find((value) => value.semanticRef.endsWith(":task"))!.elementId;
     const aliceElementId = scene.nodes.find((value) => value.semanticRef.endsWith(":alice"))!.elementId;
     expect(scene.edges.find((value) => value.label === "担当者")).toMatchObject({
@@ -401,13 +408,16 @@ describe("RDF/RDFS standard projection", () => {
       "urn:test:profile:WorkItem",
       "urn:test:profile:team",
     ]);
-    expect(scene.memberships).toHaveLength(3);
+    expect(scene.memberships).toHaveLength(5);
+    expect(scene.containers.map((value) => value.semanticRef)).toEqual([
+      "urn:test:profile:flow",
+    ]);
     expect(scene.nodes.map((value) => value.semanticRef)).toEqual([
       "urn:test:profile:alice",
       "urn:test:profile:task",
     ]);
     expect(scene.nodes.some((value) => value.semanticRef.endsWith("assignedTo"))).toBe(false);
-    expect(scene.edges).toHaveLength(2);
+    expect(scene.edges).toHaveLength(1);
     expect(scene.edges.some((value) => (
       value.label === "subClassOf"
       || value.label === "subPropertyOf"

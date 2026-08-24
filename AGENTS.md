@@ -38,7 +38,10 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Rich editorのnode、edge、属性、包含作成はsemantic transactionとする。表示だけの仮nodeをdocumentへ保存せず、node作成時はnamed IRIと少なくとも1つのtripleを同時に確定する。
 - Edge作成はpredicateまたはprofile由来capabilityを必須にし、空欄を補うgeneric predicateを暗黙生成しない。Containerへのplain dragからmembership tripleを推測しない。
 - Human structured command、Turtle直接編集、LLM返却Turtleはcandidate graph以降のvalidation、全view projection、display reconciliationを共有する。
-- Rich editorのsemantic node、edge、属性、包含、削除は、Canvasのcontext menuや作成paletteから右Inspectorまたはdetails dialogへdraftを開き、生成予定triple/graph patchのpreview、validation、明示適用の順で確定する。Canvas gestureはdraftをseedするだけで、ghost node/edgeはephemeral UI stateとしdocumentへ保存しない。
+- Rich editorの通常の意味編集入口は、右Inspectorの「新しい要素を作る」「関係を作る」「要素を変更する」「関係を変更する」の4操作に限定する。初期状態ではいずれも開始せず、開始後はCanvasで対象を選択し、必要最小限の入力、生成予定triple/graph patchのpreview、validation、明示適用の順で確定する。新規要素はhost allocatorが発行するopaque IRIと名前を表す`rdfs:label`だけで作り、種類、説明、関係、所属、位置は後続操作へ分ける。Canvasの右クリックはビュー編集だけを開始し、意味編集を混在させない。Canvas gestureとghost node/edgeはdraftをseedするephemeral UI stateに留め、documentへ保存しない。
+- 通常の意味編集UIではIRI、`rdf:type`、`rdfs:label`、`rdfs:comment`という語を露出せず、それぞれ種類、名前、説明として扱う。関係候補はcatalog/profileを正本として日本語の`A（predicate）B`形式で表示し、識別IRIはAdvancedな参照情報に留める。
+- Direct edgeの意味上の始点・終点変更は「関係を変更する」中だけ許可し、Canvas上の端子を別nodeへdropしてdraftを作る。空白や領域へのdropでは元の接続を維持し、未接続状態をsemantic graphにもview overlayにも保存しない。ビューtabの同じ端子操作はnode周囲の接続位置だけを変更し、S/P/Oを変えない。
+- Predicate resource全体の説明と個別statementの説明を分ける。個別説明はexact S/P/OをRDF標準reificationで指し、その`rdfs:comment`としてTurtleへ保存する。View-only captionへ意味説明を代入しない。
 - Structured commandとLLM editの成功時は、同じdataset serializerでTurtleを決定的に再生成する。Turtle sourceの直接編集は適用された原文を保持するが、後の再serialize時にcomment、空白、triple記述順などの書式が保持されることを保証しない。
 - Resource削除は参照が残る場合に既定で拒否する。参照tripleのpreviewを伴う明示的cascadeだけを許可し、Seq/Altのordinal変更は一つのatomic patchで再採番する。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
@@ -46,6 +49,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - 通常の自動再配置は`placement: "generated"`の要素だけを対象とし、user配置をlayout更新で移動しない。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
 - 既定appearanceはcatalogを正本とし、利用者の色・透明度・線幅等の個別調整だけを安全なsparse overlayとして保持する。任意CSSは保存しない。
+- Canvasのgrid表示とsnap間隔はeditor sessionだけに保持し、Turtle、portable document、view overlay、history、dirty stateへ保存しない。GridはCanvas座標へ追従する非interactiveな背景layerとし、標準snap間隔と同じ既定8 unitを使う。
 - 保存schema変更にはversion方針とtestを伴わせる。
 
 ## 文書

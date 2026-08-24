@@ -50,6 +50,8 @@ Orthogonal routeはsource/target attachmentを必ず含み、parallel edgeとsel
 
 Portable overlayの経路modeは`auto`、`straight`、`orthogonal`、`curve`、`manual`を区別します。自動routerが障害物を避けるために作る内部屈曲点または曲線制御点はSceneのderived routeであり、manual waypointとして保存しません。`straight`だけは中間点を持たないことを契約とし、障害物回避より利用者の明示指定を優先して必要ならdiagnosticを返します。
 
+`curve`もportable waypointを持ちません。Endpoint、採用した障害物回避corridor、利用者が明示したsparseなcurvatureからrenderer用Bezier制御点を導出します。自動品質改善はderived routeのsegmentやcontrol pointを増やせますが、overlayのwaypoint数を増やしてはなりません。利用者が明示した`manual`だけがwaypointを所有します。
+
 User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutをpadding付き障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/comment交差、endpoint共有を除くedge交差数、edge重複長、距離、bend数の辞書順で比較します。Stable edge ID順と逆順を含む固定回数だけ、他の全routeを現在状態として混雑penalty付きrerouteを行います。各置換はgraph全体の辞書順品質を単調改善する場合だけ採用し、同一入力の決定性と計算上限を保ちます。
 
 Auto routeは実shape境界でclipし、境界から外向きのderived stubを経て障害物探索へ接続します。これによりsource/target nodeを中心点から出る偽の障害物として扱わず、最初と最後のsegmentがnode内部を通ることも防ぎます。Manual/user routeは表示polyline全体がhard constraintであり、node/commentや他edgeと衝突しても変更せずdiagnosticだけを返します。`straight`は古いmanual waypointが残っていても常にendpoint二点を優先します。
@@ -86,11 +88,17 @@ LODは意味graphを削除しません。Session-onlyの可視集合とderived a
 
 標準adapterは高コストな交差最小化や最適packingを無制限に行いません。P1-08の固定budgetを守り、品質改善は固定iterationと規模別cutoffの範囲に限定します。
 
+自動display補完はengine名にかかわらず、template/iconを含む実size、region labelの外周box、comment予約box、terminal stub、membership intersectionを同じrequestへ正規化してから実行します。結果はIriograph共通のcompletionと品質検査を通し、全element geometry、全edge route、hard containment、pin保持を満たした場合だけ採用します。Engineが返した座標を無検査でoverlayへ確定しません。
+
 ### 3.2 Optional ELK adapter
 
 複合graph、階層node、port、layered配置、orthogonal routingを重視するhostは`@iriograph/layout-elk`を明示的に導入できます。[ELK](https://eclipse.dev/elk/)は階層nodeとportを扱い、Layered algorithmはroutingを段階として構成できます。Bundle sizeと計算負荷をcoreへ持ち込まないためoptional packageとし、大規模実行はhost-managed Workerを推奨します。
 
-Worker requestにはrequest IDとrevision fingerprintを付け、abortまたは新revision到着後のresultを破棄します。ELKがhard pinを保証できない入力は、pinを動かして見かけ上成功させず標準adapterへfallbackします。
+Worker requestにはrequest IDとrevision fingerprintを付け、abortまたは新revision到着後のresultを破棄します。ELKがhard pinを保証できない入力は、pinを動かして見かけ上成功させず、versioned adapter policyに標準adapter fallbackが宣言されている場合だけfallbackします。
+
+ELKは候補geometryとrouteを生成する既存engineとして利用し、その前後にIriograph固有のregion completion、実shape境界clip、comment obstacle、route refinement、品質検査を置きます。これらをELK optionやdomain predicate分岐として埋め込みません。ELKが多対多region intersectionを直接解けない場合も、membershipを単一parentへ縮約せずCore completionで補完します。
+
+Fallbackはadapter policyにversion付きで宣言された場合だけ実行し、同じrequest内でdiagnosticへ採用engineと理由を残します。`ElkLayeredLayoutAdapter`の互換既定は`fallbackPolicy: "standard"`であり、fallback時に`elk-standard-fallback-selected`を返します。Hostが`fallbackPolicy: "none"`でELKのみを指定した場合は`elk-fallback-disabled`を返し、標準adapterへ黙って切り替えません。Hard pin、全bounds containment、route欠落等のhard constraint違反は、別engineの見かけ上の成功よりerrorを優先します。
 
 ### 3.3 他engineの位置付け
 
@@ -99,6 +107,8 @@ Worker requestにはrequest IDとrevision fingerprintを付け、abortまたは�
 - [Graphviz](https://graphviz.org/docs/layouts/)は複数の成熟したlayout engineと高品質な静的出力を持ちます。BrowserでのWASM/Worker配布、font差、engine attribute、incremental editingとの境界が大きいため、server/exportまたはhost固有adapterに適します。Graphviz attributeをportable documentへコピーしません。
 
 Engine名ではなくview要求でadapterを選びます。単純flowとfallbackは標準、hierarchical business diagramの高品質自動整列はELK、自由な関係探索はforce-directed系、静的出版物はGraphviz系という役割分担です。
+
+最初の実用UIでは標準adapterを常時利用可能なbaselineとし、hostが`@iriograph/layout-elk`を導入した場合は階層flowと直交routeの高品質actionで明示選択します。Engine選択をportable document内の細かなoptionへ展開せず、stableな`layoutRef`からversioned adapter policyを解決します。自動配置のUIは採用engine名より、移動対象、pin保持、交差・重なりの改善見込み、失敗時のdiagnosticを利用者へ説明します。
 
 ## 4. 品質指標
 

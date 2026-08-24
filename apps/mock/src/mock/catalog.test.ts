@@ -59,13 +59,16 @@ describe("normalized RDF/RDFS mock", () => {
     );
 
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    expect(projected.containers).toHaveLength(3);
+    expect(projected.containers).toHaveLength(6);
     expect(projected.nodes).toHaveLength(8);
-    expect(projected.edges).toHaveLength(10);
+    expect(projected.edges).toHaveLength(5);
     expect(projected.containers.map((item) => item.semanticRef).sort(compareText)).toEqual([
       "urn:iriograph:demo:g-01",
       "urn:iriograph:demo:g-02",
       "urn:iriograph:demo:g-03",
+      "urn:iriograph:demo:s-01",
+      "urn:iriograph:demo:s-02",
+      "urn:iriograph:demo:s-03",
     ]);
     expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-04"))
       .toMatchObject({
@@ -77,7 +80,9 @@ describe("normalized RDF/RDFS mock", () => {
     expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:c-01"))
       .toMatchObject({ templateRef: "urn:iriograph:template:gateway:1" });
     expect(projected.edges.some((edge) => edge.provenance.operator === "alternative")).toBe(true);
-    expect(projected.edges.some((edge) => edge.provenance.operator === "ordinal-sequence")).toBe(true);
+    expect(projected.edges.some((edge) => edge.provenance.operator === "ordinal-sequence")).toBe(false);
+    expect(projected.containers.filter((container) => container.groupRole === "sequence"))
+      .toHaveLength(3);
     expect(projected.edges.some((edge) => edge.provenance.operator === "direct-edge")).toBe(true);
     const review = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-03")!;
     const policy = projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-04")!;
@@ -95,7 +100,8 @@ describe("normalized RDF/RDFS mock", () => {
     const reviewMemberships = (projected.memberships ?? []).filter((membership) => (
       membership.memberElementId === review.elementId
     ));
-    expect(reviewMemberships).toHaveLength(2);
+    expect(reviewMemberships.filter((membership) => membership.role === "membership")).toHaveLength(2);
+    expect(reviewMemberships.filter((membership) => membership.role === "sequence-member")).toHaveLength(2);
     expect(review.parentElementId).toBeUndefined();
     expect(reviewMemberships.map((membership) => membership.provenance.editCapability))
       .toEqual(expect.arrayContaining([
@@ -109,13 +115,14 @@ describe("normalized RDF/RDFS mock", () => {
       regionView.viewId,
     );
     expect(regions.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    expect(regions.containers).toEqual([]);
+    expect(regions.containers.filter((container) => container.groupRole === "sequence"))
+      .toHaveLength(3);
     expect(regions.regions ?? []).toHaveLength(5);
     const regionReview = regions.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-03");
     const regionReviewMemberships = (regions.memberships ?? []).filter((membership) => (
       membership.memberElementId === regionReview?.elementId
     ));
-    expect(regionReviewMemberships).toHaveLength(4);
+    expect(regionReviewMemberships).toHaveLength(6);
     expect(regionReviewMemberships.filter((membership) => (
       membership.provenance.operator === "membership-region"
       && membership.provenance.editCapability?.command === "set-membership"

@@ -130,19 +130,13 @@ describe("display reconciliation", () => {
     });
   });
 
-  it("derived edgeのendpoint変更時はrouting全体を捨てappearanceを保持する", async () => {
+  it("Seq member変更時はgroup identityとappearanceを保持する", async () => {
     const previous = documentFor(sequenceEndpointOldSource);
     for (const view of previous.views) {
       view.overlay = {
         sequence: {
-          semanticRef: oldSequenceRef,
-          appearance: { templateRef: "urn:iriograph:template:edge:generic:1" },
-          routing: {
-            waypoints: [{ x: 250, y: 70 }],
-            labelOffset: { x: 4, y: -6 },
-            sourceAnchor: { position: .25 },
-            targetAnchor: { position: .75 },
-          },
+          semanticRef: `${NS}flow`,
+          appearance: { templateRef: "urn:iriograph:template:container:sequence:1" },
         },
       };
     }
@@ -154,15 +148,13 @@ describe("display reconciliation", () => {
     );
 
     expect(result.accepted).toBe(true);
-    const reconciled = overlayFor(result.document.views[0]!.overlay, oldSequenceRef);
-    expect(reconciled?.routing).toBeUndefined();
+    const reconciled = overlayFor(result.document.views[0]!.overlay, `${NS}flow`);
     expect(reconciled?.appearance).toEqual({
-      templateRef: "urn:iriograph:template:edge:generic:1",
+      templateRef: "urn:iriograph:template:container:sequence:1",
     });
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({
-      code: "reconcile-edge-endpoints-changed",
-      semanticRef: oldSequenceRef,
-    }));
+    expect(result.diagnostics.some((diagnostic) => (
+      diagnostic.code === "reconcile-edge-endpoints-changed"
+    ))).toBe(false);
   });
 
   it("legacy styleTokenをcatalog styleRefへ移行しsparse overrideを維持する", async () => {

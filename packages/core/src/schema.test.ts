@@ -38,18 +38,47 @@ describe("Iriograph document v1 schema", () => {
     source.views[0]!.overlay.edge = {
       semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
       routing: {
-        routeMode: "curve",
+        routeMode: "manual",
         waypoints: [],
         labelOffset: { x: 6, y: -4 },
         sourceAnchor: { position: 0 },
         targetAnchor: { position: .75 },
+        sourceMarker: "diamond",
+        targetMarker: "open-arrow",
       },
-      appearance: { labelPlacement: "bottom" },
+      appearance: { labelPlacement: "bottom", edgeCaption: "図だけの注記" },
     };
 
     expect(source.schemaVersion).toBe("1");
     expect(validateIriographDocumentV1(source)).toMatchObject({ valid: true, value: source });
+    ((source.views[0]!.overlay.edge as { routing: { targetMarker: string } }).routing).targetMarker = "url(javascript:alert(1))";
+    expect(validateIriographDocumentV1(source).valid).toBe(false);
   });
+
+  it.each(["straight", "curve"])(
+    "%s routingではportable waypoints propertyを拒否する",
+    (routeMode) => {
+      const source = structuredClone(fixture("document.valid.json")) as {
+        views: Array<{ overlay: Record<string, unknown> }>;
+      };
+      source.views[0]!.overlay.edge = {
+        semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
+        routing: { routeMode, waypoints: [{ x: 100, y: 80 }] },
+      };
+
+      const invalid = validateIriographDocumentV1(source);
+      expect(invalid.valid).toBe(false);
+
+      (source.views[0]!.overlay.edge as { routing: { waypoints: unknown[] } }).routing.waypoints = [];
+      expect(validateIriographDocumentV1(source).valid).toBe(false);
+
+      source.views[0]!.overlay.edge = {
+        semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
+        routing: { routeMode, labelOffset: { x: 2, y: -3 } },
+      };
+      expect(validateIriographDocumentV1(source).valid).toBe(true);
+    },
+  );
 
   it("accepts region views and safe sparse style overrides while rejecting CSS injection", () => {
     const source = structuredClone(fixture("document.valid.json")) as {
@@ -61,6 +90,9 @@ describe("Iriograph document v1 schema", () => {
       appearance: {
         styleRef: "urn:test:style:calm",
         style: { fill: "#abcdef80", fillOpacity: 0.25, strokeWidth: 3, dash: "6 4" },
+        regionLabelAnchor: .375,
+        regionLabelWritingDirection: "vertical-down",
+        regionZOrder: 4,
       },
     };
     expect(validateIriographDocumentV1(source).valid).toBe(true);
@@ -73,6 +105,22 @@ describe("Iriograph document v1 schema", () => {
       instancePath: "/views/0/overlay/region/appearance/style/fill",
       keyword: "pattern",
     }));
+  });
+
+  it.each([
+    ["regionLabelAnchor", 1],
+    ["regionLabelWritingDirection", "vertical-up"],
+    ["regionZOrder", 1.5],
+  ])("rejects invalid portable region appearance %s", (property, value) => {
+    const source = structuredClone(fixture("document.valid.json")) as {
+      views: Array<{ overlay: Record<string, unknown> }>;
+    };
+    source.views[0]!.overlay.region = {
+      semanticRef: "urn:test:region",
+      appearance: { [property]: value },
+    };
+
+    expect(validateIriographDocumentV1(source).valid).toBe(false);
   });
 
   it.each([-0.01, 1, Number.POSITIVE_INFINITY])(
@@ -187,12 +235,12 @@ describe("normalized projection catalog v1 schema", () => {
     expect(validateProjectionCatalogV1(source)).toMatchObject({ valid: true });
   });
 
-  it("accepts the standard RDF/RDFS catalog with the default edge template for ordinal sequences", () => {
+  it("accepts the standard RDF/RDFS catalog with a container template for ordinal sequences", () => {
     const sequenceRule = standardRdfRdfsCatalog.rules.find(
       (rule) => rule.project.operator === "ordinal-sequence",
     );
 
-    expect(sequenceRule?.templateRef).toBeUndefined();
+    expect(sequenceRule?.templateRef).toBe("urn:iriograph:template:container:sequence:1");
     expect(validateProjectionCatalogV1(standardRdfRdfsCatalog)).toMatchObject({
       valid: true,
       value: standardRdfRdfsCatalog,

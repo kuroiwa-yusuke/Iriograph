@@ -25,21 +25,21 @@
           "geometry": { "x": 48, "y": 54, "width": 520, "height": 242 },
           "pinned": true,
           "placement": "user",
-          "appearance": { "style": { "fill": "#dbeafe", "stroke": "#2563eb", "text": "#1e3a8a", "fillOpacity": 0.18 } }
+          "appearance": { "labelPlacement": "bottom", "regionLabelAnchor": 0.671, "style": { "fill": "#dbeafe", "stroke": "#2563eb", "text": "#1e3a8a", "fillOpacity": 0.18 } }
         },
         "region:operations": {
           "semanticRef": "urn:iriograph:demo:g-02",
           "geometry": { "x": 338, "y": 178, "width": 742, "height": 426 },
           "pinned": true,
           "placement": "user",
-          "appearance": { "style": { "fill": "#dcfce7", "stroke": "#15803d", "text": "#14532d", "fillOpacity": 0.18 } }
+          "appearance": { "labelPlacement": "bottom", "regionLabelAnchor": 0.659, "style": { "fill": "#dcfce7", "stroke": "#15803d", "text": "#14532d", "fillOpacity": 0.18 } }
         },
         "region:audit": {
           "semanticRef": "urn:iriograph:demo:g-03",
           "geometry": { "x": 278, "y": 238, "width": 444, "height": 252 },
           "pinned": true,
           "placement": "user",
-          "appearance": { "styleRef": "urn:iriograph:style:region:overlap:1" }
+          "appearance": { "labelPlacement": "top", "regionLabelAnchor": 0.22, "styleRef": "urn:iriograph:style:region:overlap:1" }
         },
         "region:human-step": {
           "semanticRef": "urn:iriograph:demo:HumanStep",

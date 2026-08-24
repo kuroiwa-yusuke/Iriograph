@@ -10,7 +10,7 @@ Iriographの目的は、tripleを単にnode-link図へ変換することでは�
 - [semantic-notation.md](./semantic-notation.md): 意味Turtleと表示notationの分離、serializer表記規則
 - [semantic-access.md](./semantic-access.md): label-first索引、revision alias、LLM向けread/write wrapper
 - [spatial-membership.md](./spatial-membership.md): 階層containerと多対多regionの空間文法
-- [editor-interactions.md](./editor-interactions.md): context menu、details、appearanceと意味操作のinteraction規則
+- [editor-interactions.md](./editor-interactions.md): 右Inspectorの4 action、details、appearanceと意味操作のinteraction規則
 - [layout-optimization.md](./layout-optimization.md): 混雑最適化pipeline、layout adapter選択、性能・品質指標
 - [accessibility.md](./accessibility.md): Canvas keyboard、focus、ARIAの規範契約
 - [distribution.md](./distribution.md): package配布contractとSemVer方針

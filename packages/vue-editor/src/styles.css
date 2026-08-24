@@ -190,6 +190,230 @@
   border-left: 1px solid var(--iriograph-line);
 }
 
+.iriograph-inspector-mode-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: -16px -16px 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #cad7d3;
+  background: #eef3f1;
+}
+
+.iriograph-inspector-mode-tabs button {
+  min-height: 34px;
+  border: 1px solid #afc2bc;
+  border-radius: 6px;
+  color: #315957;
+  background: #fff;
+  font-weight: 750;
+}
+
+.iriograph-inspector-mode-tabs button.selected {
+  color: #fff;
+  border-color: #28666a;
+  background: #28666a;
+}
+
+.iriograph-display-inspector {
+  display: contents;
+}
+
+.iriograph-intent-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.iriograph-intent-panel > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iriograph-intent-panel > header small,
+.iriograph-intent-panel > header strong {
+  display: block;
+}
+
+.iriograph-intent-panel > header small {
+  color: #738784;
+  font-size: 8px;
+  letter-spacing: .12em;
+}
+
+.iriograph-intent-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.iriograph-intent-grid button {
+  min-height: 84px;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border: 1px solid #adc2bc;
+  border-radius: 8px;
+  color: #294f4d;
+  background: #fff;
+  font-size: 10px;
+}
+
+.iriograph-intent-grid button b {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.iriograph-intent-fields {
+  display: grid;
+  gap: 10px;
+}
+
+.iriograph-intent-fields > label,
+.iriograph-intent-fields fieldset {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.iriograph-intent-fields input:not([type="checkbox"]):not([type="radio"]),
+.iriograph-intent-fields textarea,
+.iriograph-intent-fields select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 1px solid #bdcbc7;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-intent-fields textarea {
+  resize: vertical;
+}
+
+.iriograph-intent-fields button,
+.iriograph-authoring-preview button,
+.iriograph-region-layer-actions button {
+  min-height: 32px;
+  border: 1px solid #9db3ac;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-intent-fields button.primary,
+.iriograph-authoring-preview button.primary {
+  color: #fff;
+  border-color: #28666a;
+  background: #28666a;
+}
+
+.iriograph-intent-selection {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #edf3f0;
+  font-size: 9px;
+}
+
+.iriograph-predicate-cards {
+  max-height: 280px;
+  overflow: auto;
+  padding: 7px;
+  border: 1px solid #c8d5d1;
+  border-radius: 6px;
+}
+
+.iriograph-predicate-cards > label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 6px;
+  margin: 3px 0;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-predicate-cards > label.selected {
+  border-color: #4b8582;
+  background: #eef8f5;
+}
+
+.iriograph-predicate-cards > label span,
+.iriograph-predicate-cards > label small {
+  grid-column: 2;
+  color: #667a77;
+  font-size: 8px;
+}
+
+.iriograph-sequence-editor,
+.iriograph-membership-editor {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #c8d5d1;
+  border-radius: 7px;
+  background: #f8fbfa;
+}
+
+.iriograph-sequence-editor ol {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-sequence-editor li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 30px 30px 42px;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid #d6e0dd;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-sequence-editor li > b {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: #475569;
+  font-size: 9px;
+}
+
+.iriograph-sequence-editor li > button {
+  min-height: 26px;
+  padding: 2px;
+  font-size: 8px;
+}
+
+.iriograph-authoring-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.iriograph-authoring-preview footer,
+.iriograph-region-layer-actions,
+.iriograph-endpoint-marker-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.iriograph-authoring-preview pre {
+  overflow: auto;
+  max-height: 130px;
+  font-size: 8px;
+}
+
 .iriograph-view-summary {
   padding: 17px;
   border-bottom: 1px solid #dbe2df;
@@ -737,6 +961,36 @@
   background: #fff2f1;
 }
 
+.iriograph-preview-relations {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-preview-relations li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #bfd2cc;
+  border-radius: 6px;
+  background: #f4faf8;
+}
+
+.iriograph-preview-relations li.remove {
+  border-color: #e2b7b7;
+  background: #fff5f5;
+}
+
+.iriograph-preview-relations li > span {
+  color: #526763;
+  font-size: 10px;
+  font-weight: 800;
+}
+
 .iriograph-preview-relation.membership {
   color: #744f16;
   border-color: #dec993;
@@ -1156,9 +1410,18 @@
 .iriograph-canvas-grid {
   position: absolute;
   inset: 0;
-  opacity: .35;
-  background-image: radial-gradient(#aebfba .6px, transparent .7px);
-  background-size: 18px 18px;
+  opacity: .28;
+  background-image:
+    linear-gradient(to right, #9fb3ad 1px, transparent 1px),
+    linear-gradient(to bottom, #9fb3ad 1px, transparent 1px);
+  background-size: var(--iriograph-grid-size, 8px) var(--iriograph-grid-size, 8px);
+  pointer-events: none;
+}
+
+.iriograph-edge-caption {
+  font-size: 8px;
+  font-weight: 500;
+  opacity: .82;
 }
 
 .iriograph-semantic-position-marker {
@@ -1277,6 +1540,46 @@
   touch-action: none;
 }
 
+.iriograph-scene-container.sequence-group {
+  border-radius: 10px;
+  background: rgb(255 255 255 / 44%) !important;
+  box-shadow: inset 0 0 0 1px rgb(100 116 139 / 8%);
+}
+
+.iriograph-scene-container.sequence-group > .iriograph-container-header {
+  justify-content: flex-start;
+  padding-inline: 12px;
+  color: #475569;
+  background: transparent !important;
+  font-family: Inter, "Yu Gothic", sans-serif;
+  font-size: 10px;
+}
+
+.iriograph-sequence-badges {
+  position: absolute;
+  z-index: 8;
+  left: -9px;
+  top: -9px;
+  display: flex;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.iriograph-sequence-badges > span {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  color: #fff;
+  background: #475569;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 28%);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .iriograph-scene-region {
   position: absolute;
   z-index: 0;
@@ -1289,6 +1592,15 @@
 
 .iriograph-scene-region:active {
   cursor: grabbing;
+}
+
+/*
+ * Selection is an ephemeral interaction layer. It must make an overlapped
+ * region and its eight handles reachable without rewriting regionZOrder in
+ * the portable appearance overlay.
+ */
+.iriograph-scene-region.interaction-front {
+  z-index: 7;
 }
 
 .iriograph-region-fill {
@@ -1308,9 +1620,15 @@
   font-family: Georgia, "Yu Mincho", serif;
   font-size: 11px;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  pointer-events: none;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.iriograph-region-label:active {
+  cursor: grabbing;
 }
 
 .iriograph-region-label.label-right {
@@ -1377,6 +1695,15 @@
   box-shadow: 0 0 0 3px #d98025, 0 0 0 7px rgb(217 128 37 / 18%);
 }
 
+.iriograph-scene-container.deletion-preview,
+.iriograph-scene-region.deletion-preview,
+.iriograph-scene-node.deletion-preview {
+  border-color: #c73535 !important;
+  outline: 3px solid #c73535;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 7px rgb(199 53 53 / 16%);
+}
+
 .iriograph-edge-group.diagnostic-error .iriograph-edge-path {
   stroke: #c34b45;
   stroke-width: 3;
@@ -1396,6 +1723,8 @@
   font-family: Georgia, "Yu Mincho", serif;
   font-size: 11px;
   font-weight: 600;
+  text-align: center;
+  white-space: pre-line;
 }
 
 .iriograph-container-header.header-left {
@@ -1463,6 +1792,25 @@
   filter: drop-shadow(0 0 3px rgb(11 92 171 / 85%));
 }
 
+.iriograph-edge-group.deletion-preview .iriograph-edge-path {
+  stroke: #c73535 !important;
+  stroke-dasharray: 8 5 !important;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 2px rgb(199 53 53 / 35%));
+}
+
+.iriograph-edge-group.deletion-preview .iriograph-edge-label {
+  fill: #a82424 !important;
+}
+
+.iriograph-deletion-preview-membership {
+  fill: none;
+  stroke: #c73535;
+  stroke-dasharray: 8 5;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
 .iriograph-edge-label {
   font-size: 10px;
   font-weight: 600;
@@ -1522,6 +1870,24 @@
   stroke: #c18d23;
 }
 
+.iriograph-endpoint-anchors.semantic circle {
+  fill: #e8f7ef;
+  stroke: #18794e;
+  stroke-dasharray: 3 2;
+}
+
+.iriograph-semantic-reconnect-preview {
+  fill: none;
+  stroke: #18794e;
+  stroke-dasharray: 7 5;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+
+.iriograph-scene-node.semantic-reconnect-target {
+  box-shadow: 0 0 0 4px rgb(24 121 78 / 28%);
+}
+
 .iriograph-edge-interaction-layer {
   position: absolute;
   z-index: 6;
@@ -1534,6 +1900,10 @@
   fill: none;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
+}
+
+.iriograph-edge-arrow-overlay.deletion-preview {
+  stroke: #c73535 !important;
 }
 
 .iriograph-edge-interaction-layer .iriograph-endpoint-anchors {
@@ -1696,10 +2066,12 @@
 
 .iriograph-node-label {
   overflow: hidden;
+  max-height: 100%;
+  overflow-wrap: anywhere;
   font-size: 10px;
   font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: center;
+  white-space: pre-line;
 }
 
 .iriograph-gateway-mark {
@@ -1725,19 +2097,25 @@
 }
 
 .iriograph-resize-handle {
-  width: 20px;
-  height: 20px;
+  width: 13px;
+  height: 13px;
   position: absolute;
-  right: -11px;
-  bottom: -11px;
   z-index: 5;
   border: 2px solid #fff;
   border-radius: 2px;
   background: #c18d23;
   box-shadow: 0 0 0 1px #8c681f;
-  cursor: nwse-resize;
   transform: none !important;
 }
+
+.iriograph-resize-handle[data-handle="nw"] { left: -8px; top: -8px; cursor: nwse-resize; }
+.iriograph-resize-handle[data-handle="n"] { left: 50%; top: -8px; cursor: ns-resize; transform: translateX(-50%) !important; }
+.iriograph-resize-handle[data-handle="ne"] { right: -8px; top: -8px; cursor: nesw-resize; }
+.iriograph-resize-handle[data-handle="e"] { right: -8px; top: 50%; cursor: ew-resize; transform: translateY(-50%) !important; }
+.iriograph-resize-handle[data-handle="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
+.iriograph-resize-handle[data-handle="s"] { left: 50%; bottom: -8px; cursor: ns-resize; transform: translateX(-50%) !important; }
+.iriograph-resize-handle[data-handle="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
+.iriograph-resize-handle[data-handle="w"] { left: -8px; top: 50%; cursor: ew-resize; transform: translateY(-50%) !important; }
 
 .iriograph-source-panel {
   padding: 16px;
@@ -1977,33 +2355,6 @@
   border-bottom: 1px solid #e0e6e3;
 }
 
-.iriograph-inspector > .iriograph-edge-routing-quick {
-  display: grid;
-  gap: 8px;
-  margin: -16px -16px 0;
-  padding: 13px 16px;
-  border-bottom: 2px solid #cab371;
-  background: #fff9e9;
-}
-
-.iriograph-edge-routing-quick > header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.iriograph-edge-routing-quick > header div {
-  min-width: 0;
-  display: grid;
-}
-
-.iriograph-edge-routing-quick > header strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .iriograph-inspector section > label,
 .iriograph-section-heading > label {
   display: block;
@@ -2023,14 +2374,27 @@
 }
 
 .iriograph-inspector select,
-.iriograph-inspector section > input {
+.iriograph-inspector section > input,
+.iriograph-inspector section > textarea {
   width: 100%;
-  height: 29px;
+  min-height: 29px;
+  box-sizing: border-box;
   padding: 4px 7px;
   border: 1px solid #c7d2ce;
   border-radius: 4px;
   background: #fff;
   font-size: 9px;
+}
+
+.iriograph-inspector section > textarea {
+  resize: vertical;
+}
+
+.iriograph-grid-visibility label {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .iriograph-section-heading {
@@ -2107,45 +2471,46 @@
   gap: 8px;
 }
 
+.iriograph-edge-view-summary {
+  display: grid;
+  gap: 6px;
+}
+
+.iriograph-edge-view-summary > strong {
+  overflow: hidden;
+  color: #253f40;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-view-disclosure {
+  padding: 7px 8px;
+  border: 1px solid #d5dfdc;
+  border-radius: 5px;
+  background: #fafcfb;
+}
+
+.iriograph-view-disclosure > summary {
+  cursor: pointer;
+  color: #315957;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.iriograph-view-disclosure[open] {
+  display: grid;
+  gap: 7px;
+}
+
+.iriograph-view-disclosure textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
 .iriograph-routing-inspector > label {
   margin: 3px 0 0;
-}
-
-.iriograph-waypoint-row {
-  display: grid;
-  grid-template-columns: 16px 1fr 1fr 24px;
-  align-items: center;
-  gap: 4px;
-}
-
-.iriograph-waypoint-row > span {
-  color: #627575;
-  font-size: 8px;
-  text-align: center;
-}
-
-.iriograph-waypoint-row label {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  color: #788887;
-  font-size: 8px;
-}
-
-.iriograph-waypoint-row input {
-  min-width: 0;
-  width: 100%;
-  height: 25px;
-  padding: 2px 4px;
-  border: 1px solid #cbd5d2;
-  border-radius: 4px;
-}
-
-.iriograph-waypoint-row button {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
-  padding: 0;
 }
 
 .iriograph-overlay-preview pre {
@@ -2417,14 +2782,6 @@
   border: 1px solid #dde4e1;
 }
 
-.iriograph-appearance-popover {
-  width: 330px;
-  position: absolute;
-  z-index: 105;
-  right: 385px;
-  top: 92px;
-}
-
 .iriograph-appearance-editor {
   display: grid;
   gap: 10px;
@@ -2433,6 +2790,13 @@
   border-radius: 8px;
   background: #fffefb;
   box-shadow: 0 14px 40px rgb(20 43 42 / 24%);
+}
+
+.iriograph-appearance-editor.inline {
+  padding: 10px;
+  border-color: #c7d4d0;
+  border-radius: 5px;
+  box-shadow: none;
 }
 
 .iriograph-style-presets {

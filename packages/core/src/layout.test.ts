@@ -4,6 +4,7 @@ import {
   LayoutAdapterRegistry,
   STANDARD_LAYOUT_REFS,
   StandardLightweightLayoutAdapter,
+  completeRegionLayout,
   createStandardLayoutRegistry,
   layoutProjectedScene,
   type LayoutAdapter,
@@ -56,6 +57,55 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(result.geometries["step-a"]!.y).toBeLessThan(result.geometries["step-b"]!.y);
     expect(result.geometries.bag!.y).toBeLessThan(result.geometries.outside!.y);
     expect(isInside(result.geometries["step-a"]!, result.geometries.bag!)).toBe(true);
+  });
+
+  it("orders Seq group members by ordinal membership without visible edges", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "sequence", structuralKind: "container" },
+        { elementId: "third", structuralKind: "node", parentElementId: "sequence" },
+        { elementId: "first", structuralKind: "node", parentElementId: "sequence" },
+        { elementId: "second", structuralKind: "node", parentElementId: "sequence" },
+      ],
+      edges: [],
+      memberships: [
+        { semanticRef: "m3", containerElementId: "sequence", memberElementId: "third", role: "sequence-member", ordinal: 3 },
+        { semanticRef: "m1", containerElementId: "sequence", memberElementId: "first", role: "sequence-member", ordinal: 1 },
+        { semanticRef: "m2", containerElementId: "sequence", memberElementId: "second", role: "sequence-member", ordinal: 2 },
+      ],
+    };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene,
+    }, createStandardLayoutRegistry());
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.geometries.first!.x).toBeLessThan(result.geometries.second!.x);
+    expect(result.geometries.second!.x).toBeLessThan(result.geometries.third!.x);
+    expect(Object.keys(result.routes)).toEqual([]);
+  });
+
+  it("encloses a member shared by multiple Seq groups without inventing a parent", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "sequence-a", structuralKind: "container", groupRole: "sequence" },
+        { elementId: "sequence-b", structuralKind: "container", groupRole: "sequence" },
+        { elementId: "shared", structuralKind: "node" },
+      ],
+      edges: [],
+      memberships: [
+        { semanticRef: "a1", containerElementId: "sequence-a", memberElementId: "shared", role: "sequence-member", ordinal: 1 },
+        { semanticRef: "b1", containerElementId: "sequence-b", memberElementId: "shared", role: "sequence-member", ordinal: 1 },
+      ],
+    };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene,
+    }, createStandardLayoutRegistry());
+
+    expect(result.diagnostics).toEqual([]);
+    expect(isInside(result.geometries.shared!, result.geometries["sequence-a"]!)).toBe(true);
+    expect(isInside(result.geometries.shared!, result.geometries["sequence-b"]!)).toBe(true);
   });
 
   it("places generated children inside the visual content area of a left-header container", async () => {
@@ -840,6 +890,83 @@ describe("LayoutAdapterRegistry", () => {
     expect(result.diagnostics.some((item) => item.code.includes("region-member"))).toBe(false);
   });
 
+  it("uses membership-only ordering to form a compact deterministic region matrix", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "region-left", structuralKind: "region", size: { width: 220, height: 160 } },
+        { elementId: "region-right", structuralKind: "region", size: { width: 220, height: 160 } },
+        { elementId: "a", structuralKind: "node" },
+        { elementId: "b", structuralKind: "node" },
+        { elementId: "shared", structuralKind: "node" },
+      ],
+      memberships: [
+        { semanticRef: "left-a", containerElementId: "region-left", regionElementId: "region-left", memberElementId: "a" },
+        { semanticRef: "left-shared", containerElementId: "region-left", regionElementId: "region-left", memberElementId: "shared" },
+        { semanticRef: "right-b", containerElementId: "region-right", regionElementId: "region-right", memberElementId: "b" },
+        { semanticRef: "right-shared", containerElementId: "region-right", regionElementId: "region-right", memberElementId: "shared" },
+      ],
+      edges: [],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:region-matrix", "LR");
+
+    const first = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const second = await adapter.layout({
+      layoutRef: adapter.layoutRef,
+      scene: {
+        elements: [...scene.elements].reverse(),
+        memberships: [...scene.memberships!].reverse(),
+        edges: [],
+      },
+    });
+    const aspect = Math.max(first.width / first.height, first.height / first.width);
+
+    expect(first.geometries).toEqual(second.geometries);
+    expect(first.geometries.a!.x).toBe(first.geometries.b!.x);
+    expect(first.geometries.shared!.x).toBeGreaterThan(first.geometries.a!.x);
+    expect(isInside(first.geometries.shared!, first.geometries["region-left"]!)).toBe(true);
+    expect(isInside(first.geometries.shared!, first.geometries["region-right"]!)).toBe(true);
+    expect(aspect).toBeLessThan(4);
+  });
+
+  it("packs empty generated regions by aspect instead of preserving remote placeholder geometry", () => {
+    const request: LayoutRequest = {
+      layoutRef: "urn:test:empty-region-pack",
+      scene: {
+        elements: [
+          { elementId: "node", structuralKind: "node" },
+          { elementId: "region-a", structuralKind: "region", size: { width: 220, height: 150 } },
+          { elementId: "region-b", structuralKind: "region", size: { width: 220, height: 150 } },
+          { elementId: "region-c", structuralKind: "region", size: { width: 220, height: 150 } },
+        ],
+        edges: [],
+      },
+    };
+    const candidate = {
+      layoutRef: request.layoutRef,
+      geometries: {
+        node: { x: 48, y: 48, width: 160, height: 72 },
+        "region-a": { x: 4_000, y: 48, width: 220, height: 150 },
+        "region-b": { x: 8_000, y: 48, width: 220, height: 150 },
+        "region-c": { x: 12_000, y: 48, width: 220, height: 150 },
+      },
+      routes: {},
+      width: 12_268,
+      height: 246,
+      diagnostics: [],
+    };
+
+    const first = completeRegionLayout(request, candidate);
+    const second = completeRegionLayout({
+      ...request,
+      scene: { ...request.scene, elements: [...request.scene.elements].reverse() },
+    }, candidate);
+    const aspect = Math.max(first.width / first.height, first.height / first.width);
+
+    expect(first.geometries).toEqual(second.geometries);
+    expect(aspect).toBeLessThan(3);
+    expect(first.width).toBeLessThan(candidate.width / 5);
+  });
+
   it("manual region geometry is a hard constraint and disjoint membership is diagnostic-only", async () => {
     const left = { x: 20, y: 20, width: 120, height: 120 };
     const right = { x: 240, y: 20, width: 120, height: 120 };
@@ -872,6 +999,63 @@ describe("LayoutAdapterRegistry", () => {
       elementId: "shared",
     }));
     expect(result.diagnostics.some((item) => item.severity === "error")).toBe(false);
+  });
+
+  it("reports a multiply-associated member that is inside only one overlapping region", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          { elementId: "left", structuralKind: "region", placement: "user", geometry: { x: 20, y: 20, width: 200, height: 160 } },
+          { elementId: "right", structuralKind: "region", placement: "user", geometry: { x: 120, y: 20, width: 200, height: 160 } },
+          { elementId: "shared", structuralKind: "node", placement: "user", geometry: { x: 50, y: 60, width: 40, height: 30 } },
+        ],
+        memberships: [
+          { semanticRef: "left-member", containerElementId: "left", regionElementId: "left", memberElementId: "shared" },
+          { semanticRef: "right-member", containerElementId: "right", regionElementId: "right", memberElementId: "shared" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "region-member-outside-intersection",
+      elementId: "shared",
+    }));
+  });
+
+  it("reports a member whose center is inside but full bounds cross a region boundary", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          {
+            elementId: "region",
+            structuralKind: "region",
+            placement: "user",
+            geometry: { x: 20, y: 20, width: 120, height: 120 },
+          },
+          {
+            elementId: "member",
+            structuralKind: "container",
+            placement: "user",
+            geometry: { x: 115, y: 50, width: 40, height: 30 },
+          },
+        ],
+        memberships: [{
+          semanticRef: "region-member",
+          containerElementId: "region",
+          regionElementId: "region",
+          memberElementId: "member",
+        }],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "region-member-outside",
+      elementId: "member",
+    }));
   });
 
   it("keeps generated regions around members with negative user coordinates", async () => {

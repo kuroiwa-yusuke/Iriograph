@@ -92,15 +92,6 @@
         "accent": "#879697"
       },
       "defaultSize": { "width": 168, "height": 72 }
-    },
-    "urn:iriograph:template:sequence-flow:1": {
-      "templateRef": "urn:iriograph:template:sequence-flow:1",
-      "structuralKind": "edge",
-      "style": {
-        "fill": "none",
-        "stroke": "#476366",
-        "text": "#3b5558"
-      }
     }
   },
   "assets": {

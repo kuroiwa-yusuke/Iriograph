@@ -15,6 +15,7 @@ const props = defineProps<{
   currentStyleRef?: string;
   currentOverride?: VisualStyleOverride;
   presets: Readonly<Record<string, VisualStyleOverride>>;
+  inline?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -86,8 +87,8 @@ function emitPreview(): void {
 </script>
 
 <template>
-  <section class="iriograph-appearance-editor" aria-label="見た目を調整">
-    <header><div><small>APPEARANCE</small><strong>見た目を調整</strong></div><button type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
+  <section class="iriograph-appearance-editor" :class="{ inline }" aria-label="ビューを編集">
+    <header><div><small>VIEW STYLE</small><strong>スタイルを調整</strong></div><button v-if="!inline" type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
     <p v-if="selectionCount > 1">選択中の{{ selectionCount }}要素へ同じ設定を適用します。</p>
     <div v-if="Object.keys(presets).length" class="iriograph-style-presets" role="radiogroup" aria-label="スタイルpreset">
       <button type="button" :aria-pressed="!styleRef" @click="setPreset('')">既定</button>

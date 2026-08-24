@@ -66,12 +66,14 @@ import {
 import {
   normalizeDiagramSnapSettings,
   resizeGeometryElement,
+  resizeGeometryElementFromHandle,
   selectedGeometryElements,
   translateSelection,
   type DiagramSelectionRequest,
   type DiagramSnapSettings,
   type GeometryChange,
   type GeometryElement,
+  type ResizeHandle,
 } from "../selection";
 import type {
   DiagramContextMenuRequest,
@@ -92,14 +94,19 @@ const props = withDefaults(defineProps<{
   snap?: DiagramSnapSettings;
   semanticPositionPicking?: boolean;
   semanticResourcePicking?: boolean;
+  /** Enables semantic endpoint reassignment handles for a selected direct edge. */
+  semanticEndpointReconnect?: boolean;
   semanticResourcePickLabel?: string;
   semanticDraftPosition?: Point;
   containmentWarningElementIds?: string[];
   semanticMetadata?: Readonly<Record<string, SemanticDisplayMetadata>>;
   showAllComments?: boolean;
+  showGrid?: boolean;
+  /** Ephemeral semantic preview only; never part of Scene or the document. */
+  deletionPreviewResourceRefs?: readonly string[];
+  /** Exact statement identities removed by the pending semantic patch. */
+  deletionPreviewStatementRefs?: readonly string[];
   edgeRouteModes?: Readonly<Record<string, "auto" | "straight" | "orthogonal" | "curve" | "manual">>;
-  regionLabelPlacements?: Readonly<Record<string, "top" | "right" | "bottom" | "left" | "center">>;
-  regionLabelWritingDirections?: Readonly<Record<string, "horizontal" | "vertical">>;
   busy?: boolean;
 }>(), {
   selectedElementId: "",
@@ -109,14 +116,16 @@ const props = withDefaults(defineProps<{
   snap: () => normalizeDiagramSnapSettings(),
   semanticPositionPicking: false,
   semanticResourcePicking: false,
+  semanticEndpointReconnect: false,
   semanticResourcePickLabel: "resource",
   semanticDraftPosition: undefined,
   containmentWarningElementIds: () => [],
   semanticMetadata: () => ({}),
   showAllComments: false,
+  showGrid: true,
+  deletionPreviewResourceRefs: () => [],
+  deletionPreviewStatementRefs: () => [],
   edgeRouteModes: () => ({}),
-  regionLabelPlacements: () => ({}),
-  regionLabelWritingDirections: () => ({}),
   busy: false,
 });
 
@@ -131,12 +140,19 @@ const emit = defineEmits<{
   resizeChange: [payload: { elementId: string; geometry: ElementGeometry }];
   geometryBatchChange: [payload: GeometryChange[]];
   routingUpdate: [payload: EdgeRoutingUpdate];
+  regionLabelUpdate: [payload: { elementId: string; anchor: number }];
   /** Seeds a semantic authoring draft; it never mutates the graph directly. */
   semanticEditRequest: [elementId: string];
   /** Seeds draft coordinates only; it never mutates the graph or history. */
   semanticPositionRequest: [position: Point, containerIri?: string];
   /** Explicit picker mode only; normal selection and drag never emit this. */
   semanticResourceRequest: [semanticRef: string];
+  /** Seeds a direct-edge replacement draft; it never mutates semantic or view state. */
+  semanticEndpointReconnectRequest: [payload: {
+    edgeElementId: string;
+    endpoint: "source" | "target";
+    targetSemanticRef: string;
+  }];
   semanticPickCancel: [];
   contextMenuRequest: [request: DiagramContextMenuRequest];
   /** @deprecated Use routingUpdate for the complete sparse routing value. */
@@ -145,6 +161,9 @@ const emit = defineEmits<{
 
 const CANVAS_PADDING = 20;
 const PAN_KEY_STEP = 64;
+const DRAG_AUTO_PAN_MARGIN = 48;
+const DRAG_AUTO_PAN_MAX_STEP = 24;
+const RESIZE_HANDLES: readonly ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const instanceId = useId();
 const markerIds: Record<Exclude<EdgeTerminalMarker, "none">, string> = {
   arrow: `${instanceId}-arrow`,
@@ -166,6 +185,12 @@ const viewport = reactive<DiagramViewportMetrics>({
 const viewportPanning = ref(false);
 const previewGeometries = ref<Record<string, ElementGeometry>>({});
 const previewRouting = ref<Record<string, EditableEdgeRouting | null>>({});
+const semanticReconnectPreview = ref<{
+  edgeElementId: string;
+  endpoint: "source" | "target";
+  point: Point;
+  targetElementId?: string;
+}>();
 const navigatorItems = computed(() => sceneNavigatorItems(props.scene));
 const activeNavigatorElementId = ref("");
 const navigatorAnchorElementId = ref("");
@@ -204,7 +229,17 @@ const selectedElementIdsSet = computed(() => new Set([
 const containmentWarningElementIdsSet = computed(() => new Set(
   props.containmentWarningElementIds,
 ));
+const deletionPreviewResourceRefsSet = computed(() => new Set(
+  props.deletionPreviewResourceRefs,
+));
+const deletionPreviewStatementRefsSet = computed(() => new Set(
+  props.deletionPreviewStatementRefs,
+));
 const selectedEdge = computed(() => props.scene.edges.find((edge) => edge.elementId === props.selectedElementId));
+const orderedRegions = computed(() => [...(props.scene.regions ?? [])].sort((left, right) => (
+  (left.regionZOrder ?? 0) - (right.regionZOrder ?? 0)
+  || left.elementId.localeCompare(right.elementId)
+)));
 const minimapViewport = computed(() => {
   const offset = stageOffset();
   const x = clamp((viewport.scrollLeft - offset.x) / props.zoom, 0, props.scene.width);
@@ -265,6 +300,43 @@ function diagnosticAriaSuffix(element: DiagnosticElement): string {
   return `${diagnostic}${containment}`;
 }
 
+function isDeletionPreviewResource(element: SceneNode | SceneContainer | SceneRegion): boolean {
+  return deletionPreviewResourceRefsSet.value.has(element.semanticRef);
+}
+
+function isDeletionPreviewEdge(edge: SceneEdge): boolean {
+  return edge.provenance?.sourceStatementRefs.some((statementRef) => (
+    deletionPreviewStatementRefsSet.value.has(statementRef)
+  )) ?? false;
+}
+
+const deletionPreviewMemberships = computed(() => (props.scene.memberships ?? []).filter(
+  (membership) => membership.provenance.sourceStatementRefs.some((statementRef) => (
+    deletionPreviewStatementRefsSet.value.has(statementRef)
+  )),
+));
+
+function deletionPreviewMembershipPath(
+  membership: NonNullable<DiagramScene["memberships"]>[number],
+): string {
+  const container = endpointElementsById.value.get(membership.containerElementId);
+  const member = endpointElementsById.value.get(membership.memberElementId);
+  if (!container || !member) return "";
+  const containerCenter = centerOf(container.geometry);
+  const memberCenter = centerOf(member.geometry);
+  const start = edgeEndpointAnchorPoint(
+    container.geometry,
+    endpointElementShape(container),
+    edgeEndpointAnchorFromPoint(container.geometry, memberCenter),
+  );
+  const end = edgeEndpointAnchorPoint(
+    member.geometry,
+    endpointElementShape(member),
+    edgeEndpointAnchorFromPoint(member.geometry, containerCenter),
+  );
+  return polylinePath([start, end]);
+}
+
 onMounted(() => {
   updateViewportMetrics();
   window.addEventListener("resize", updateViewportMetrics);
@@ -302,6 +374,10 @@ watch(() => props.readOnly, (readOnly) => {
   // Permission can change while a key is held. Pending presentation writes
   // are discarded at that boundary, while navigation remains available.
   if (readOnly && keyboardGesture) cancelKeyboardGesture();
+});
+
+watch(() => props.semanticEndpointReconnect, (enabled) => {
+  if (!enabled && semanticReconnectPreview.value) stopViewportTracking?.();
 });
 
 watch(navigatorItems, (nextItems) => {
@@ -402,9 +478,31 @@ function edgeLabelPosition(edge: SceneEdge): Point {
 }
 
 function editableWaypoints(edge: SceneEdge): Point[] {
+  if (!waypointEditingAllowed(edge)) return [];
   const preview = previewRouting.value[edge.elementId];
   if (preview !== undefined) return preview?.waypoints?.map((point) => ({ ...point })) ?? [];
   return editableEdgeWaypoints({ route: renderedRoute(edge), waypoints: edge.waypoints });
+}
+
+function edgeRouteMode(edge: SceneEdge): "auto" | "straight" | "orthogonal" | "curve" | "manual" {
+  return props.edgeRouteModes[edge.elementId]
+    ?? edge.routeMode
+    ?? (edge.waypoints?.length ? "manual" : "auto");
+}
+
+function waypointEditingAllowed(edge: SceneEdge): boolean {
+  const mode = edgeRouteMode(edge);
+  return mode !== "straight" && mode !== "curve";
+}
+
+function withoutDisallowedWaypoints(
+  edge: SceneEdge,
+  routing: EditableEdgeRouting | undefined,
+): EditableEdgeRouting | undefined {
+  if (!routing || waypointEditingAllowed(edge) || !routing.waypoints) return routing;
+  const result = { ...routing };
+  delete result.waypoints;
+  return Object.values(result).some((value) => value !== undefined) ? result : undefined;
 }
 
 function renderedRoute(edge: SceneEdge): Point[] {
@@ -556,6 +654,7 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
   let pendingChanges: GeometryChange[] = [];
 
   trackPointer((moveEvent) => {
+    autoPanForPointer(moveEvent);
     const translated = translateSelection(
       initialScene,
       movingElementIds,
@@ -594,7 +693,7 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
   });
 }
 
-function startResize(event: PointerEvent, element: GeometryElement): void {
+function startResize(event: PointerEvent, element: GeometryElement, handle: ResizeHandle = "se"): void {
   if (props.readOnly || event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
@@ -602,17 +701,15 @@ function startResize(event: PointerEvent, element: GeometryElement): void {
   emit("gestureStart");
   regionConstraintMessage.value = "";
   const origin = { x: event.clientX, y: event.clientY };
-  const initial = { ...element.geometry };
+  const initialScene = snapshotScene(props.scene);
 
   trackPointer((moveEvent) => {
-    const requestedWidth = initial.width + (moveEvent.clientX - origin.x) / props.zoom;
-    const requestedHeight = initial.height + (moveEvent.clientY - origin.y) / props.zoom;
-    const change = resizeGeometryElement(props.scene, element.elementId, {
-      width: requestedWidth,
-      height: requestedHeight,
+    const change = resizeGeometryElementFromHandle(initialScene, element.elementId, handle, {
+      x: (moveEvent.clientX - origin.x) / props.zoom,
+      y: (moveEvent.clientY - origin.y) / props.zoom,
     });
     if (!change) return;
-    const constrained = constrainMembershipRegionMovement(props.scene, [change]);
+    const constrained = constrainMembershipRegionMovement(initialScene, [change]);
     regionConstraintMessage.value = constrained.issue?.message ?? "";
     const accepted = constrained.changes[0];
     if (!accepted) return;
@@ -622,7 +719,7 @@ function startResize(event: PointerEvent, element: GeometryElement): void {
 }
 
 function startWaypointMove(event: PointerEvent, edge: SceneEdge, index: number): void {
-  if (props.readOnly || event.button !== 0) return;
+  if (props.readOnly || event.button !== 0 || !waypointEditingAllowed(edge)) return;
   event.preventDefault();
   event.stopPropagation();
   requestSelection({ elementId: edge.elementId, mode: "replace" });
@@ -655,11 +752,74 @@ function startLabelMove(event: PointerEvent, edge: SceneEdge): void {
   });
 }
 
+function regionLabelStyle(region: SceneRegion): Record<string, string> | undefined {
+  const anchor = region.regionLabelAnchor;
+  if (!Number.isFinite(anchor)) return undefined;
+  const point = pointAtRegionPerimeter(region.geometry, anchor!);
+  return {
+    left: `${point.x - region.geometry.x}px`,
+    top: `${point.y - region.geometry.y}px`,
+    right: "auto",
+    bottom: "auto",
+    transform: "translate(-50%, -50%)",
+  };
+}
+
+function startRegionLabelMove(event: PointerEvent, region: SceneRegion): void {
+  if (props.readOnly || event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  requestSelection({ elementId: region.elementId, mode: "replace" });
+  emit("gestureStart");
+  trackPointer((moveEvent) => {
+    const point = semanticPositionAt(moveEvent);
+    if (!point) return;
+    emit("regionLabelUpdate", {
+      elementId: region.elementId,
+      anchor: nearestRegionPerimeterAnchor(region.geometry, point),
+    });
+  });
+}
+
+function pointAtRegionPerimeter(geometry: ElementGeometry, anchor: number): Point {
+  const width = geometry.width;
+  const height = geometry.height;
+  const perimeter = Math.max(1, 2 * (width + height));
+  let distance = clamp(anchor, 0, .999999) * perimeter;
+  if (distance <= width) return { x: geometry.x + distance, y: geometry.y };
+  distance -= width;
+  if (distance <= height) return { x: geometry.x + width, y: geometry.y + distance };
+  distance -= height;
+  if (distance <= width) return { x: geometry.x + width - distance, y: geometry.y + height };
+  distance -= width;
+  return { x: geometry.x, y: geometry.y + height - Math.min(height, distance) };
+}
+
+function nearestRegionPerimeterAnchor(geometry: ElementGeometry, point: Point): number {
+  const localX = clamp(point.x - geometry.x, 0, geometry.width);
+  const localY = clamp(point.y - geometry.y, 0, geometry.height);
+  const distances = [localY, geometry.width - localX, geometry.height - localY, localX];
+  const side = distances.indexOf(Math.min(...distances));
+  const perimeter = Math.max(1, 2 * (geometry.width + geometry.height));
+  const distance = side === 0
+    ? localX
+    : side === 1
+      ? geometry.width + localY
+      : side === 2
+        ? geometry.width + geometry.height + (geometry.width - localX)
+        : 2 * geometry.width + geometry.height + (geometry.height - localY);
+  return clamp(distance / perimeter, 0, .999999);
+}
+
 function startEndpointAnchorMove(
   event: PointerEvent,
   edge: SceneEdge,
   endpoint: "source" | "target",
 ): void {
+  if (props.semanticEndpointReconnect) {
+    startSemanticEndpointReconnect(event, edge, endpoint);
+    return;
+  }
   if (props.readOnly || event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
@@ -672,11 +832,11 @@ function startEndpointAnchorMove(
   trackPointer((moveEvent) => {
     const point = canvasPoint(moveEvent);
     if (!point) return;
-    pending = routingWithEndpointAnchor(
+    pending = withoutDisallowedWaypoints(edge, routingWithEndpointAnchor(
       edge,
       endpoint,
       edgeEndpointAnchorFromPoint(element.geometry, point),
-    );
+    ));
     previewRouting.value = {
       ...previewRouting.value,
       [edge.elementId]: pending ?? null,
@@ -690,9 +850,86 @@ function startEndpointAnchorMove(
   });
 }
 
+function startSemanticEndpointReconnect(
+  event: PointerEvent,
+  edge: SceneEdge,
+  endpoint: "source" | "target",
+): void {
+  if (props.readOnly || event.button !== 0) return;
+  event.preventDefault();
+  event.stopPropagation();
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
+  const initialPoint = endpointAnchorHandlePoint(edge, endpoint);
+  semanticReconnectPreview.value = { edgeElementId: edge.elementId, endpoint, point: initialPoint };
+
+  const handleMove = (moveEvent: PointerEvent): void => {
+    const point = canvasPoint(moveEvent);
+    if (!point) return;
+    const target = nodeAtPoint(point);
+    semanticReconnectPreview.value = {
+      edgeElementId: edge.elementId,
+      endpoint,
+      point: target ? centerOf(target.geometry) : point,
+      targetElementId: target?.elementId,
+    };
+    autoPanForPointer(moveEvent);
+  };
+  const cleanup = (upEvent?: PointerEvent): void => {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", cleanup);
+    window.removeEventListener("pointercancel", cleanup);
+    const targetElementId = upEvent?.type === "pointerup"
+      ? semanticReconnectPreview.value?.targetElementId
+      : undefined;
+    semanticReconnectPreview.value = undefined;
+    if (stopViewportTracking === cleanup) stopViewportTracking = undefined;
+    const target = targetElementId
+      ? props.scene.nodes.find((candidate) => candidate.elementId === targetElementId)
+      : undefined;
+    const currentSemanticRef = endpoint === "source"
+      ? endpointElementsById.value.get(edge.sourceElementId)?.semanticRef
+      : endpointElementsById.value.get(edge.targetElementId)?.semanticRef;
+    if (!target || target.semanticRef === currentSemanticRef) return;
+    emit("semanticEndpointReconnectRequest", {
+      edgeElementId: edge.elementId,
+      endpoint,
+      targetSemanticRef: target.semanticRef,
+    });
+  };
+  stopViewportTracking?.();
+  stopViewportTracking = cleanup;
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", cleanup, { once: true });
+  window.addEventListener("pointercancel", cleanup, { once: true });
+}
+
+function nodeAtPoint(point: Point): SceneNode | undefined {
+  return [...props.scene.nodes].reverse().find((node) => {
+    const geometry = geometryFor(node);
+    return point.x >= geometry.x
+      && point.x <= geometry.x + geometry.width
+      && point.y >= geometry.y
+      && point.y <= geometry.y + geometry.height;
+  });
+}
+
+function semanticReconnectPath(): string {
+  const preview = semanticReconnectPreview.value;
+  const edge = preview
+    ? props.scene.edges.find((candidate) => candidate.elementId === preview.edgeElementId)
+    : undefined;
+  if (!preview || !edge) return "";
+  const route = renderedRoute(edge);
+  const fixed = preview.endpoint === "source" ? route.at(-1) : route[0];
+  if (!fixed) return "";
+  return preview.endpoint === "source"
+    ? polylinePath([preview.point, fixed])
+    : polylinePath([fixed, preview.point]);
+}
+
 function addWaypointAtPointer(event: MouseEvent, edge: SceneEdge): void {
   requestSelection({ elementId: edge.elementId, mode: "replace" });
-  if (props.readOnly) return;
+  if (props.readOnly || !waypointEditingAllowed(edge)) return;
   const requested = canvasPoint(event);
   if (!requested) return;
   event.preventDefault();
@@ -705,7 +942,7 @@ function addWaypointAtPointer(event: MouseEvent, edge: SceneEdge): void {
 }
 
 function handleWaypointKeydown(event: KeyboardEvent, edge: SceneEdge, index: number): void {
-  if (props.readOnly) return;
+  if (props.readOnly || !waypointEditingAllowed(edge)) return;
   const waypoints = editableWaypoints(edge);
   if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
@@ -737,7 +974,7 @@ function handleWaypointKeydown(event: KeyboardEvent, edge: SceneEdge, index: num
 }
 
 function handleLabelKeydown(event: KeyboardEvent, edge: SceneEdge): void {
-  if (props.readOnly || !edge.label) return;
+  if (props.readOnly || (!edge.label && !edge.caption)) return;
   if (event.key === "Home" || event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
     event.stopPropagation();
@@ -778,7 +1015,7 @@ function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
   if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
     event.stopPropagation();
-    if (!props.readOnly) emit("semanticEditRequest", edge.elementId);
+    if (!props.readOnly) announce("意味の削除は右側の「関係を変更する」から行います");
   }
 }
 
@@ -790,11 +1027,11 @@ function handleGeometrySemanticKeydown(event: KeyboardEvent, elementId: string):
   if (event.key !== "Delete" && event.key !== "Backspace") return;
   event.preventDefault();
   event.stopPropagation();
-  if (!props.readOnly) emit("semanticEditRequest", elementId);
+  if (!props.readOnly) announce("意味の削除は右側の「要素を変更する」から行います");
 }
 
 function emitWaypointRouting(edge: SceneEdge, waypoints: readonly Point[] | undefined): void {
-  const routing = routingWithWaypoints(edge, waypoints);
+  const routing = withoutDisallowedWaypoints(edge, routingWithWaypoints(edge, waypoints));
   emit("routingUpdate", { elementId: edge.elementId, routing });
   emit("routingChange", {
     elementId: edge.elementId,
@@ -803,17 +1040,29 @@ function emitWaypointRouting(edge: SceneEdge, waypoints: readonly Point[] | unde
 }
 
 function emitLabelRouting(edge: SceneEdge, labelOffset: Point | undefined): void {
-  if (!edge.label) return;
+  if (!edge.label && !edge.caption) return;
   emit("routingUpdate", {
     elementId: edge.elementId,
-    routing: routingWithLabelOffset(edge, labelOffset),
+    routing: withoutDisallowedWaypoints(edge, routingWithLabelOffset(edge, labelOffset)),
   });
 }
 
 function edgeAriaLabel(edge: SceneEdge): string {
   const source = endpointElementsById.value.get(edge.sourceElementId)?.label ?? edge.sourceElementId;
   const target = endpointElementsById.value.get(edge.targetElementId)?.label ?? edge.targetElementId;
-  return `${source}から${target}への${edge.label || sequenceOrdinalBadge(edge) || "edge"}`;
+  const caption = edge.caption ? `、図上の注記 ${edge.caption}` : "";
+  const semanticComment = edgeSemanticComments(edge);
+  return `${source}から${target}への${edge.label || sequenceOrdinalBadge(edge) || "edge"}${caption}${semanticComment ? `、関係の説明 ${semanticComment}` : ""}`;
+}
+
+function edgeSemanticComments(edge: SceneEdge): string {
+  return (edge.statementComments ?? []).map((comment) => (
+    `${comment.value}${comment.language ? `（${comment.language}）` : ""}`
+  )).join("\n\n");
+}
+
+function edgeCaptionLines(edge: SceneEdge): string[] {
+  return edge.caption?.split(/\r?\n/u).filter((line) => line.length > 0) ?? [];
 }
 
 function sequenceOrdinalBadge(edge: SceneEdge): string {
@@ -827,6 +1076,26 @@ function sequenceOrdinalBadge(edge: SceneEdge): string {
     && Number.isSafeInteger(provenance.toOrdinal)
     ? `${provenance.fromOrdinal}→${provenance.toOrdinal}`
     : "";
+}
+
+function sequenceMemberBadges(elementId: string): Array<{ key: string; ordinal: number; label: string }> {
+  const containers = new Map(props.scene.containers.map((container) => [container.elementId, container]));
+  return (props.scene.memberships ?? [])
+    .filter((membership) => (
+      membership.role === "sequence-member"
+      && membership.memberElementId === elementId
+      && Number.isSafeInteger(membership.ordinal)
+    ))
+    .sort((left, right) => (
+      left.ordinal! - right.ordinal!
+      || left.containerElementId.localeCompare(right.containerElementId)
+      || left.semanticRef.localeCompare(right.semanticRef)
+    ))
+    .map((membership) => ({
+      key: membership.semanticRef,
+      ordinal: membership.ordinal!,
+      label: containers.get(membership.containerElementId)?.label ?? "並び順",
+    }));
 }
 
 function navigatorDomId(elementId: string): string {
@@ -1026,10 +1295,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
   if (command.kind === "semantic-edit") {
     event.preventDefault();
     event.stopPropagation();
-    if (!props.readOnly && activeNavigatorElementId.value) {
-      emit("semanticEditRequest", activeNavigatorElementId.value);
-      announceActiveNavigatorItem("意味編集を開始");
-    }
+    if (!props.readOnly && activeNavigatorElementId.value) announce("意味の変更は右側の4つの操作から行います");
     return;
   }
   if (command.kind === "focus") {
@@ -1079,6 +1345,10 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
   const activeId = activeNavigatorElementId.value;
   const edge = props.scene.edges.find((candidate) => candidate.elementId === activeId);
   if (edge) {
+    if (!waypointEditingAllowed(edge)) {
+      announce("直線・曲線ではWaypointを編集しません");
+      return;
+    }
     if (!selectedElementIdsSet.value.has(activeId)) {
       requestSelection({ elementId: activeId, mode: "replace" });
     }
@@ -1168,16 +1438,22 @@ function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): vo
     width: initial.geometry.width + gesture.delta.x,
     height: initial.geometry.height + gesture.delta.y,
   });
-  gesture.geometryChanges = change ? [change] : [];
-  previewGeometries.value = change ? { [change.elementId]: change.geometry } : {};
-  announce(`サイズ ${Math.round(change?.geometry.width ?? initial.geometry.width)} × ${Math.round(change?.geometry.height ?? initial.geometry.height)}`);
+  const constrained = constrainMembershipRegionMovement(
+    gesture.initialScene,
+    change ? [change] : [],
+  );
+  gesture.geometryChanges = constrained.changes;
+  regionConstraintMessage.value = constrained.issue?.message ?? "";
+  const accepted = constrained.changes[0];
+  previewGeometries.value = accepted ? { [accepted.elementId]: accepted.geometry } : {};
+  announce(`サイズ ${Math.round(accepted?.geometry.width ?? initial.geometry.width)} × ${Math.round(accepted?.geometry.height ?? initial.geometry.height)}`);
 }
 
 function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | "remove"): void {
   const edge = props.scene.edges.find((candidate) => (
     candidate.elementId === activeNavigatorElementId.value
   ));
-  if (!edge) return;
+  if (!edge || !waypointEditingAllowed(edge)) return;
   if (!selectedElementIdsSet.value.has(edge.elementId)) {
     requestSelection({ elementId: edge.elementId, mode: "replace" });
   }
@@ -1201,7 +1477,7 @@ function moveActiveWaypoint(movement: "previous" | "next"): void {
   const edge = props.scene.edges.find((candidate) => (
     candidate.elementId === activeNavigatorElementId.value
   ));
-  if (!edge) return;
+  if (!edge || !waypointEditingAllowed(edge)) return;
   const count = editableEdgeWaypoints(edge).length;
   if (count === 0) {
     announce("Waypointはありません");
@@ -1275,6 +1551,7 @@ function emitKeyboardRouting(
   routing: EditableEdgeRouting | undefined,
   emitLegacyWaypointChange: boolean,
 ): void {
+  routing = withoutDisallowedWaypoints(edge, routing);
   emit("routingUpdate", { elementId: edge.elementId, routing });
   if (!emitLegacyWaypointChange) return;
   emit("routingChange", {
@@ -1379,6 +1656,25 @@ function stageOffset(): Point {
 
 function panBy(deltaX: number, deltaY: number): void {
   setViewportScroll(viewport.scrollLeft + deltaX, viewport.scrollTop + deltaY);
+}
+
+function autoPanForPointer(event: PointerEvent): void {
+  const element = scrollElement.value;
+  if (!element) return;
+  const bounds = element.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return;
+  const axisDelta = (position: number, start: number, end: number): number => {
+    if (position < start + DRAG_AUTO_PAN_MARGIN) {
+      return -Math.min(DRAG_AUTO_PAN_MAX_STEP, start + DRAG_AUTO_PAN_MARGIN - position);
+    }
+    if (position > end - DRAG_AUTO_PAN_MARGIN) {
+      return Math.min(DRAG_AUTO_PAN_MAX_STEP, position - (end - DRAG_AUTO_PAN_MARGIN));
+    }
+    return 0;
+  };
+  const deltaX = axisDelta(event.clientX, bounds.left, bounds.right);
+  const deltaY = axisDelta(event.clientY, bounds.top, bounds.bottom);
+  if (deltaX || deltaY) panBy(deltaX, deltaY);
 }
 
 function getViewportState(): DiagramViewportState {
@@ -1663,21 +1959,26 @@ defineExpose<DiagramCanvasNavigationApi>({
             activeNavigatorElementId,
             readOnly,
             semanticDraftPosition,
+            semanticEndpointReconnect,
+            semanticReconnectPreview,
             containmentWarningElementIds,
             semanticMetadata,
             showAllComments,
+            showGrid,
+            snap.grid.size,
             edgeRouteModes,
-            regionLabelPlacements,
-            regionLabelWritingDirections,
+            deletionPreviewResourceRefs,
+            deletionPreviewStatementRefs,
           ]"
           :style="{
             width: `${scene.width}px`,
             height: `${scene.height}px`,
             transform: `scale(${zoom})`,
+            '--iriograph-grid-size': `${snap.grid.size}px`,
           }"
           @contextmenu="requestBlankContextMenu"
         >
-          <div class="iriograph-canvas-grid" />
+          <div v-if="showGrid" class="iriograph-canvas-grid" aria-hidden="true" />
           <p v-if="regionConstraintMessage" class="iriograph-region-constraint-warning" role="alert">{{ regionConstraintMessage }}</p>
           <span
             v-if="semanticDraftPosition"
@@ -1687,11 +1988,11 @@ defineExpose<DiagramCanvasNavigationApi>({
           />
 
           <div
-            v-for="region in scene.regions ?? []"
+            v-for="region in orderedRegions"
             :key="region.elementId"
             :id="navigatorDomId(region.elementId)"
             class="iriograph-scene-region"
-            :class="[{ selected: selectedElementIdsSet.has(region.elementId), 'navigator-active': activeNavigatorElementId === region.elementId }, diagnosticClass(region)]"
+            :class="[{ selected: selectedElementIdsSet.has(region.elementId), 'interaction-front': selectedElementIdsSet.has(region.elementId), 'navigator-active': activeNavigatorElementId === region.elementId, 'deletion-preview': isDeletionPreviewResource(region) }, diagnosticClass(region)]"
             role="option"
             tabindex="-1"
             :data-element-id="region.elementId"
@@ -1717,13 +2018,23 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span
               class="iriograph-region-label"
               :class="[
-                `label-${regionLabelPlacements[region.elementId] ?? region.labelPlacement ?? 'top'}`,
-                `writing-${regionLabelWritingDirections[region.elementId] ?? ((regionLabelPlacements[region.elementId] ?? region.labelPlacement) === 'left' || (regionLabelPlacements[region.elementId] ?? region.labelPlacement) === 'right' ? 'vertical' : 'horizontal')}`,
+                `label-${region.labelPlacement ?? 'top'}`,
+                `writing-${region.regionLabelWritingDirection === 'vertical-down' || (!region.regionLabelWritingDirection && (region.labelPlacement === 'left' || region.labelPlacement === 'right')) ? 'vertical' : 'horizontal'}`,
               ]"
+              :style="regionLabelStyle(region)"
+              title="ドラッグしてラベルを領域の枠上で移動"
+              @pointerdown="startRegionLabelMove($event, region)"
             >{{ region.label }}</span>
             <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(' ／ ') }}</span>
             <span v-if="commentsFor(region.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(region.semanticRef) }}</span>
-            <span v-if="selectedElementIdsSet.size === 1 && selectedElementId === region.elementId && !readOnly" class="iriograph-resize-handle" title="領域サイズを変更" @pointerdown="startResize($event, region)" />
+            <span
+              v-for="handle in (selectedElementIdsSet.size === 1 && selectedElementId === region.elementId && !readOnly ? RESIZE_HANDLES : [])"
+              :key="handle"
+              class="iriograph-resize-handle"
+              :data-handle="handle"
+              :title="`領域サイズを${handle}方向から変更`"
+              @pointerdown="startResize($event, region, handle)"
+            />
           </div>
 
           <div
@@ -1739,10 +2050,11 @@ defineExpose<DiagramCanvasNavigationApi>({
               readOnly,
               semanticMetadata[container.semanticRef],
               showAllComments,
+              isDeletionPreviewResource(container),
             ]"
             :id="navigatorDomId(container.elementId)"
             class="iriograph-scene-container"
-            :class="[{ selected: selectedElementIdsSet.has(container.elementId), 'navigator-active': activeNavigatorElementId === container.elementId, 'containment-warning': containmentWarningElementIdsSet.has(container.elementId) }, diagnosticClass(container)]"
+            :class="[{ selected: selectedElementIdsSet.has(container.elementId), 'navigator-active': activeNavigatorElementId === container.elementId, 'containment-warning': containmentWarningElementIdsSet.has(container.elementId), 'deletion-preview': isDeletionPreviewResource(container), 'sequence-group': container.groupRole === 'sequence' }, diagnosticClass(container)]"
             role="option"
             tabindex="-1"
             :data-element-id="container.elementId"
@@ -1776,11 +2088,14 @@ defineExpose<DiagramCanvasNavigationApi>({
             </span>
             <span v-if="additionalLabels(container.semanticRef, container.label).length" class="iriograph-additional-labels">{{ additionalLabels(container.semanticRef, container.label).join(' ／ ') }}</span>
             <span v-if="commentsFor(container.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(container.semanticRef) }}</span>
+            <span v-if="sequenceMemberBadges(container.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(container.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
             <span
-              v-if="selectedElementIdsSet.size === 1 && selectedElementId === container.elementId && !readOnly"
+              v-for="handle in (selectedElementIdsSet.size === 1 && selectedElementId === container.elementId && !readOnly ? RESIZE_HANDLES : [])"
+              :key="handle"
               class="iriograph-resize-handle"
-              title="領域サイズを変更"
-              @pointerdown="startResize($event, container)"
+              :data-handle="handle"
+              :title="`領域サイズを${handle}方向から変更`"
+              @pointerdown="startResize($event, container, handle)"
             />
           </div>
 
@@ -1809,6 +2124,13 @@ defineExpose<DiagramCanvasNavigationApi>({
                 <circle cx="5" cy="5" r="3.5" fill="context-stroke" />
               </marker>
             </defs>
+            <path
+              v-for="membership in deletionPreviewMemberships"
+              :key="`deletion-membership:${membership.semanticRef}`"
+              class="iriograph-deletion-preview-membership"
+              :data-semantic-ref="membership.semanticRef"
+              :d="deletionPreviewMembershipPath(membership)"
+            />
             <g
               v-for="edge in scene.edges"
               :key="edge.elementId"
@@ -1822,10 +2144,11 @@ defineExpose<DiagramCanvasNavigationApi>({
                 scene.diagnostics,
                 readOnly,
                 edgeRouteModes[edge.elementId],
+                isDeletionPreviewEdge(edge),
               ]"
               :id="navigatorDomId(edge.elementId)"
               class="iriograph-edge-group"
-              :class="[{ selected: selectedElementIdsSet.has(edge.elementId), 'navigator-active': activeNavigatorElementId === edge.elementId, fallback: edge.fallback }, diagnosticClass(edge)]"
+              :class="[{ selected: selectedElementIdsSet.has(edge.elementId), 'navigator-active': activeNavigatorElementId === edge.elementId, fallback: edge.fallback, 'deletion-preview': isDeletionPreviewEdge(edge) }, diagnosticClass(edge)]"
               :data-element-id="edge.elementId"
               tabindex="-1"
               role="option"
@@ -1838,6 +2161,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               @dblclick.stop="addWaypointAtPointer($event, edge)"
               @contextmenu="requestPointerContextMenu($event, 'edge', edge.elementId)"
             >
+              <title v-if="edgeSemanticComments(edge)">{{ edgeSemanticComments(edge) }}</title>
               <path class="iriograph-edge-hitarea" :d="pathFor(edge)" />
               <path
                 class="iriograph-edge-path"
@@ -1849,7 +2173,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :marker-end="terminalMarkerUrl(edge.targetMarker ?? 'arrow')"
               />
               <text
-                v-if="edge.label || sequenceOrdinalBadge(edge)"
+                v-if="edge.label || sequenceOrdinalBadge(edge) || edge.caption"
                 class="iriograph-edge-label"
                 :class="{ editable: !readOnly }"
                 :x="edgeLabelPosition(edge).x"
@@ -1863,7 +2187,14 @@ defineExpose<DiagramCanvasNavigationApi>({
                 @keydown="handleLabelKeydown($event, edge)"
                 @dblclick.stop
               >
-                {{ edge.label || sequenceOrdinalBadge(edge) }}
+                <tspan :x="edgeLabelPosition(edge).x">{{ edge.label || sequenceOrdinalBadge(edge) }}</tspan>
+                <tspan
+                  v-for="(line, index) in edgeCaptionLines(edge)"
+                  :key="index"
+                  class="iriograph-edge-caption"
+                  :x="edgeLabelPosition(edge).x"
+                  :dy="index === 0 ? 14 : 12"
+                >{{ line }}</tspan>
               </text>
             </g>
           </svg>
@@ -1881,6 +2212,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               readOnly,
               semanticMetadata[node.semanticRef],
               showAllComments,
+              isDeletionPreviewResource(node),
+              semanticReconnectPreview?.targetElementId === node.elementId,
             ]"
             :id="navigatorDomId(node.elementId)"
             class="iriograph-scene-node"
@@ -1895,6 +2228,8 @@ defineExpose<DiagramCanvasNavigationApi>({
                 'navigator-active': activeNavigatorElementId === node.elementId,
                 'user-placed': node.placement === 'user',
                 'containment-warning': containmentWarningElementIdsSet.has(node.elementId),
+                'deletion-preview': isDeletionPreviewResource(node),
+                'semantic-reconnect-target': semanticReconnectPreview?.targetElementId === node.elementId,
                 ...diagnosticClass(node),
               },
             ]"
@@ -1925,19 +2260,28 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span v-if="commentsFor(node.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(node.semanticRef) }}</span>
             <span v-if="node.shape === 'diamond'" class="iriograph-gateway-mark">×</span>
             <span v-if="node.placement === 'user'" class="iriograph-pin-indicator" title="ユーザー調整済み">●</span>
+            <span v-if="sequenceMemberBadges(node.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
             <span
-              v-if="selectedElementIdsSet.size === 1 && selectedElementId === node.elementId && !readOnly"
+              v-for="handle in (selectedElementIdsSet.size === 1 && selectedElementId === node.elementId && !readOnly ? RESIZE_HANDLES : [])"
+              :key="handle"
               class="iriograph-resize-handle"
-              title="nodeサイズを変更"
-              @pointerdown="startResize($event, node)"
+              :data-handle="handle"
+              :title="`nodeサイズを${handle}方向から変更`"
+              @pointerdown="startResize($event, node, handle)"
             />
           </div>
 
           <svg class="iriograph-edge-interaction-layer" :width="scene.width" :height="scene.height" :viewBox="`0 0 ${scene.width} ${scene.height}`" aria-hidden="true">
             <path
+              v-if="semanticReconnectPreview"
+              class="iriograph-semantic-reconnect-preview"
+              :d="semanticReconnectPath()"
+            />
+            <path
               v-for="edge in scene.edges"
               :key="`target-marker:${edge.elementId}`"
               class="iriograph-edge-arrow-overlay"
+              :class="{ 'deletion-preview': isDeletionPreviewEdge(edge) }"
               :d="terminalOverlayPath(edge, 'target')"
               :stroke="edge.style.stroke"
               :stroke-width="edge.style.strokeWidth"
@@ -1947,12 +2291,13 @@ defineExpose<DiagramCanvasNavigationApi>({
               v-for="edge in scene.edges"
               :key="`source-marker:${edge.elementId}`"
               class="iriograph-edge-arrow-overlay"
+              :class="{ 'deletion-preview': isDeletionPreviewEdge(edge) }"
               :d="terminalOverlayPath(edge, 'source')"
               :stroke="edge.style.stroke"
               :stroke-width="edge.style.strokeWidth"
               :marker-start="terminalMarkerUrl(edge.sourceMarker ?? 'none')"
             />
-            <g v-if="selectedEdge && !readOnly" class="iriograph-waypoints">
+            <g v-if="selectedEdge && !readOnly && waypointEditingAllowed(selectedEdge)" class="iriograph-waypoints">
               <circle
                 v-for="(point, index) in editableWaypoints(selectedEdge)"
                 :key="index"
@@ -1966,7 +2311,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 @keydown="handleWaypointKeydown($event, selectedEdge, index)"
               />
             </g>
-            <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors">
+            <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors" :class="{ semantic: semanticEndpointReconnect }">
               <template v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
                 <line
                   v-if="endpointAnchorHalo(selectedEdge, endpoint)"
@@ -1983,7 +2328,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                   :cy="endpointAnchorHalo(selectedEdge, endpoint)!.haloPoint.y"
                   r="12"
                   @pointerdown="startEndpointAnchorMove($event, selectedEdge, endpoint)"
-                ><title>{{ endpoint }} endpoint anchor</title></circle>
+                ><title>{{ semanticEndpointReconnect ? `${endpoint === 'source' ? '始点' : '終点'}を別のnodeへ接続` : `${endpoint} endpoint anchor` }}</title></circle>
               </template>
             </g>
           </svg>
