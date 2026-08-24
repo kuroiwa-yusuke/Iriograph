@@ -50,7 +50,9 @@ Orthogonal routeはsource/target attachmentを必ず含み、parallel edgeとsel
 
 Portable overlayの経路modeは`auto`、`straight`、`orthogonal`、`curve`、`manual`を区別します。自動routerが障害物を避けるために作る内部屈曲点または曲線制御点はSceneのderived routeであり、manual waypointとして保存しません。`straight`だけは中間点を持たないことを契約とし、障害物回避より利用者の明示指定を優先して必要ならdiagnosticを返します。
 
-User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutをpadding付き障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/comment交差、edge重複長、edge交差数、bend数、距離の辞書順で比較します。Stable edge ID順と逆順を含む固定回数だけ混雑penalty付きrerouteを行い、同一入力の決定性と計算上限を保ちます。
+User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutをpadding付き障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/comment交差、endpoint共有を除くedge交差数、edge重複長、距離、bend数の辞書順で比較します。Stable edge ID順と逆順を含む固定回数だけ、他の全routeを現在状態として混雑penalty付きrerouteを行います。各置換はgraph全体の辞書順品質を単調改善する場合だけ採用し、同一入力の決定性と計算上限を保ちます。
+
+Auto routeは実shape境界でclipし、境界から外向きのderived stubを経て障害物探索へ接続します。これによりsource/target nodeを中心点から出る偽の障害物として扱わず、最初と最後のsegmentがnode内部を通ることも防ぎます。Manual/user routeは表示polyline全体がhard constraintであり、node/commentや他edgeと衝突しても変更せずdiagnosticだけを返します。`straight`は古いmanual waypointが残っていても常にendpoint二点を優先します。
 
 ### 2.6 Component packing
 
@@ -111,7 +113,7 @@ Engine名ではなくview要求でadapterを選びます。単純flowとfallback
 | displacement | 存続element centerの旧位置からの移動量。pinは0必須 | 編集時のmental map維持 |
 | aspect | sceneの`max(width / height, height / width)` | 極端に細長い配置の抑制 |
 
-比較はhard constraint、overlap、crossing、displacement、bends/length、aspectの順を基本とし、同scoreはstable ID由来の候補順で決めます。単一の重み付き合計だけにすると、小さな可読性改善とpin違反等が相殺されるため使いません。
+比較はhard constraint、node/route overlap、endpoint共有を除くcrossing、edge overlap、displacement、length/bends、aspectの順を基本とし、同scoreはstable ID由来の候補順で決めます。単一の重み付き合計だけにすると、小さな可読性改善とpin違反等が相殺されるため使いません。
 
 ## 5. P1-08固定benchmark
 

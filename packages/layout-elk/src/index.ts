@@ -43,6 +43,14 @@ export type ElkGraphEdge = {
   sections?: ElkEdgeSection[];
 };
 
+export type ElkGraphPort = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 /**
  * Stable, minimal ELK boundary exposed for host-injected Worker engines. The
  * adapter intentionally does not expose engine options through the document.
@@ -53,6 +61,7 @@ export type ElkGraphNode = {
   y?: number;
   width?: number;
   height?: number;
+  ports?: ElkGraphPort[];
   children?: ElkGraphNode[];
   edges?: ElkGraphEdge[];
   layoutOptions?: Record<string, string>;
@@ -145,7 +154,10 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
       const engine = await this.#getEngine();
       const output = await engine.layout(prepared.graph);
       const parsed = parseEngineOutput(request, prepared, output, this.direction);
-      if (!parsed.invalidGeometry && hasExternalReservations(request.scene.elements)) {
+      if (!parsed.invalidGeometry) {
+        // ELK owns placement, while Core's route-only pass applies the same
+        // endpoint clipping, manual-route hard constraints, comment obstacles,
+        // and graph-global deterministic refinement used by the fallback.
         const routed = await routeWithFixedGeometry(
           request,
           parsed.geometries,
@@ -223,10 +235,6 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
   }
 }
 
-function hasExternalReservations(elements: readonly LayoutElement[]): boolean {
-  return elements.some((element) => (element.externalReservations?.length ?? 0) > 0);
-}
-
 async function routeWithFixedGeometry(
   request: LayoutRequest,
   geometries: Readonly<Record<string, ElementGeometry>>,
@@ -274,11 +282,13 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
   for (const members of children.values()) members.sort(compareText);
 
   const spacing = { ...DEFAULT_SPACING, ...request.spacing };
+  const portsByElement = new Map<string, ElkGraphPort[]>();
   const buildNode = (id: string): ElkGraphNode => {
     const element = elements.get(id)!;
     const size = elementSize(element);
     const nested = children.get(id) ?? [];
     const reservationMargins = externalReservationMargins(element, size);
+    const ports = portsByElement.get(id) ?? [];
     const layoutOptions: Record<string, string> = {
       ...(element.structuralKind === "container"
         ? {
@@ -293,11 +303,15 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
       ...(reservationMargins
         ? { "elk.margins": reservationMargins }
         : {}),
+      ...(ports.length > 0
+        ? { "elk.portConstraints": "FIXED_POS" }
+        : {}),
     };
     return {
       id,
       width: size.width,
       height: size.height,
+      ...(ports.length > 0 ? { ports: ports.map((port) => ({ ...port })) } : {}),
       ...(nested.length > 0 ? { children: nested.map(buildNode) } : {}),
       ...(Object.keys(layoutOptions).length > 0 ? { layoutOptions } : {}),
     };
@@ -306,6 +320,35 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
   const edgesByEngineId = new Map<string, LayoutEdge>();
   const edges: ElkGraphEdge[] = [];
   const duplicateCounts = new Map<string, number>();
+  const portIds = new Set<string>();
+  const fixedPort = (
+    elementId: string,
+    engineId: string,
+    role: "source" | "target",
+    anchor: LayoutEdge["sourceAnchor"],
+  ): string | undefined => {
+    if (!isValidEdgeEndpointAnchor(anchor)) return undefined;
+    const element = elements.get(elementId)!;
+    const size = elementSize(element);
+    const boundary = edgeEndpointAnchorPoint(
+      { x: 0, y: 0, width: size.width, height: size.height },
+      elementShape(element),
+      anchor,
+    );
+    let id = `urn:iriograph:elk-port:${encodeURIComponent(engineId)}:${role}`;
+    while (elements.has(id) || portIds.has(id)) id += ":port";
+    portIds.add(id);
+    const ports = portsByElement.get(elementId) ?? [];
+    ports.push({
+      id,
+      x: boundary.x - 0.5,
+      y: boundary.y - 0.5,
+      width: 1,
+      height: 1,
+    });
+    portsByElement.set(elementId, ports);
+    return id;
+  };
   for (const edge of [...request.scene.edges].sort(compareEdge)) {
     if (!elements.has(edge.sourceElementId) || !elements.has(edge.targetElementId)) {
       diagnostics.push({
@@ -321,10 +364,22 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
     duplicateCounts.set(edge.elementId, occurrence + 1);
     const engineId = occurrence === 0 ? edge.elementId : `${edge.elementId}\u0000${occurrence}`;
     edgesByEngineId.set(engineId, edge);
+    const sourcePort = fixedPort(
+      edge.sourceElementId,
+      engineId,
+      "source",
+      edge.sourceAnchor,
+    );
+    const targetPort = fixedPort(
+      edge.targetElementId,
+      engineId,
+      "target",
+      edge.targetAnchor,
+    );
     edges.push({
       id: engineId,
-      sources: [edge.sourceElementId],
-      targets: [edge.targetElementId],
+      sources: [sourcePort ?? edge.sourceElementId],
+      targets: [targetPort ?? edge.targetElementId],
     });
   }
 
@@ -347,7 +402,9 @@ function prepareGraph(request: LayoutRequest, direction: LayoutDirection): Prepa
         "elk.layered.nodePlacement.favorStraightEdges": "true",
         "elk.layered.thoroughness": "20",
         "elk.layered.unnecessaryBendpoints": "false",
+        "elk.layered.allowNonFlowPortsToSwitchSides": "true",
         "elk.spacing.nodeNode": String(spacing.itemGap),
+        "elk.spacing.portPort": String(Math.max(8, Math.round(spacing.itemGap / 5))),
         "elk.spacing.edgeEdge": String(Math.max(10, Math.round(spacing.itemGap / 4))),
         "elk.spacing.edgeNode": String(Math.max(12, Math.round(spacing.itemGap / 3))),
         "elk.layered.spacing.edgeEdgeBetweenLayers": String(
@@ -524,7 +581,7 @@ function parseEngineOutput(
 
   const routes: Record<string, Point[]> = {};
   for (const [engineId, edge] of prepared.edgesByEngineId) {
-    const manual = manualRoute(edge, geometries);
+    const manual = edge.routeMode === "straight" ? undefined : manualRoute(edge, geometries);
     if (manual) {
       routes[edge.elementId] = manual;
       continue;
@@ -646,7 +703,7 @@ function ensureCompleteResult(
   const bundleIndexes = routeBundleIndexes(sortedEdges);
   const elementsById = new Map(elements.map((element) => [element.elementId, element]));
   for (const edge of sortedEdges) {
-    const manual = manualRoute(edge, geometries);
+    const manual = edge.routeMode === "straight" ? undefined : manualRoute(edge, geometries);
     const candidateRoute = candidate.routes[edge.elementId];
     let route: Point[];
     if (manual) {
@@ -830,7 +887,11 @@ function manualRoute(
   edge: LayoutEdge,
   geometries: Record<string, ElementGeometry>,
 ): Point[] | undefined {
-  if (edge.routingPlacement !== "user" || !edge.waypoints || edge.waypoints.length === 0) {
+  if (
+    (edge.routingPlacement !== "user" && edge.routeMode !== "manual")
+    || !edge.waypoints
+    || edge.waypoints.length === 0
+  ) {
     return undefined;
   }
   const source = geometries[edge.sourceElementId];

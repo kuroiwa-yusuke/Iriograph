@@ -42,6 +42,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Structured commandとLLM editの成功時は、同じdataset serializerでTurtleを決定的に再生成する。Turtle sourceの直接編集は適用された原文を保持するが、後の再serialize時にcomment、空白、triple記述順などの書式が保持されることを保証しない。
 - Resource削除は参照が残る場合に既定で拒否する。参照tripleのpreviewを伴う明示的cascadeだけを許可し、Seq/Altのordinal変更は一つのatomic patchで再採番する。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
+- 自動再投影と全体layoutはsemantic sourceの確定変更時だけ実行する。Overlay-only変更では他要素を再配置せず、変更要素とincident edgeのderived routeだけを更新する。
 - 通常の自動再配置は`placement: "generated"`の要素だけを対象とし、user配置をlayout更新で移動しない。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
 - 既定appearanceはcatalogを正本とし、利用者の色・透明度・線幅等の個別調整だけを安全なsparse overlayとして保持する。任意CSSは保存しない。

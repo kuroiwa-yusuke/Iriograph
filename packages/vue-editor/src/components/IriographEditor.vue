@@ -12,6 +12,7 @@ import {
   diagnosticTargetsSceneElement,
   generatedElementId,
   parseSemanticGraph,
+  projectSemanticView,
   previewAuthoringCommands,
   seedAuthoringCommandFromProvenance,
   semanticSourceFingerprint,
@@ -121,10 +122,16 @@ import { catalogCreationPalette } from "../creation-palette";
 import { diagnosticGuidance } from "../diagnostic-guidance";
 import { semanticDisplayMetadata } from "../semantic-metadata";
 import { membershipRegionClassIrisAtPoint } from "../region-membership-constraints";
+import { reconcilePresentationScene } from "../presentation-scene";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
+type RegionLabelWritingDirection = "horizontal" | "vertical";
+type DocumentRefreshKind = "semantic" | "presentation";
+type DisplayInspectorAction = "appearance" | "geometry" | "region-label" | "routing";
+
+const REGION_LABEL_WRITING_DIRECTION_EXTENSION = "urn:iriograph:vue-editor:region-label-writing-direction";
 
 const props = withDefaults(defineProps<{
   modelValue: IriographDocument;
@@ -214,6 +221,11 @@ const viewForm = ref({ viewId: "", profileRef: "", layoutRef: "", locale: "" });
 const viewDialog = ref<HTMLFormElement>();
 const viewDialogInitialFocus = ref<HTMLInputElement>();
 const viewDialogTitleId = `${useId()}-view-dialog-title`;
+const leftSidebarId = `${useId()}-left-sidebar`;
+const rightSidebarId = `${useId()}-right-sidebar`;
+const leftSidebarCollapsed = ref(false);
+const rightSidebarCollapsed = ref(false);
+const displayInspectorAction = ref<DisplayInspectorAction>();
 const contextMenuRequest = ref<DiagramContextMenuRequest>();
 let contextMenuReturnFocus: HTMLElement | undefined;
 const detailsDialogElementId = ref("");
@@ -281,6 +293,19 @@ const selectedElement = computed<SelectedElement | undefined>(() => [
   ...(scene.value.regions ?? []),
   ...scene.value.edges,
 ].find((element) => element.elementId === selectedElementId.value));
+watch(
+  () => `${selectedElementId.value}:${selectedElement.value?.structuralKind ?? ""}`,
+  () => {
+    const kind = selectedElement.value?.structuralKind;
+    displayInspectorAction.value = kind === "edge"
+      ? "routing"
+      : kind === "region"
+        ? "region-label"
+        : kind
+          ? "appearance"
+          : undefined;
+  },
+);
 const selectedOverlay = computed<ViewElementOverlay | undefined>(() => {
   if (!activeView.value || !selectedElementId.value) return undefined;
   return activeView.value.overlay[selectedElementId.value];
@@ -344,6 +369,12 @@ const selectedEdgeLabelExplanation = computed(() => {
 });
 const regionLabelPlacements = computed<Record<string, RegionLabelPlacement>>(() => Object.fromEntries(
   (scene.value.regions ?? []).map((region) => [region.elementId, regionLabelPlacementFor(region.elementId)]),
+));
+const regionLabelWritingDirections = computed<Record<string, RegionLabelWritingDirection>>(() => Object.fromEntries(
+  (scene.value.regions ?? []).map((region) => [
+    region.elementId,
+    regionLabelWritingDirectionFor(region.elementId),
+  ]),
 ));
 const hasSelectedEditableRouting = computed(() => Boolean(
   selectedEdge.value?.waypoints?.length
@@ -906,6 +937,7 @@ watch(
     if (nextJson === JSON.stringify(draft.value)) return;
     cancelSemanticRequest();
     saveActiveViewSession();
+    const previous = clone(draft.value);
     draft.value = clone(value);
     const nextViewId = resolveActiveViewId(
       draft.value,
@@ -921,7 +953,11 @@ watch(
     future.value = [];
     applyDiagnostics.value = [];
     invalidateAuthoringPreview();
-    void refreshScene();
+    if (documentRefreshKind(previous, draft.value) === "presentation") {
+      void refreshPresentationScene();
+    } else {
+      void refreshScene();
+    }
   },
   { deep: true },
 );
@@ -1110,6 +1146,46 @@ async function refreshScene(): Promise<void> {
   }
 }
 
+async function refreshPresentationScene(): Promise<void> {
+  const requestToken = ++sceneRequestToken;
+  sceneValidationAbortController?.abort();
+  sceneValidationAbortController = undefined;
+  const assetRequest = assetSceneSession.begin();
+  const document = clone(draft.value);
+  const runtime = projectionRuntimeContext.value;
+  const viewId = resolveActiveViewId(document, currentActiveViewId.value);
+  const view = document.views.find((candidate) => candidate.viewId === viewId);
+  const profile = view ? runtime?.catalogsByProfile.get(view.profileRef) : undefined;
+  if (!view || !runtime || !profile || rawScene.value.viewId !== viewId) {
+    await refreshScene();
+    return;
+  }
+  try {
+    const projected = projectSemanticView(
+      document,
+      profile.catalog,
+      viewId,
+      runtime.projectionOptions,
+    );
+    if (requestToken !== sceneRequestToken) return;
+    const reconciled = reconcilePresentationScene(rawScene.value, projected);
+    const result = props.assetAccess
+      ? await assetSceneSession.enrich(assetRequest, reconciled, profile.catalog.assets, props.assetAccess)
+      : assetSceneSession.commitWithoutAssets(assetRequest, reconciled);
+    if (requestToken !== sceneRequestToken || !result.accepted) return;
+    rawScene.value = result.scene;
+    clearMissingSelection(scene.value);
+  } catch (cause) {
+    if (requestToken !== sceneRequestToken) return;
+    applyDiagnostics.value = [{
+      severity: "error",
+      category: "internal",
+      code: "presentation-reconciliation-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    }];
+  }
+}
+
 function projectionContextFromLegacyCatalog(catalog: ProjectionCatalogV1): ProjectionRuntimeContext {
   const catalogRef = `${catalog.catalogId}@${catalog.catalogVersion}`;
   return createProjectionRuntimeContext([{
@@ -1286,6 +1362,15 @@ function setSelection(elementIds: readonly string[]): void {
   session.primaryElementId = primary;
   emit("selectionChanged", primary);
   emit("selectionSetChanged", [...next]);
+}
+
+function selectDisplayInspectorAction(action: DisplayInspectorAction, event: Event): void {
+  displayInspectorAction.value = action;
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLButtonElement)) return;
+  void nextTick(() => {
+    if (target.isConnected) target.focus();
+  });
 }
 
 function selectAndReveal(elementId: string, event: MouseEvent): void {
@@ -1574,6 +1659,29 @@ function regionLabelPlacementFor(elementId: string): RegionLabelPlacement {
     : "top";
 }
 
+function defaultRegionLabelPlacement(element: SceneRegion): RegionLabelPlacement {
+  const value = activeCatalog.value?.templates[element.templateRef]?.labelPlacement;
+  return typeof value === "string" && ["top", "right", "bottom", "left"].includes(value)
+    ? value as RegionLabelPlacement
+    : "top";
+}
+
+function defaultRegionLabelWritingDirection(
+  placement: RegionLabelPlacement,
+): RegionLabelWritingDirection {
+  return placement === "left" || placement === "right" ? "vertical" : "horizontal";
+}
+
+function regionLabelWritingDirectionFor(elementId: string): RegionLabelWritingDirection {
+  const placement = regionLabelPlacementFor(elementId);
+  const value = activeView.value?.overlay[elementId]?.appearance?.extensions?.[
+    REGION_LABEL_WRITING_DIRECTION_EXTENSION
+  ];
+  return value === "horizontal" || value === "vertical"
+    ? value
+    : defaultRegionLabelWritingDirection(placement);
+}
+
 function updateSelectedRegionLabelPlacement(event: Event): void {
   const element = selectedElement.value;
   const placement = (event.target as HTMLSelectElement).value as RegionLabelPlacement;
@@ -1583,8 +1691,37 @@ function updateSelectedRegionLabelPlacement(event: Event): void {
     if (!view) return;
     const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
     const appearance = { ...current.appearance };
-    if (placement === "top") delete appearance.labelPlacement;
+    if (placement === defaultRegionLabelPlacement(element)) delete appearance.labelPlacement;
     else appearance.labelPlacement = placement;
+    if (Object.keys(appearance).length) current.appearance = appearance;
+    else delete current.appearance;
+    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[element.elementId];
+    else view.overlay[element.elementId] = current;
+  }, true);
+}
+
+function updateSelectedRegionLabelWritingDirection(event: Event): void {
+  const element = selectedElement.value;
+  const direction = (event.target as HTMLSelectElement).value as RegionLabelWritingDirection;
+  if (
+    element?.structuralKind !== "region"
+    || props.readOnly
+    || (direction !== "horizontal" && direction !== "vertical")
+  ) return;
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
+    const appearance = { ...current.appearance };
+    const extensions = { ...appearance.extensions };
+    const placement = regionLabelPlacementFor(element.elementId);
+    if (direction === defaultRegionLabelWritingDirection(placement)) {
+      delete extensions[REGION_LABEL_WRITING_DIRECTION_EXTENSION];
+    } else {
+      extensions[REGION_LABEL_WRITING_DIRECTION_EXTENSION] = direction;
+    }
+    if (Object.keys(extensions).length) appearance.extensions = extensions;
+    else delete appearance.extensions;
     if (Object.keys(appearance).length) current.appearance = appearance;
     else delete current.appearance;
     if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[element.elementId];
@@ -1993,7 +2130,7 @@ async function applyStructuredAuthoring(): Promise<void> {
       ? applyCreatedResourceTemplate(result.document, preview, creationPresentation)
       : result.document;
     resetAuthoringDraft();
-    publish(committed, true);
+    publish(committed, true, "semantic");
     turtleDraft.value = committed.semantic.source;
   } catch (cause) {
     if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
@@ -2528,7 +2665,7 @@ async function applyTurtleDraft(): Promise<boolean> {
     return false;
   }
   if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
-  publish(result.document, true);
+  publish(result.document, true, "semantic");
   semanticWarningConfirmation.value = undefined;
   turtleDraft.value = result.document.semantic.source;
   return true;
@@ -2581,7 +2718,7 @@ async function flushPendingEdits(): Promise<boolean> {
     return false;
   }
   if (turtlePending.value) return applyTurtleDraft();
-  await refreshScene();
+  schemaDiagnostics.value = schemaDiagnosticsFor(draft.value, projectionRuntimeContext.value);
   return !schemaDiagnostics.value.some((item) => item.severity === "error")
     && !scene.value.diagnostics.some((item) => item.severity === "error");
 }
@@ -2819,11 +2956,14 @@ async function executeViewCommand(command: ViewCommand): Promise<boolean> {
   if (viewChanged) {
     emit("update:activeViewId", nextViewId);
   }
-  rawScene.value = emptyScene(nextViewId);
+  if (viewChanged) rawScene.value = emptyScene(nextViewId);
   restoreActiveViewSession();
-  publish(result.document, true);
+  await publish(
+    result.document,
+    true,
+    command.command === "reset-overlay" ? "presentation" : "semantic",
+  );
   if (controlledViewRequest) emit("update:activeViewId", controlledViewRequest);
-  await refreshScene();
   if (currentActiveViewId.value === nextViewId) {
     await nextTick();
     await diagramCanvas.value?.restoreViewport(sessionFor(nextViewId).viewport);
@@ -2870,10 +3010,14 @@ function mutateDocument(
   const next = clone(draft.value);
   mutation(next);
   if (JSON.stringify(next) === JSON.stringify(draft.value)) return;
-  publish(next, recordHistory);
+  publish(next, recordHistory, "presentation");
 }
 
-function publish(next: IriographDocument, recordHistory: boolean): void {
+function publish(
+  next: IriographDocument,
+  recordHistory: boolean,
+  refreshKind: DocumentRefreshKind,
+): Promise<void> {
   invalidateAuthoringPreview();
   if (recordHistory) {
     history.value.push(clone(draft.value));
@@ -2883,13 +3027,14 @@ function publish(next: IriographDocument, recordHistory: boolean): void {
   draft.value = clone(next);
   lastEmittedJson = JSON.stringify(draft.value);
   emit("update:modelValue", clone(draft.value));
-  void refreshScene();
+  return refreshKind === "presentation" ? refreshPresentationScene() : refreshScene();
 }
 
 function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): void {
   invalidateAuthoringPreview();
   saveActiveViewSession();
   const pendingTurtle = turtleDraft.value;
+  const refreshKind = documentRefreshKind(draft.value, next);
   draft.value = clone(next);
   const nextViewId = resolveActiveViewId(draft.value, currentActiveViewId.value);
   if (nextViewId !== currentActiveViewId.value) {
@@ -2902,7 +3047,21 @@ function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): voi
   applyDiagnostics.value = [];
   lastEmittedJson = JSON.stringify(draft.value);
   emit("update:modelValue", clone(draft.value));
-  void refreshScene();
+  if (refreshKind === "presentation") void refreshPresentationScene();
+  else void refreshScene();
+}
+
+function documentRefreshKind(
+  previous: IriographDocument,
+  next: IriographDocument,
+): DocumentRefreshKind {
+  const withoutOverlay = (document: IriographDocument) => ({
+    ...document,
+    views: document.views.map((view) => ({ ...view, overlay: {} })),
+  });
+  return JSON.stringify(withoutOverlay(previous)) === JSON.stringify(withoutOverlay(next))
+    ? "presentation"
+    : "semantic";
 }
 
 function geometryElement(elementId: string): GeometryElement | undefined {
@@ -2917,6 +3076,15 @@ function trimHistory(): void {
 function setZoomState(value: number): void {
   zoom.value = normalizeDiagramZoom(value);
   sessionFor(currentActiveViewId.value).viewport.zoom = zoom.value;
+}
+
+function toggleLeftSidebar(): void {
+  leftSidebarCollapsed.value = !leftSidebarCollapsed.value;
+}
+
+function toggleRightSidebar(): void {
+  rightSidebarCollapsed.value = !rightSidebarCollapsed.value;
+  if (rightSidebarCollapsed.value && appearanceEditorOpen.value) closeAppearanceEditor();
 }
 
 async function zoomTo(value: number): Promise<void> {
@@ -3116,8 +3284,22 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </div>
     </header>
 
-    <div class="iriograph-editor-layout">
-      <aside class="iriograph-elements-panel">
+    <div
+      class="iriograph-editor-layout"
+      :class="{
+        'left-sidebar-collapsed': leftSidebarCollapsed,
+        'right-sidebar-collapsed': rightSidebarCollapsed,
+      }"
+    >
+      <button
+        type="button"
+        class="iriograph-sidebar-toggle iriograph-left-sidebar-toggle"
+        :aria-label="leftSidebarCollapsed ? '左サイドバーを開く' : '左サイドバーを閉じる'"
+        :aria-expanded="!leftSidebarCollapsed"
+        :aria-controls="leftSidebarId"
+        @click="toggleLeftSidebar"
+      >{{ leftSidebarCollapsed ? '›' : '‹' }}</button>
+      <aside v-show="!leftSidebarCollapsed" :id="leftSidebarId" class="iriograph-elements-panel">
         <section class="iriograph-view-summary">
           <small>ACTIVE VIEW</small>
           <select
@@ -3178,11 +3360,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </aside>
 
       <main class="iriograph-main-surface">
-        <nav class="iriograph-view-tabs" aria-label="Editor view">
-          <button type="button" :class="{ active: panel === 'diagram' }" @click="panel = 'diagram'">◇ Diagram</button>
-          <button type="button" :class="{ active: panel === 'turtle' }" @click="panel = 'turtle'">≡ Turtle</button>
-          <button type="button" :class="{ active: panel === 'document' }" @click="panel = 'document'">{ } Document</button>
-          <button type="button" :class="{ active: panel === 'catalog' }" @click="panel = 'catalog'">⌘ Catalog</button>
+        <nav class="iriograph-view-tabs" aria-label="Canvasとsource表示を切り替え" role="group">
+          <button type="button" :class="{ active: panel === 'diagram' }" :aria-pressed="panel === 'diagram'" @click="panel = 'diagram'">◇ Diagram</button>
+          <button type="button" :class="{ active: panel === 'turtle' }" :aria-pressed="panel === 'turtle'" @click="panel = 'turtle'">≡ Turtle</button>
+          <button type="button" :class="{ active: panel === 'document' }" :aria-pressed="panel === 'document'" @click="panel = 'document'">{ } Document</button>
+          <button type="button" :class="{ active: panel === 'catalog' }" :aria-pressed="panel === 'catalog'" @click="panel = 'catalog'">⌘ Catalog</button>
         </nav>
 
         <section v-show="panel === 'diagram'" class="iriograph-diagram-panel">
@@ -3288,6 +3470,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :show-all-comments="showAllComments"
             :edge-route-modes="edgeRouteModes"
             :region-label-placements="regionLabelPlacements"
+            :region-label-writing-directions="regionLabelWritingDirections"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
             @selection-set-request="selectElements"
@@ -3351,8 +3534,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         </section>
       </main>
 
-      <aside class="iriograph-inspector">
-        <section v-if="selectedEdge" class="iriograph-edge-routing-quick" aria-label="選択した関係の経路">
+      <aside v-show="!rightSidebarCollapsed" :id="rightSidebarId" class="iriograph-inspector">
+        <section v-if="selectedEdge && displayInspectorAction === 'routing'" class="iriograph-edge-routing-quick" aria-label="選択した関係の経路">
           <header><div><small>SELECTED RELATION</small><strong>{{ selectedEdgeDisplayName }}</strong></div><span>{{ selectedManualWaypoints.length }} waypoint</span></header>
           <div class="iriograph-edge-contract"><span>{{ selectedEdgeEndpointLabels.source }}</span><b>→</b><span>{{ selectedEdgeEndpointLabels.target }}</span></div>
           <p>{{ selectedEdgeLabelExplanation }}</p>
@@ -3394,7 +3577,36 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択` : selectedElement.structuralKind === 'edge' ? '関係' : selectedElement.structuralKind === 'node' ? '要素' : '領域' }}</span>
         </header>
         <template v-if="selectedElement">
-          <section>
+          <nav class="iriograph-display-actions" aria-label="表示の編集操作">
+            <button
+              type="button"
+              :class="{ selected: displayInspectorAction === 'appearance' }"
+              :aria-current="displayInspectorAction === 'appearance' ? 'step' : undefined"
+              @click="selectDisplayInspectorAction('appearance', $event)"
+            >見た目</button>
+            <button
+              v-if="'geometry' in selectedElement"
+              type="button"
+              :class="{ selected: displayInspectorAction === 'geometry' }"
+              :aria-current="displayInspectorAction === 'geometry' ? 'step' : undefined"
+              @click="selectDisplayInspectorAction('geometry', $event)"
+            >位置・サイズ</button>
+            <button
+              v-if="selectedElement.structuralKind === 'region'"
+              type="button"
+              :class="{ selected: displayInspectorAction === 'region-label' }"
+              :aria-current="displayInspectorAction === 'region-label' ? 'step' : undefined"
+              @click="selectDisplayInspectorAction('region-label', $event)"
+            >領域名</button>
+            <button
+              v-if="selectedElement.structuralKind === 'edge'"
+              type="button"
+              :class="{ selected: displayInspectorAction === 'routing' }"
+              :aria-current="displayInspectorAction === 'routing' ? 'step' : undefined"
+              @click="selectDisplayInspectorAction('routing', $event)"
+            >経路・接点</button>
+          </nav>
+          <section class="iriograph-semantic-reference">
             <details><summary>Advanced: Semantic reference</summary><code>{{ selectedElement.semanticRef }}</code></details>
             <button
               v-if="selectedElement.structuralKind !== 'edge' && selectedElement.structuralKind !== 'region' && selectedElement.parentProvenance?.editCapability"
@@ -3403,7 +3615,6 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || authoringBusy || turtlePending"
               @click="seedParentRemoval"
             >包含から外す</button>
-            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="openAppearanceEditor">見た目を調整</button>
           </section>
           <section v-if="selectedContainmentWarnings.length" class="iriograph-containment-warnings">
             <label>Containment consistency</label>
@@ -3455,7 +3666,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Sourceへ移動</button>
             </article>
           </section>
-          <section>
+          <section v-if="displayInspectorAction === 'appearance'">
+            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="openAppearanceEditor">見た目を調整</button>
             <label>Template</label>
             <select
               v-if="selectedElement.structuralKind !== 'edge'"
@@ -3467,7 +3679,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </select>
             <code v-else>{{ selectedElement.templateRef }}</code>
           </section>
-          <section v-if="selectedElement.structuralKind === 'node'">
+          <section v-if="displayInspectorAction === 'appearance' && selectedElement.structuralKind === 'node'">
             <label>Icon IRI</label>
             <input
               list="iriograph-asset-refs"
@@ -3489,13 +3701,19 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               {{ pickingAsset ? "assetを選択中…" : "Workspace assetを選択" }}
             </button>
           </section>
-          <section v-if="selectedElement.structuralKind === 'region'">
+          <section v-if="displayInspectorAction === 'region-label' && selectedElement.structuralKind === 'region'">
             <label>領域名の位置</label>
             <select :value="regionLabelPlacements[selectedElement.elementId] ?? 'top'" :disabled="readOnly" @change="updateSelectedRegionLabelPlacement">
               <option value="top">上</option><option value="right">右</option><option value="bottom">下</option><option value="left">左</option>
             </select>
+            <label>文字方向</label>
+            <select aria-label="Region label writing direction" :value="regionLabelWritingDirections[selectedElement.elementId]" :disabled="readOnly" @change="updateSelectedRegionLabelWritingDirection">
+              <option value="horizontal">横書き（左から右）</option>
+              <option value="vertical">縦書き（上から下）</option>
+            </select>
+            <small>上下逆転や180度回転は保存しません。</small>
           </section>
-          <section v-if="'geometry' in selectedElement">
+          <section v-if="displayInspectorAction === 'geometry' && 'geometry' in selectedElement">
             <div class="iriograph-section-heading">
               <label>Geometry overlay</label>
               <span :class="selectedElement.placement">{{ selectedElement.placement }}</span>
@@ -3512,7 +3730,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               </label>
             </div>
           </section>
-          <section v-if="selectedElement.structuralKind === 'edge'">
+          <section v-if="displayInspectorAction === 'routing' && selectedElement.structuralKind === 'edge'">
             <label>Projection</label>
             <div class="iriograph-edge-contract">
               <span>{{ edgeEndpointLabel(selectedElement.sourceElementId, '始点') }}</span><b>→</b><span>{{ edgeEndpointLabel(selectedElement.targetElementId, '終点') }}</span>
@@ -3520,7 +3738,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <p>{{ selectedElement.fallback ? "標準の矢印として表示" : "定義済みの関係表示" }}</p>
             <details><summary>Advanced: projection rule</summary><code>{{ selectedElement.provenance?.rule?.ruleId ?? selectedElement.projectionRuleId }}</code></details>
           </section>
-          <section v-if="selectedElement.structuralKind === 'edge'" class="iriograph-routing-inspector">
+          <section v-if="displayInspectorAction === 'routing' && selectedElement.structuralKind === 'edge'" class="iriograph-routing-inspector">
             <div class="iriograph-section-heading">
               <label>Manual routing</label>
               <span>{{ selectedManualWaypoints.length ? `${selectedManualWaypoints.length} points` : "automatic" }}</span>
@@ -3598,15 +3816,23 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               @click="resetSelectedRouting"
             >Routingを自動に戻す</button>
           </section>
-          <section v-if="selectedElement.structuralKind !== 'edge' && selectedOverlay?.placement === 'user'">
+          <section v-if="displayInspectorAction === 'geometry' && selectedElement.structuralKind !== 'edge' && selectedOverlay?.placement === 'user'">
             <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="clearSelectedOverride">ユーザー調整を解除</button>
           </section>
         </template>
-        <section class="iriograph-overlay-preview">
-          <div class="iriograph-section-heading"><label>View overlay</label><span>{{ Object.keys(activeView?.overlay ?? {}).length }}</span></div>
+        <details class="iriograph-overlay-preview">
+          <summary>Advanced: View overlay ({{ Object.keys(activeView?.overlay ?? {}).length }})</summary>
           <pre>{{ overlayJson }}</pre>
-        </section>
+        </details>
       </aside>
+      <button
+        type="button"
+        class="iriograph-sidebar-toggle iriograph-right-sidebar-toggle"
+        :aria-label="rightSidebarCollapsed ? '右サイドバーを開く' : '右サイドバーを閉じる'"
+        :aria-expanded="!rightSidebarCollapsed"
+        :aria-controls="rightSidebarId"
+        @click="toggleRightSidebar"
+      >{{ rightSidebarCollapsed ? '‹' : '›' }}</button>
     </div>
 
     <div

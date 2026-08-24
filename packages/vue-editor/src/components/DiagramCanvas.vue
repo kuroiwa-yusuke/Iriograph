@@ -99,6 +99,7 @@ const props = withDefaults(defineProps<{
   showAllComments?: boolean;
   edgeRouteModes?: Readonly<Record<string, "auto" | "straight" | "orthogonal" | "curve" | "manual">>;
   regionLabelPlacements?: Readonly<Record<string, "top" | "right" | "bottom" | "left" | "center">>;
+  regionLabelWritingDirections?: Readonly<Record<string, "horizontal" | "vertical">>;
   busy?: boolean;
 }>(), {
   selectedElementId: "",
@@ -115,6 +116,7 @@ const props = withDefaults(defineProps<{
   showAllComments: false,
   edgeRouteModes: () => ({}),
   regionLabelPlacements: () => ({}),
+  regionLabelWritingDirections: () => ({}),
   busy: false,
 });
 
@@ -1666,6 +1668,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             showAllComments,
             edgeRouteModes,
             regionLabelPlacements,
+            regionLabelWritingDirections,
           ]"
           :style="{
             width: `${scene.width}px`,
@@ -1711,7 +1714,13 @@ defineExpose<DiagramCanvasNavigationApi>({
             @contextmenu="requestPointerContextMenu($event, 'region', region.elementId)"
           >
             <span class="iriograph-region-fill" :style="{ background: region.style.fill, opacity: region.style.fillOpacity ?? 0.28 }" />
-            <span class="iriograph-region-label" :class="`label-${regionLabelPlacements[region.elementId] ?? region.labelPlacement ?? 'top'}`">{{ region.label }}</span>
+            <span
+              class="iriograph-region-label"
+              :class="[
+                `label-${regionLabelPlacements[region.elementId] ?? region.labelPlacement ?? 'top'}`,
+                `writing-${regionLabelWritingDirections[region.elementId] ?? ((regionLabelPlacements[region.elementId] ?? region.labelPlacement) === 'left' || (regionLabelPlacements[region.elementId] ?? region.labelPlacement) === 'right' ? 'vertical' : 'horizontal')}`,
+              ]"
+            >{{ region.label }}</span>
             <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(' ／ ') }}</span>
             <span v-if="commentsFor(region.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" role="note">{{ commentsFor(region.semanticRef) }}</span>
             <span v-if="selectedElementIdsSet.size === 1 && selectedElementId === region.elementId && !readOnly" class="iriograph-resize-handle" title="領域サイズを変更" @pointerdown="startResize($event, region)" />

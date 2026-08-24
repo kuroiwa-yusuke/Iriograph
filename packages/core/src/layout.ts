@@ -1,5 +1,6 @@
 import {
   edgeEndpointAnchorFromPoint,
+  edgeEndpointAnchorHaloGeometry,
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
 } from "./endpoint-anchor.js";
@@ -943,6 +944,8 @@ const ROUTE_GRID_OBSTACLE_LIMIT = 24;
 const ROUTE_GRID_COMMITTED_LIMIT = 16;
 const ROUTE_GRID_ELEMENT_LIMIT = 256;
 const ROUTE_GRID_EDGE_LIMIT = 512;
+const ROUTE_REFINEMENT_PASSES = 2;
+const ROUTE_ENDPOINT_STUB = ROUTE_OBSTACLE_PADDING + 2;
 
 function routeEdges(state: LayoutState): Record<string, Point[]> {
   const routes: Record<string, Point[]> = {};
@@ -973,10 +976,9 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
         reportMissingEndpoint(edge, state);
         return;
       }
-      const manual = manualWaypoints(edge);
-      if (manual) {
+      if (edge.routeMode === "straight") {
         routes[edge.elementId] = applyEndpointAnchors(
-          manualRoute(source, target, manual, false),
+          directRoute(edge, source, target, state),
           edge,
           source,
           target,
@@ -984,9 +986,10 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
         );
         return;
       }
-      if (edge.routeMode === "straight") {
+      const manual = manualWaypoints(edge);
+      if (manual) {
         routes[edge.elementId] = applyEndpointAnchors(
-          directRoute(edge, source, target, state),
+          manualRoute(source, target, manual, false),
           edge,
           source,
           target,
@@ -1003,7 +1006,13 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
       const route = edge.sourceElementId === canonicalSourceId
         ? canonicalRoute
         : [...canonicalRoute].reverse().map(copyPoint);
-      routes[edge.elementId] = applyEndpointAnchors(route, edge, source, target, state);
+      routes[edge.elementId] = withDerivedEndpointStubs(
+        applyEndpointAnchors(route, edge, source, target, state),
+        edge,
+        source,
+        target,
+        state,
+      );
     });
   }
   return improveDerivedRoutes(routes, state);
@@ -1015,6 +1024,14 @@ function directRoute(
   target: ElementGeometry,
   state: LayoutState,
 ): Point[] {
+  if (edge.sourceElementId === edge.targetElementId) {
+    const centerY = source.y + source.height / 2;
+    const inset = Math.max(4, Math.min(12, source.height / 4));
+    return [
+      { x: source.x + source.width, y: centerY - inset },
+      { x: source.x + source.width, y: centerY + inset },
+    ];
+  }
   const sourceToward = centerOf(target);
   const targetToward = centerOf(source);
   return [
@@ -1038,17 +1055,17 @@ type RoutedEdge = {
 
 type RouteCost = readonly [
   obstacleIntersections: number,
-  overlapLength: number,
   crossings: number,
-  bends: number,
+  overlapLength: number,
   length: number,
+  bends: number,
 ];
 
 type RouteSearchCost = readonly [
-  overlapLength: number,
   crossings: number,
-  bends: number,
+  overlapLength: number,
   length: number,
+  bends: number,
 ];
 
 type GridSearchEntry = {
@@ -1078,42 +1095,78 @@ function improveDerivedRoutes(
     || state.edges.length > ROUTE_GRID_EDGE_LIMIT
   ) return routes;
 
-  const committed: RoutedEdge[] = [];
-  for (const edge of state.edges) {
-    const base = routes[edge.elementId];
-    if (edge.routeMode === "straight") {
-      if (base) committed.push({ edge, points: base });
-      continue;
-    }
-    if (!base || base.length < 2 || edge.sourceElementId === edge.targetElementId) {
-      if (base) committed.push({ edge, points: base });
-      continue;
-    }
+  const sorted = [...state.edges].sort(compareEdge);
+  const bundled = new Set(
+    [...edgeBundles(sorted).values()]
+      .filter((edges) => edges.length > 1)
+      .flatMap((edges) => edges.map((edge) => edge.elementId)),
+  );
+  for (const edge of sorted) {
+    if (!isImmutableRoute(edge)) continue;
+    const route = routes[edge.elementId];
+    if (!route) continue;
     const obstacles = routeObstacles(edge, state);
-    const baseCost = routeCost(base, obstacles, committed);
-    const manual = edge.routingPlacement === "user" && Boolean(edge.waypoints?.length);
-    if (
-      baseCost[0] === 0
-      && (manual || (baseCost[1] === 0 && baseCost[2] === 0))
-    ) {
-      committed.push({ edge, points: base });
-      continue;
-    }
+    if (!polylineIntersectsAnyGeometry(route, obstacles)) continue;
+    state.diagnostics.push({
+      severity: "warning",
+      code: "layout-manual-route-obstacle",
+      message: `manual route intersects a node or comment obstacle and was preserved: ${edge.elementId}`,
+      layoutRef: state.request.layoutRef,
+      edgeId: edge.elementId,
+    });
+  }
+  const orders = [sorted, [...sorted].reverse()];
+  for (let pass = 0; pass < ROUTE_REFINEMENT_PASSES; pass += 1) {
+    for (const edge of orders[pass % orders.length]!) {
+      const base = routes[edge.elementId];
+      if (
+        isImmutableRoute(edge)
+        || edge.routeMode === "straight"
+        || !base
+        || base.length < 2
+        || edge.sourceElementId === edge.targetElementId
+      ) continue;
 
-    const gates = routeGates(edge, base);
-    const candidate = routeThroughGates(gates, base, obstacles, committed);
-    if (candidate) {
-      const candidateCost = routeCost(candidate, obstacles, committed);
+      // Every refinement compares against the complete current route set, not
+      // just routes visited earlier in this pass. This makes each accepted
+      // replacement a monotonic graph-global improvement while the fixed
+      // forward/reverse passes keep runtime and tie-breaking deterministic.
+      const others = sorted.flatMap((other): RoutedEdge[] => {
+        if (other.elementId === edge.elementId) return [];
+        const points = routes[other.elementId];
+        return points ? [{ edge: other, points }] : [];
+      });
+      const obstacles = routeObstacles(edge, state);
+      const baseCost = routeCost(base, edge, obstacles, others, state);
+      if (
+        bundled.has(edge.elementId)
+        && baseCost[0] === 0
+        && baseCost[1] === 0
+        && baseCost[2] === 0
+      ) continue;
+      const frame = autoRouteFrame(base);
+      const middle = routeThroughGates(
+        frame.gates,
+        base,
+        [...obstacles, ...endpointRoutingObstacles(edge, state)],
+        others,
+        edge,
+        state,
+      );
+      if (!middle) continue;
+      const candidate = frameRoute(frame, middle);
+      const candidateCost = routeCost(candidate, edge, obstacles, others, state);
       if (
         (baseCost[0] === 0 || candidateCost[0] === 0)
         && compareRouteCandidate(candidateCost, candidate, baseCost, base) < 0
-      ) {
-        routes[edge.elementId] = candidate;
-      }
+      ) routes[edge.elementId] = candidate;
     }
-    committed.push({ edge, points: routes[edge.elementId]! });
   }
   return routes;
+}
+
+function isImmutableRoute(edge: LayoutEdge): boolean {
+  return edge.routingPlacement === "user" || edge.routeMode === "manual";
 }
 
 function routeObstacles(edge: LayoutEdge, state: LayoutState): ElementGeometry[] {
@@ -1132,14 +1185,40 @@ function routeObstacles(edge: LayoutEdge, state: LayoutState): ElementGeometry[]
   return result;
 }
 
-function routeGates(edge: LayoutEdge, base: readonly Point[]): Point[] {
+function endpointRoutingObstacles(edge: LayoutEdge, state: LayoutState): ElementGeometry[] {
+  return [...new Set([edge.sourceElementId, edge.targetElementId])].flatMap((id) => {
+    const geometry = state.geometries[id];
+    return geometry ? [copyGeometry(geometry)] : [];
+  });
+}
+
+type AutoRouteFrame = {
+  prefix: Point[];
+  gates: Point[];
+  suffix: Point[];
+};
+
+function autoRouteFrame(base: readonly Point[]): AutoRouteFrame {
   const start = base[0];
   const end = base.at(-1);
-  if (!start || !end) return [];
-  const manual = edge.routingPlacement === "user" && edge.waypoints?.length
-    ? edge.waypoints.map(copyPoint)
-    : [];
-  return [copyPoint(start), ...manual, copyPoint(end)];
+  if (!start || !end) return { prefix: [], gates: [], suffix: [] };
+  if (base.length < 4) {
+    return { prefix: [copyPoint(start)], gates: [copyPoint(start), copyPoint(end)], suffix: [] };
+  }
+  const sourceHalo = base[1]!;
+  const targetHalo = base.at(-2)!;
+  return {
+    prefix: [copyPoint(start)],
+    gates: [copyPoint(sourceHalo), copyPoint(targetHalo)],
+    suffix: [copyPoint(end)],
+  };
+}
+
+function frameRoute(frame: AutoRouteFrame, middle: readonly Point[]): Point[] {
+  const result = frame.prefix.map(copyPoint);
+  if (middle.length > 0) appendConnectedRoute(result, middle);
+  if (frame.suffix.length > 0) appendConnectedRoute(result, frame.suffix);
+  return simplifyOrthogonalRoute(result);
 }
 
 function routeThroughGates(
@@ -1147,6 +1226,8 @@ function routeThroughGates(
   base: readonly Point[],
   allObstacles: readonly ElementGeometry[],
   committed: readonly RoutedEdge[],
+  edge: LayoutEdge,
+  state: LayoutState,
 ): Point[] | undefined {
   if (gates.length < 2) return undefined;
   const relevant = relevantRouteObstacles(gates, base, allObstacles);
@@ -1161,6 +1242,8 @@ function routeThroughGates(
       relevant,
       committed,
       base,
+      edge,
+      state,
     );
     if (!segmentRoute) return undefined;
     appendConnectedRoute(route, segmentRoute);
@@ -1193,6 +1276,8 @@ function rectilinearVisibilityRoute(
   obstacles: readonly ElementGeometry[],
   committed: readonly RoutedEdge[],
   base: readonly Point[],
+  edge: LayoutEdge,
+  state: LayoutState,
 ): Point[] | undefined {
   if (samePoint(start, end)) return [copyPoint(start), copyPoint(end)];
   if (obstacles.some((obstacle) => pointInsideGeometry(start, obstacle))) return undefined;
@@ -1285,12 +1370,12 @@ function rectilinearVisibilityRoute(
 
     for (const neighbor of neighbors) {
       const target = points[neighbor.pointIndex]!;
-      const interaction = segmentInteraction(point, target, committed, true);
+      const interaction = segmentInteraction(point, target, edge, committed, state, true);
       const nextCost: RouteSearchCost = [
-        current.cost[0] + interaction.overlapLength,
-        current.cost[1] + interaction.crossings,
-        current.cost[2] + (current.direction !== 0 && current.direction !== neighbor.direction ? 1 : 0),
-        current.cost[3] + pointDistance(point, target),
+        current.cost[0] + interaction.crossings,
+        current.cost[1] + interaction.overlapLength,
+        current.cost[2] + pointDistance(point, target),
+        current.cost[3] + (current.direction !== 0 && current.direction !== neighbor.direction ? 1 : 0),
       ];
       const nextSignature = `${current.signature}>${pointSignature(target)}`;
       const nextState = searchStateKey(neighbor.pointIndex, neighbor.direction);
@@ -1382,8 +1467,10 @@ class MinRouteQueue {
 
 function routeCost(
   route: readonly Point[],
+  edge: LayoutEdge,
   obstacles: readonly ElementGeometry[],
   committed: readonly RoutedEdge[],
+  state: LayoutState,
 ): RouteCost {
   let obstacleIntersections = 0;
   let overlapLength = 0;
@@ -1394,59 +1481,132 @@ function routeCost(
     obstacleIntersections += obstacles.filter((obstacle) => (
       segmentIntersectsGeometry(start, end, obstacle)
     )).length;
-    const interaction = segmentInteraction(start, end, committed);
+  }
+  for (const routed of committed) {
+    const interaction = polylineInteraction(route, edge, routed, state);
     overlapLength += interaction.overlapLength;
     crossings += interaction.crossings;
   }
   return [
     obstacleIntersections,
-    overlapLength,
     crossings,
-    routeBends(route),
+    overlapLength,
     routeLength(route),
+    routeBends(route),
   ];
+}
+
+function polylineInteraction(
+  points: readonly Point[],
+  edge: LayoutEdge,
+  routed: RoutedEdge,
+  state: LayoutState,
+): { overlapLength: number; crossings: number } {
+  const sharedEndpointGeometries = sharedEndpointIds(edge, routed.edge).flatMap((id) => {
+    const geometry = state.geometries[id];
+    return geometry ? [expandGeometry(geometry, ROUTE_ENDPOINT_STUB + 1)] : [];
+  });
+  let overlapLength = 0;
+  const crossingPoints = new Set<string>();
+  for (let leftIndex = 0; leftIndex < points.length - 1; leftIndex += 1) {
+    const leftStart = points[leftIndex]!;
+    const leftEnd = points[leftIndex + 1]!;
+    for (let rightIndex = 0; rightIndex < routed.points.length - 1; rightIndex += 1) {
+      const rightStart = routed.points[rightIndex]!;
+      const rightEnd = routed.points[rightIndex + 1]!;
+      overlapLength += collinearOverlapLengthOutsideGeometries(
+        leftStart,
+        leftEnd,
+        rightStart,
+        rightEnd,
+        sharedEndpointGeometries,
+      );
+      const intersection = segmentIntersectionPoint(
+        leftStart,
+        leftEnd,
+        rightStart,
+        rightEnd,
+        true,
+      );
+      if (
+        intersection
+        && !sharedEndpointGeometries.some((geometry) => pointInsideOrOnGeometry(intersection, geometry))
+      ) crossingPoints.add(pointSignature(intersection));
+    }
+  }
+  return { overlapLength, crossings: crossingPoints.size };
 }
 
 function segmentInteraction(
   start: Point,
   end: Point,
+  edge: LayoutEdge,
   committed: readonly RoutedEdge[],
+  state: LayoutState,
   includeCandidateEndpoints = false,
 ): { overlapLength: number; crossings: number } {
   let overlapLength = 0;
   let crossings = 0;
   for (const routed of committed) {
+    const sharedEndpointGeometries = sharedEndpointIds(edge, routed.edge).flatMap((id) => {
+      const geometry = state.geometries[id];
+      return geometry ? [expandGeometry(geometry, ROUTE_ENDPOINT_STUB + 1)] : [];
+    });
     for (let index = 0; index < routed.points.length - 1; index += 1) {
       const otherStart = routed.points[index]!;
       const otherEnd = routed.points[index + 1]!;
-      overlapLength += collinearOverlapLength(start, end, otherStart, otherEnd);
+      overlapLength += collinearOverlapLengthOutsideGeometries(
+        start,
+        end,
+        otherStart,
+        otherEnd,
+        sharedEndpointGeometries,
+      );
+      const intersection = segmentIntersectionPoint(start, end, otherStart, otherEnd, includeCandidateEndpoints);
       if (
-        includeCandidateEndpoints
-          ? candidateSegmentCrossesRoute(start, end, otherStart, otherEnd)
-          : segmentsCrossStrictly(start, end, otherStart, otherEnd)
+        intersection
+        && !sharedEndpointGeometries.some((geometry) => pointInsideOrOnGeometry(intersection, geometry))
       ) crossings += 1;
     }
   }
   return { overlapLength, crossings };
 }
 
-function candidateSegmentCrossesRoute(
-  candidateStart: Point,
-  candidateEnd: Point,
-  routeStart: Point,
-  routeEnd: Point,
-): boolean {
-  const candidateDx = candidateEnd.x - candidateStart.x;
-  const candidateDy = candidateEnd.y - candidateStart.y;
-  const routeDx = routeEnd.x - routeStart.x;
-  const routeDy = routeEnd.y - routeStart.y;
-  const denominator = candidateDx * routeDy - candidateDy * routeDx;
-  if (denominator === 0) return false;
-  const offsetX = routeStart.x - candidateStart.x;
-  const offsetY = routeStart.y - candidateStart.y;
-  const candidateRatio = (offsetX * routeDy - offsetY * routeDx) / denominator;
-  const routeRatio = (offsetX * candidateDy - offsetY * candidateDx) / denominator;
-  return candidateRatio >= 0 && candidateRatio <= 1 && routeRatio > 0 && routeRatio < 1;
+function sharedEndpointIds(left: LayoutEdge, right: LayoutEdge): string[] {
+  return [...new Set([
+    left.sourceElementId,
+    left.targetElementId,
+  ].filter((id) => id === right.sourceElementId || id === right.targetElementId))];
+}
+
+function segmentIntersectionPoint(
+  leftStart: Point,
+  leftEnd: Point,
+  rightStart: Point,
+  rightEnd: Point,
+  includeLeftEndpoints: boolean,
+): Point | undefined {
+  const leftDx = leftEnd.x - leftStart.x;
+  const leftDy = leftEnd.y - leftStart.y;
+  const rightDx = rightEnd.x - rightStart.x;
+  const rightDy = rightEnd.y - rightStart.y;
+  const denominator = leftDx * rightDy - leftDy * rightDx;
+  if (denominator === 0) return undefined;
+  const offsetX = rightStart.x - leftStart.x;
+  const offsetY = rightStart.y - leftStart.y;
+  const leftRatio = (offsetX * rightDy - offsetY * rightDx) / denominator;
+  const rightRatio = (offsetX * leftDy - offsetY * leftDx) / denominator;
+  const leftInside = includeLeftEndpoints
+    ? leftRatio >= 0 && leftRatio <= 1
+    : leftRatio > 0 && leftRatio < 1;
+  const rightInside = includeLeftEndpoints
+    ? rightRatio >= 0 && rightRatio <= 1
+    : rightRatio > 0 && rightRatio < 1;
+  if (!leftInside || !rightInside) return undefined;
+  return {
+    x: leftStart.x + leftDx * leftRatio,
+    y: leftStart.y + leftDy * leftRatio,
+  };
 }
 
 function compareRouteCandidate(
@@ -1529,6 +1689,13 @@ function polylineIntersectsGeometry(
   return false;
 }
 
+function polylineIntersectsAnyGeometry(
+  route: readonly Point[],
+  geometries: readonly ElementGeometry[],
+): boolean {
+  return geometries.some((geometry) => polylineIntersectsGeometry(route, geometry));
+}
+
 function segmentIntersectsAnyGeometry(
   start: Point,
   end: Point,
@@ -1603,46 +1770,57 @@ function pointInsideGeometry(point: Point, geometry: ElementGeometry): boolean {
     && point.y < geometry.y + geometry.height;
 }
 
-function collinearOverlapLength(
+function pointInsideOrOnGeometry(point: Point, geometry: ElementGeometry): boolean {
+  return point.x >= geometry.x
+    && point.x <= geometry.x + geometry.width
+    && point.y >= geometry.y
+    && point.y <= geometry.y + geometry.height;
+}
+
+function collinearOverlapLengthOutsideGeometries(
   leftStart: Point,
   leftEnd: Point,
   rightStart: Point,
   rightEnd: Point,
+  excluded: readonly ElementGeometry[],
 ): number {
-  if (leftStart.x === leftEnd.x && rightStart.x === rightEnd.x && leftStart.x === rightStart.x) {
-    return intervalOverlap(leftStart.y, leftEnd.y, rightStart.y, rightEnd.y);
+  const vertical = leftStart.x === leftEnd.x
+    && rightStart.x === rightEnd.x
+    && leftStart.x === rightStart.x;
+  const horizontal = leftStart.y === leftEnd.y
+    && rightStart.y === rightEnd.y
+    && leftStart.y === rightStart.y;
+  if (!vertical && !horizontal) return 0;
+  const leftA = vertical ? leftStart.y : leftStart.x;
+  const leftB = vertical ? leftEnd.y : leftEnd.x;
+  const rightA = vertical ? rightStart.y : rightStart.x;
+  const rightB = vertical ? rightEnd.y : rightEnd.x;
+  const low = Math.max(Math.min(leftA, leftB), Math.min(rightA, rightB));
+  const high = Math.min(Math.max(leftA, leftB), Math.max(rightA, rightB));
+  if (high <= low) return 0;
+  const coordinate = vertical ? leftStart.x : leftStart.y;
+  const cuts = excluded.flatMap((geometry): Array<readonly [number, number]> => {
+    const crossLow = vertical ? geometry.x : geometry.y;
+    const crossHigh = vertical
+      ? geometry.x + geometry.width
+      : geometry.y + geometry.height;
+    if (coordinate < crossLow || coordinate > crossHigh) return [];
+    const axisLow = vertical ? geometry.y : geometry.x;
+    const axisHigh = vertical
+      ? geometry.y + geometry.height
+      : geometry.x + geometry.width;
+    const cutLow = Math.max(low, axisLow);
+    const cutHigh = Math.min(high, axisHigh);
+    return cutHigh > cutLow ? [[cutLow, cutHigh] as const] : [];
+  }).sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  let excludedLength = 0;
+  let cursor = low;
+  for (const [cutLow, cutHigh] of cuts) {
+    if (cutHigh <= cursor) continue;
+    excludedLength += cutHigh - Math.max(cursor, cutLow);
+    cursor = Math.max(cursor, cutHigh);
   }
-  if (leftStart.y === leftEnd.y && rightStart.y === rightEnd.y && leftStart.y === rightStart.y) {
-    return intervalOverlap(leftStart.x, leftEnd.x, rightStart.x, rightEnd.x);
-  }
-  return 0;
-}
-
-function intervalOverlap(leftA: number, leftB: number, rightA: number, rightB: number): number {
-  return Math.max(
-    0,
-    Math.min(Math.max(leftA, leftB), Math.max(rightA, rightB))
-      - Math.max(Math.min(leftA, leftB), Math.min(rightA, rightB)),
-  );
-}
-
-function segmentsCrossStrictly(
-  leftStart: Point,
-  leftEnd: Point,
-  rightStart: Point,
-  rightEnd: Point,
-): boolean {
-  const leftDx = leftEnd.x - leftStart.x;
-  const leftDy = leftEnd.y - leftStart.y;
-  const rightDx = rightEnd.x - rightStart.x;
-  const rightDy = rightEnd.y - rightStart.y;
-  const denominator = leftDx * rightDy - leftDy * rightDx;
-  if (denominator === 0) return false;
-  const offsetX = rightStart.x - leftStart.x;
-  const offsetY = rightStart.y - leftStart.y;
-  const leftRatio = (offsetX * rightDy - offsetY * rightDx) / denominator;
-  const rightRatio = (offsetX * leftDy - offsetY * leftDx) / denominator;
-  return leftRatio > 0 && leftRatio < 1 && rightRatio > 0 && rightRatio < 1;
+  return Math.max(0, high - low - excludedLength);
 }
 
 function collinear(first: Point, middle: Point, last: Point): boolean {
@@ -1826,6 +2004,15 @@ function routeSelfLoopBundle(
     return;
   }
   edges.forEach((edge, index) => {
+    if (edge.routeMode === "straight") {
+      const centerY = geometry.y + geometry.height / 2;
+      const inset = Math.max(4, Math.min(12, geometry.height / 4));
+      routes[edge.elementId] = applyEndpointAnchors([
+        { x: geometry.x + geometry.width, y: centerY - inset },
+        { x: geometry.x + geometry.width, y: centerY + inset },
+      ], edge, geometry, geometry, state);
+      return;
+    }
     const manual = manualWaypoints(edge);
     const route = manual
       ? manualRoute(geometry, geometry, manual, true)
@@ -1862,6 +2049,78 @@ function applyEndpointAnchors(
   return result;
 }
 
+function withDerivedEndpointStubs(
+  route: readonly Point[],
+  edge: LayoutEdge,
+  source: ElementGeometry,
+  target: ElementGeometry,
+  state: LayoutState,
+): Point[] {
+  if (route.length < 2 || isImmutableRoute(edge) || edge.routeMode === "straight") {
+    return route.map(copyPoint);
+  }
+  // Preserve stable lane positions while the nominal flow axis matches the
+  // actual geometry. If user geometry is primarily on the other axis, choose
+  // the genuinely nearest facing sides instead of an LR/TB opposite-side port.
+  const sourceCenter = centerOf(source);
+  const targetCenter = centerOf(target);
+  const horizontalSeparation = Math.abs(targetCenter.x - sourceCenter.x)
+    >= Math.abs(targetCenter.y - sourceCenter.y);
+  const nominalAxisMatches = state.direction === "LR"
+    ? horizontalSeparation
+    : !horizontalSeparation;
+  const sourceToward = nominalAxisMatches ? route[0]! : targetCenter;
+  const targetToward = nominalAxisMatches ? route.at(-1)! : sourceCenter;
+  const sourceAnchor = isValidEdgeEndpointAnchor(edge.sourceAnchor)
+    ? edge.sourceAnchor
+    : edgeEndpointAnchorFromPoint(source, sourceToward);
+  const targetAnchor = isValidEdgeEndpointAnchor(edge.targetAnchor)
+    ? edge.targetAnchor
+    : edgeEndpointAnchorFromPoint(target, targetToward);
+  const sourceHalo = endpointRoutingHaloGeometry(
+    source,
+    layoutElementShape(state.elements.get(edge.sourceElementId)),
+    sourceAnchor,
+  );
+  const targetHalo = endpointRoutingHaloGeometry(
+    target,
+    layoutElementShape(state.elements.get(edge.targetElementId)),
+    targetAnchor,
+  );
+  return [
+    sourceHalo.boundaryPoint,
+    sourceHalo.haloPoint,
+    ...route.slice(1, -1).map(copyPoint),
+    targetHalo.haloPoint,
+    targetHalo.boundaryPoint,
+  ];
+}
+
+function endpointRoutingHaloGeometry(
+  geometry: ElementGeometry,
+  shape: EdgeEndpointShape,
+  anchor: EdgeEndpointAnchor,
+) {
+  const initial = edgeEndpointAnchorHaloGeometry(geometry, shape, anchor, 0);
+  const distances: number[] = [];
+  if (initial.normal.x > 0) {
+    distances.push((geometry.x + geometry.width - initial.boundaryPoint.x) / initial.normal.x);
+  } else if (initial.normal.x < 0) {
+    distances.push((geometry.x - initial.boundaryPoint.x) / initial.normal.x);
+  }
+  if (initial.normal.y > 0) {
+    distances.push((geometry.y + geometry.height - initial.boundaryPoint.y) / initial.normal.y);
+  } else if (initial.normal.y < 0) {
+    distances.push((geometry.y - initial.boundaryPoint.y) / initial.normal.y);
+  }
+  const boxExitDistance = Math.min(...distances.filter((distance) => distance >= 0));
+  const distance = Math.max(
+    ROUTE_ENDPOINT_STUB,
+    Number.isFinite(boxExitDistance) ? boxExitDistance + 1 : ROUTE_ENDPOINT_STUB,
+  );
+  return edgeEndpointAnchorHaloGeometry(geometry, shape, anchor, distance);
+}
+
 function layoutElementShape(element: LayoutElement | undefined): EdgeEndpointShape {
   return element?.shape ?? (element?.structuralKind === "container"
     ? "container"
@@ -1869,7 +2128,7 @@ function layoutElementShape(element: LayoutElement | undefined): EdgeEndpointSha
 }
 
 function manualWaypoints(edge: LayoutEdge): Point[] | undefined {
-  return edge.routingPlacement === "user" && edge.waypoints && edge.waypoints.length > 0
+  return isImmutableRoute(edge) && edge.waypoints && edge.waypoints.length > 0
     ? edge.waypoints.map(copyPoint)
     : undefined;
 }

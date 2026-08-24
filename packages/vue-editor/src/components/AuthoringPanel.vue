@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, useId } from "vue";
+import { computed, nextTick, ref, useId } from "vue";
 import type { ProjectionDiagnostic } from "@iriograph/core";
 
 import type {
@@ -116,6 +116,29 @@ const selectedMembershipIris = computed(() => new Set([
   props.modelValue.memberIri,
   ...props.modelValue.memberIris,
 ].filter(Boolean)));
+const editingDraft = computed(() => !props.preview);
+const targetSummary = computed(() => {
+  if (selectedBatch.value.length === 0) return "図から対象を選択するか、新しい要素を作成してください";
+  if (selectedBatch.value.length === 1) return selectedBatch.value[0]?.label ?? selectedBatch.value[0]?.iri ?? "1件を選択";
+  return `${selectedBatch.value.length}件を選択`;
+});
+
+function restoreActionFocus(target: EventTarget | null): void {
+  if (!(target instanceof HTMLButtonElement)) return;
+  void nextTick(() => {
+    if (target.isConnected) target.focus();
+  });
+}
+
+function isActionSelected(kind: EditorAuthoringKind): boolean {
+  return editingDraft.value && props.modelValue.kind === kind;
+}
+
+function isClassificationSelected(predicateIri: string): boolean {
+  return editingDraft.value
+    && props.modelValue.kind === "set-property"
+    && props.modelValue.predicateIri === predicateIri;
+}
 
 function update<K extends keyof EditorAuthoringDraft>(
   key: K,
@@ -132,7 +155,7 @@ function changeKind(event: Event): void {
   emit("update:modelValue", emptyAuthoringDraft(inputValue(event) as EditorAuthoringKind));
 }
 
-function selectQuickKind(kind: EditorAuthoringKind): void {
+function selectQuickKind(kind: EditorAuthoringKind, event?: Event): void {
   const primary = selectedBatch.value[0]?.iri ?? props.selectedResource?.iri ?? "";
   const draft = emptyAuthoringDraft(kind, primary);
   if (kind === "set-property") {
@@ -154,9 +177,13 @@ function selectQuickKind(kind: EditorAuthoringKind): void {
     draft.predicateIri = props.edgePredicates[0]?.iri ?? "";
   }
   emit("update:modelValue", draft);
+  restoreActionFocus(event?.currentTarget ?? null);
 }
 
-function selectClassification(predicateIri: typeof RDF_TYPE | typeof RDFS_SUBCLASS): void {
+function selectClassification(
+  predicateIri: typeof RDF_TYPE | typeof RDFS_SUBCLASS,
+  event?: Event,
+): void {
   const primary = selectedBatch.value[0]?.iri ?? props.selectedResource?.iri ?? "";
   const draft = emptyAuthoringDraft("set-property", primary);
   draft.subjectIri = primary;
@@ -164,6 +191,7 @@ function selectClassification(predicateIri: typeof RDF_TYPE | typeof RDFS_SUBCLA
   draft.predicateIri = predicateIri;
   draft.propertyValues = [emptyPropertyValueDraft("iri")];
   emit("update:modelValue", draft);
+  restoreActionFocus(event?.currentTarget ?? null);
 }
 
 function updateMembershipSelection(iri: string, selected: boolean): void {
@@ -176,12 +204,13 @@ function updateMembershipSelection(iri: string, selected: boolean): void {
   });
 }
 
-function selectCapabilityAction(capability: AuthoringCapabilityChoice): void {
+function selectCapabilityAction(capability: AuthoringCapabilityChoice, event?: Event): void {
   emit("update:modelValue", {
     ...emptyAuthoringDraft("apply-capability"),
     capabilityId: capability.iri,
     capabilityBindings: capabilityBindingsFor(capability),
   });
+  restoreActionFocus(event?.currentTarget ?? null);
 }
 
 function updatePropertyValue<K extends keyof EditorPropertyValueDraft>(
@@ -343,18 +372,23 @@ function requestPosition(): void {
       <li v-for="(item, index) in diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ diagnosticGuidance(item).title }}</b><span>{{ diagnosticGuidance(item).action }}</span><details><summary>技術的な詳細</summary><code>{{ item.code }}</code> {{ diagnosticGuidance(item).detail }}</details></li>
     </ul>
     <datalist :id="resourceListId"><option v-for="item in resources" :key="item.iri" :value="item.iri">{{ item.label }}</option></datalist>
-    <nav class="iriograph-authoring-quick-actions" aria-label="意味グラフの操作">
-      <button type="button" :disabled="!enabled || busy" @click="emit('openPalette')">新しい要素</button>
+    <section class="iriograph-authoring-target" aria-label="編集対象">
+      <small>1. 対象</small>
+      <strong>{{ targetSummary }}</strong>
+      <span v-if="selectedBatch.length > 1">選択した要素をまとめて編集できます。</span>
+    </section>
+    <nav v-if="!preview" class="iriograph-authoring-quick-actions" aria-label="2. 操作を選択">
+      <button type="button" :class="{ selected: modelValue.kind === 'create-resource' }" :aria-current="modelValue.kind === 'create-resource' ? 'step' : undefined" :disabled="!enabled || busy" @click="emit('openPalette')">新しい要素</button>
       <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="emit('openDetails')">詳細・属性</button>
-      <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectQuickKind('connect-resources')">関係を作成</button>
-      <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectQuickKind('set-membership')">領域・包含</button>
-      <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectClassification(RDF_TYPE)">分類を設定</button>
-      <button v-if="selectedResource" type="button" :disabled="!enabled || busy" @click="selectClassification(RDFS_SUBCLASS)">上位概念を設定</button>
-      <button v-if="selectedResource && structures.some((item) => item.kind === 'sequence')" type="button" :disabled="!enabled || busy" @click="selectQuickKind('set-sequence')">並び順を編集</button>
-      <button v-if="selectedResource && structures.some((item) => item.kind === 'alternatives')" type="button" :disabled="!enabled || busy" @click="selectQuickKind('set-alternatives')">分岐を編集</button>
-      <button v-for="capability in capabilities" :key="capability.iri" type="button" :title="capability.iri" :disabled="!enabled || busy" @click="selectCapabilityAction(capability)">{{ capability.label ?? '追加アクション' }}</button>
+      <button v-if="selectedResource" type="button" :class="{ selected: isActionSelected('connect-resources') }" :aria-current="isActionSelected('connect-resources') ? 'step' : undefined" :disabled="!enabled || busy" @click="selectQuickKind('connect-resources', $event)">関係を作成</button>
+      <button v-if="selectedResource" type="button" :class="{ selected: isActionSelected('set-membership') }" :aria-current="isActionSelected('set-membership') ? 'step' : undefined" :disabled="!enabled || busy" @click="selectQuickKind('set-membership', $event)">領域・包含</button>
+      <button v-if="selectedResource" type="button" :class="{ selected: isClassificationSelected(RDF_TYPE) }" :aria-current="isClassificationSelected(RDF_TYPE) ? 'step' : undefined" :disabled="!enabled || busy" @click="selectClassification(RDF_TYPE, $event)">分類を設定</button>
+      <button v-if="selectedResource" type="button" :class="{ selected: isClassificationSelected(RDFS_SUBCLASS) }" :aria-current="isClassificationSelected(RDFS_SUBCLASS) ? 'step' : undefined" :disabled="!enabled || busy" @click="selectClassification(RDFS_SUBCLASS, $event)">上位概念を設定</button>
+      <button v-if="selectedResource && structures.some((item) => item.kind === 'sequence')" type="button" :class="{ selected: isActionSelected('set-sequence') }" :aria-current="isActionSelected('set-sequence') ? 'step' : undefined" :disabled="!enabled || busy" @click="selectQuickKind('set-sequence', $event)">並び順を編集</button>
+      <button v-if="selectedResource && structures.some((item) => item.kind === 'alternatives')" type="button" :class="{ selected: isActionSelected('set-alternatives') }" :aria-current="isActionSelected('set-alternatives') ? 'step' : undefined" :disabled="!enabled || busy" @click="selectQuickKind('set-alternatives', $event)">分岐を編集</button>
+      <button v-for="capability in capabilities" :key="capability.iri" type="button" :title="capability.iri" :class="{ selected: modelValue.kind === 'apply-capability' && modelValue.capabilityId === capability.iri }" :aria-current="modelValue.kind === 'apply-capability' && modelValue.capabilityId === capability.iri ? 'step' : undefined" :disabled="!enabled || busy" @click="selectCapabilityAction(capability, $event)">{{ capability.label ?? '追加アクション' }}</button>
     </nav>
-    <details class="iriograph-authoring-advanced">
+    <details v-if="!preview" class="iriograph-authoring-advanced">
       <summary>Advanced: 操作種別を選択</summary>
       <label>
         <span>操作</span>
@@ -364,6 +398,8 @@ function requestPosition(): void {
         </select>
       </label>
     </details>
+
+    <div v-if="!preview && editingDraft" class="iriograph-authoring-inputs" aria-label="3. 必要な内容を入力">
 
     <template v-if="modelValue.kind === 'create-resource'">
       <label><span>名前</span><input aria-label="Resource label" :value="modelValue.label" :disabled="!enabled || busy" @input="update('label', inputValue($event))" /></label>
@@ -490,10 +526,11 @@ function requestPosition(): void {
         </template>
       </fieldset>
     </template>
+    </div>
 
-    <div class="iriograph-authoring-actions">
-      <button type="button" :disabled="!enabled || busy" @click="emit('preview')">{{ busy ? "検証中…" : "変更内容を確認" }}</button>
-      <button type="button" class="primary" :disabled="!enabled || busy || !preview?.valid" @click="emit('apply')">{{ preview?.diagnostics.some((item) => item.severity === 'warning') ? "警告を確認して適用" : "明示的に適用" }}</button>
+    <div v-if="editingDraft || preview" class="iriograph-authoring-actions">
+      <button v-if="!preview" type="button" :disabled="!enabled || busy" @click="emit('preview')">{{ busy ? "検証中…" : "4. 変更内容を確認" }}</button>
+      <button v-if="preview" type="button" class="primary" :disabled="!enabled || busy || !preview.valid" @click="emit('apply')">{{ preview.diagnostics.some((item) => item.severity === 'warning') ? "警告を確認して適用" : "5. 明示的に適用" }}</button>
       <button type="button" @click="emit('cancel')">キャンセル</button>
     </div>
 

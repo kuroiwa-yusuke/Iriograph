@@ -43,7 +43,7 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(result.geometries.bag!.x).toBeLessThan(result.geometries.outside!.x);
     expect(isInside(result.geometries["step-a"]!, result.geometries.bag!)).toBe(true);
     expect(isInside(result.geometries["step-b"]!, result.geometries.bag!)).toBe(true);
-    expect(result.routes["flow-1"]).toHaveLength(4);
+    expect(result.routes["flow-1"]!.length).toBeGreaterThanOrEqual(4);
   });
 
   it("lays out the same hierarchy top-to-bottom for the TB adapter", async () => {
@@ -356,8 +356,8 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(plain.y).toBeGreaterThanOrEqual(commented.y + commented.height + 10 + 90 + 48);
   });
 
-  it("keeps manual waypoint gates while derived segments avoid obstacles", async () => {
-    const manualPoint = { x: 320, y: 230 };
+  it("keeps the complete manual route unchanged even when it crosses an obstacle", async () => {
+    const manualPoint = { x: 320, y: 110 };
     const scene: LayoutProjectedScene = {
       elements: [
         {
@@ -391,9 +391,157 @@ describe("StandardLightweightLayoutAdapter", () => {
 
     const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
 
-    expect(result.routes.edge).toContainEqual(manualPoint);
+    expect(result.routes.edge).toEqual([
+      { x: 120, y: 110 },
+      manualPoint,
+      { x: 500, y: 110 },
+    ]);
     expect(scene.edges[0]!.waypoints).toEqual([manualPoint]);
-    expect(polylineCrossesBox(result.routes.edge!, scene.elements[1]!.geometry!)).toBe(false);
+    expect(polylineCrossesBox(result.routes.edge!, scene.elements[1]!.geometry!)).toBe(true);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "layout-manual-route-obstacle",
+      edgeId: "edge",
+    }));
+  });
+
+  it("treats routeMode manual as an immutable endpoint-inclusive route", async () => {
+    const waypoint = { x: 260, y: 160 };
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "a", structuralKind: "node", placement: "user", geometry: { x: 20, y: 80, width: 100, height: 60 } },
+        { elementId: "b", structuralKind: "node", placement: "user", geometry: { x: 420, y: 80, width: 100, height: 60 } },
+      ],
+      edges: [{
+        elementId: "edge",
+        sourceElementId: "a",
+        targetElementId: "b",
+        routeMode: "manual",
+        waypoints: [waypoint],
+      }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:manual-mode", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.edge).toHaveLength(3);
+    expect(result.routes.edge?.[1]).toEqual(waypoint);
+    expect(scene.edges[0]!.waypoints).toEqual([waypoint]);
+  });
+
+  it("chooses the nearest shape boundary and keeps endpoint segments outside nodes", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "source",
+          structuralKind: "node",
+          shape: "circle",
+          placement: "user",
+          geometry: { x: 100, y: 300, width: 100, height: 80 },
+        },
+        {
+          elementId: "target",
+          structuralKind: "node",
+          shape: "diamond",
+          placement: "user",
+          geometry: { x: 100, y: 0, width: 100, height: 80 },
+        },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "source", targetElementId: "target" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:nearest-port", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const route = result.routes.edge!;
+
+    expect(route[0]).toEqual({ x: 150, y: 300 });
+    expect(route[1]!.y).toBeLessThan(route[0]!.y);
+    expect(route.at(-1)).toEqual({ x: 150, y: 80 });
+    expect(route.at(-2)!.y).toBeGreaterThan(route.at(-1)!.y);
+    expect(polylineCrossesBox(route.slice(0, 2), scene.elements[0]!.geometry!)).toBe(false);
+    expect(polylineCrossesBox(route.slice(-2), scene.elements[1]!.geometry!)).toBe(false);
+  });
+
+  it("uses an outward derived stub for an explicit opposite-side anchor", async () => {
+    const source = { x: 20, y: 100, width: 100, height: 60 };
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "source", structuralKind: "node", placement: "user", geometry: source },
+        { elementId: "target", structuralKind: "node", placement: "user", geometry: { x: 420, y: 100, width: 100, height: 60 } },
+      ],
+      edges: [{
+        elementId: "edge",
+        sourceElementId: "source",
+        targetElementId: "target",
+        sourceAnchor: { position: 0 },
+      }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:outward-anchor", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const route = result.routes.edge!;
+
+    expect(route[0]).toEqual({ x: 70, y: 100 });
+    expect(route[1]).toEqual({ x: 70, y: 88 });
+    expect(polylineCrossesBox(route.slice(0, 2), source)).toBe(false);
+  });
+
+  it("refines generated routes against later manual routes using graph-global quality", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "top", structuralKind: "node", placement: "user", geometry: { x: 280, y: 20, width: 100, height: 60 } },
+        { elementId: "bottom", structuralKind: "node", placement: "user", geometry: { x: 280, y: 320, width: 100, height: 60 } },
+        { elementId: "left", structuralKind: "node", placement: "user", geometry: { x: 20, y: 170, width: 100, height: 60 } },
+        { elementId: "right", structuralKind: "node", placement: "user", geometry: { x: 540, y: 170, width: 100, height: 60 } },
+      ],
+      edges: [
+        { elementId: "a-generated", sourceElementId: "top", targetElementId: "bottom" },
+        {
+          elementId: "z-manual",
+          sourceElementId: "left",
+          targetElementId: "right",
+          routeMode: "manual",
+          waypoints: [{ x: 300, y: 200 }],
+        },
+      ],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:global-route", "LR");
+
+    const first = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const second = await adapter.layout({
+      layoutRef: adapter.layoutRef,
+      scene: { elements: [...scene.elements].reverse(), edges: [...scene.edges].reverse() },
+    });
+
+    expect(first.routes).toEqual(second.routes);
+    expect(first.routes["z-manual"]).toEqual([
+      { x: 120, y: 200 },
+      { x: 300, y: 200 },
+      { x: 540, y: 200 },
+    ]);
+    expect(polylineStrictCrossings(
+      first.routes["a-generated"]!,
+      first.routes["z-manual"]!,
+    )).toBe(0);
+  });
+
+  it("keeps straight self-routes endpoint-only even with stale manual waypoints", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [{ elementId: "a", structuralKind: "node" }],
+      edges: [{
+        elementId: "edge",
+        sourceElementId: "a",
+        targetElementId: "a",
+        routeMode: "straight",
+        routingPlacement: "user",
+        waypoints: [{ x: 999, y: 999 }],
+      }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:straight-self", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.edge).toHaveLength(2);
+    expect(result.routes.edge).not.toContainEqual({ x: 999, y: 999 });
   });
 
   it("deterministically separates otherwise overlapping routes", async () => {
@@ -461,9 +609,9 @@ describe("StandardLightweightLayoutAdapter", () => {
       JSON.stringify(first.routes["forward-z"]),
       JSON.stringify(first.routes.reverse),
     ])).toHaveProperty("size", 3);
-    expect(first.routes["forward-a"]?.[0]?.y).toBe(68);
-    expect(first.routes["forward-z"]?.[0]?.y).toBe(88);
-    expect(first.routes.reverse?.at(-1)?.y).toBe(108);
+    expect(first.routes["forward-a"]?.[0]?.y).toBeCloseTo(68);
+    expect(first.routes["forward-z"]?.[0]?.y).toBeCloseTo(88);
+    expect(first.routes.reverse?.at(-1)?.y).toBeCloseTo(108);
     expect(Math.max(...first.routes["loop-a"]!.map((point) => point.x))).toBe(204);
     expect(Math.max(...first.routes["loop-z"]!.map((point) => point.x))).toBe(222);
     expect(first.width).toBeGreaterThanOrEqual(270);

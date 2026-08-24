@@ -33,7 +33,7 @@ Resource削除は、他resourceからの参照や構造membershipが残る場合
 
 semantic transaction成功後は、全viewをそれぞれのprofile、catalog、layoutで再投影します。存続するidentityのuser overlayは互換な範囲で維持し、新規要素は決定的layoutからgenerated provenanceの初期geometryを得ます。Catalogから再生成できるtemplate、style、iconはoverlayへ複製しません。このdisplay reconciliationはsemantic変更の結果を表示可能にする後処理であり、任意の見た目変更をsemantic transactionに混ぜることではありません。
 
-通常の再投影・layout更新で再配置するのは`placement: "generated"`の要素だけです。`placement: "user"`のgeometryは固定制約としてlayoutへ渡し、互換なidentityが存続する限り自動的に移動しません。
+通常の再投影・layout更新で再配置するのは`placement: "generated"`の要素だけです。`placement: "user"`のgeometryは固定制約としてlayoutへ渡し、互換なidentityが存続する限り自動的に移動しません。自動再投影と全体layoutの発火源はsemantic sourceの確定変更だけです。Drag、resize、appearance、label位置、endpoint anchor、routing等のoverlay-only変更では全体layoutを再実行せず、変更geometryとincident edgeのderived routeだけを再計算します。
 
 ## Turtleの再serialize
 
@@ -50,6 +50,8 @@ Comment、空白、改行位置、property listのまとめ方、triple記述順
 ## 複数view
 
 一つのsemantic graphには複数のnamed viewを持てます。ユーザーは保存済みのviewを選択し、各viewのprofile、layout、locale、overlayを独立して利用します。どのsemantic構造をcontainer、sequence、alternative等として表示するかはview profileが決めます。
+
+標準の新規documentとsampleは、通常のnode/edgeと重なり可能な領域を同時に表せる`region` viewを一つだけ持ちます。`node-link` viewは単一parentの階層containerが必要な既存documentと明示的な追加viewのために読み書き互換を維持します。利用者に「flowかregionsか」という実装上の空間文法を最初に選ばせません。
 
 v1はSPARQL queryや汎用filter editorをview定義へ持ちません。編集作業中に要素を一時的に隠す操作はeditor session stateであり、semantic graphやportable documentを変更しません。永続的に異なる意味範囲を切り出す仕組みは、named viewとprofileの実利用を確認してから拡張します。
 

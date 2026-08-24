@@ -15,7 +15,7 @@ import {
   type AssetPickResult,
 } from "@iriograph/vue-editor";
 
-import { mockInstanceFlowProjectionCatalog } from "./mock/catalog";
+import { mockClassificationRegionProjectionCatalog } from "./mock/catalog";
 import {
   createMockAuthoringContext,
   mockProjectionRuntimeContext,
@@ -40,7 +40,7 @@ import {
 
 const STORAGE_PREFIX = "iriograph.mock.workspace:";
 
-const catalog: ProjectionCatalogV1 = mockInstanceFlowProjectionCatalog;
+const catalog: ProjectionCatalogV1 = mockClassificationRegionProjectionCatalog;
 const editor = ref<InstanceType<typeof IriographEditor> | null>(null);
 const importInput = ref<HTMLInputElement | null>(null);
 const workspace = ref<MockWorkspaceManifest>();
@@ -316,7 +316,7 @@ function emptyDocument(): IriographDocumentV1 {
     },
     views: [{
       viewId: "main",
-      kind: "node-link",
+      kind: "region",
       profileRef: catalog.profileRef,
       layoutRef: catalog.defaults?.layoutRef ?? "urn:iriograph:layout:hierarchical-lr:1",
       overlay: {},

@@ -69,7 +69,7 @@ describe("ElkLayeredLayoutAdapter", () => {
     });
     expect(input.edges?.map((item) => item.id)).toEqual(["edge-1"]);
     expect(result.geometries["b-child"]!.x).toBeGreaterThan(result.geometries["a-container"]!.x);
-    expect(result.routes["edge-1"]).toHaveLength(4);
+    expect(result.routes["edge-1"]!.length).toBeGreaterThanOrEqual(4);
     expect(result.width).toBeGreaterThan(0);
     expect(result.height).toBeGreaterThan(0);
   });
@@ -220,6 +220,14 @@ describe("ElkLayeredLayoutAdapter", () => {
 
     const a = result.geometries.a!;
     const b = result.geometries.b!;
+    const input = engine.inputs[0]!;
+    const inputA = findElkNode(input, "a")!;
+    const inputB = findElkNode(input, "b")!;
+    const autoInput = input.edges?.find((item) => item.id === "auto")!;
+    expect(inputA.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_POS");
+    expect(inputB.layoutOptions?.["elk.portConstraints"]).toBe("FIXED_POS");
+    expect(autoInput.sources?.[0]).toBe(inputA.ports?.find((port) => port.id.endsWith(":source"))?.id);
+    expect(autoInput.targets?.[0]).toBe(inputB.ports?.find((port) => port.id.endsWith(":target"))?.id);
     expect(result.routes.auto?.[0]).toEqual({ x: a.x + a.width / 2, y: a.y });
     expect(result.routes.auto?.at(-1)).toEqual({
       x: b.x + b.width / 2,
@@ -253,6 +261,25 @@ describe("ElkLayeredLayoutAdapter", () => {
         edgeEndpointAnchorPoint(a, "rectangle", edgeEndpointAnchorFromPoint(a, bCenter)),
         edgeEndpointAnchorPoint(b, "rectangle", edgeEndpointAnchorFromPoint(b, aCenter)),
       ]);
+  });
+
+  test("gives straight priority over stale manual points, including self-routes", async () => {
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:straight-priority", "LR", {
+      engine: new RecordingEngine(),
+    });
+    const result = await adapter.layout(request(
+      [element("a")],
+      [{
+        ...edge("direct", "a", "a"),
+        routeMode: "straight",
+        routingPlacement: "user",
+        waypoints: [{ x: 999, y: 999 }],
+      }],
+      "urn:test:straight-priority",
+    ));
+
+    expect(result.routes.direct).toHaveLength(2);
+    expect(result.routes.direct).not.toContainEqual({ x: 999, y: 999 });
   });
 
   test("keeps ELK bend points available for curve smoothing", async () => {
@@ -552,6 +579,15 @@ function positionChildren(children: ElkGraphNode[]): void {
     child.height ??= 72;
     positionChildren(child.children ?? []);
   });
+}
+
+function findElkNode(root: ElkGraphNode, id: string): ElkGraphNode | undefined {
+  if (root.id === id) return root;
+  for (const child of root.children ?? []) {
+    const found = findElkNode(child, id);
+    if (found) return found;
+  }
+  return undefined;
 }
 
 function section(offset: number): ElkGraphEdge["sections"] {

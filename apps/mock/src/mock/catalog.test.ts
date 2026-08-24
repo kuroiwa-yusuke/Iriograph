@@ -38,9 +38,25 @@ describe("normalized RDF/RDFS mock", () => {
     expect(workflowClassificationRegionDomainCatalog.defaults).toBeUndefined();
   });
 
-  it("Bag/Seq/Alt/label付きpredicateからnode-linkと重なりregionを投影する", () => {
+  it("標準regionと明示追加したnode-linkから同じ意味graphを投影する", () => {
     const document = sampleDocument();
-    const projected = projectSemanticView(document, mockInstanceFlowProjectionCatalog);
+    const regionView = document.views[0]!;
+    document.views.push({
+      viewId: "flow-compatibility",
+      kind: "node-link",
+      profileRef: mockInstanceFlowProjectionCatalog.profileRef,
+      layoutRef: mockInstanceFlowProjectionCatalog.defaults!.layoutRef,
+      locale: "ja",
+      // The sample intentionally stores only the region view. Reuse its sparse
+      // semanticRef-based presentation overrides when exercising the optional
+      // node-link compatibility projection.
+      overlay: structuredClone(regionView.overlay),
+    });
+    const projected = projectSemanticView(
+      document,
+      mockInstanceFlowProjectionCatalog,
+      "flow-compatibility",
+    );
 
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(projected.containers).toHaveLength(3);
@@ -90,7 +106,7 @@ describe("normalized RDF/RDFS mock", () => {
     const regions = projectSemanticView(
       document,
       mockClassificationRegionProjectionCatalog,
-      "regions",
+      regionView.viewId,
     );
     expect(regions.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(regions.containers).toEqual([]);

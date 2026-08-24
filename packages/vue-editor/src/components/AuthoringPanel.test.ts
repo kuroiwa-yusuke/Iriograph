@@ -111,9 +111,8 @@ describe("AuthoringPanel", () => {
     expect(wrapper.findAll("input, select").every((field) => (
       "disabled" in field.element && (field.element as HTMLInputElement).disabled
     ))).toBe(true);
-    expect(wrapper.findAll(".iriograph-authoring-actions button").slice(0, 2).every(
-      (button) => (button.element as HTMLButtonElement).disabled,
-    )).toBe(true);
+    expect(wrapper.get(".iriograph-authoring-actions button:first-child").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".iriograph-authoring-actions button:last-child").text()).toBe("キャンセル");
   });
 
   it("propertyの空literal・複数valueと明示deleteを別操作として通知する", async () => {

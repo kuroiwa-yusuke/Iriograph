@@ -14,11 +14,11 @@ Vue editorは右クリックの対象別操作、見た目を確認できる作�
 
 `@iriograph/semantic-access`はlabel/comment中心の検索、describe、neighbor、subgraph、membership索引、revisionに束縛した決定的alias、Core authoring transactionへ委譲するwrite facadeを提供します。これはLLM tool transportそのものではなく、host/MCP adapterが認証、actor policy、revision conflictを接続するためのpackage境界です。標準predicate IRIへ日本語label、説明、category、例を付けるpicker catalogも持ち、日本語独自IRIを生成しません。Instanceのopaque IRIと、統制されたclass/predicate vocabularyをS/P/O上の位置ではなく役割で区別します。
 
-Core/editorは0.2.1の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
+Core/editorは0.3.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。P0/P1のMVP gateは満たしていますが、API安定版ではありません。
 
 kuroxiom-cloudのhost adapterは実装・deploy済みです。workspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続しています。
 
-Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認例です。意味を名前へ埋め込まないopaque寄りIRI、label/comment付きpredicate、Bag、Seq、Alt、seeAlso、標準包含を特殊化したdomain predicate、二領域に属する共有memberを含み、同じ意味graphをnode-link viewとregion viewで切り替えられます。Workspace treeの画像asset IRIをicon overlayから参照する例も維持します。Domain catalogは標準構造を置き換えず、標準catalogと決定的に結合します。
+Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認例です。意味を名前へ埋め込まないopaque寄りIRI、label/comment付きpredicate、Bag、Seq、Alt、seeAlso、標準包含を特殊化したdomain predicate、二領域に属する共有memberを含み、通常のnode/edgeと重なり領域を一つのregion viewで表示します。Node-link viewは既存documentと明示追加の互換機能として維持します。Workspace treeの画像asset IRIをicon overlayから参照する例も維持します。Domain catalogは標準構造を置き換えず、標準catalogと決定的に結合します。
 
 ## 優先度
 

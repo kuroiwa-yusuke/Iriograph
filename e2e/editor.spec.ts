@@ -72,6 +72,27 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   expect(consoleErrors).toEqual([]);
 });
 
+test("左右サイドバーを折りたたむとCanvasが空いた領域まで拡張する", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
+  const viewport = page.locator(".iriograph-canvas-scroll");
+  const before = await requiredBox(viewport, "canvas viewport");
+
+  await page.getByLabel("左サイドバーを閉じる").click();
+  await page.getByLabel("右サイドバーを閉じる").click();
+  await expect(page.getByLabel("左サイドバーを開く")).toBeVisible();
+  await expect(page.getByLabel("右サイドバーを開く")).toBeVisible();
+  await expect.poll(async () => (await requiredBox(viewport, "expanded canvas viewport")).width)
+    .toBeGreaterThan(before.width + 400);
+
+  await page.getByLabel("全体を表示").click();
+  await expect(page.locator(".iriograph-scene-node").first()).toBeInViewport();
+  await page.getByLabel("左サイドバーを開く").click();
+  await page.getByLabel("右サイドバーを開く").click();
+  await expect(page.getByLabel("左サイドバーを閉じる")).toBeVisible();
+  await expect(page.getByLabel("右サイドバーを閉じる")).toBeVisible();
+});
+
 test("named view管理とtemporary hideをsemantic sourceから分離する", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -81,8 +102,9 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
 
   await page.goto("/");
   const viewSelect = page.getByLabel("Named view", { exact: true });
-  await expect(viewSelect.locator("option")).toHaveCount(2);
+  await expect(viewSelect.locator("option")).toHaveCount(1);
   await expect(viewSelect).toHaveValue("main");
+  await expect(page.locator(".iriograph-scene-region")).toHaveCount(5);
   const turtleBefore = await readTurtle(page);
 
   await page.locator(".iriograph-scene-node").first().click();
@@ -90,26 +112,20 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT - 1);
   await expect(page.getByRole("button", { name: /再表示/ })).toContainText("(1)");
 
-  await viewSelect.selectOption("regions");
-  await expect(viewSelect).toHaveValue("regions");
-  await expect(page.locator(".iriograph-scene-node")).toHaveCount(REGION_VIEW_NODE_COUNT);
-  await expect(page.locator(".iriograph-scene-region")).toHaveCount(5);
-  await expect(page.locator(".iriograph-view-summary")).toContainText("5 areas");
-
   await page.locator(".iriograph-view-actions").getByRole("button", { name: "複製" }).click();
-  await expect(viewSelect).toHaveValue("regions-copy");
-  await expect(viewSelect.locator("option")).toHaveCount(3);
+  await expect(viewSelect).toHaveValue("main-copy");
+  await expect(viewSelect.locator("option")).toHaveCount(2);
 
   await page.locator(".iriograph-view-actions").getByRole("button", { name: "設定" }).click();
-  await expect(page.locator('.iriograph-view-dialog input[readonly]')).toHaveValue("regions-copy");
+  await expect(page.locator('.iriograph-view-dialog input[readonly]')).toHaveValue("main-copy");
   await page.locator('.iriograph-view-dialog input[placeholder="ja"]').fill("en-US");
   await page.locator('.iriograph-view-dialog button[type="submit"]').click();
   await expect(page.locator(".iriograph-view-dialog")).toHaveCount(0);
 
   await page.locator(".iriograph-view-actions").getByRole("button", { name: "Overlay reset" }).click();
-  await expect(viewSelect).toHaveValue("regions-copy");
+  await expect(viewSelect).toHaveValue("main-copy");
   await page.locator(".iriograph-view-actions").getByRole("button", { name: "削除" }).click();
-  await expect(viewSelect.locator("option")).toHaveCount(2);
+  await expect(viewSelect.locator("option")).toHaveCount(1);
   await expect(viewSelect).toHaveValue("main");
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT - 1);
 
@@ -124,7 +140,7 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   await page.locator('.iriograph-view-dialog input:not([readonly])').first().fill("audit");
   await page.locator('.iriograph-view-dialog button[type="submit"]').click();
   await expect(viewSelect).toHaveValue("audit");
-  await expect(viewSelect.locator("option")).toHaveCount(3);
+  await expect(viewSelect.locator("option")).toHaveCount(2);
 
   await expect.poll(() => readTurtle(page)).toBe(turtleBefore);
   expect(consoleErrors).toEqual([]);
@@ -156,7 +172,7 @@ test("structured semantic authoringをPreviewして位置とTurtleをatomicに�
   expect(initialY).toBeGreaterThan(0);
 
   await page.getByRole("button", { name: "変更内容を確認" }).click();
-  await expect(page.getByText("追加する関係 1件")).toBeVisible();
+  await expect(page.getByText("追加する関係 3件")).toBeVisible();
   await expect(page.getByText("適用可能", { exact: true })).toBeVisible();
   await page.locator(".iriograph-authoring-actions .primary").click();
 
@@ -285,8 +301,6 @@ test("作成paletteとregion viewでラベル中心の作成・重なり・複�
   await expect(page.locator(".iriograph-authoring-preview")).toContainText("包含");
   await page.locator(".iriograph-authoring-actions").getByRole("button", { name: "キャンセル" }).click();
 
-  const viewSelect = page.getByLabel("Named view", { exact: true });
-  await viewSelect.selectOption("regions");
   await expect(page.locator(".iriograph-scene-region")).toHaveCount(5);
   await expect(page.locator(".iriograph-scene-container")).toHaveCount(0);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(REGION_VIEW_NODE_COUNT);
@@ -365,20 +379,14 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   const semanticSource = await page.getByLabel("Turtle source").inputValue();
   await page.getByRole("button", { name: /Diagram/ }).click();
 
-  const indices = await nodes.evaluateAll((elements) => {
-    const groups = new Map<string, number[]>();
-    elements.forEach((element, index) => {
-      const parent = (element as HTMLElement).dataset.parentElementId ?? "";
-      const group = groups.get(parent) ?? [];
-      group.push(index);
-      groups.set(parent, group);
-    });
-    return [...groups.entries()]
-      .filter(([parent, group]) => parent && group.length >= 3)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)[0]?.[1].slice(0, 3) ?? [];
-  });
-  expect(indices).toHaveLength(3);
-  const selectedNodes = indices.map((index) => nodes.nth(index));
+  // Region viewは単一parentを持たないため、同じ業務領域内の既知nodeを
+  // semantic labelで選び、multi-selectionのpresentation操作を検証する。
+  const selectedNodes = [
+    nodes.filter({ hasText: "内容を審査" }),
+    nodes.filter({ hasText: "承認ポリシー" }),
+    nodes.filter({ hasText: "承認結果を登録" }),
+  ];
+  for (const selected of selectedNodes) await expect(selected).toHaveCount(1);
 
   await selectedNodes[0]!.click();
   await selectedNodes[1]!.click({ modifiers: ["Control"] });

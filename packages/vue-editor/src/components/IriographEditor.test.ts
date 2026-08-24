@@ -57,6 +57,17 @@ describe("IriographEditor transaction regression", () => {
     vi.restoreAllMocks();
   });
 
+  it("Canvas/source selectorを押下状態が分かるbutton groupとして公開する", async () => {
+    wrapper = await mountEditor();
+    const selector = wrapper.get('.iriograph-view-tabs[role="group"]');
+    const buttons = selector.findAll("button");
+    expect(selector.attributes("aria-label")).toContain("Canvas");
+    expect(buttons[0]?.attributes("aria-pressed")).toBe("true");
+    await buttons[1]!.trigger("click");
+    expect(buttons[0]?.attributes("aria-pressed")).toBe("false");
+    expect(buttons[1]?.attributes("aria-pressed")).toBe("true");
+  });
+
   it("一つのdrag gestureを一つのhistory itemとしてundo/redoする", async () => {
     wrapper = await mountEditor();
     const canvas = wrapper.getComponent(DiagramCanvas);
@@ -86,6 +97,47 @@ describe("IriographEditor transaction regression", () => {
       geometry: finalGeometry,
       placement: "user",
     });
+  });
+
+  it("presentation変更ではlayoutを再実行せずgeometryを保持し、semantic適用時だけ再実行する", async () => {
+    const layout = vi.spyOn(StandardLightweightLayoutAdapter.prototype, "layout");
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const initialScene = canvas.props("scene") as DiagramScene;
+    const source = initialScene.nodes.find((item) => item.semanticRef === `${NS}a`)!;
+    const untouched = initialScene.nodes.find((item) => item.semanticRef === `${NS}b`)!;
+    const initialUntouchedGeometry = { ...untouched.geometry };
+    const initialRoute = initialScene.edges[0]!.route?.map((point) => ({ ...point }));
+    const initialLayoutCalls = layout.mock.calls.length;
+
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "geometryBatchChange", [{
+      elementId: source.elementId,
+      geometry: offset(source.geometry, 48, 20),
+    }]);
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    const presentationScene = canvas.props("scene") as DiagramScene;
+    expect(layout.mock.calls.length).toBe(initialLayoutCalls);
+    expect(presentationScene.nodes.find((item) => item.elementId === untouched.elementId)?.geometry)
+      .toEqual(initialUntouchedGeometry);
+    expect(presentationScene.edges[0]?.route).not.toEqual(initialRoute);
+
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: presentationScene.edges[0]!.elementId,
+      routing: { waypoints: [{ x: 250, y: 140 }] },
+    });
+    await settle();
+    expect(layout.mock.calls.length).toBe(initialLayoutCalls);
+
+    await openTurtlePanel(wrapper);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+      .setValue(`${initialSource}\n:a rdfs:comment "Changed" .\n`);
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await waitUntil(() => layout.mock.calls.length > initialLayoutCalls);
+    await settle();
+    expect(layout.mock.calls.length).toBeGreaterThan(initialLayoutCalls);
   });
 
   it("edge routing gestureをmanual overlayとして保存しundoできる", async () => {

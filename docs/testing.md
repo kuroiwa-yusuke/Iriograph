@@ -44,7 +44,7 @@ docker build -f Dockerfile.e2e -t iriograph-e2e .
 docker run --rm --ipc=host iriograph-e2e
 ```
 
-E2Eはmock fixtureのnode-link/region named view切替・追加・複製・設定・削除・overlay reset・temporary hide、classを含む重なりregionと共有member、交差内node拘束と交差位置からの複数分類、node drag、multi-select、group drag、grid snap、整列、等間隔、undo/redo、resize、右クリックmenu、label-first作成palette/details dialog、複数・複数行label/commentとhover/全表示、色・透明度appearance、関係削除draft、node外側endpoint halo drag、edge route mode・terminal marker・waypoint追加/移動/削除、Seq ordinal badge、label drag/reset、parallel/self-loop個別選択、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、presentation操作後のTurtle不変、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
+E2Eは標準sampleが単一region viewで開くこと、明示追加したnode-link/region named viewの切替・複製・設定・削除・overlay reset・temporary hide、classを含む重なりregionと共有member、交差内node拘束と交差位置からの複数分類、node drag、multi-select、group drag、grid snap、整列、等間隔、undo/redo、resize、右クリックmenu、label-first作成palette/details dialog、複数・複数行label/commentとhover/全表示、色・透明度appearance、関係削除draft、node外側endpoint halo drag、edge route mode・terminal marker・waypoint追加/移動/削除、Seq ordinal badge、label drag/reset、parallel/self-loop個別選択、mouse/keyboard pan、fit、minimap、selection reveal、pending Turtleを保存時にflushする経路、不正Turtle適用時のScene rollback、presentation操作後にsemantic sourceと非対象geometryが不変で全体layoutが走らないこと、navigation後のdirty不変、console/page error不在をhost integration flowで確認します。失敗時のtraceは`test-results/`に残ります。
 
 ## Test追加規則
 
