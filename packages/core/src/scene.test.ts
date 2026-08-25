@@ -27,7 +27,8 @@ describe("ProjectedScene conversion", () => {
     );
 
     expect(scene.diagnostics).toEqual([]);
-    expect(scene.edges[0]!.route!.length).toBeGreaterThanOrEqual(4);
+    expect(scene.edges[0]!.route!.length).toBeGreaterThanOrEqual(2);
+    expect(scene.edges[0]!.route!.length).toBeLessThanOrEqual(3);
     expect(scene.edges[0]?.waypoints).toBeUndefined();
     expect(scene.nodes.every((node) => node.geometry.width > 0)).toBe(true);
   });
@@ -69,7 +70,8 @@ describe("ProjectedScene conversion", () => {
       STANDARD_LAYOUT_REFS.hierarchicalLr,
       createStandardLayoutRegistry(),
     );
-    expect(scene.edges[0]!.route!.length).toBeGreaterThanOrEqual(4);
+    expect(scene.edges[0]!.route!.length).toBeGreaterThanOrEqual(2);
+    expect(scene.edges[0]!.route!.length).toBeLessThanOrEqual(3);
     expect(scene.edges[0]?.waypoints).toBeUndefined();
     expect(scene.edges[0]?.labelOffset).toEqual({ x: 7, y: -9 });
   });
@@ -114,12 +116,13 @@ describe("ProjectedScene conversion", () => {
     });
   });
 
-  it("node内label/icon offsetを意味グラフと独立したappearanceとしてSceneへ渡す", async () => {
+  it("node内label/icon offsetと文字方向を意味グラフと独立したappearanceとしてSceneへ渡す", async () => {
     const document = documentFor({
       a: {
         semanticRef: "urn:test:scene:a",
         appearance: {
           nodeLabelOffset: { x: 14, y: -6 },
+          nodeLabelWritingDirection: "vertical-down",
           nodeIconOffset: { x: -12, y: 8 },
         },
       },
@@ -131,6 +134,7 @@ describe("ProjectedScene conversion", () => {
     );
     expect(scene.nodes.find((node) => node.semanticRef === "urn:test:scene:a")).toMatchObject({
       nodeLabelOffset: { x: 14, y: -6 },
+      nodeLabelWritingDirection: "vertical-down",
       nodeIconOffset: { x: -12, y: 8 },
     });
   });

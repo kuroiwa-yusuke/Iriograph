@@ -275,7 +275,11 @@ function compatibleAppearance(
     });
     delete result.iconRef;
   }
-  if (next.structuralKind !== "node" && (result.nodeLabelOffset || result.nodeIconOffset)) {
+  if (next.structuralKind !== "node" && (
+    result.nodeLabelOffset
+    || result.nodeLabelWritingDirection
+    || result.nodeIconOffset
+  )) {
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
@@ -283,6 +287,7 @@ function compatibleAppearance(
       semanticRef: next.semanticRef,
     });
     delete result.nodeLabelOffset;
+    delete result.nodeLabelWritingDirection;
     delete result.nodeIconOffset;
   }
   if (!result.styleRef && result.styleToken && catalog.styles?.[result.styleToken]) {

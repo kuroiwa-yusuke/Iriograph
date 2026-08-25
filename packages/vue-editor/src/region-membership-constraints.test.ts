@@ -23,7 +23,7 @@ describe("membership-region presentation constraints", () => {
     }]);
   });
 
-  it("複数class regionの交差へnode全体をclampしBag membershipは無視する", () => {
+  it("複数class regionの交差へnode全体をclampしoperator名に依存しない", () => {
     const scene = matrixScene();
     const result = constrainMembershipRegionMovement(scene, [{
       elementId: "node",
@@ -39,7 +39,7 @@ describe("membership-region presentation constraints", () => {
     expect(constrainMembershipRegionMovement(scene, [{
       elementId: "node",
       geometry: { x: 260, y: 260, width: 40, height: 30 },
-    }]).changes[0]?.geometry).toMatchObject({ x: 260, y: 260 });
+    }]).changes[0]?.geometry).toMatchObject({ x: 200, y: 170 });
   });
 
   it("空intersectionを拒否し、pointer上のderived class regionを全件返す", () => {
@@ -174,7 +174,112 @@ describe("membership-region presentation constraints", () => {
       { elementId: "node", geometry: { x: 160, y: 110, width: 40, height: 30 } },
     ]);
   });
+
+  it("Seq・領域・containerの全所属intersectionへmemberをclampする", () => {
+    const scene = overlappingSequenceScene();
+    const result = constrainMembershipRegionMovement(scene, [{
+      elementId: "node",
+      geometry: { x: 40, y: 40, width: 40, height: 30 },
+    }]);
+
+    expect(result.issue).toBeUndefined();
+    expect(result.changes).toEqual([{
+      elementId: "node",
+      geometry: { x: 136, y: 106, width: 40, height: 30 },
+    }]);
+  });
+
+  it("一つのSeqと共通memberを動かしても別Seq・領域の外へ出さない", () => {
+    const scene = overlappingSequenceScene();
+    const result = constrainMembershipRegionMovement(scene, [
+      { elementId: "seq-a", geometry: { x: -80, y: 20, width: 260, height: 200 } },
+      { elementId: "node", geometry: { x: 50, y: 120, width: 40, height: 30 } },
+    ]);
+
+    expect(result.issue).toBeUndefined();
+    expect(result.changes).toEqual([
+      { elementId: "seq-a", geometry: { x: 6, y: 20, width: 260, height: 200 } },
+      { elementId: "node", geometry: { x: 136, y: 120, width: 40, height: 30 } },
+    ]);
+  });
+
+  it("Seq resizeで共有memberをcontent外へ残す変更をatomicに拒否する", () => {
+    const scene = overlappingSequenceScene();
+
+    expect(constrainMembershipRegionMovement(scene, [{
+      elementId: "seq-a",
+      geometry: { x: 20, y: 20, width: 150, height: 200 },
+    }])).toMatchObject({
+      changes: [],
+      issue: { code: "membership-region-intersection-empty", elementId: "node" },
+    });
+  });
 });
+
+function overlappingSequenceScene(): DiagramScene {
+  const sequenceProvenance = {
+    sourceStatementRefs: ["urn:test:sequence-statement"],
+    operator: "ordinal-sequence" as const,
+    derivation: "direct" as const,
+  };
+  const regionProvenance = {
+    sourceStatementRefs: ["urn:test:region-statement"],
+    operator: "membership-region" as const,
+    derivation: "direct" as const,
+  };
+  const container = (elementId: string, x: number, y: number, width: number, height: number) => ({
+    elementId,
+    semanticRef: `urn:test:${elementId}`,
+    structuralKind: "container" as const,
+    label: elementId,
+    templateRef: "urn:test:sequence",
+    headerPosition: "top" as const,
+    geometry: { x, y, width, height },
+    style: { fill: "#fff", stroke: "#000", text: "#000" },
+    pinned: false,
+    placement: "generated" as const,
+  });
+  return {
+    viewId: "main",
+    width: 600,
+    height: 400,
+    diagnostics: [],
+    containers: [
+      container("seq-a", 20, 20, 260, 200),
+      container("seq-b", 120, 60, 240, 180),
+    ],
+    regions: [{
+      elementId: "region",
+      semanticRef: "urn:test:Region",
+      structuralKind: "region",
+      label: "Region",
+      templateRef: "urn:test:region",
+      geometry: { x: 100, y: 80, width: 220, height: 180 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      pinned: false,
+      placement: "generated",
+      provenance: regionProvenance,
+    }],
+    nodes: [{
+      elementId: "node",
+      semanticRef: "urn:test:item",
+      structuralKind: "node",
+      label: "Item",
+      templateRef: "urn:test:node",
+      shape: "rectangle",
+      geometry: { x: 150, y: 120, width: 40, height: 30 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      pinned: false,
+      placement: "generated",
+    }],
+    memberships: [
+      { semanticRef: "urn:test:seq-a-1", containerElementId: "seq-a", memberElementId: "node", role: "sequence-member", ordinal: 1, provenance: sequenceProvenance },
+      { semanticRef: "urn:test:seq-b-1", containerElementId: "seq-b", memberElementId: "node", role: "sequence-member", ordinal: 1, provenance: sequenceProvenance },
+      { semanticRef: "urn:test:region-member", containerElementId: "region", regionElementId: "region", memberElementId: "node", role: "membership", provenance: regionProvenance },
+    ],
+    edges: [],
+  };
+}
 
 function matrixScene(): DiagramScene {
   const provenance = {

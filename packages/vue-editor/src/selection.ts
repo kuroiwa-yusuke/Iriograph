@@ -54,8 +54,6 @@ export const DEFAULT_DIAGRAM_SNAP_SETTINGS: DiagramSnapSettings = {
   targets: { enabled: true, tolerance: 6 },
 };
 
-const SCENE_INSET = 8;
-
 export function normalizeDiagramSnapSettings(
   value?: DiagramSnapSettingsInput,
 ): DiagramSnapSettings {
@@ -158,7 +156,7 @@ export function resizeGeometryElementFromHandle(
     ? { width: 240, height: 120 }
     : { width: 44, height: 36 };
   const children = element.structuralKind === "container"
-    ? [...index.values()].filter((candidate) => parentElementId(candidate) === element.elementId)
+    ? semanticContainerMembers(scene, element.elementId, index)
     : element.structuralKind === "region"
       ? semanticRegionMembers(scene, element.elementId, index)
       : [];
@@ -166,14 +164,11 @@ export function resizeGeometryElementFromHandle(
   const parent = elementParentId ? index.get(elementParentId) : undefined;
   const outer = parent?.structuralKind === "container"
     ? diagramContainerContentBounds(parent)
-    : {
-        x: SCENE_INSET,
-        y: SCENE_INSET,
-        width: scene.width - SCENE_INSET * 2,
-        height: scene.height - SCENE_INSET * 2,
-      };
-  const outerRight = outer.x + outer.width;
-  const outerBottom = outer.y + outer.height;
+    : undefined;
+  const outerLeft = outer?.x ?? Number.NEGATIVE_INFINITY;
+  const outerTop = outer?.y ?? Number.NEGATIVE_INFINITY;
+  const outerRight = outer ? outer.x + outer.width : Number.POSITIVE_INFINITY;
+  const outerBottom = outer ? outer.y + outer.height : Number.POSITIVE_INFINITY;
   const originalRight = element.geometry.x + element.geometry.width;
   const originalBottom = element.geometry.y + element.geometry.height;
   let left = handle.includes("w") ? element.geometry.x + delta.x : element.geometry.x;
@@ -181,9 +176,9 @@ export function resizeGeometryElementFromHandle(
   let top = handle.includes("n") ? element.geometry.y + delta.y : element.geometry.y;
   let bottom = handle.includes("s") ? originalBottom + delta.y : originalBottom;
 
-  if (handle.includes("w")) left = clampToInterval(left, outer.x, right - minimumBase.width);
+  if (handle.includes("w")) left = clampToInterval(left, outerLeft, right - minimumBase.width);
   if (handle.includes("e")) right = clampToInterval(right, left + minimumBase.width, outerRight);
-  if (handle.includes("n")) top = clampToInterval(top, outer.y, bottom - minimumBase.height);
+  if (handle.includes("n")) top = clampToInterval(top, outerTop, bottom - minimumBase.height);
   if (handle.includes("s")) bottom = clampToInterval(bottom, top + minimumBase.height, outerBottom);
 
   if (children.length > 0) {
@@ -198,9 +193,9 @@ export function resizeGeometryElementFromHandle(
     if (handle.includes("s")) bottom = Math.max(bottom, requiredBottom);
   }
 
-  left = clampToInterval(left, outer.x, right - minimumBase.width);
+  left = clampToInterval(left, outerLeft, right - minimumBase.width);
   right = clampToInterval(right, left + minimumBase.width, outerRight);
-  top = clampToInterval(top, outer.y, bottom - minimumBase.height);
+  top = clampToInterval(top, outerTop, bottom - minimumBase.height);
   bottom = clampToInterval(bottom, top + minimumBase.height, outerBottom);
   const geometry = { ...element.geometry, x: left, y: top, width: right - left, height: bottom - top };
   if (children.some((child) => (
@@ -227,6 +222,24 @@ function semanticRegionMembers(
       && membership.provenance.operator === "membership-region"
     ))
     .map((membership) => membership.memberElementId));
+  return [...memberIds].map((elementId) => index.get(elementId)).filter(
+    (element): element is GeometryElement => Boolean(element),
+  );
+}
+
+function semanticContainerMembers(
+  scene: DiagramScene,
+  containerElementId: string,
+  index: ReadonlyMap<string, GeometryElement>,
+): GeometryElement[] {
+  const memberIds = new Set([
+    ...[...index.values()]
+      .filter((candidate) => parentElementId(candidate) === containerElementId)
+      .map((candidate) => candidate.elementId),
+    ...(scene.memberships ?? [])
+      .filter((membership) => membership.containerElementId === containerElementId)
+      .map((membership) => membership.memberElementId),
+  ]);
   return [...memberIds].map((elementId) => index.get(elementId)).filter(
     (element): element is GeometryElement => Boolean(element),
   );
@@ -365,13 +378,10 @@ function constrainCommonTranslation(
       if (element.geometry.width > content.width || element.geometry.height > content.height) {
         return { x: 0, y: 0 };
       }
-    } else if (element.geometry.width > scene.width - SCENE_INSET * 2
-      || element.geometry.height > scene.height - SCENE_INSET * 2) {
-      return { x: 0, y: 0 };
     }
     const allowed = parent?.structuralKind === "container" && !movingIds.has(parent.elementId)
       ? boundsInsideContainer(parent, element.geometry)
-      : boundsInsideScene(scene, element.geometry);
+      : unboundedRange();
     minimumX = Math.max(minimumX, allowed.minimumX - element.geometry.x);
     maximumX = Math.min(maximumX, allowed.maximumX - element.geometry.x);
     minimumY = Math.max(minimumY, allowed.minimumY - element.geometry.y);
@@ -434,15 +444,12 @@ function parentElementId(element: GeometryElement | undefined): string | undefin
   return element && "parentElementId" in element ? element.parentElementId : undefined;
 }
 
-function boundsInsideScene(
-  scene: DiagramScene,
-  geometry: ElementGeometry,
-): BoundsRange {
+function unboundedRange(): BoundsRange {
   return {
-    minimumX: SCENE_INSET,
-    maximumX: Math.max(SCENE_INSET, scene.width - geometry.width - SCENE_INSET),
-    minimumY: SCENE_INSET,
-    maximumY: Math.max(SCENE_INSET, scene.height - geometry.height - SCENE_INSET),
+    minimumX: Number.NEGATIVE_INFINITY,
+    maximumX: Number.POSITIVE_INFINITY,
+    minimumY: Number.NEGATIVE_INFINITY,
+    maximumY: Number.POSITIVE_INFINITY,
   };
 }
 

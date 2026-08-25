@@ -6,26 +6,25 @@ import { statementIdentityForNamedStatement } from "@iriograph/core";
 import SemanticIntentPanel from "./SemanticIntentPanel.vue";
 
 describe("SemanticIntentPanel", () => {
-  it("初期状態を4つの利用者intentだけに限定する", () => {
+  it("初期状態はCanvas選択の概要と2つの追加入口だけを表示する", () => {
     const wrapper = mount(SemanticIntentPanel);
     expect(wrapper.findAll(".iriograph-intent-grid button").map((button) => button.text())).toEqual([
-      "＋新しい要素を作る",
-      "→関係を作る",
-      "✎要素を変更する",
-      "⌘関係を変更する",
+      "＋要素を追加",
+      "→関係を追加",
     ]);
+    expect(wrapper.text()).toContain("Canvasで要素か関係を選択");
     expect(wrapper.find('input[placeholder*="urn:"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain("IRI");
   });
 
   it("新規要素は名前だけをallocator向けdraftへ渡す", async () => {
     const wrapper = mount(SemanticIntentPanel, { attachTo: document.body });
-    await click(wrapper, "新しい要素を作る");
+    await click(wrapper, "要素を追加");
     const name = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="新しい要素の名前"]');
     expect(document.activeElement).toBe(name.element);
     await name.setValue("見積確認");
-    await click(wrapper, "変更内容を確認");
-    const draft = wrapper.emitted("previewDraft")?.[0]?.[0] as Record<string, unknown>;
+    await click(wrapper, "要素を作成");
+    const draft = wrapper.emitted("executeDraft")?.[0]?.[0] as Record<string, unknown>;
     expect(draft).toMatchObject({ kind: "create-resource", label: "見積確認" });
     expect(draft.classIris).toEqual([]);
     expect(draft.initialX).toBe("");
@@ -49,13 +48,13 @@ describe("SemanticIntentPanel", () => {
         sentencePattern: "AはBに先行する",
       }],
     } });
-    await click(wrapper, "関係を作る");
+    await click(wrapper, "関係を追加");
     expect(wrapper.text()).toContain("依存・順序");
     expect(wrapper.text()).toContain("A（先行する）B");
     expect(wrapper.text()).toContain("AはBに先行する");
     await wrapper.get<HTMLInputElement>('input[type="radio"]').setValue(true);
-    await click(wrapper, "変更内容を確認");
-    expect(wrapper.emitted("previewDraft")?.[0]?.[0]).toMatchObject({
+    await click(wrapper, "関係を作成");
+    expect(wrapper.emitted("executeDraft")?.[0]?.[0]).toMatchObject({
       kind: "connect-resources",
       sourceIri: "urn:test:a",
       targetIri: "urn:test:b",
@@ -72,7 +71,7 @@ describe("SemanticIntentPanel", () => {
         derivedReason: "この線は並び順から自動生成されています。",
       },
     } });
-    await click(wrapper, "関係を変更する");
+    await click(wrapper, "関係の意味を編集");
     expect(wrapper.text()).toContain("並び順から自動生成");
     expect(wrapper.text()).not.toContain("この関係を削除");
   });
@@ -81,7 +80,7 @@ describe("SemanticIntentPanel", () => {
     const wrapper = mount(SemanticIntentPanel, { props: {
       predicates: [{ iri: "urn:test:rel", label: "関連する" }],
     } });
-    await click(wrapper, "関係を変更する");
+    await wrapper.setProps({ requestedIntent: "edit-relation" });
     expect(wrapper.text()).toContain("Canvasで要素を選び");
     await wrapper.setProps({ selectedEdge: {
       label: "A（関連する）B",
@@ -127,12 +126,12 @@ describe("SemanticIntentPanel", () => {
         },
       },
     } });
-    await click(wrapper, "関係を変更する");
+    await click(wrapper, "関係の意味を編集");
     expect(wrapper.get<HTMLTextAreaElement>('textarea[aria-label="この関係だけの説明 1"]').element.value)
       .toBe("この矢印だけの説明");
     await wrapper.setProps({ pickedTargetIri: "urn:test:c" });
-    await click(wrapper, "変更内容を確認");
-    const commands = wrapper.emitted("previewCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
+    await click(wrapper, "関係を更新");
+    const commands = wrapper.emitted("executeCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
     expect(commands.map((command) => command.type)).toEqual([
       "remove-statement", "connect-resources", "set-statement-comments",
     ]);
@@ -156,10 +155,10 @@ describe("SemanticIntentPanel", () => {
         memberIris: [],
       }],
     } });
-    await click(wrapper, "関係を変更する");
+    await click(wrapper, "所属・並び順を編集");
     await wrapper.get("select").setValue("add");
-    await click(wrapper, "変更内容を確認");
-    const commands = wrapper.emitted("previewCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
+    await click(wrapper, "所属を更新");
+    const commands = wrapper.emitted("executeCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
     expect(commands).toHaveLength(2);
     expect(commands.map((command) => command.memberIri)).toEqual(["urn:test:a", "urn:test:b"]);
     expect(commands.every((command) => command.type === "set-membership" && command.enabled === true)).toBe(true);
@@ -174,10 +173,10 @@ describe("SemanticIntentPanel", () => {
         memberIris: [],
       }],
     } });
-    await click(wrapper, "関係を変更する");
+    await click(wrapper, "所属・並び順を編集");
     await wrapper.get("select").setValue("add");
-    await click(wrapper, "変更内容を確認");
-    const commands = wrapper.emitted("previewCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
+    await click(wrapper, "所属を更新");
+    const commands = wrapper.emitted("executeCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
     expect(commands.map((command) => command.memberIri)).toEqual(["urn:test:a"]);
   });
 
@@ -193,11 +192,11 @@ describe("SemanticIntentPanel", () => {
         members: [{ iri: "urn:test:a", label: "受付" }, { iri: "urn:test:b", label: "審査" }],
       }],
     } });
-    await click(wrapper, "関係を変更する");
+    await click(wrapper, "所属・並び順を編集");
     expect(wrapper.text()).toContain("通常の関係線とは別の構造");
     await wrapper.get('button[aria-label="受付を後ろへ"]').trigger("click");
-    await click(wrapper, "並び順の変更を確認");
-    expect(wrapper.emitted("previewCommands")?.[0]?.[0]).toEqual([{
+    await click(wrapper, "並び順を更新");
+    expect(wrapper.emitted("executeCommands")?.[0]?.[0]).toEqual([{
       type: "set-sequence",
       commandId: "intent-sequence",
       sequenceIri: "urn:test:seq",
@@ -207,7 +206,7 @@ describe("SemanticIntentPanel", () => {
     }]);
   });
 
-  it("要素削除は参照関係を含む明示cascade previewを常に作る", async () => {
+  it("要素削除はEditorの選択削除フローへ委譲する", async () => {
     const wrapper = mount(SemanticIntentPanel, { props: {
       elementDetails: {
         iri: "urn:test:a",
@@ -217,14 +216,10 @@ describe("SemanticIntentPanel", () => {
         commentValues: [],
       },
     } });
-    await click(wrapper, "要素を変更する");
-    expect(wrapper.text()).toContain("始点・終点・所属先として使う関係");
-    await click(wrapper, "要素と関係の削除内容を確認");
-    expect(wrapper.emitted("previewCommands")?.[0]?.[0]).toEqual([expect.objectContaining({
-      type: "delete-resource",
-      resourceIri: "urn:test:a",
-      cascade: true,
-    })]);
+    await click(wrapper, "要素の詳細を編集");
+    expect(wrapper.text()).toContain("選択外の関係や並び順");
+    await click(wrapper, "選択した要素を削除");
+    expect(wrapper.emitted("deleteSelection")).toHaveLength(1);
   });
 
   it("要素の種類と業務上の所属を分け、概念領域のtypeを二重編集しない", async () => {
@@ -253,13 +248,13 @@ describe("SemanticIntentPanel", () => {
       ],
       selectedResources: [{ iri: "urn:test:a", label: "申請" }],
     } });
-    await click(wrapper, "要素を変更する");
+    await click(wrapper, "要素の詳細を編集");
     expect(wrapper.get(".iriograph-semantic-type-editor").text()).toContain("申請の種類");
     expect(wrapper.get(".iriograph-semantic-type-editor").text()).toContain("概念領域にも反映");
     expect(wrapper.get(".iriograph-current-memberships").text()).toContain("概念領域（上の「要素の種類」と同じ設定）");
     expect(wrapper.get(".iriograph-current-memberships").text()).toContain("審査担当領域");
-    await wrapper.get('button[aria-label="4つの操作へ戻る"]').trigger("click");
-    await click(wrapper, "関係を変更する");
+    await wrapper.get('button[aria-label="選択内容へ戻る"]').trigger("click");
+    await click(wrapper, "所属・並び順を編集");
     expect(wrapper.get(".iriograph-membership-editor").text()).toContain("審査担当領域");
     expect(wrapper.get(".iriograph-membership-editor").text()).not.toContain("申請の概念領域");
   });
@@ -277,7 +272,7 @@ describe("SemanticIntentPanel", () => {
         targetIri: "urn:test:b", targetLabel: "本人確認", direction: "outgoing",
       }],
     } });
-    await click(wrapper, "要素を変更する");
+    await click(wrapper, "要素の詳細を編集");
     const overview = wrapper.get('[aria-label="接続している関係"]');
     expect(overview.text()).toContain("申請（必要とする）本人確認");
     expect(overview.text()).toContain("この要素から出る関係");
@@ -301,23 +296,17 @@ describe("SemanticIntentPanel", () => {
     await wrapper.setProps({ requestedIntent: "edit-relation" });
     expect(wrapper.text()).toContain("接続している要素");
     expect(wrapper.text()).toContain("始点申請");
-    expect(wrapper.emitted("previewCommands")).toBeUndefined();
+    expect(wrapper.emitted("executeCommands")).toBeUndefined();
   });
 
-  it("Previewではraw tripleより先に人が読める関係を表示する", () => {
-    const wrapper = mount(SemanticIntentPanel, { props: { preview: {
-      confirmationId: "preview:1",
-      valid: true,
-      diagnostics: [],
-      addedStatements: ["<urn:test:a> <urn:test:rel> <urn:test:b> ."],
-      removedStatements: [],
-      candidateSource: "",
-      operationLabel: "関係を追加",
-      resourceChips: [{ iri: "urn:test:a", label: "申請", role: "始点" }],
-      relations: [{ kind: "edge", label: "申請（承認を依頼する）承認者", action: "add" }],
-    } } });
-    expect(wrapper.get(".iriograph-preview-relations").text()).toContain("追加申請（承認を依頼する）承認者");
-    expect(wrapper.get("details").attributes()).not.toHaveProperty("open");
+  it("選択概要はraw IRIでなく人が読める関係を先に表示する", () => {
+    const wrapper = mount(SemanticIntentPanel, { props: { selectedEdge: {
+      label: "申請から承認者", sourceIri: "urn:test:a", sourceLabel: "申請",
+      predicateIri: "urn:test:rel", targetIri: "urn:test:b", targetLabel: "承認者",
+    }, predicates: [{ iri: "urn:test:rel", label: "承認を依頼する" }] } });
+    expect(wrapper.get(".iriograph-semantic-selection-summary").text())
+      .toContain("申請（承認を依頼する）承認者");
+    expect(wrapper.text()).not.toContain("urn:test");
   });
 
   it("主表示名だけを変更しても他言語labelと複数commentをlosslessに保つ", async () => {
@@ -328,10 +317,10 @@ describe("SemanticIntentPanel", () => {
         commentValues: [{ value: "業務説明", language: "ja" }, { value: "Business note", language: "en" }],
       },
     } });
-    await click(wrapper, "要素を変更する");
+    await click(wrapper, "要素の詳細を編集");
     await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="要素の名前"]').setValue("申請書");
-    await click(wrapper, "変更内容を確認");
-    const commands = wrapper.emitted("previewCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
+    await click(wrapper, "変更を保存");
+    const commands = wrapper.emitted("executeCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
     expect(commands).toHaveLength(1);
     expect(commands[0]?.values).toEqual([
       { kind: "literal", value: "申請書", language: "ja" },

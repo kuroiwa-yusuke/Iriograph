@@ -3,6 +3,16 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 const INITIAL_NODE_COUNT = 8;
 const REGION_VIEW_NODE_COUNT = 8;
 
+async function openPurchaseSample(page: Page): Promise<void> {
+  await page.goto("/");
+  await page.getByRole("button", { name: /purchase-approval\.iriograph/u }).click();
+  await expect(page.locator(".document-heading")).toContainText("purchase-approval");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
+  await expect(page.locator(".iriograph-edge-group")).toHaveCount(5);
+  await expect(page.locator(".iriograph-scene-container.sequence-group")).toHaveCount(3);
+  await expect(page.locator(".iriograph-canvas-scroll")).toHaveAttribute("aria-busy", "false");
+}
+
 test("editorのpointer操作、history、Turtle rollback、保存flushがbrowserで連携する", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -10,7 +20,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
 
   const node = page.locator(".iriograph-scene-node").first();
@@ -77,7 +87,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
 });
 
 test("左右サイドバーを折りたたむとCanvasが空いた領域まで拡張する", async ({ page }) => {
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
   const viewport = page.locator(".iriograph-canvas-scroll");
   const before = await requiredBox(viewport, "canvas viewport");
@@ -104,7 +114,7 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   const viewSelect = page.getByLabel("Named view", { exact: true });
   await expect(viewSelect.locator("option")).toHaveCount(1);
   await expect(viewSelect).toHaveValue("main");
@@ -150,40 +160,34 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   expect(consoleErrors).toEqual([]);
 });
 
-test("右Inspectorの4 intentから名前だけでopaque IRIの要素を作成・undoする", async ({ page }) => {
+test("選択中心Inspectorの追加入口から名前だけでopaque IRIの要素を作成・undoする", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
   const inspector = page.locator(".iriograph-inspector");
   const intentButtons = inspector.locator(".iriograph-intent-grid button");
   await expect(intentButtons).toHaveText([
-    "＋新しい要素を作る",
-    "→関係を作る",
-    "✎要素を変更する",
-    "⌘関係を変更する",
+    "＋要素を追加",
+    "→関係を追加",
   ]);
   await expect(inspector.locator(".iriograph-intent-fields")).toHaveCount(0);
   await expect(inspector.locator(".iriograph-display-inspector")).not.toBeVisible();
 
   const turtleBefore = await readTurtle(page);
-  await inspector.getByRole("button", { name: "新しい要素を作る" }).click();
+  await inspector.getByRole("button", { name: "要素を追加" }).click();
   const name = inspector.getByLabel("新しい要素の名前");
   await expect(name).toBeFocused();
   await expect(inspector).not.toContainText("IRI");
   await expect(inspector).not.toContainText("種類");
   await expect(inspector).not.toContainText("説明");
   await name.fill("E2E opaque 新規要素");
-  await page.getByRole("button", { name: "変更内容を確認" }).click();
-  const preview = page.locator(".iriograph-authoring-preview");
-  await expect(preview).toContainText("追加 1件");
-  await expect(preview).toContainText("E2E opaque 新規要素");
-  await expect(page.getByText("適用可能", { exact: true })).toBeVisible();
-  await preview.getByRole("button", { name: "明示的に適用" }).click();
+  await page.getByRole("button", { name: "要素を作成" }).click();
+  await expect(page.locator(".iriograph-authoring-preview")).toHaveCount(0);
 
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT + 1);
   const created = page.locator(".iriograph-scene-node").filter({ hasText: "E2E opaque 新規要素" });
@@ -212,14 +216,14 @@ test("意味Inspectorをcategory・近傍・型/所属・host CSS・狭幅で一
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
   await page.setViewportSize({ width: 900, height: 820 });
-  await page.goto("/");
+  await openPurchaseSample(page);
   await page.addStyleTag({ content: "fieldset { border: 12px solid rgb(255, 0, 0); padding: 20px; }" });
   const inspector = page.locator(".iriograph-inspector");
   const review = page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" });
   const complete = page.locator(".iriograph-scene-node").filter({ hasText: "完了" });
   await review.click();
   await complete.click({ modifiers: ["Control"] });
-  await inspector.getByRole("button", { name: "関係を作る" }).click();
+  await inspector.getByRole("button", { name: "関係を追加" }).click();
   const catalog = inspector.locator(".iriograph-predicate-cards");
   await expect(catalog.locator(".iriograph-predicate-group")).not.toHaveCount(0);
   expect(await catalog.locator('input[type="radio"]').count()).toBeGreaterThan(20);
@@ -240,10 +244,10 @@ test("意味Inspectorをcategory・近傍・型/所属・host CSS・狭幅で一
     element.scrollWidth <= element.clientWidth + 1
   ))).toBe(true);
 
-  await inspector.getByRole("button", { name: "4つの操作へ戻る" }).click();
+  await inspector.getByRole("button", { name: "選択内容へ戻る" }).click();
   await page.getByRole("button", { name: "選択を解除" }).click();
   await review.click();
-  await inspector.getByRole("button", { name: "要素を変更する" }).click();
+  await inspector.getByRole("button", { name: "要素の詳細を編集" }).click();
   await expect(inspector.locator(".iriograph-semantic-type-editor")).toContainText("要素の種類");
   await expect(inspector.locator(".iriograph-current-memberships")).toContainText("所属する領域");
   await expect(inspector.locator('[aria-label="接続している関係"]')).toContainText("内容を審査");
@@ -251,17 +255,17 @@ test("意味Inspectorをcategory・近傍・型/所属・host CSS・狭幅で一
   await relationFocus.click();
   await expect(page.locator(".iriograph-edge-group.selected")).toHaveCount(1);
 
-  await inspector.getByRole("button", { name: "4つの操作へ戻る" }).click();
-  await inspector.getByRole("button", { name: "関係を変更する" }).click();
+  await inspector.getByRole("button", { name: "選択内容へ戻る" }).click();
+  await inspector.getByRole("button", { name: "関係の意味を編集" }).click();
   await expect(inspector.locator('label:has-text("関係") select optgroup')).not.toHaveCount(0);
   await expect(inspector.locator('label:has-text("関係") select')).toContainText("A");
-  await inspector.getByRole("button", { name: "4つの操作へ戻る" }).click();
-  await inspector.getByRole("button", { name: "新しい要素を作る" }).click();
+  await inspector.getByRole("button", { name: "選択内容へ戻る" }).click();
+  await inspector.getByRole("button", { name: "要素を追加" }).click();
   const name = inspector.getByLabel("新しい要素の名前");
   await name.fill("保存前の入力");
   await expect(page.locator(".iriograph-editor-heading")).toContainText("意味を入力中");
   await page.locator(".iriograph-editor-header").getByRole("button", { name: "保存" }).click();
-  await expect(inspector.getByRole("button", { name: "変更内容を確認" })).toBeFocused();
+  await expect(inspector.getByRole("button", { name: "要素を作成" })).toBeFocused();
   await expect(inspector.locator(".iriograph-intent-guidance")).toContainText("意味の変更が入力中");
   expect(consoleErrors).toEqual([]);
 });
@@ -273,7 +277,7 @@ test("意味/ビューtabを排他表示し、右クリックから右Inspector�
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
   await expect(page.locator(".iriograph-zoom-actions .zoom-value")).not.toHaveText("100%");
   const turtleBefore = await readTurtle(page);
@@ -306,7 +310,10 @@ test("意味/ビューtabを排他表示し、右クリックから右Inspector�
   await fillRow.locator('input[type="checkbox"]').check();
   await fillColor.fill("#ff3355");
   await expect(review).toHaveCSS("background-color", "rgb(255, 51, 85)");
-  await appearance.getByRole("button", { name: "適用", exact: true }).click();
+  await expect(appearance.getByRole("button", { name: "適用", exact: true })).toHaveCount(0);
+  await expect(appearance.getByRole("button", { name: "キャンセル", exact: true })).toHaveCount(0);
+  await expect(appearance).toBeVisible();
+  await appearance.getByRole("button", { name: "閉じる", exact: true }).click();
   await expect(appearance).toHaveCount(0);
   expect(await readTurtle(page)).toBe(turtleBefore);
   expect(consoleErrors).toEqual([]);
@@ -320,7 +327,7 @@ test("nodeの形とpackage/workspace icon、label/icon配置をビューだけ�
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
   await page.setViewportSize({ width: 1000, height: 820 });
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
   const turtleBefore = await readTurtle(page);
   const inspector = page.locator(".iriograph-inspector");
@@ -432,14 +439,14 @@ test("nodeの形とpackage/workspace icon、label/icon配置をビューだけ�
   expect(consoleErrors).toEqual([]);
 });
 
-test("意味側のedge端子dropは接続先draftを作り、個別説明をTurtleへ保存する", async ({ page }) => {
+test("意味側のedge端子dropは接続先を直接atomic更新し、個別説明をTurtleへ保存する", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   const turtleBefore = await readTurtle(page);
   const edge = page.locator('.iriograph-edge-group[aria-label*="内容を審査から承認ポリシーへの関連する"]');
   await expect(edge).toHaveCount(1);
@@ -457,17 +464,17 @@ test("意味側のedge端子dropは接続先draftを作り、個別説明をTurt
     targetBox.x + targetBox.width / 2 - (handleBox.x + handleBox.width / 2),
     targetBox.y + targetBox.height / 2 - (handleBox.y + handleBox.height / 2),
   );
-  await expect(inspector.locator(".iriograph-intent-panel > header")).toContainText("関係を変更する");
+  await expect.poll(() => readTurtle(page)).not.toBe(turtleBefore);
+  await expect(inspector.locator(".iriograph-authoring-preview")).toHaveCount(0);
+  const reconnected = page.locator(".iriograph-edge-group").filter({ hasText: "関連する" });
+  await reconnected.click();
+  await inspector.getByRole("button", { name: "関係の意味を編集" }).click();
   await expect(inspector.locator(".iriograph-intent-selection")).toContainText("終点完了");
-  expect(await readTurtle(page)).toBe(turtleBefore);
 
   await inspector.getByRole("button", { name: "説明を追加" }).click();
   await inspector.getByRole("textbox", { name: "この関係だけの説明 1", exact: true })
     .fill("E2Eの関係固有説明\n二行目");
-  await inspector.getByRole("button", { name: "変更内容を確認" }).click();
-  const preview = inspector.locator(".iriograph-authoring-preview");
-  await expect(preview).toContainText("内容を審査（関連する）完了");
-  await preview.getByRole("button", { name: "明示的に適用" }).click();
+  await inspector.getByRole("button", { name: "関係を更新" }).click();
 
   await expect.poll(() => readTurtle(page)).toContain("E2Eの関係固有説明\\n二行目");
   const turtleAfter = await readTurtle(page);
@@ -487,7 +494,7 @@ test("薄いCanvas gridはsnap間隔で表示し、toggleしても意味・dirty
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
   const turtleBefore = await readTurtle(page);
   const undo = page.locator('button[title="Undo (Ctrl/Cmd+Z)"]');
@@ -536,7 +543,7 @@ test("region viewで領域交差・複数包含・説明・8方向resizeを扱�
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   const turtleBefore = await readTurtle(page);
   expect(turtleBefore).toContain("wf:n-03 a wf:HumanStep, wf:AuditedStep");
   await expect(page.locator(".iriograph-scene-region")).toHaveCount(5);
@@ -583,7 +590,8 @@ test("region viewで領域交差・複数包含・説明・8方向resizeを扱�
   await opacityRow.locator('input[type="checkbox"]').check();
   await opacityRow.locator('input[type="range"]').fill("0.35");
   await expect(audit.locator(".iriograph-region-fill")).toHaveCSS("opacity", "0.35");
-  await appearance.getByRole("button", { name: "適用", exact: true }).click();
+  await expect(appearance.getByRole("button", { name: "適用", exact: true })).toHaveCount(0);
+  await appearance.getByRole("button", { name: "閉じる", exact: true }).click();
   expect(await readTurtle(page)).toBe(turtleBefore);
 
   await page.keyboard.press("Escape");
@@ -604,7 +612,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   const nodes = page.locator(".iriograph-scene-node");
   await expect(nodes).toHaveCount(INITIAL_NODE_COUNT);
   await page.getByRole("button", { name: /Turtle/ }).click();
@@ -614,9 +622,9 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   // Region viewは単一parentを持たないため、同じ業務領域内の既知nodeを
   // semantic labelで選び、multi-selectionのpresentation操作を検証する。
   const selectedNodes = [
-    nodes.filter({ hasText: "内容を審査" }),
-    nodes.filter({ hasText: "承認ポリシー" }),
     nodes.filter({ hasText: "承認結果を登録" }),
+    nodes.filter({ hasText: "内容を修正" }),
+    nodes.filter({ hasText: "完了" }),
   ];
   for (const selected of selectedNodes) await expect(selected).toHaveCount(1);
 
@@ -709,7 +717,7 @@ test("parallel/self-loopを個別選択しstraight/curve・端子・manual routi
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   const parallel = page.getByRole("option", { name: /内容を審査から承認ポリシーへの/ });
   await expect(parallel).toHaveCount(2);
   const parallelPaths = await parallel.locator(".iriograph-edge-path").evaluateAll(
@@ -784,7 +792,7 @@ test("viewport navigationをmouse/keyboard、fit、minimap、selection revealで
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(INITIAL_NODE_COUNT);
   const viewport = page.locator(".iriograph-canvas-scroll");
   await page.locator(".iriograph-zoom-actions .zoom-value").click();
@@ -832,7 +840,7 @@ test("single-tab-stop navigatorで選択・geometry・routingをkeyboard完結�
   });
   page.on("pageerror", (error) => consoleErrors.push(error.message));
 
-  await page.goto("/");
+  await openPurchaseSample(page);
   const canvasShell = page.locator(".iriograph-canvas-shell");
   const viewport = page.locator(".iriograph-canvas-scroll");
   await expect(canvasShell.locator('[tabindex="0"]')).toHaveCount(1);

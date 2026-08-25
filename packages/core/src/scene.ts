@@ -165,6 +165,7 @@ export async function layoutProjectedDiagramScene(
     semanticText: node.semanticText,
     labelPlacement: node.labelPlacement,
     nodeLabelOffset: node.nodeLabelOffset,
+    nodeLabelWritingDirection: node.nodeLabelWritingDirection,
     nodeIconOffset: node.nodeIconOffset,
     templateRef: node.templateRef,
     shape: node.shape,

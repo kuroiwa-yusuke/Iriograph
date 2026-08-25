@@ -1,8 +1,18 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
+async function openPurchaseSample(page: Page): Promise<void> {
+  await page.goto("/");
+  await page.getByRole("button", { name: /purchase-approval\.iriograph/u }).click();
+  await expect(page.locator(".document-heading")).toContainText("purchase-approval");
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
+  await expect(page.locator(".iriograph-edge-group")).toHaveCount(5);
+  await expect(page.locator(".iriograph-scene-container.sequence-group")).toHaveCount(3);
+  await expect(page.locator(".iriograph-canvas-scroll")).toHaveAttribute("aria-busy", "false");
+}
+
 test("Seqと選択中object本体のsemantic layerを固定し操作handleだけを最前面にする", async ({ page }) => {
   const errors = collectBrowserErrors(page);
-  await page.goto("/");
+  await openPurchaseSample(page);
 
   const sequences = page.locator(".iriograph-scene-container.sequence-group");
   await expect(sequences).toHaveCount(3);
@@ -44,7 +54,7 @@ test("Seqと選択中object本体のsemantic layerを固定し操作handleだけ
 test("800px hostでもgridとCanvasを見切らずsidebar折畳み・scroll・pan・auto-panで到達する", async ({ page }) => {
   await page.setViewportSize({ width: 800, height: 900 });
   const errors = collectBrowserErrors(page);
-  await page.goto("/");
+  await openPurchaseSample(page);
 
   const documentWidth = await page.evaluate(() => ({
     client: document.documentElement.clientWidth,

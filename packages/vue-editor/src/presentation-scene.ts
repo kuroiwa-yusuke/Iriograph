@@ -34,6 +34,7 @@ export function reconcilePresentationScene(
       ...node,
       geometry: copyGeometry(node.geometry ?? previous?.geometry ?? defaultGeometry(node.defaultSize)),
       nodeLabelOffset: copyPoint(node.nodeLabelOffset),
+      nodeLabelWritingDirection: node.nodeLabelWritingDirection,
       nodeIconOffset: copyPoint(node.nodeIconOffset),
       iconUrl: previous?.structuralKind === "node" && previous.iconRef === node.iconRef
         ? previous.iconUrl

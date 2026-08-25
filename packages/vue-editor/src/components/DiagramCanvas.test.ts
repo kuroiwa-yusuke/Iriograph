@@ -180,6 +180,33 @@ describe("DiagramCanvas pointer gestures", () => {
     dispatchPointer("pointerup", 254, 174);
   });
 
+  it("drop前のpreview中に負方向へCanvas boundsを拡張し負座標を確定する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), snap: disabledSnap() },
+    });
+    const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage");
+    expect(stage.element.style.width).toBe("1440px");
+
+    await wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').trigger("pointerdown", {
+      button: 0,
+      clientX: 340,
+      clientY: 360,
+    });
+    dispatchPointer("pointermove", -660, -640);
+    await wrapper.vm.$nextTick();
+    expect(Number.parseFloat(stage.element.style.width)).toBeGreaterThan(1440);
+    dispatchPointer("pointerup", -660, -640);
+
+    expect(lastPayload<Array<{ elementId: string; geometry: ElementGeometry }>>(
+      wrapper,
+      "geometryBatchChange",
+    )).toEqual([{
+      elementId: "node-a",
+      geometry: { x: -980, y: -960, width: 120, height: 60 },
+    }]);
+  });
+
   it("意味編集の端子dropはnodeだけを接続先draftとして通知しview routingを変更しない", async () => {
     const scene = sceneFixture();
     wrapper = mount(DiagramCanvas, {
@@ -194,16 +221,16 @@ describe("DiagramCanvas pointer gestures", () => {
     const edgeLayer = wrapper.get<SVGSVGElement>(".iriograph-edge-layer").element;
     Object.defineProperty(edgeLayer, "getBoundingClientRect", {
       configurable: true,
-      value: () => ({ left: 0, top: 0, right: 800, bottom: 500, width: 800, height: 500, x: 0, y: 0, toJSON: () => ({}) }),
+      value: () => ({ left: 0, top: 0, right: 1440, bottom: 1140, width: 1440, height: 1140, x: 0, y: 0, toJSON: () => ({}) }),
     });
     const sourceHandle = wrapper.get(".iriograph-endpoint-anchors circle.source");
-    await sourceHandle.trigger("pointerdown", { button: 0, clientX: 140, clientY: 70 });
-    dispatchPointer("pointermove", 330, 180);
+    await sourceHandle.trigger("pointerdown", { button: 0, clientX: 460, clientY: 390 });
+    dispatchPointer("pointermove", 650, 500);
     await wrapper.vm.$nextTick();
     expect(wrapper.get('.iriograph-scene-node[data-element-id="node-b"]').classes())
       .toContain("semantic-reconnect-target");
     expect(wrapper.get(".iriograph-semantic-reconnect-preview").attributes("d")).toMatch(/^M /u);
-    dispatchPointer("pointerup", 330, 180);
+    dispatchPointer("pointerup", 650, 500);
     expect(lastPayload(wrapper, "semanticEndpointReconnectRequest")).toEqual({
       edgeElementId: "edge-a-b",
       endpoint: "source",
@@ -211,9 +238,9 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
 
-    await sourceHandle.trigger("pointerdown", { button: 0, clientX: 140, clientY: 70 });
-    dispatchPointer("pointermove", 700, 450);
-    dispatchPointer("pointerup", 700, 450);
+    await sourceHandle.trigger("pointerdown", { button: 0, clientX: 460, clientY: 390 });
+    dispatchPointer("pointermove", 1020, 770);
+    dispatchPointer("pointerup", 1020, 770);
     expect(wrapper.emitted("semanticEndpointReconnectRequest")).toHaveLength(1);
   });
 
@@ -227,7 +254,7 @@ describe("DiagramCanvas pointer gestures", () => {
       .toHaveLength(8);
     expect(wrapper.find(".iriograph-scene-node .iriograph-resize-handle").exists()).toBe(false);
     expect(wrapper.get('.iriograph-resize-handle[data-handle="se"]').attributes("style"))
-      .toContain("left: 140px; top: 100px");
+      .toContain("left: 460px; top: 420px");
     await wrapper.get('.iriograph-resize-handle[data-handle="se"]').trigger("pointerdown", {
       button: 0,
       clientX: 200,
@@ -279,8 +306,8 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     const svg = wrapper.get<SVGSVGElement>(".iriograph-edge-layer");
     svg.element.getBoundingClientRect = () => ({
-      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 500,
-      width: 800, height: 500, toJSON: () => undefined,
+      x: 0, y: 0, left: 0, top: 0, right: 1440, bottom: 1140,
+      width: 1440, height: 1140, toJSON: () => undefined,
     });
     const handles = wrapper.findAll(".iriograph-endpoint-anchors circle");
     expect(handles).toHaveLength(2);
@@ -289,13 +316,13 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(handles[0]!.classes()).toContain("source");
     expect(handles[1]!.classes()).toContain("target");
 
-    await handles[0]!.trigger("pointerdown", { button: 0, clientX: 140, clientY: 70 });
-    dispatchPointer("pointermove", 80, 20);
+    await handles[0]!.trigger("pointerdown", { button: 0, clientX: 460, clientY: 390 });
+    dispatchPointer("pointermove", 400, 340);
     await flushPreview();
     expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cx")).toBe("80");
     expect(wrapper.get(".iriograph-endpoint-anchors circle.source").attributes("cy")).toBe("22");
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
-    dispatchPointer("pointerup", 80, 20);
+    dispatchPointer("pointerup", 400, 340);
 
     expect(lastPayload(wrapper, "routingUpdate")).toEqual({
       elementId: "edge-a-b",
@@ -352,6 +379,7 @@ describe("DiagramCanvas pointer gestures", () => {
   it("選択node内のlabel/iconをzoom考慮でdragしpreview後にoffsetだけを確定する", async () => {
     const scene = sceneFixture();
     scene.nodes[0]!.iconUrl = "data:image/svg+xml,%3Csvg/%3E";
+    scene.nodes[0]!.nodeLabelWritingDirection = "vertical-down";
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
       props: {
@@ -362,6 +390,9 @@ describe("DiagramCanvas pointer gestures", () => {
         zoom: 2,
       },
     });
+
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"] .iriograph-node-text')
+      .classes()).toContain("writing-vertical");
 
     wrapper.get('.iriograph-scene-node[data-element-id="node-a"] .iriograph-node-text').element
       .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 100, clientY: 80 }));
@@ -410,14 +441,14 @@ describe("DiagramCanvas pointer gestures", () => {
       y: 0,
       left: 0,
       top: 0,
-      right: 800,
-      bottom: 500,
-      width: 800,
-      height: 500,
+      right: 1440,
+      bottom: 1140,
+      width: 1440,
+      height: 1140,
       toJSON: () => undefined,
     });
 
-    await wrapper.get(".iriograph-edge-group").trigger("dblclick", { clientX: 180, clientY: 76 });
+    await wrapper.get(".iriograph-edge-group").trigger("dblclick", { clientX: 500, clientY: 396 });
 
     expect(lastPayload(wrapper, "routingUpdate")).toEqual({
       elementId: "edge-a-b",
@@ -547,7 +578,7 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.get(".iriograph-edge-label").attributes("tabindex")).toBe("-1");
   });
 
-  it("DeleteとBackspaceはsemantic edit eventを通知しない", async () => {
+  it("DeleteとBackspaceはactive要素のatomic semantic削除を要求する", async () => {
     wrapper = mount(DiagramCanvas, { props: { scene: sceneFixture() } });
 
     await wrapper.get(".iriograph-edge-group").trigger("keydown", { key: "Delete" });
@@ -555,12 +586,14 @@ describe("DiagramCanvas pointer gestures", () => {
     await wrapper.get(".iriograph-canvas-scroll").trigger("keydown", { key: "Delete" });
     await wrapper.get(".iriograph-canvas-scroll").trigger("keydown", { key: "Backspace" });
 
-    expect(wrapper.emitted("semanticEditRequest")).toBeUndefined();
+    expect(wrapper.emitted("semanticEditRequest")?.map((event) => event[0])).toEqual([
+      "edge-a-b", "node-a", "node-a", "node-a",
+    ]);
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
 
     await wrapper.setProps({ readOnly: true });
     await wrapper.get(".iriograph-edge-group").trigger("keydown", { key: "Delete" });
-    expect(wrapper.emitted("semanticEditRequest")).toBeUndefined();
+    expect(wrapper.emitted("semanticEditRequest")).toHaveLength(4);
   });
 
   it("labelのないedgeにはlabel位置handleを作らない", () => {
@@ -624,7 +657,7 @@ describe("DiagramCanvas pointer gestures", () => {
     await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
     await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true, repeat: true });
 
-    expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 22px");
+    expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 342px");
     expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
     expect(wrapper.emitted("gestureStart")).toHaveLength(1);
 
@@ -665,7 +698,7 @@ describe("DiagramCanvas pointer gestures", () => {
     const viewport = wrapper.get(".iriograph-canvas-scroll");
     await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
     await viewport.trigger("keydown", { key: "Escape" });
-    expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 20px");
+    expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 340px");
     expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
 
     await wrapper.setProps({ readOnly: true });
@@ -803,6 +836,8 @@ describe("DiagramCanvas pointer gestures", () => {
     await api.fitToView();
     expect(wrapper.emitted("zoomChange")?.at(-1)?.[0]).toBe(.22);
     expect((wrapper.props() as { zoom: number }).zoom).toBe(.22);
+    expect(viewport.element.scrollLeft).toBeCloseTo(68.4);
+    expect(viewport.element.scrollTop).toBeCloseTo(65.4);
 
     await mounted.setProps({ zoom: 1 });
     configureViewport(wrapper, 220, 160);
@@ -828,6 +863,31 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
   });
 
+  it("fitは作業余白を除外し負geometryとScene外routeのcontent centerを使う", async () => {
+    const scene = sceneFixture();
+    scene.nodes[0]!.geometry = { x: -400, y: -200, width: 120, height: 60 };
+    scene.edges[0]!.route = [{ x: -340, y: -170 }, { x: 900, y: 600 }];
+    let mounted: VueWrapper;
+    mounted = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        zoom: 1,
+        onZoomChange: (value: number) => mounted.setProps({ zoom: value }),
+      },
+    });
+    wrapper = mounted;
+    configureViewport(wrapper, 220, 160);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const api = wrapper.vm as unknown as DiagramCanvasNavigationApi;
+
+    await api.fitToView();
+
+    expect(wrapper.emitted("zoomChange")?.at(-1)?.[0]).toBe(.13);
+    expect(viewport.element.scrollLeft).toBeCloseTo(36.1);
+    expect(viewport.element.scrollTop).toBeCloseTo(33.6);
+  });
+
   it("modifier selectionを通知し、group dragをpreview後に一つのbatchで確定する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
@@ -844,8 +904,8 @@ describe("DiagramCanvas pointer gestures", () => {
     await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
 
     expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
-    expect((nodes[0]!.element as HTMLElement).style.left).toBe("32px");
-    expect((nodes[1]!.element as HTMLElement).style.left).toBe("312px");
+    expect((nodes[0]!.element as HTMLElement).style.left).toBe("352px");
+    expect((nodes[1]!.element as HTMLElement).style.left).toBe("632px");
 
     dispatchPointer("pointerup", 113, 91);
     expect(wrapper.emitted("geometryBatchChange")).toEqual([[[
@@ -1044,18 +1104,18 @@ describe("DiagramCanvas pointer gestures", () => {
       },
     });
     expect(wrapper.get(".iriograph-semantic-position-marker").attributes("style"))
-      .toContain("left: 88px");
+      .toContain("left: 408px");
     const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
     stage.getBoundingClientRect = () => ({
-      x: 10, y: 20, left: 10, top: 20, right: 810, bottom: 520,
-      width: 800, height: 500, toJSON: () => undefined,
+      x: 10, y: 20, left: 10, top: 20, right: 1450, bottom: 1160,
+      width: 1440, height: 1140, toJSON: () => undefined,
     });
     await wrapper.get(".iriograph-canvas-scroll").trigger("pointerdown", {
       button: 0,
-      clientX: 110,
-      clientY: 120,
+      clientX: 430,
+      clientY: 440,
     });
-    dispatchPointer("pointerup", 110, 120);
+    dispatchPointer("pointerup", 430, 440);
     expect(lastPayload(wrapper, "semanticPositionRequest")).toEqual({ x: 100, y: 100 });
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
     expect(wrapper.emitted("gestureStart")).toBeUndefined();
@@ -1093,14 +1153,14 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
     stage.getBoundingClientRect = () => ({
-      x: 10, y: 20, left: 10, top: 20, right: 810, bottom: 520,
-      width: 800, height: 500, toJSON: () => undefined,
+      x: 10, y: 20, left: 10, top: 20, right: 1450, bottom: 1160,
+      width: 1440, height: 1140, toJSON: () => undefined,
     });
 
     await wrapper.get(".iriograph-scene-container").trigger("pointerdown", {
       button: 0,
-      clientX: 110,
-      clientY: 120,
+      clientX: 430,
+      clientY: 440,
     });
     expect(wrapper.emitted("semanticPositionRequest")?.at(-1)).toEqual([
       { x: 100, y: 100 },
@@ -1168,13 +1228,13 @@ describe("DiagramCanvas pointer gestures", () => {
       props: { scene, semanticPositionPicking: true },
     });
     wrapper.get<HTMLElement>(".iriograph-canvas-stage").element.getBoundingClientRect = () => ({
-      x: 10, y: 20, left: 10, top: 20, right: 810, bottom: 520,
-      width: 800, height: 500, toJSON: () => undefined,
+      x: 10, y: 20, left: 10, top: 20, right: 1450, bottom: 1160,
+      width: 1440, height: 1140, toJSON: () => undefined,
     });
     await wrapper.get(".iriograph-scene-region").trigger("pointerdown", {
       button: 0,
-      clientX: 160,
-      clientY: 140,
+      clientX: 480,
+      clientY: 460,
     });
     expect(wrapper.emitted("semanticPositionRequest")?.at(-1)).toEqual([
       { x: 150, y: 120 },
@@ -1269,8 +1329,8 @@ describe("DiagramCanvas pointer gestures", () => {
       props: { scene },
     });
     wrapper.get<HTMLElement>(".iriograph-canvas-stage").element.getBoundingClientRect = () => ({
-      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 500,
-      width: 800, height: 500, toJSON: () => undefined,
+      x: 0, y: 0, left: 0, top: 0, right: 1440, bottom: 1140,
+      width: 1440, height: 1140, toJSON: () => undefined,
     });
 
     expect(wrapper.findAll(".iriograph-scene-region").map((item) => item.attributes("data-element-id")))
@@ -1280,11 +1340,11 @@ describe("DiagramCanvas pointer gestures", () => {
 
     await wrapper.get('[data-element-id="region-a"] .iriograph-region-label').trigger("pointerdown", {
       button: 0,
-      clientX: 0,
-      clientY: 0,
+      clientX: 320,
+      clientY: 320,
     });
-    dispatchPointer("pointermove", 250, 110);
-    dispatchPointer("pointerup", 250, 110);
+    dispatchPointer("pointermove", 570, 430);
+    dispatchPointer("pointerup", 570, 430);
 
     expect(lastPayload<{ elementId: string; anchor: number }>(wrapper, "regionLabelUpdate"))
       .toEqual({ elementId: "region-a", anchor: 360 / 940 });

@@ -376,6 +376,7 @@ function projectResource(
     shape: template.shape ?? "rounded-rectangle",
     iconRef,
     nodeLabelOffset: overlayEntry?.overlay.appearance?.nodeLabelOffset,
+    nodeLabelWritingDirection: overlayEntry?.overlay.appearance?.nodeLabelWritingDirection,
     nodeIconOffset: overlayEntry?.overlay.appearance?.nodeIconOffset,
   };
 }

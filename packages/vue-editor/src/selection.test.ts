@@ -59,6 +59,15 @@ describe("selection geometry policy", () => {
     expect(translateSelection(scene, ["node-a"], { x: 10, y: 0 })[0]?.geometry.x).toBe(32);
   });
 
+  it("top-level要素はScene外の負座標・正座標へ移動できる", () => {
+    const scene = sceneFixture();
+
+    expect(translateSelection(scene, ["node-a"], { x: -220, y: -140 }, noSnap()))
+      .toEqual([{ elementId: "node-a", geometry: { x: -200, y: -100, width: 40, height: 30 } }]);
+    expect(translateSelection(scene, ["node-c"], { x: 500, y: 400 }, noSnap()))
+      .toEqual([{ elementId: "node-c", geometry: { x: 750, y: 550, width: 50, height: 30 } }]);
+  });
+
   it("alignmentは各container boundsを尊重し、distributionはbbox間gapを等しくする", () => {
     const contained = containedSceneFixture();
     expect(alignSelection(contained, ["node-a", "node-b"], "left"))
@@ -89,6 +98,15 @@ describe("selection geometry policy", () => {
       });
   });
 
+  it("top-level要素のresizeはScene境界で打ち切らない", () => {
+    const scene = sceneFixture();
+
+    expect(resizeGeometryElementFromHandle(scene, "node-a", "nw", { x: -100, y: -80 }))
+      .toEqual({ elementId: "node-a", geometry: { x: -80, y: -40, width: 140, height: 110 } });
+    expect(resizeGeometryElementFromHandle(scene, "node-c", "se", { x: 500, y: 400 }))
+      .toEqual({ elementId: "node-c", geometry: { x: 250, y: 150, width: 550, height: 430 } });
+  });
+
   it("8方向resizeでもregionの意味上のmemberを枠外へ残さない", () => {
     const scene = sceneFixture();
     const provenance = { sourceStatementRefs: ["urn:test:s"], operator: "membership-region" as const, derivation: "direct" as const };
@@ -101,6 +119,26 @@ describe("selection geometry policy", () => {
     scene.memberships = [{ semanticRef: "urn:test:m", containerElementId: "region-a", regionElementId: "region-a", memberElementId: "node-a", provenance }];
     expect(resizeGeometryElementFromHandle(scene, "region-a", "nw", { x: 200, y: 120 }))
       .toEqual({ elementId: "region-a", geometry: { x: 70, y: 66, width: 240, height: 124 } });
+  });
+
+  it("parentElementIdを持たない共有Seq memberもcontainer resizeの内側へ保つ", () => {
+    const scene = containedSceneFixture();
+    scene.nodes[0] = { ...scene.nodes[0]!, parentElementId: undefined, geometry: { x: 200, y: 70, width: 40, height: 30 } };
+    scene.memberships = [{
+      semanticRef: "urn:test:seq-member",
+      containerElementId: "container-a",
+      memberElementId: "node-a",
+      role: "sequence-member",
+      ordinal: 1,
+      provenance: {
+        sourceStatementRefs: ["urn:test:seq-statement"],
+        operator: "ordinal-sequence",
+        derivation: "direct",
+      },
+    }];
+
+    expect(resizeGeometryElementFromHandle(scene, "container-a", "e", { x: -200, y: 0 }))
+      .toEqual({ elementId: "container-a", geometry: { x: 8, y: 8, width: 248, height: 180 } });
   });
 });
 

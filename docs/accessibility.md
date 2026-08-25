@@ -28,7 +28,7 @@ Scene再投影ではstable `elementId`が存続する限りfocusを維持する�
 | `[` / `,`、`]` / `.` | Active edgeの前 / 次のwaypointを編集対象にする |
 | `W` / Insert | Active edgeの最長segmentへwaypointを追加する |
 | Ctrl + Backspace / Delete | Active waypointを削除する |
-| Delete / Backspace | 既存のsemantic authoring draftをseedする。Graphを直接削除しない |
+| Delete / Backspace | Active itemを含む現在の選択をsemantic削除する。選択外の関係・所属・順序へ波及する場合だけ影響一覧dialogを開く |
 | Escape | Presentation preview中は破棄する。それ以外は選択を解除する |
 
 Command判定はVue、DOM、Sceneの操作から分離したpure resolverで行う。優先順位は`Ctrl + Shift + Arrow`のsecondary presentation edit、`Ctrl + Arrow`のprimary presentation edit、`Shift + Arrow`のrange、Arrow focusの順である。将来Inspector valueやendpoint anchorを追加するときも、この判定を再利用し、Canvasとglobal shortcutで同じeventを二重適用しない。
@@ -43,9 +43,11 @@ Presentation keyの最初の`keydown`でgestureを開始し、key repeat中はlo
 
 Sceneの非同期更新はCanvasの`aria-busy`で通知する。Focus、selection、編集対象、commit/cancelはpolite live regionへ短く通知し、projection errorは`role="alert"`を使う。Optionは`aria-selected`、position、set size、kind、label、primary状態を公開する。
 
-標準view dialogはopenerを記録し、表示時に最初のfieldへfocusし、Tabをdialog内で循環させる。Escapeで閉じ、閉じた後は存在するopenerへfocusを戻す。
+標準details dialogと削除影響dialogはopenerを記録し、表示時に最初のfieldまたは主操作へfocusし、Tabをdialog内で循環させる。Escapeで閉じ、閉じた後は存在するopenerへfocusを戻す。削除dialogは選択外へ波及する関係・所属・順序がある場合だけ開き、影響をlabel付きlistとして読み上げ、確認操作以外でgraphを変更しない。選択集合内だけの削除と非削除の意味・ビュー操作は確認dialogを開きません。
 
 Canvas focusとactive itemは色だけに依存しない3pxのringを持つ。Edge hit area、waypoint、resize handleはpointerで扱えるtargetを拡張する。Catalog由来の任意色はIriographが一律にcontrast保証できないため、catalog authorはnode/label/backgroundのWCAG contrastを検証しなければならない。標準editor chromeとfocus indicatorはWCAG AA相当のcontrastを維持する。
+
+Compact Inspectorは文字と余白を縮めても、labelとcontrolの関連付け、visible focus、keyboard順序、行全体を使うpointer targetを維持します。Inlineビュー編集のcheckbox/select/preset/resetは操作時に確定したことをlive statusへ通知し、color/range/numberはinput中の値を過剰に読み上げずchange時の一回だけ確定を通知します。
 
 Semantic object本体の視覚層は選択時にも`region/sequence group < edge < node`を越えません。選択したregion/Seq本体をnodeの上へ出す方法でtargetを確保せず、waypoint、endpoint halo、8方向resize handleだけを独立したtransient interaction layerへ描画します。このhandleはpointer targetを最上位で確保しますが追加tab stopにはせず、同じ操作を上表のkeyboard commandからも利用できます。狭幅hostでもCanvas内部scroll、sidebar折り畳み、fit、minimapによって全Scene itemと外周handleへ到達可能にします。
 

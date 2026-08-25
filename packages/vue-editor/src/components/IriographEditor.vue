@@ -19,13 +19,13 @@ import {
   previewAuthoringCommands,
   seedAuthoringCommandFromProvenance,
   semanticSourceFingerprint,
+  statementIdentityForNamedStatement,
   validateSemanticDocument,
   validateIriographDocumentV1,
   validateProjectionCatalogV1,
   withPackageDefaultIconAccess,
   type AuthoringPreview,
   type AuthoringCommand,
-  type AuthoringTripleChange,
   type AssetAccess,
   type AssetDefinition,
   type DiagramScene,
@@ -34,6 +34,7 @@ import {
   type ElementGeometry,
   type IriographDocument,
   type LayoutAdapterRegistry,
+  type NodeLabelWritingDirection,
   type Point,
   type ProjectionCatalogV1,
   type ProjectionDiagnostic,
@@ -95,6 +96,7 @@ import {
 import {
   appendEdgeWaypoint,
   normalizeEditableRouting,
+  removeEdgeWaypoint,
   routingWithEndpointAnchor,
   type EdgeRoutingUpdate,
 } from "../edge-routing";
@@ -143,6 +145,15 @@ type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
 type DocumentRefreshKind = "semantic" | "presentation";
 type DisplayInspectorAction = "appearance" | "geometry" | "region-label" | "routing";
 type InspectorMode = "semantic" | "appearance";
+type DeletionImpact = {
+  key: string;
+  label: string;
+  kind: "relation" | "membership" | "sequence";
+};
+type PendingDeletion = {
+  preview: AuthoringPreview;
+  impacts: DeletionImpact[];
+};
 
 const props = withDefaults(defineProps<{
   modelValue: IriographDocument;
@@ -214,7 +225,7 @@ const selectedElementIds = ref<string[]>([]);
 const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
 const zoom = ref(1);
 const diagramCanvas = ref<DiagramCanvasNavigationApi>();
-const semanticIntentPanel = ref<{ focusPendingIntent(): void }>();
+const semanticIntentPanel = ref<{ focusPendingIntent(): void; resetIntent(): void }>();
 const turtleTextarea = ref<HTMLTextAreaElement>();
 const history = ref<IriographDocument[]>([]);
 const future = ref<IriographDocument[]>([]);
@@ -225,11 +236,6 @@ const sceneLoading = ref(true);
 const applyingTurtle = ref(false);
 const semanticWarningConfirmation = ref<SemanticWarningConfirmation>();
 const authoringDraft = ref<EditorAuthoringDraft>(emptyAuthoringDraft());
-const authoringPreview = ref<AuthoringPreview>();
-const authoringPreviewDescriptor = ref<{
-  operationLabel: string;
-  resourceChips: AuthoringPreviewView["resourceChips"];
-}>();
 const authoringResourcePicker = ref<AuthoringResourcePickerTarget>();
 const authoringBusy = ref(false);
 const pickingAsset = ref(false);
@@ -239,6 +245,10 @@ const viewForm = ref({ viewId: "", profileRef: "", layoutRef: "", locale: "" });
 const viewDialog = ref<HTMLFormElement>();
 const viewDialogInitialFocus = ref<HTMLInputElement>();
 const viewDialogTitleId = `${useId()}-view-dialog-title`;
+const pendingDeletion = ref<PendingDeletion>();
+const deletionDialog = ref<HTMLElement>();
+const deletionConfirmButton = ref<HTMLButtonElement>();
+const deletionDialogTitleId = `${useId()}-deletion-dialog-title`;
 const leftSidebarId = `${useId()}-left-sidebar`;
 const rightSidebarId = `${useId()}-right-sidebar`;
 const assetSuggestionsListId = `${useId()}-asset-suggestions`;
@@ -263,6 +273,7 @@ const appearancePreviewValue = ref<AppearanceEditorValue>();
 const showAllComments = ref(false);
 const showCanvasGrid = ref(true);
 let viewDialogReturnFocus: HTMLElement | undefined;
+let deletionDialogReturnFocus: HTMLElement | undefined;
 const defaultLayoutRegistry = createStandardLayoutRegistry();
 const assetSceneSession = new AssetSceneSession();
 let lastEmittedJson = "";
@@ -421,7 +432,7 @@ const turtlePending = computed(() => turtleDraft.value !== draft.value.semantic.
 const structuredAuthoringPending = computed(() => (
   semanticIntentDraftPending.value
   || authoringDraftHasInput(authoringDraft.value)
-  || Boolean(authoringPreview.value)
+  || Boolean(pendingDeletion.value)
 ));
 const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
   if (!props.authoringContext) return undefined;
@@ -942,20 +953,6 @@ function currentDraftStructureChoice(draft: EditorAuthoringDraft): AuthoringStru
   return undefined;
 }
 
-function authoringOperationLabel(kind: EditorAuthoringDraft["kind"]): string {
-  return {
-    "create-resource": "要素を作成",
-    "set-property": "属性を設定",
-    "connect-resources": "関係を作成",
-    "set-membership": "包含を設定",
-    "set-sequence": "順序を設定",
-    "set-alternatives": "選択肢を設定",
-    "delete-resource": "要素を削除",
-    "remove-statement": "関係を削除",
-    "apply-capability": "定義済み操作",
-  }[kind];
-}
-
 function authoringPreviewResourceChips(
   value: EditorAuthoringDraft,
 ): AuthoringPreviewView["resourceChips"] {
@@ -1007,87 +1004,8 @@ function authoringPreviewResourceChips(
   )) === index);
 }
 
-function authoringPreviewRelations(
-  value: EditorAuthoringDraft,
-): AuthoringPreviewView["relations"] {
-  const labelFor = (iri: string, choices: AuthoringChoice[]) => (
-    choices.find((item) => item.iri === iri)?.label || compactRef(iri)
-  );
-  if (value.kind === "create-resource") {
-    return [
-      ...(value.createEdgeEnabled
-        ? [{ kind: "edge" as const, label: labelFor(value.createEdgePredicateIri, authoringEdgeChoices.value) }]
-        : []),
-      ...(value.createMembershipEnabled
-        ? [{ kind: "membership" as const, label: authoringStructureChoices.value.find((item) => item.key === value.createMembershipStructureConfigKey)?.label || "包含" }]
-        : []),
-    ];
-  }
-  if (value.kind === "set-membership") {
-    return [{ kind: "membership", label: authoringStructureChoices.value.find((item) => item.key === value.structureConfigKey)?.label || "包含" }];
-  }
-  if (value.kind === "connect-resources" || value.kind === "set-property") {
-    return [{ kind: "edge", label: labelFor(value.predicateIri, value.kind === "connect-resources" ? authoringEdgeChoices.value : authoringPropertyChoices.value) }];
-  }
-  if (value.kind === "remove-statement") {
-    return [{ kind: "edge", label: labelFor(value.statementPredicate, authoringPropertyChoices.value) }];
-  }
-  return [];
-}
-
-function patchPreviewRelations(preview: AuthoringPreview): AuthoringPreviewView["relations"] {
-  const rdfType = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-  const labelForResource = (iri: string) => authoringResourceChoices.value.find(
-    (item) => item.iri === iri,
-  )?.label ?? semanticMetadata.value[iri]?.labels[0]?.value ?? compactRef(iri);
-  const labelForPredicate = (iri: string) => authoringContext.value?.terms.find(
-    (term) => term.iri === iri,
-  )?.label ?? semanticMetadata.value[iri]?.labels[0]?.value ?? compactRef(iri);
-  const convert = (
-    change: AuthoringTripleChange,
-    action: "add" | "remove",
-  ): AuthoringPreviewView["relations"][number] | undefined => {
-    if (change.subject.termType !== "NamedNode" || change.object.termType !== "NamedNode") return undefined;
-    if (change.predicateIri === rdfType) return undefined;
-    return {
-      kind: change.predicateIri === "http://www.w3.org/2000/01/rdf-schema#member"
-        ? "membership"
-        : "edge",
-      action,
-      label: `${labelForResource(change.subject.value)}（${labelForPredicate(change.predicateIri)}）${labelForResource(change.object.value)}`,
-    };
-  };
-  const relations = [
-    ...preview.patch.removed.map((change) => convert(change, "remove")),
-    ...preview.patch.added.map((change) => convert(change, "add")),
-  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
-  return relations.filter((relation, index) => relations.findIndex((candidate) => (
-    candidate.action === relation.action
-    && candidate.kind === relation.kind
-    && candidate.label === relation.label
-  )) === index);
-}
-const authoringPreviewView = computed<AuthoringPreviewView | undefined>(() => {
-  const preview = authoringPreview.value;
-  if (!preview) return undefined;
-  const patchRelations = patchPreviewRelations(preview);
-  return {
-    confirmationId: preview.confirmationId,
-    valid: preview.valid,
-    diagnostics: preview.diagnostics,
-    addedStatements: preview.patch.added.map(formatTripleChange),
-    removedStatements: preview.patch.removed.map(formatTripleChange),
-    candidateSource: preview.candidateSource ?? "",
-    operationLabel: authoringPreviewDescriptor.value?.operationLabel
-      ?? authoringOperationLabel(authoringDraft.value.kind),
-    resourceChips: authoringPreviewDescriptor.value?.resourceChips.length
-      ? authoringPreviewDescriptor.value.resourceChips
-      : authoringPreviewResourceChips(authoringDraft.value),
-    relations: patchRelations.length ? patchRelations : authoringPreviewRelations(authoringDraft.value),
-  };
-});
 const authoringDeletionPreview = computed(() => {
-  const preview = authoringPreview.value;
+  const preview = pendingDeletion.value?.preview;
   if (!preview) return undefined;
   const resourceSemanticRefs = preview.commands.flatMap((command) => (
     command.type === "delete-resource" ? [command.resourceIri] : []
@@ -1884,6 +1802,32 @@ function resetSelectedNodeContentOffset(target: "label" | "icon"): void {
   changeNodeContentOffset({ elementId: node.elementId, target }, true);
 }
 
+function nodeLabelWritingDirectionFor(elementId: string): NodeLabelWritingDirection {
+  return scene.value.nodes.find((node) => node.elementId === elementId)?.nodeLabelWritingDirection
+    ?? "horizontal-right";
+}
+
+function updateSelectedNodeLabelWritingDirection(event: Event): void {
+  const node = selectedElement.value;
+  if (node?.structuralKind !== "node" || props.readOnly) return;
+  const direction = (event.target as HTMLSelectElement).value as NodeLabelWritingDirection;
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[node.elementId] ?? { semanticRef: node.semanticRef };
+    const appearance = { ...current.appearance };
+    if (direction === "vertical-down") appearance.nodeLabelWritingDirection = direction;
+    else delete appearance.nodeLabelWritingDirection;
+    if (Object.keys(appearance).length) current.appearance = appearance;
+    else delete current.appearance;
+    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) {
+      delete view.overlay[node.elementId];
+    } else {
+      view.overlay[node.elementId] = current;
+    }
+  }, true);
+}
+
 function addSelectedWaypoint(): void {
   const edge = selectedEdge.value;
   if (!edge || !selectedWaypointEditingAvailable.value) return;
@@ -1891,6 +1835,20 @@ function addSelectedWaypoint(): void {
     elementId: edge.elementId,
     routing: {
       waypoints: appendEdgeWaypoint(edge),
+      labelOffset: edge.labelOffset,
+      sourceAnchor: edge.sourceAnchor,
+      targetAnchor: edge.targetAnchor,
+    },
+  }, true);
+}
+
+function removeSelectedWaypointAt(index: number): void {
+  const edge = selectedEdge.value;
+  if (!edge || !selectedWaypointEditingAvailable.value) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: {
+      waypoints: removeEdgeWaypoint(edge.waypoints, index),
       labelOffset: edge.labelOffset,
       sourceAnchor: edge.sourceAnchor,
       targetAnchor: edge.targetAnchor,
@@ -2302,7 +2260,7 @@ function previewAppearance(value: AppearanceEditorValue): void {
   appearancePreviewValue.value = clone(value);
 }
 
-function applyAppearance(value: AppearanceEditorValue): void {
+function commitAppearance(value: AppearanceEditorValue): void {
   const targets = new Set(appearanceTargetIds.value);
   mutateDocument((document) => {
     const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
@@ -2334,6 +2292,11 @@ function applyAppearance(value: AppearanceEditorValue): void {
       }
     }
   }, true);
+  appearancePreviewValue.value = undefined;
+}
+
+function applyAppearance(value: AppearanceEditorValue): void {
+  commitAppearance(value);
   closeAppearanceEditor();
 }
 
@@ -2413,97 +2376,34 @@ function updateAuthoringDraft(next: EditorAuthoringDraft): void {
   applyDiagnostics.value = [];
 }
 
-async function previewStructuredAuthoring(): Promise<void> {
-  const context = authoringContext.value;
-  if (!context || !authoringEnabled.value || authoringBusy.value) return;
-  cancelAuthoringRequest();
-  const requestToken = ++authoringRequestToken;
-  const controller = new AbortController();
-  authoringAbortController = controller;
-  const sourceDocument = clone(draft.value);
-  const sourceJson = JSON.stringify(sourceDocument);
-  const draftJson = JSON.stringify(authoringDraft.value);
-  authoringBusy.value = true;
-  try {
-    const commands = compileAuthoringDraft(
-      clone(authoringDraft.value),
-      activeView.value?.viewId ?? "",
-    );
-    const preview = await previewAuthoringCommands(sourceDocument, commands, context, {
-      allocator: props.resourceIriAllocator ?? context.allocator,
-      signal: controller.signal,
-    });
-    if (
-      requestToken !== authoringRequestToken
-      || controller.signal.aborted
-      || props.readOnly
-      || JSON.stringify(draft.value) !== sourceJson
-      || JSON.stringify(authoringDraft.value) !== draftJson
-    ) return;
-    authoringPreview.value = preview;
-    applyDiagnostics.value = clone(preview.diagnostics);
-  } catch (cause) {
-    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
-    authoringPreview.value = undefined;
-    applyDiagnostics.value = [authoringFailureDiagnostic("authoring-preview-failed", cause)];
-  } finally {
-    if (requestToken === authoringRequestToken) {
-      authoringAbortController = undefined;
-      authoringBusy.value = false;
-    }
-  }
-}
-
-async function previewDetailsCommands(commands: AuthoringCommand[]): Promise<void> {
-  const context = authoringContext.value;
+async function executeDetailsCommands(commands: AuthoringCommand[]): Promise<void> {
   const element = detailsDialogTarget.value;
-  if (!context || !element || !authoringEnabled.value || authoringBusy.value || commands.length === 0) return;
+  if (!element || commands.length === 0) return;
   detailsDialogElementId.value = "";
-  cancelAuthoringRequest();
-  const requestToken = ++authoringRequestToken;
-  const controller = new AbortController();
-  authoringAbortController = controller;
-  const sourceDocument = clone(draft.value);
-  const sourceJson = JSON.stringify(sourceDocument);
-  authoringBusy.value = true;
-  try {
-    const preview = await previewAuthoringCommands(sourceDocument, commands, context, {
-      allocator: props.resourceIriAllocator ?? context.allocator,
-      signal: controller.signal,
-    });
-    if (
-      requestToken !== authoringRequestToken
-      || controller.signal.aborted
-      || props.readOnly
-      || JSON.stringify(draft.value) !== sourceJson
-    ) return;
-    authoringPreviewDescriptor.value = {
-      operationLabel: `${element.label} の詳細・属性を編集`,
-      resourceChips: [{ iri: element.semanticRef, label: element.label, role: "対象" }],
-    };
-    authoringPreview.value = preview;
-    applyDiagnostics.value = clone(preview.diagnostics);
-  } catch (cause) {
-    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
-    authoringPreview.value = undefined;
-    authoringPreviewDescriptor.value = undefined;
-    applyDiagnostics.value = [authoringFailureDiagnostic("details-preview-failed", cause)];
-  } finally {
-    if (requestToken === authoringRequestToken) {
-      authoringAbortController = undefined;
-      authoringBusy.value = false;
-    }
-  }
+  await executeIntentCommands(commands, `${element.label} の詳細・属性を編集`, [{
+    iri: element.semanticRef,
+    label: element.label,
+    role: "対象",
+  }]);
 }
 
 function previewIntentDraft(next: EditorAuthoringDraft, operationLabel: string): void {
   if (props.readOnly) return;
   updateAuthoringDraft(next);
-  authoringPreviewDescriptor.value = {
+  const commands = compileAuthoringDraft(clone(next), activeView.value?.viewId ?? "");
+  const creationPresentation = next.kind === "create-resource" && next.createTemplateRef
+    ? {
+        templateRef: next.createTemplateRef,
+        structuralKind: next.createStructuralKind,
+        viewId: currentActiveViewId.value,
+      }
+    : undefined;
+  void executeIntentCommands(
+    commands,
     operationLabel,
-    resourceChips: authoringPreviewResourceChips(next),
-  };
-  void previewStructuredAuthoring();
+    authoringPreviewResourceChips(next),
+    creationPresentation,
+  );
 }
 
 async function previewIntentCommands(
@@ -2511,13 +2411,26 @@ async function previewIntentCommands(
   operationLabel: string,
   resources: Array<{ iri: string; label: string; role: string }>,
 ): Promise<void> {
+  await executeIntentCommands(commands, operationLabel, resources);
+}
+
+async function executeIntentCommands(
+  commands: AuthoringCommand[],
+  _operationLabel: string,
+  _resources: Array<{ iri: string; label: string; role: string }>,
+  creationPresentation?: {
+    templateRef: string;
+    structuralKind: "node" | "container" | "region";
+    viewId: string;
+  },
+): Promise<void> {
   const context = authoringContext.value;
   if (!context || !authoringEnabled.value || authoringBusy.value) return;
   if (commands.length === 0) {
     applyDiagnostics.value = [{
       severity: "warning",
       code: "authoring-no-change",
-      message: "変更する項目を選んでから、もう一度確認してください。",
+      message: "変更する項目を選んでから、もう一度実行してください。",
     }];
     return;
   }
@@ -2539,15 +2452,30 @@ async function previewIntentCommands(
       || props.readOnly
       || JSON.stringify(draft.value) !== sourceJson
     ) return;
-    authoringDraft.value = draftFromAuthoringCommand(commands[0]!) ?? emptyAuthoringDraft();
-    authoringPreviewDescriptor.value = { operationLabel, resourceChips: resources };
-    authoringPreview.value = preview;
     applyDiagnostics.value = clone(preview.diagnostics);
+    if (!preview.valid) return;
+    const result = await applyAuthoringPreview(sourceDocument, preview, context, {
+      confirmationId: preview.confirmationId,
+      signal: controller.signal,
+    });
+    if (
+      requestToken !== authoringRequestToken
+      || controller.signal.aborted
+      || props.readOnly
+      || JSON.stringify(draft.value) !== sourceJson
+    ) return;
+    applyDiagnostics.value = clone(result.diagnostics);
+    if (!result.accepted) return;
+    const committed = creationPresentation
+      ? applyCreatedResourceTemplate(result.document, preview, creationPresentation)
+      : result.document;
+    resetAuthoringDraft();
+    semanticIntentPanel.value?.resetIntent();
+    publish(committed, true, "semantic");
+    turtleDraft.value = committed.semantic.source;
   } catch (cause) {
     if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
-    authoringPreview.value = undefined;
-    authoringPreviewDescriptor.value = undefined;
-    applyDiagnostics.value = [authoringFailureDiagnostic("intent-preview-failed", cause)];
+    applyDiagnostics.value = [authoringFailureDiagnostic("intent-transaction-failed", cause)];
   } finally {
     if (requestToken === authoringRequestToken) {
       authoringAbortController = undefined;
@@ -2578,40 +2506,138 @@ function seedSemanticEdgeEndpoint(payload: {
     || selectedEdge.value?.elementId !== payload.edgeElementId
     || intentEdgeDetails.value?.derivedReason
   ) return;
-  activeSemanticIntent.value = "edit-relation";
-  const field = payload.endpoint === "source" ? "sourceIri" : "targetIri";
-  beginIntentResourcePicking(field);
-  seedDraftResource(payload.targetSemanticRef);
+  const edge = intentEdgeDetails.value;
+  const capability = edge?.capability;
+  if (!edge || capability?.command !== "remove-statement" || !payload.targetSemanticRef) return;
+  const nextStatement = {
+    subjectIri: payload.endpoint === "source" ? payload.targetSemanticRef : edge.sourceIri,
+    predicateIri: edge.predicateIri,
+    objectIri: payload.endpoint === "target" ? payload.targetSemanticRef : edge.targetIri,
+  };
+  const commands: AuthoringCommand[] = [{
+    type: "remove-statement",
+    commandId: "endpoint-reconnect-remove",
+    statementRef: capability.statementRef,
+    subjectIri: capability.subject,
+    predicateIri: capability.predicate,
+    objectIri: capability.object,
+  }, {
+    type: "connect-resources",
+    commandId: "endpoint-reconnect-add",
+    ...nextStatement,
+  }, {
+    type: "set-statement-comments",
+    commandId: "endpoint-reconnect-comments",
+    statementRef: statementIdentityForNamedStatement(nextStatement),
+    ...nextStatement,
+    comments: (edge.statementComments ?? []).map((item) => ({ kind: "literal", ...item })),
+  }];
+  void executeIntentCommands(commands, `${edge.label}の接続先を変更`, [
+    { iri: nextStatement.subjectIri, label: "始点", role: "始点" },
+    { iri: nextStatement.objectIri, label: "終点", role: "終点" },
+  ]);
 }
 
-async function applyStructuredAuthoring(): Promise<void> {
+function selectedDeletionCommands(elementIds: readonly string[]): AuthoringCommand[] {
+  const elements = [
+    ...scene.value.nodes,
+    ...scene.value.containers,
+    ...(scene.value.regions ?? []),
+    ...scene.value.edges,
+  ];
+  const selected = elementIds
+    .map((elementId) => elements.find((candidate) => candidate.elementId === elementId))
+    .filter((element): element is SelectedElement => Boolean(element));
+  const deletedResourceIris = new Set(selected
+    .filter((element) => element.structuralKind !== "edge")
+    .map((element) => element.semanticRef));
+  const commands: AuthoringCommand[] = [...deletedResourceIris].map((resourceIri, index) => ({
+    type: "delete-resource",
+    commandId: `selection-delete-resource-${index + 1}`,
+    resourceIri,
+    cascade: true,
+  }));
+  for (const edge of selected.filter((element): element is SceneEdge => element.structuralKind === "edge")) {
+    const capability = edge.provenance?.editCapability;
+    if (capability?.command !== "remove-statement") continue;
+    if (deletedResourceIris.has(capability.subject) || deletedResourceIris.has(capability.object)) continue;
+    commands.push({
+      type: "remove-statement",
+      commandId: `selection-delete-edge-${commands.length + 1}`,
+      statementRef: capability.statementRef,
+      subjectIri: capability.subject,
+      predicateIri: capability.predicate,
+      objectIri: capability.object,
+    });
+  }
+  return commands;
+}
+
+function deletionImpacts(preview: AuthoringPreview, selectedIds: ReadonlySet<string>): DeletionImpact[] {
+  const removedRefs = new Set(preview.patch.removed.map((change) => change.statementRef));
+  const impacts: DeletionImpact[] = [];
+  for (const edge of scene.value.edges) {
+    const refs = new Set([
+      ...(edge.provenance?.sourceStatementRefs ?? []),
+      ...(edge.labelProvenance?.sourceStatementRefs ?? []),
+    ]);
+    if (selectedIds.has(edge.elementId) || ![...refs].some((ref) => removedRefs.has(ref))) continue;
+    const source = geometryElement(edge.sourceElementId)?.label ?? "始点";
+    const target = geometryElement(edge.targetElementId)?.label ?? "終点";
+    impacts.push({
+      key: `edge:${edge.elementId}`,
+      kind: "relation",
+      label: `${source}（${edge.label || "関係"}）${target}`,
+    });
+  }
+  for (const membership of scene.value.memberships ?? []) {
+    if (!membership.provenance.sourceStatementRefs.some((ref) => removedRefs.has(ref))) continue;
+    const representedIds = [
+      membership.containerElementId,
+      membership.memberElementId,
+      ...(membership.regionElementId ? [membership.regionElementId] : []),
+    ];
+    if (representedIds.every((elementId) => selectedIds.has(elementId))) continue;
+    const container = geometryElement(membership.containerElementId)?.label ?? "領域";
+    const member = geometryElement(membership.memberElementId)?.label ?? "要素";
+    impacts.push({
+      key: `membership:${membership.semanticRef}:${membership.ordinal ?? 0}`,
+      kind: membership.role === "sequence-member" ? "sequence" : "membership",
+      label: membership.role === "sequence-member"
+        ? `${container} の ${membership.ordinal ?? "?"}番「${member}」`
+        : `${container} に含まれる「${member}」`,
+    });
+  }
+  return impacts.filter((impact, index) => (
+    impacts.findIndex((candidate) => candidate.key === impact.key) === index
+  ));
+}
+
+async function requestSemanticDeletion(elementId?: string): Promise<void> {
   const context = authoringContext.value;
-  const preview = authoringPreview.value;
-  if (
-    !context
-    || !preview?.valid
-    || !authoringEnabled.value
-    || authoringBusy.value
-    || props.readOnly
-  ) return;
+  if (!context || !authoringEnabled.value || authoringBusy.value || props.readOnly) return;
+  const targetIds = elementId
+    ? selectedElementIdsSet.value.has(elementId) ? [...selectedElementIds.value] : [elementId]
+    : [...selectedElementIds.value];
+  const commands = selectedDeletionCommands(targetIds);
+  if (commands.length === 0) {
+    applyDiagnostics.value = [{
+      severity: "warning",
+      code: "selection-delete-unavailable",
+      message: "この表示は元の関係を直接削除できません。元の所属・並び順を選んで編集してください。",
+    }];
+    return;
+  }
   cancelAuthoringRequest();
   const requestToken = ++authoringRequestToken;
   const controller = new AbortController();
   authoringAbortController = controller;
   const previous = clone(draft.value);
   const previousJson = JSON.stringify(previous);
-  const creationPresentation = authoringDraft.value.kind === "create-resource"
-    && authoringDraft.value.createTemplateRef
-    ? {
-        templateRef: authoringDraft.value.createTemplateRef,
-        structuralKind: authoringDraft.value.createStructuralKind,
-        viewId: currentActiveViewId.value,
-      }
-    : undefined;
   authoringBusy.value = true;
   try {
-    const result = await applyAuthoringPreview(previous, preview, context, {
-      confirmationId: preview.confirmationId,
+    const preview = await previewAuthoringCommands(previous, commands, context, {
+      allocator: props.resourceIriAllocator ?? context.allocator,
       signal: controller.signal,
     });
     if (
@@ -2620,22 +2646,115 @@ async function applyStructuredAuthoring(): Promise<void> {
       || props.readOnly
       || JSON.stringify(draft.value) !== previousJson
     ) return;
-    applyDiagnostics.value = clone(result.diagnostics);
-    if (!result.accepted) return;
-    const committed = creationPresentation
-      ? applyCreatedResourceTemplate(result.document, preview, creationPresentation)
-      : result.document;
-    resetAuthoringDraft();
-    publish(committed, true, "semantic");
-    turtleDraft.value = committed.semantic.source;
+    applyDiagnostics.value = clone(preview.diagnostics);
+    if (!preview.valid) return;
+    const impacts = deletionImpacts(preview, new Set(targetIds));
+    if (impacts.length > 0) {
+      deletionDialogReturnFocus = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : undefined;
+      pendingDeletion.value = { preview, impacts };
+      return;
+    }
+    await applyDeletionPreview(previous, preview, requestToken, controller);
   } catch (cause) {
     if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
-    applyDiagnostics.value = [authoringFailureDiagnostic("authoring-apply-failed", cause)];
+    applyDiagnostics.value = [authoringFailureDiagnostic("selection-delete-failed", cause)];
+  } finally {
+    if (requestToken === authoringRequestToken) {
+      authoringAbortController = undefined;
+      authoringBusy.value = false;
+      if (pendingDeletion.value) {
+        await nextTick();
+        deletionConfirmButton.value?.focus();
+      }
+    }
+  }
+}
+
+async function confirmPendingDeletion(): Promise<void> {
+  const context = authoringContext.value;
+  const pending = pendingDeletion.value;
+  if (!context || !pending?.preview.valid || authoringBusy.value || props.readOnly) return;
+  cancelAuthoringRequest();
+  const requestToken = ++authoringRequestToken;
+  const controller = new AbortController();
+  authoringAbortController = controller;
+  const previous = clone(draft.value);
+  authoringBusy.value = true;
+  try {
+    await applyDeletionPreview(previous, pending.preview, requestToken, controller);
+  } catch (cause) {
+    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
+    applyDiagnostics.value = [authoringFailureDiagnostic("selection-delete-apply-failed", cause)];
   } finally {
     if (requestToken === authoringRequestToken) {
       authoringAbortController = undefined;
       authoringBusy.value = false;
     }
+  }
+}
+
+async function applyDeletionPreview(
+  previous: IriographDocument,
+  preview: AuthoringPreview,
+  requestToken: number,
+  controller: AbortController,
+): Promise<void> {
+  const context = authoringContext.value;
+  if (!context) return;
+  const previousJson = JSON.stringify(previous);
+  const result = await applyAuthoringPreview(previous, preview, context, {
+    confirmationId: preview.confirmationId,
+    signal: controller.signal,
+  });
+  if (
+    requestToken !== authoringRequestToken
+    || controller.signal.aborted
+    || props.readOnly
+    || JSON.stringify(draft.value) !== previousJson
+  ) return;
+  applyDiagnostics.value = clone(result.diagnostics);
+  if (!result.accepted) return;
+  pendingDeletion.value = undefined;
+  resetAuthoringDraft();
+  semanticIntentPanel.value?.resetIntent();
+  clearSelection();
+  publish(result.document, true, "semantic");
+  turtleDraft.value = result.document.semantic.source;
+  restoreDeletionDialogFocus();
+}
+
+function cancelPendingDeletion(): void {
+  pendingDeletion.value = undefined;
+  restoreDeletionDialogFocus();
+}
+
+function restoreDeletionDialogFocus(): void {
+  const target = deletionDialogReturnFocus;
+  deletionDialogReturnFocus = undefined;
+  void nextTick(() => target?.focus());
+}
+
+function handleDeletionDialogKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape" && !authoringBusy.value) {
+    event.preventDefault();
+    cancelPendingDeletion();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...(deletionDialog.value?.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  ) ?? [])];
+  if (focusable.length === 0) return;
+  const first = focusable[0]!;
+  const last = focusable.at(-1)!;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
@@ -2949,22 +3068,17 @@ function cancelAuthoringDraft(): void {
   if (authoringBusy.value) cancelAuthoringRequest();
   authoringDraft.value = emptyAuthoringDraft();
   authoringResourcePicker.value = undefined;
-  authoringPreview.value = undefined;
-  authoringPreviewDescriptor.value = undefined;
   applyDiagnostics.value = [];
 }
 
 function resetAuthoringDraft(): void {
   authoringDraft.value = emptyAuthoringDraft();
   authoringResourcePicker.value = undefined;
-  authoringPreview.value = undefined;
-  authoringPreviewDescriptor.value = undefined;
 }
 
 function invalidateAuthoringPreview(): void {
   cancelAuthoringRequest();
-  authoringPreview.value = undefined;
-  authoringPreviewDescriptor.value = undefined;
+  if (pendingDeletion.value) cancelPendingDeletion();
 }
 
 function cancelAuthoringRequest(): void {
@@ -2982,20 +3096,6 @@ function authoringFailureDiagnostic(code: string, cause: unknown): ProjectionDia
   };
 }
 
-function formatTripleChange(change: AuthoringTripleChange): string {
-  return `${formatAuthoringGraphTerm(change.subject)} <${change.predicateIri}> ${
-    formatAuthoringGraphTerm(change.object)
-  } . # ${change.statementRef}`;
-}
-
-function formatAuthoringGraphTerm(term: AuthoringTripleChange["object"]): string {
-  if (term.termType === "NamedNode") return `<${term.value}>`;
-  if (term.termType === "BlankNode") return `_:${term.value}`;
-  return `${JSON.stringify(term.value)}${
-    term.language ? `@${term.language}` : `^^<${term.datatypeIri}>`
-  }`;
-}
-
 function layoutPurposeLabel(layoutRef: string | undefined): string {
   if (layoutRef?.includes("hierarchical-lr")) return "左から右へ自動配置";
   if (layoutRef?.includes("hierarchical-tb")) return "上から下へ自動配置";
@@ -3005,11 +3105,13 @@ function layoutPurposeLabel(layoutRef: string | undefined): string {
 async function applyTurtleDraft(): Promise<boolean> {
   if (props.readOnly) return false;
   if (structuredAuthoringPending.value) {
-    pendingAuthoringGuidance.value = "意味の変更が入力中です。変更内容を確認して明示的に適用するか、キャンセルしてください。";
+    pendingAuthoringGuidance.value = pendingDeletion.value
+      ? "削除の影響確認を完了するか、キャンセルしてください。"
+      : "意味の変更が入力中です。実行するか、キャンセルしてください。";
     applyDiagnostics.value = [{
       severity: "error",
       code: "pending-structured-authoring",
-      message: "Structured authoring draftを適用またはCancelしてからTurtleを適用してください。",
+      message: "意味編集を実行またはキャンセルしてからTurtleを適用してください。",
     }];
     return false;
   }
@@ -3135,11 +3237,13 @@ async function requestSave(): Promise<void> {
 
 async function flushPendingEdits(): Promise<boolean> {
   if (structuredAuthoringPending.value) {
-    pendingAuthoringGuidance.value = "意味の変更が入力中です。変更内容を確認して明示的に適用するか、キャンセルしてください。";
+    pendingAuthoringGuidance.value = pendingDeletion.value
+      ? "削除の影響確認を完了するか、キャンセルしてください。"
+      : "意味の変更が入力中です。実行するか、キャンセルしてください。";
     applyDiagnostics.value = [{
       severity: "error",
       code: "pending-structured-authoring",
-      message: "意味の変更が入力中です。右の意味編集で変更内容を確認して明示的に適用するか、キャンセルしてください。",
+      message: "意味の変更が入力中です。右の意味編集で実行するか、キャンセルしてください。",
     }];
     inspectorMode.value = "semantic";
     rightSidebarCollapsed.value = false;
@@ -3173,6 +3277,11 @@ function handleKeydown(event: KeyboardEvent): void {
       return;
     }
     clearSelection();
+    return;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && selectedElementIds.value.length > 0) {
+    event.preventDefault();
+    void requestSemanticDeletion();
     return;
   }
   if (command && event.key.toLowerCase() === "z") {
@@ -3963,6 +4072,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @semantic-position-request="seedDraftPosition"
             @semantic-resource-request="seedDraftResource"
             @semantic-endpoint-reconnect-request="seedSemanticEdgeEndpoint"
+            @semantic-edit-request="requestSemanticDeletion"
             @semantic-pick-cancel="cancelAuthoringPicking"
             @context-menu-request="openContextMenu"
           />
@@ -4039,10 +4149,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           :requested-intent="activeSemanticIntent"
           :picked-source-iri="authoringDraft.sourceIri"
           :picked-target-iri="authoringDraft.targetIri"
-          :preview="authoringPreviewView"
-          @preview-draft="previewIntentDraft"
-          @preview-commands="previewIntentCommands"
-          @apply="applyStructuredAuthoring"
+          :diagnostics="applyDiagnostics"
+          @execute-draft="previewIntentDraft"
+          @execute-commands="previewIntentCommands"
+          @delete-selection="requestSemanticDeletion()"
           @cancel="cancelAuthoringDraft"
           @pick-resource="beginIntentResourcePicking"
           @focus-element="focusElement"
@@ -4113,6 +4223,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :current-override="appearancePrimaryOverlay?.style"
               :presets="appearancePresetStyles"
               @preview="previewAppearance"
+              @commit="commitAppearance"
               @apply="applyAppearance"
               @close="closeAppearanceEditor"
             />
@@ -4176,6 +4287,16 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <div class="iriograph-node-content-placement">
               <label>要素内の配置</label>
               <small class="iriograph-node-content-guidance">Canvas上のラベルやアイコンをドラッグして、この要素の中で位置を調整できます。</small>
+              <label>ラベルの文字方向</label>
+              <select
+                aria-label="Node label writing direction"
+                :value="nodeLabelWritingDirectionFor(selectedElement.elementId)"
+                :disabled="readOnly"
+                @change="updateSelectedNodeLabelWritingDirection"
+              >
+                <option value="horizontal-right">横書き（左から右）</option>
+                <option value="vertical-down">縦書き（上から下）</option>
+              </select>
               <div class="iriograph-node-content-reset-actions">
                 <button
                   type="button"
@@ -4234,6 +4355,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 @click="addSelectedWaypoint"
               >経路点を追加</button>
               <small>{{ selectedManualWaypoints.length }}個の経路点。Canvas上の点をドラッグして調整します。</small>
+              <div v-if="selectedManualWaypoints.length" class="iriograph-waypoint-list" role="list" aria-label="手動経路点">
+                <div v-for="(_, index) in selectedManualWaypoints" :key="index" role="listitem">
+                  <span>経路点 {{ index + 1 }}</span>
+                  <button
+                    type="button"
+                    :aria-label="`経路点 ${index + 1}を削除`"
+                    :disabled="readOnly"
+                    @click="removeSelectedWaypointAt(index)"
+                  >削除</button>
+                </div>
+              </div>
             </template>
             <label>端子の形</label>
             <div class="iriograph-endpoint-marker-fields">
@@ -4358,6 +4490,35 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </form>
     </div>
 
+    <div v-if="pendingDeletion" class="iriograph-deletion-dialog-backdrop" role="presentation">
+      <section
+        ref="deletionDialog"
+        class="iriograph-deletion-dialog"
+        role="dialog"
+        aria-modal="true"
+        :aria-labelledby="deletionDialogTitleId"
+        @keydown="handleDeletionDialogKeydown"
+      >
+        <header>
+          <strong :id="deletionDialogTitleId">選択外の情報も削除されます</strong>
+          <button type="button" aria-label="削除をキャンセル" :disabled="authoringBusy" @click="cancelPendingDeletion">×</button>
+        </header>
+        <p>選択した要素を削除すると、次の関係・所属・並び順も同じ操作で削除されます。</p>
+        <ul aria-label="削除の影響一覧">
+          <li v-for="impact in pendingDeletion.impacts" :key="impact.key">
+            <small>{{ impact.kind === 'relation' ? '関係' : impact.kind === 'sequence' ? '並び順' : '所属' }}</small>
+            <span>{{ impact.label }}</span>
+          </li>
+        </ul>
+        <footer>
+          <button type="button" :disabled="authoringBusy" @click="cancelPendingDeletion">キャンセル</button>
+          <button ref="deletionConfirmButton" type="button" class="danger" :disabled="authoringBusy" @click="confirmPendingDeletion">
+            {{ authoringBusy ? '削除中…' : '影響も含めて削除' }}
+          </button>
+        </footer>
+      </section>
+    </div>
+
     <ResourceCreationPalette
       v-if="creationPalette"
       :kind="creationPalette.kind"
@@ -4382,7 +4543,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       :resources="authoringResourceChoices"
       :busy="authoringBusy"
       :notice="detailsDialogTarget.notice"
-      @preview="previewDetailsCommands"
+      @execute="executeDetailsCommands"
       @close="detailsDialogElementId = ''"
     />
   </article>

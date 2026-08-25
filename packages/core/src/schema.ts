@@ -192,6 +192,7 @@ export const iriographDocumentSchema = {
         styleToken: { type: "string", minLength: 1 },
         labelPlacement: { enum: ["top", "right", "bottom", "left", "center"] },
         nodeLabelOffset: { $ref: "#/$defs/point" },
+        nodeLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },
         nodeIconOffset: { $ref: "#/$defs/point" },
         regionLabelAnchor: { type: "number", minimum: 0, exclusiveMaximum: 1 },
         regionLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },

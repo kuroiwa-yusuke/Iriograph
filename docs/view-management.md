@@ -42,17 +42,19 @@ Editor sessionはviewIdごとに次を保持します。
 
 - selection集合とprimary selection
 - zoom、scrollLeft、scrollTopからなるviewport
+- 実content boundsの外周320 unitから始まり、drag/resize中に必要方向へ160 unitずつ拡張するwork area bounds
 - 一時非表示にしたexact Scene element ID集合
 
 これらは`v-model`、overlay、undo/redo history、dirty stateへ入りません。一時hideは指定した
 exact IDだけを起点とし、containerの場合だけ全structural descendantを閉包に含めます。その後、
 非表示geometryへ接続するedgeと明示指定edgeだけをScene cloneから除きます。Semantic graphを跨いだ
-新しいedgeを生成しません。
+新しいedgeを生成しません。Work areaは一つのgesture中も正負方向へ単調に拡張し、負方向では
+viewport位置を補正します。Fitはwork area全体でなく、負座標とrouteを含む実content boundsを使います。
 
 ## 制限
 
 v1はviewごとのSPARQL、filter DSL、predicate条件式、非表示nodeを跨ぐedge再接続を持ちません。
 表示構造の違いはcatalog profileで宣言し、個別要素の表示調整はoverlay、一時的な絞り込みは
 session-only hideで扱います。Structured authoringの構造候補はactive viewの
-profile/catalog/viewIdへbindします。Standard editorの`新しい要素を作る`は初期位置を入力せず、
+profile/catalog/viewIdへbindします。Standard editorの`要素を追加`は初期位置を入力せず、
 active viewの標準layoutがgenerated geometryを補完します。

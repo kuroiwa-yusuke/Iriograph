@@ -1,13 +1,19 @@
 {
   "workspaceId": "iriograph-local-mock",
   "name": "Iriograph local workspace",
-  "defaultDocumentPath": "models/purchase-approval.iriograph",
+  "defaultDocumentPath": "models/pizza-order-delivery.iriograph",
   "entries": [
     {
       "kind": "iriograph-document",
       "path": "models/purchase-approval.iriograph",
       "mediaType": "application/vnd.iriograph+json",
       "url": "/workspace/models/purchase-approval.iriograph"
+    },
+    {
+      "kind": "iriograph-document",
+      "path": "models/pizza-order-delivery.iriograph",
+      "mediaType": "application/vnd.iriograph+json",
+      "url": "/workspace/models/pizza-order-delivery.iriograph"
     },
     {
       "kind": "asset",

@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   preview: [value: AppearanceEditorValue];
+  commit: [value: AppearanceEditorValue];
   apply: [value: AppearanceEditorValue];
   close: [];
 }>();
@@ -49,6 +50,7 @@ watch([styleRef, style], emitPreview, { deep: true });
 
 function setPreset(refValue: string): void {
   styleRef.value = refValue;
+  commitInline();
 }
 
 function toggleField(field: StyleField, enabled: boolean): void {
@@ -61,6 +63,7 @@ function toggleField(field: StyleField, enabled: boolean): void {
   if (!enabled || field === "fillOpacity" || field === "strokeWidth" || field === "dash") {
     style.value = next;
   }
+  commitInline();
 }
 
 function updateColor(field: "fill" | "stroke" | "text" | "accent", event: Event): void {
@@ -73,11 +76,13 @@ function updateNumber(field: "fillOpacity" | "strokeWidth", event: Event): void 
 
 function updateDash(event: Event): void {
   style.value = { ...style.value, dash: (event.target as HTMLSelectElement).value };
+  commitInline();
 }
 
 function reset(): void {
   styleRef.value = "";
   style.value = {};
+  commitInline();
 }
 
 function value(): AppearanceEditorValue {
@@ -90,6 +95,10 @@ function value(): AppearanceEditorValue {
 function emitPreview(): void {
   emit("preview", value());
 }
+
+function commitInline(): void {
+  if (props.inline) emit("commit", value());
+}
 </script>
 
 <template>
@@ -101,11 +110,11 @@ function emitPreview(): void {
       <button v-for="(preset, refValue) in presets" :key="refValue" type="button" :title="refValue" :aria-pressed="styleRef === refValue" @click="setPreset(refValue)"><span :style="{ background: preset.fill ?? currentStyle.fill, borderColor: preset.stroke ?? currentStyle.stroke }" />{{ refValue.split(/[:/#]/u).at(-1) }}</button>
     </div>
     <div class="iriograph-appearance-fields">
-      <label v-for="field in colorFields" :key="field"><input type="checkbox" :checked="style[field] !== undefined" @change="toggleField(field, ($event.target as HTMLInputElement).checked)" /><span>{{ colorFieldLabels[field] }}</span><input type="color" :aria-label="colorFieldLabels[field]" :value="style[field] ?? currentStyle[field] ?? '#000000'" :disabled="style[field] === undefined" @input="updateColor(field, $event)" /></label>
-      <label v-if="fields.includes('fillOpacity')"><input type="checkbox" :checked="style.fillOpacity !== undefined" @change="toggleField('fillOpacity', ($event.target as HTMLInputElement).checked)" /><span>領域の透明度</span><input type="range" min="0" max="1" step="0.05" :value="style.fillOpacity ?? currentStyle.fillOpacity ?? 1" :disabled="style.fillOpacity === undefined" @input="updateNumber('fillOpacity', $event)" /></label>
-      <label v-if="fields.includes('strokeWidth')"><input type="checkbox" :checked="style.strokeWidth !== undefined" @change="toggleField('strokeWidth', ($event.target as HTMLInputElement).checked)" /><span>線の太さ</span><input type="number" min="0" max="20" step="0.5" :value="style.strokeWidth ?? currentStyle.strokeWidth ?? 1" :disabled="style.strokeWidth === undefined" @input="updateNumber('strokeWidth', $event)" /></label>
+      <label v-for="field in colorFields" :key="field"><input type="checkbox" :checked="style[field] !== undefined" @change="toggleField(field, ($event.target as HTMLInputElement).checked)" /><span>{{ colorFieldLabels[field] }}</span><input type="color" :aria-label="colorFieldLabels[field]" :value="style[field] ?? currentStyle[field] ?? '#000000'" :disabled="style[field] === undefined" @input="updateColor(field, $event)" @change="commitInline" /></label>
+      <label v-if="fields.includes('fillOpacity')"><input type="checkbox" :checked="style.fillOpacity !== undefined" @change="toggleField('fillOpacity', ($event.target as HTMLInputElement).checked)" /><span>領域の透明度</span><input type="range" min="0" max="1" step="0.05" :value="style.fillOpacity ?? currentStyle.fillOpacity ?? 1" :disabled="style.fillOpacity === undefined" @input="updateNumber('fillOpacity', $event)" @change="commitInline" /></label>
+      <label v-if="fields.includes('strokeWidth')"><input type="checkbox" :checked="style.strokeWidth !== undefined" @change="toggleField('strokeWidth', ($event.target as HTMLInputElement).checked)" /><span>線の太さ</span><input type="number" min="0" max="20" step="0.5" :value="style.strokeWidth ?? currentStyle.strokeWidth ?? 1" :disabled="style.strokeWidth === undefined" @input="updateNumber('strokeWidth', $event)" @change="commitInline" /></label>
       <label v-if="fields.includes('dash')"><input type="checkbox" :checked="style.dash !== undefined" @change="toggleField('dash', ($event.target as HTMLInputElement).checked)" /><span>線種</span><select :value="style.dash ?? currentStyle.dash ?? '6 4'" :disabled="style.dash === undefined" @change="updateDash"><option value="0">実線</option><option value="6 4">破線</option><option value="2 3">点線</option><option value="10 4 2 4">一点鎖線</option></select></label>
     </div>
-    <footer><button type="button" @click="reset">カタログ既定へ戻す</button><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" @click="emit('apply', value())">適用</button></footer>
+    <footer><button type="button" @click="reset">カタログ既定へ戻す</button><button v-if="inline" type="button" @click="emit('close')">閉じる</button><template v-else><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" @click="emit('apply', value())">適用</button></template></footer>
   </section>
 </template>

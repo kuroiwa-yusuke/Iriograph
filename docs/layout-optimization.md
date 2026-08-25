@@ -18,7 +18,7 @@ Semantic Turtleと`.iriograph` documentにはengine固有optionを保存しま�
 
 各段階はstable element IDでsortした入力と明示的な中間結果を持ちます。一つの巨大なheuristicへ統合せず、品質指標、cache invalidation、fallbackを段階ごとに観測可能にします。
 
-以下は最適化を進める実装順序です。現行の標準軽量adapterは責務分離、包含/SCC、size、基本layered配置、単純orthogonal route、pin保持までを持ちます。Component packing、crossing sweep、label衝突、局所incremental、LODはこの順序に従う後続実装であり、P1-08初稿benchmarkが実装済みとみなすものではありません。
+以下は最適化を進める実装順序です。現行の標準軽量adapterは責務分離、包含/SCC、size、membership band、基本layered配置、bounded crossing改善、pin保持、最大1中間点のroute completionまでを持ちます。高度なcomponent packing、label衝突、局所incremental、LODはこの順序に従う後続実装であり、P1-08初稿benchmarkが実装済みとみなすものではありません。
 
 ### 2.1 意味投影
 
@@ -42,6 +42,8 @@ SCC縮約DAGへrankを割り当て、LR/TB方向、rank gap、item gapに従っ�
 
 順序候補が複数ある場合は、edge由来のbarycenter、以前の並び、stable IDの順で決定します。全探索で最少交差を求めず、規模に応じた固定回数のsweepに制限します。
 
+Region viewでは、各resourceのmembership集合をstableなsignatureとしてcross-axis bandへ割り当てます。複数領域に属するresourceは対応する交差bandへ置き、非所属resourceはpredicate名ではなくproducer/resource/consumerの接続方向と近傍だけから主軸列とband間位置を決めます。生成された重ならない兄弟regionは共通の主軸spanを持ち、外側region配下のlaneはそのcontent spanへ揃えます。固定/user geometryと重なり集合にはこの正規化を適用しません。
+
 ### 2.5 Crossing、port、orthogonal routing
 
 Layer内順序を上下sweepで改善し、交差数が改善しない時点または固定iteration上限で終了します。Source/target roleからport sideを解決できる場合はcatalog/profile由来の抽象port constraintを使用し、engine固有port IDは保存しません。Roleがないedgeはshape境界上の決定的なattachmentを使います。
@@ -50,7 +52,7 @@ Orthogonal routeはsource/target attachmentを必ず含み、parallel edgeとsel
 
 Portable overlayの経路modeは`auto`、`straight`、`orthogonal`、`curve`、`manual`を区別します。自動routerが障害物を避けるために作る内部屈曲点または曲線制御点はSceneのderived routeであり、manual waypointとして保存しません。`straight`だけは中間点を持たないことを契約とし、障害物回避より利用者の明示指定を優先して必要ならdiagnosticを返します。
 
-`curve`もportable waypointを持ちません。Endpoint、採用した障害物回避corridor、利用者が明示したsparseなcurvatureからrenderer用Bezier制御点を導出します。自動品質改善はderived routeのsegmentやcontrol pointを増やせますが、overlayのwaypoint数を増やしてはなりません。利用者が明示した`manual`だけがwaypointを所有します。
+`curve`もportable waypointを持ちません。Endpoint、採用した障害物回避corridor、利用者が明示したsparseなcurvatureからrenderer用Bezier制御点を導出します。自動品質探索は内部候補として複数segmentを扱えますが、公開するderived routeはendpoint二点または中間点一つへcompletionし、overlayのwaypoint数を増やしません。利用者が明示した`manual`だけがwaypointを所有します。Parallel/reciprocal edgeはcompletion後もroute signatureを共有させず、個別選択可能なlaneを保ちます。
 
 User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutをpadding付き障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/comment交差、endpoint共有を除くedge交差数、edge重複長、距離、bend数の辞書順で比較します。Stable edge ID順と逆順を含む固定回数だけ、他の全routeを現在状態として混雑penalty付きrerouteを行います。各置換はgraph全体の辞書順品質を単調改善する場合だけ採用し、同一入力の決定性と計算上限を保ちます。
 
@@ -109,6 +111,8 @@ Fallbackはadapter policyにversion付きで宣言された場合だけ実行し
 Engine名ではなくview要求でadapterを選びます。単純flowとfallbackは標準、hierarchical business diagramの高品質自動整列はELK、自由な関係探索はforce-directed系、静的出版物はGraphviz系という役割分担です。
 
 最初の実用UIでは標準adapterを常時利用可能なbaselineとし、hostが`@iriograph/layout-elk`を導入した場合は階層flowと直交routeの高品質actionで明示選択します。Engine選択をportable document内の細かなoptionへ展開せず、stableな`layoutRef`からversioned adapter policyを解決します。自動配置のUIは採用engine名より、移動対象、pin保持、交差・重なりの改善見込み、失敗時のdiagnosticを利用者へ説明します。
+
+0.6.0のピザ注文・配送fixtureでは、同一ProjectedSceneを固定1920×1080で比較し、標準adapterを採用しました。Optional ELKはnode overlap 0、edge交差6でしたが、route-node交差3、fit 24%、aspect 3.18、lane順不成立でした。標準adapterはnode overlap 0、route-node交差1、edge交差9、fit 57%、aspect 2.99、lane順成立です。この結果はadapter選択の検証証拠であり、fixtureのIRIやlabelを検出するruntime分岐には使いません。
 
 ## 4. 品質指標
 

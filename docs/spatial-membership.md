@@ -120,7 +120,7 @@ type SceneMembership = {
 
 Class同士の概念階層は`rdfs:subClassOf`、resourceの分類は`rdf:type`、任意group所属は`rdfs:member`またはそのsubpropertyとして別々に編集します。Editorはこれらを一つの「包含」actionへ混ぜてはなりません。
 
-Classification-constrained viewでは、要素の全boundsを現在のclass intersection内へclampしなければなりません。別cellへ移す操作はgeometryから意味を推論せず、右Inspectorの`関係を変更する`から移動先classを明示したsemantic previewを開きます。共通部分が空または要素より小さい場合は移動を拒否し、region geometryまたはclassificationのどちらを修正するか選べるdiagnosticを返します。
+Classification-constrained viewでは、要素の全boundsを現在のclass intersection内へclampしなければなりません。別cellへ移す操作はgeometryから意味を推論せず、右Inspectorの`所属・並び順を編集`から移動先classを明示し、一回の実行操作内でvalidationとsemantic transactionを行います。共通部分が空または要素より小さい場合は移動を拒否し、region geometryまたはclassificationのどちらを修正するか選べるdiagnosticを返します。
 
 ## 5. Layout adapter境界
 
@@ -137,7 +137,7 @@ Layout requestは`elements`、`edges`とは独立した`memberships`を受け取
 
 Region geometryもnode/container geometryと同じView overlayに保存できます。ユーザーが移動・resizeした場合は`placement: "user"`として維持し、再投影で自動生成位置へ戻してはなりません。
 
-Resize可能なregionは四隅と四辺中央の8 handleを持ちます。Handle drag中も前節のmembership containmentをhard constraintとして適用し、previewが不正なままpointerupしても保存しません。制約対象のmemberはnodeに限らず、geometryを持つcontainerとregionも含みます。Pointer drag、keyboard move/resize、数値geometry、整列・等間隔、region本体の移動と8-handle resizeはすべて同じintersection制約を通し、いずれか一つの所属regionに収まるだけの候補を確定しません。Region labelは外周上のanchorをdragでき、`appearance.regionLabelAnchor`へ0以上1未満の正規化位置、`appearance.regionLabelWritingDirection`へ`horizontal-right`または`vertical-down`を保存します。Region背景同士のz-orderは`appearance.regionZOrder`で編集できますが、semantic membershipや別primitiveのz-orderへ意味を持たせません。選択中region本体は構造layer内だけを一時前面化し、edge/node層を越えません。8 handleだけはtransient interaction layerへ分離するため、他のregion/Seqやnodeと重なっても操作できます。選択解除時は保存済み`regionZOrder`へ戻り、この一時前面化をdocument、history、dirty stateへ保存しません。Vue固有extensionは新規保存せず、旧文書の読取互換だけに使います。
+Resize可能なregion/Seq/containerは四隅と四辺中央の8 handleを持ちます。Handle drag中も前節のmembership containmentをhard constraintとして適用し、previewが不正なままpointerupしても保存しません。制約対象のmemberはnodeに限らず、geometryを持つcontainerとregionも含みます。同じmemberが複数のregion、Seq、containerへ属する場合は、各region geometryと各container content boundsの共通範囲へmember全体を保ちます。一つのSeqとmemberを同時移動しても、memberが別の所属先から外れる移動量へ進めません。Pointer drag、keyboard move/resize、数値geometry、整列・等間隔、枠本体の移動と8-handle resizeはすべて同じintersection制約を通し、いずれか一つの所属先に収まるだけの候補を確定しません。Region labelは外周上のanchorをdragでき、`appearance.regionLabelAnchor`へ0以上1未満の正規化位置、`appearance.regionLabelWritingDirection`へ`horizontal-right`または`vertical-down`を保存します。Region背景同士のz-orderは`appearance.regionZOrder`で編集できますが、semantic membershipや別primitiveのz-orderへ意味を持たせません。選択中region本体は構造layer内だけを一時前面化し、edge/node層を越えません。8 handleだけはtransient interaction layerへ分離するため、他のregion/Seqやnodeと重なっても操作できます。選択解除時は保存済み`regionZOrder`へ戻り、この一時前面化をdocument、history、dirty stateへ保存しません。Vue固有extensionは新規保存せず、旧文書の読取互換だけに使います。
 
 Semantic source変更後のreconciliationはresource IRIが存続するregion overlayを維持します。Bagの型変更等でprimitiveが変わった場合は、互換なappearanceだけを残してgeometryを新しいprimitiveへ照合し、diagnosticを返します。Catalogから再生成できる透明度、色、線種をoverlayへ複製してはなりません。
 
@@ -150,7 +150,7 @@ Membershipの追加・削除はsemantic transactionです。
 3. Turtle parse、subproperty closure、parent型、cycle、domain validationを実行する。
 4. 全viewを再投影し、node-link hierarchyとregionをそれぞれ補完する。
 5. 存続overlayをreconcileし、新規geometryだけを決定的に生成する。
-6. Previewを明示適用した場合だけTurtleとoverlayを一つのrevisionとして保存する。
+6. Candidateの検証が成功した場合だけ、利用者の実行一回の中でTurtleとoverlayを一つのrevisionとして保存する。
 
 Plain drag、領域のresize、重なりの変更はこのlifecycleを開始しません。LLMにはTurtle、許可語彙、必要なprojection capabilityを渡し、geometry調整を要求しないことを既定とします。
 

@@ -73,7 +73,8 @@ describe("ElkLayeredLayoutAdapter", () => {
     });
     expect(input.edges?.map((item) => item.id)).toEqual(["edge-1"]);
     expect(result.geometries["b-child"]!.x).toBeGreaterThan(result.geometries["a-container"]!.x);
-    expect(result.routes["edge-1"]!.length).toBeGreaterThanOrEqual(4);
+    expect(result.routes["edge-1"]!.length).toBeGreaterThanOrEqual(2);
+    expect(result.routes["edge-1"]!.length).toBeLessThanOrEqual(3);
     expect(result.width).toBeGreaterThan(0);
     expect(result.height).toBeGreaterThan(0);
   });
@@ -187,7 +188,7 @@ describe("ElkLayeredLayoutAdapter", () => {
       "urn:test:routes",
     ));
 
-    expect(result.routes.self).toHaveLength(4);
+    expect(result.routes.self).toHaveLength(3);
     expect(result.routes.self![0]).not.toEqual(result.routes.self![1]);
     expect(result.routes["parallel-1"]).not.toEqual(result.routes["parallel-2"]);
     expect(result.routes.manual!.slice(1, -1)).toEqual([
@@ -286,7 +287,7 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(result.routes.direct).not.toContainEqual({ x: 999, y: 999 });
   });
 
-  test("keeps ELK bend points available for curve smoothing", async () => {
+  test("compacts an unobstructed ELK curve corridor to endpoint-only", async () => {
     const adapter = new ElkLayeredLayoutAdapter("urn:test:curve", "LR", {
       engine: new RecordingEngine(),
     });
@@ -296,7 +297,7 @@ describe("ElkLayeredLayoutAdapter", () => {
       "urn:test:curve",
     ));
 
-    expect(result.routes.curved!.length).toBeGreaterThan(2);
+    expect(result.routes.curved).toHaveLength(2);
   });
 
   test("never invokes ELK for fixed geometry and returns a Core-valid result", async () => {

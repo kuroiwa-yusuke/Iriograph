@@ -55,7 +55,7 @@ describe("Iriograph document v1 schema", () => {
     expect(validateIriographDocumentV1(source).valid).toBe(false);
   });
 
-  it("accepts backward-compatible optional node-local label/icon offsets", () => {
+  it("accepts optional node-local label/icon offsets and sparse writing direction", () => {
     const source = structuredClone(fixture("document.valid.json")) as {
       views: Array<{ overlay: Record<string, unknown> }>;
     };
@@ -63,10 +63,14 @@ describe("Iriograph document v1 schema", () => {
       semanticRef: "urn:test:node",
       appearance: {
         nodeLabelOffset: { x: 12, y: -7 },
+        nodeLabelWritingDirection: "vertical-down",
         nodeIconOffset: { x: -9, y: 5 },
       },
     };
     expect(validateIriographDocumentV1(source).valid).toBe(true);
+    (source.views[0]!.overlay.node as { appearance: { nodeLabelWritingDirection: string } })
+      .appearance.nodeLabelWritingDirection = "vertical-up";
+    expect(validateIriographDocumentV1(source).valid).toBe(false);
   });
 
   it.each(["straight", "curve"])(

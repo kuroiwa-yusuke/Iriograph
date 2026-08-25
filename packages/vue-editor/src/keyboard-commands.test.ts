@@ -50,4 +50,9 @@ describe("canvas keyboard commands", () => {
       movement: "next",
     });
   });
+
+  it("修飾なしDelete/Backspaceを選択中の意味削除として解決する", () => {
+    expect(resolveCanvasKeyboardCommand({ ...base, key: "Delete" }).kind).toBe("semantic-edit");
+    expect(resolveCanvasKeyboardCommand({ ...base, key: "Backspace" }).kind).toBe("semantic-edit");
+  });
 });

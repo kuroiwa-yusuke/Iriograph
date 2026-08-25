@@ -123,7 +123,7 @@ export type LayoutAdapterResolution =
 
 const DEFAULT_SPACING: LayoutSpacing = {
   margin: 48,
-  rankGap: 104,
+  rankGap: 56,
   itemGap: 48,
   containerPadding: 28,
   containerHeader: 36,
@@ -256,6 +256,31 @@ export function completeRegionLayout(
     geometries[region.elementId] = enclosureGeometry(members, minimum, spacing);
   }
 
+  const normalizedRegionIds = normalizeGeneratedRegionSiblingSpans(
+    request,
+    regionCandidates,
+    memberships,
+    geometries,
+  );
+  if (normalizedRegionIds.size > 0) {
+    // Owners and transitive owners must enclose the normalized child spans.
+    // Do not recompute the normalized children themselves, which would shrink
+    // them back to their individual content widths.
+    for (const region of regions) {
+      if (isFixed(region) || normalizedRegionIds.has(region.elementId)) continue;
+      const members = memberships
+        .filter((membership) => membership.regionElementId === region.elementId)
+        .map((membership) => geometries[membership.memberElementId])
+        .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+      if (members.length === 0) continue;
+      geometries[region.elementId] = enclosureGeometry(
+        members,
+        region.size ?? region.geometry ?? { width: 240, height: 160 },
+        spacing,
+      );
+    }
+  }
+
   packEmptyGeneratedRegions(regionCandidates, memberships, geometries, spacing);
 
   validateRegionMembershipGeometry(request, geometries, memberships, diagnostics);
@@ -273,6 +298,89 @@ export function completeRegionLayout(
     height: bounds.height,
     diagnostics,
   };
+}
+
+/**
+ * A generated outer region or the virtual root commonly owns several disjoint
+ * lane regions. Give those siblings one shared primary-axis span so the result
+ * reads as a single matrix instead of ragged independent boxes. The rule is
+ * never applied to fixed/user geometry or overlapping region sets.
+ */
+function normalizeGeneratedRegionSiblingSpans(
+  request: LayoutRequest,
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  geometries: Record<string, ElementGeometry>,
+): Set<string> {
+  const direction = request.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalLr
+    ? "LR"
+    : request.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalTb ? "TB" : undefined;
+  if (!direction) return new Set();
+  const byId = new Map(regions.map((region) => [region.elementId, region]));
+  const normalized = new Set<string>();
+  const containerPadding = request.spacing?.containerPadding ?? DEFAULT_SPACING.containerPadding;
+  const normalize = (childIds: readonly string[], ownerId?: string): void => {
+    if (childIds.length < 2) return;
+    const children = childIds.map((id) => byId.get(id)!);
+    if (children.some((child) => isFixed(child) || !geometries[child.elementId])) return;
+    const directMemberSets = childIds.map((childId) => new Set(memberships
+      .filter((membership) => membership.regionElementId === childId)
+      .map((membership) => membership.memberElementId)));
+    if (
+      directMemberSets.some((members) => members.size === 0)
+      || directMemberSets.some((members, index) => directMemberSets.some((other, otherIndex) => (
+        index < otherIndex && [...members].some((memberId) => other.has(memberId))
+      )))
+    ) return;
+    const siblingGeometries = childIds.map((id) => geometries[id]!);
+    const owner = ownerId ? byId.get(ownerId) : undefined;
+    const ownerGeometry = owner && !isFixed(owner) ? geometries[ownerId!] : undefined;
+    const ownerStart = ownerGeometry
+      ? (direction === "LR" ? ownerGeometry.x : ownerGeometry.y) + containerPadding
+      : Number.POSITIVE_INFINITY;
+    const ownerEnd = ownerGeometry
+      ? (direction === "LR"
+          ? ownerGeometry.x + ownerGeometry.width
+          : ownerGeometry.y + ownerGeometry.height) - containerPadding
+      : Number.NEGATIVE_INFINITY;
+    const primaryStart = Math.min(ownerStart, ...siblingGeometries.map((geometry) => (
+      direction === "LR" ? geometry.x : geometry.y
+    )));
+    const primaryEnd = Math.max(ownerEnd, ...siblingGeometries.map((geometry) => (
+      direction === "LR" ? geometry.x + geometry.width : geometry.y + geometry.height
+    )));
+    for (const childId of childIds) {
+      const geometry = geometries[childId]!;
+      geometries[childId] = direction === "LR"
+        ? { ...geometry, x: primaryStart, width: primaryEnd - primaryStart }
+        : { ...geometry, y: primaryStart, height: primaryEnd - primaryStart };
+      normalized.add(childId);
+    }
+  };
+  for (const owner of [...regions].sort((left, right) => compareText(left.elementId, right.elementId))) {
+    const childIds = [...new Set(memberships
+      .filter((membership) => membership.regionElementId === owner.elementId)
+      .map((membership) => membership.memberElementId)
+      .filter((memberId) => byId.has(memberId)))]
+      .sort(compareText);
+    normalize(childIds, owner.elementId);
+  }
+  const nestedRegionIds = new Set(memberships
+    .map((membership) => membership.memberElementId)
+    .filter((memberId) => byId.has(memberId)));
+  normalize([...byId.keys()].filter((regionId) => !nestedRegionIds.has(regionId)).sort(compareText));
+  // A virtual-root normalization may expand an outer region after its child
+  // lanes were completed. Run the owner pass once more so those generated
+  // child lanes fill the new owner content span as one matrix.
+  for (const owner of [...regions].sort((left, right) => compareText(left.elementId, right.elementId))) {
+    const childIds = [...new Set(memberships
+      .filter((membership) => membership.regionElementId === owner.elementId)
+      .map((membership) => membership.memberElementId)
+      .filter((memberId) => byId.has(memberId)))]
+      .sort(compareText);
+    normalize(childIds, owner.elementId);
+  }
+  return normalized;
 }
 
 function enclosureGeometry(
@@ -872,28 +980,64 @@ function naturalGroupLayout(
     byRank.set(rank, members);
   }
   for (const members of byRank.values()) members.sort(compareText);
+  const crossBands = state.direction === "LR"
+    ? membershipCrossBands(ids, byRank, groupId, state)
+    : undefined;
+  const sortedRanks = [...byRank.keys()].sort((left, right) => left - right);
+  const primaryByRank = new Map<number, number>();
+  let primaryCursor = 0;
+  for (const rank of sortedRanks) {
+    primaryByRank.set(rank, primaryCursor);
+    primaryCursor += Math.max(...byRank.get(rank)!.map((id) => (
+      primarySize(elementLayoutSize(id, state), state.direction)
+    ))) + state.spacing.rankGap;
+  }
+  const primaryOffsets = crossBands
+    ? membershipPrimaryOffsets(ids, ranks, primaryByRank, groupId, crossBands, state)
+    : new Map<string, number>();
 
   const placements = new Map<string, ElementGeometry>();
-  let primary = 0;
   let maxCross = 0;
-  for (const rank of [...byRank.keys()].sort((left, right) => left - right)) {
+  for (const rank of sortedRanks) {
     const members = byRank.get(rank)!;
-    const rankPrimary = Math.max(...members.map((id) => (
-      primarySize(elementLayoutSize(id, state), state.direction)
-    )));
+    const primary = primaryByRank.get(rank)!;
     let cross = 0;
+    const bandCursors = new Map<string, number>();
     for (const id of members) {
       const size = elementLayoutSize(id, state);
+      const bandKey = crossBands?.keyByElement.get(id);
+      const bandOffset = crossBands && bandKey ? crossBands.offsetByKey.get(bandKey)! : 0;
+      const primaryOffset = bandKey ? primaryOffsets.get(bandKey) ?? 0 : 0;
+      const bandCursor = bandKey ? bandCursors.get(bandKey) ?? 0 : cross;
+      const crossPosition = bandOffset + bandCursor;
       const geometry = state.direction === "LR"
-        ? { x: primary, y: cross, width: size.width, height: size.height }
-        : { x: cross, y: primary, width: size.width, height: size.height };
+        ? { x: primary + primaryOffset, y: crossPosition, width: size.width, height: size.height }
+        : { x: crossPosition, y: primary, width: size.width, height: size.height };
       placements.set(id, geometry);
-      cross += crossSize(size, state.direction) + state.spacing.itemGap;
+      if (bandKey) {
+        bandCursors.set(
+          bandKey,
+          bandCursor + crossSize(size, state.direction) + state.spacing.itemGap,
+        );
+      } else {
+        cross += crossSize(size, state.direction) + state.spacing.itemGap;
+      }
     }
-    maxCross = Math.max(maxCross, Math.max(0, cross - state.spacing.itemGap));
-    primary += rankPrimary + state.spacing.rankGap;
+    maxCross = crossBands?.extent ?? Math.max(
+      maxCross,
+      Math.max(0, cross - state.spacing.itemGap),
+    );
   }
-  const primaryExtent = Math.max(0, primary - state.spacing.rankGap);
+  if (crossBands) {
+    placeUnassignedElementsByAffinity(placements, ids, groupId, crossBands, state);
+  }
+  const primaryExtent = Math.max(0, primaryCursor - state.spacing.rankGap);
+  const placementWidth = Math.max(0, ...[...placements.values()].map((geometry) => (
+    geometry.x + geometry.width
+  )));
+  const placementHeight = Math.max(0, ...[...placements.values()].map((geometry) => (
+    geometry.y + geometry.height
+  )));
   for (const id of allIds) {
     if (placements.has(id)) continue;
     const size = elementLayoutSize(id, state);
@@ -902,9 +1046,243 @@ function naturalGroupLayout(
   return {
     placements,
     bounds: state.direction === "LR"
-      ? { width: primaryExtent, height: maxCross }
-      : { width: maxCross, height: primaryExtent },
+      ? { width: Math.max(primaryExtent, placementWidth), height: Math.max(maxCross, placementHeight) }
+      : { width: Math.max(maxCross, placementWidth), height: Math.max(primaryExtent, placementHeight) },
   };
+}
+
+type MembershipCrossBands = {
+  keyByElement: Map<string, string>;
+  offsetByKey: Map<string, number>;
+  assignedElementIds: Set<string>;
+  extent: number;
+};
+
+/**
+ * Gives LR region members a stable cross-axis band across every rank. A
+ * multiple-membership signature receives its own deterministic intersection
+ * band; this keeps region matrices possible without treating any domain lane
+ * or predicate specially.
+ */
+function membershipCrossBands(
+  ids: readonly string[],
+  byRank: ReadonlyMap<number, readonly string[]>,
+  groupId: string,
+  state: LayoutState,
+): MembershipCrossBands | undefined {
+  const idSet = new Set(ids);
+  const regionsByElement = new Map<string, Set<string>>();
+  const membersByRegion = new Map<string, string[]>();
+  for (const membership of state.request.scene.memberships ?? []) {
+    if (!membership.regionElementId) continue;
+    const member = immediateChildInGroup(membership.memberElementId, groupId, state.parents);
+    if (!member || !idSet.has(member)) continue;
+    const regions = regionsByElement.get(member) ?? new Set<string>();
+    regions.add(membership.regionElementId);
+    regionsByElement.set(member, regions);
+    const members = membersByRegion.get(membership.regionElementId) ?? [];
+    members.push(member);
+    membersByRegion.set(membership.regionElementId, members);
+  }
+  const regionSignatures = new Set(
+    [...regionsByElement.values()].map((regions) => [...regions].sort(compareText).join("\u0001")),
+  );
+  if (regionSignatures.size < 2) return undefined;
+
+  const keyByElement = new Map(ids.flatMap((id) => {
+    const regions = regionsByElement.get(id);
+    return regions && regions.size > 0
+      ? [[id, [...regions].sort(compareText).join("\u0001")] as const]
+      : [];
+  }));
+  const heightByKey = new Map<string, number>();
+  for (const members of byRank.values()) {
+    const rankHeightByKey = new Map<string, number>();
+    for (const id of members) {
+      const key = keyByElement.get(id);
+      if (!key) continue;
+      const size = elementLayoutSize(id, state);
+      rankHeightByKey.set(
+        key,
+        (rankHeightByKey.get(key) ?? -state.spacing.itemGap)
+          + crossSize(size, state.direction) + state.spacing.itemGap,
+      );
+    }
+    for (const [key, height] of rankHeightByKey) {
+      heightByKey.set(key, Math.max(heightByKey.get(key) ?? 0, height));
+    }
+  }
+
+  const bandGap = state.spacing.containerPadding * 2 + state.spacing.containerHeader;
+  const orderKeyByRegion = new Map([...membersByRegion].map(([regionId, members]) => [
+    regionId,
+    [...new Set(members)].sort(compareText)[0] ?? regionId,
+  ]));
+  const bandOrderKey = (key: string): string => key
+    .split("\u0001")
+    .map((regionId) => orderKeyByRegion.get(regionId) ?? regionId)
+    .join("\u0001");
+  const offsetByKey = new Map<string, number>();
+  let cursor = 0;
+  for (const key of [...heightByKey.keys()].sort((left, right) => (
+    compareText(bandOrderKey(left), bandOrderKey(right)) || compareText(left, right)
+  ))) {
+    offsetByKey.set(key, cursor);
+    cursor += heightByKey.get(key)! + bandGap;
+  }
+  return {
+    keyByElement,
+    offsetByKey,
+    assignedElementIds: new Set(keyByElement.keys()),
+    extent: Math.max(0, cursor - bandGap),
+  };
+}
+
+/**
+ * Aligns membership bands on the primary axis when an unassigned directed
+ * resource bridges them (producer -> resource -> consumer). The equality is a
+ * soft, generic graph constraint; direct forward cross-band edges then keep a
+ * minimum progression without inspecting predicates or labels.
+ */
+function membershipPrimaryOffsets(
+  ids: readonly string[],
+  ranks: ReadonlyMap<string, number>,
+  primaryByRank: ReadonlyMap<number, number>,
+  groupId: string,
+  bands: MembershipCrossBands,
+  state: LayoutState,
+): Map<string, number> {
+  const centerX = (id: string): number => (
+    primaryByRank.get(ranks.get(id) ?? 0) ?? 0
+  ) + primarySize(elementLayoutSize(id, state), state.direction) / 2;
+  const constraints = new Map<string, number[]>();
+  for (const resourceId of ids.filter((id) => !bands.assignedElementIds.has(id)).sort(compareText)) {
+    const producers = state.edges.flatMap((edge): string[] => {
+      if (edge.targetElementId !== resourceId) return [];
+      const id = immediateChildInGroup(edge.sourceElementId, groupId, state.parents);
+      return id && bands.assignedElementIds.has(id) ? [id] : [];
+    });
+    const consumers = state.edges.flatMap((edge): string[] => {
+      if (edge.sourceElementId !== resourceId) return [];
+      const id = immediateChildInGroup(edge.targetElementId, groupId, state.parents);
+      return id && bands.assignedElementIds.has(id) ? [id] : [];
+    });
+    for (const producer of [...new Set(producers)].sort(compareText)) {
+      for (const consumer of [...new Set(consumers)].sort(compareText)) {
+        const fromKey = bands.keyByElement.get(producer);
+        const toKey = bands.keyByElement.get(consumer);
+        if (!fromKey || !toKey || fromKey === toKey) continue;
+        const forward = compareText(fromKey, toKey) <= 0;
+        const key = forward ? `${fromKey}\u0000${toKey}` : `${toKey}\u0000${fromKey}`;
+        const difference = centerX(producer) - centerX(consumer);
+        const values = constraints.get(key) ?? [];
+        values.push(forward ? difference : -difference);
+        constraints.set(key, values);
+      }
+    }
+  }
+  const adjacency = new Map([...bands.offsetByKey.keys()].map((key) => [key, [] as Array<{
+    target: string;
+    difference: number;
+  }>]));
+  for (const [key, values] of [...constraints].sort(([left], [right]) => compareText(left, right))) {
+    const [from, to] = key.split("\u0000") as [string, string];
+    const difference = median(values);
+    adjacency.get(from)?.push({ target: to, difference });
+    adjacency.get(to)?.push({ target: from, difference: -difference });
+  }
+  const result = new Map<string, number>();
+  for (const root of bands.offsetByKey.keys()) {
+    if (result.has(root)) continue;
+    result.set(root, 0);
+    const queue = [root];
+    while (queue.length > 0) {
+      const source = queue.shift()!;
+      for (const edge of (adjacency.get(source) ?? []).sort((left, right) => (
+        compareText(left.target, right.target) || left.difference - right.difference
+      ))) {
+        if (result.has(edge.target)) continue;
+        result.set(edge.target, result.get(source)! + edge.difference);
+        queue.push(edge.target);
+      }
+    }
+  }
+  for (const edge of [...state.edges].sort(compareEdge)) {
+    const source = immediateChildInGroup(edge.sourceElementId, groupId, state.parents);
+    const target = immediateChildInGroup(edge.targetElementId, groupId, state.parents);
+    if (!source || !target || !bands.assignedElementIds.has(source) || !bands.assignedElementIds.has(target)) continue;
+    const sourceKey = bands.keyByElement.get(source)!;
+    const targetKey = bands.keyByElement.get(target)!;
+    if (sourceKey === targetKey || (ranks.get(target) ?? 0) <= (ranks.get(source) ?? 0)) continue;
+    const required = centerX(source) + (result.get(sourceKey) ?? 0) + state.spacing.rankGap;
+    const current = centerX(target) + (result.get(targetKey) ?? 0);
+    if (current < required) result.set(targetKey, (result.get(targetKey) ?? 0) + required - current);
+  }
+  const minimum = Math.min(0, ...result.values());
+  if (minimum < 0) for (const [key, value] of result) result.set(key, value - minimum);
+  return result;
+}
+
+function placeUnassignedElementsByAffinity(
+  placements: Map<string, ElementGeometry>,
+  ids: readonly string[],
+  groupId: string,
+  bands: MembershipCrossBands,
+  state: LayoutState,
+): void {
+  const occupied = [...bands.assignedElementIds]
+    .map((id) => placements.get(id))
+    .filter((geometry): geometry is ElementGeometry => geometry !== undefined)
+    .map(copyGeometry);
+  const unassigned = ids
+    .filter((id) => !bands.assignedElementIds.has(id))
+    .sort(compareText);
+  for (const id of unassigned) {
+    const current = placements.get(id);
+    if (!current) continue;
+    const incomingNeighbours = state.edges.flatMap((edge): string[] => {
+      if (edge.targetElementId !== id) return [];
+      const immediate = immediateChildInGroup(edge.sourceElementId, groupId, state.parents);
+      return immediate && bands.assignedElementIds.has(immediate) ? [immediate] : [];
+    });
+    const neighbours = state.edges.flatMap((edge): string[] => {
+      const other = edge.sourceElementId === id
+        ? edge.targetElementId
+        : edge.targetElementId === id ? edge.sourceElementId : "";
+      if (!other) return [];
+      const immediate = immediateChildInGroup(other, groupId, state.parents);
+      return immediate && bands.assignedElementIds.has(immediate) ? [immediate] : [];
+    });
+    // A directed resource produced by an assigned node belongs beside that
+    // producer's column. This keeps message/artifact edges short without
+    // introducing predicate-specific layout rules. Resources without an
+    // assigned producer use the median neighbourhood column instead.
+    const incomingGeometries = [...new Set(incomingNeighbours)]
+      .map((neighbour) => placements.get(neighbour))
+      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+    const neighbourGeometries = [...new Set(neighbours)]
+      .map((neighbour) => placements.get(neighbour))
+      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+    const primaryGeometries = incomingGeometries.length > 0
+      ? incomingGeometries
+      : neighbourGeometries;
+    const preferred = neighbourGeometries.length > 0
+      ? {
+          x: median(primaryGeometries.map((geometry) => centerOf(geometry).x))
+            - current.width / 2,
+          y: neighbourGeometries.reduce((sum, geometry) => sum + centerOf(geometry).y, 0)
+            / neighbourGeometries.length - current.height / 2,
+        }
+      : { x: current.x, y: bands.extent + state.spacing.containerHeader };
+    const geometry = avoidOccupiedGeometry({
+      x: Math.max(0, preferred.x),
+      y: Math.max(0, preferred.y),
+      width: current.width,
+      height: current.height,
+    }, occupied, state.direction, Math.max(12, state.spacing.itemGap / 2));
+    placements.set(id, geometry);
+    occupied.push(copyGeometry(geometry));
+  }
 }
 
 function elementLayoutSize(
@@ -921,13 +1299,40 @@ function elementLayoutSize(
   return { width: footprint.width, height: footprint.height };
 }
 
+function median(values: readonly number[]): number {
+  const ordered = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(ordered.length / 2);
+  return ordered.length % 2 === 0
+    ? (ordered[middle - 1]! + ordered[middle]!) / 2
+    : ordered[middle]!;
+}
+
 function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): Map<string, number> {
   const idSet = new Set(ids);
   const pairs = new Set<string>();
+  const membersByRegion = new Map<string, string[]>();
+  const regionMembershipCountByMember = new Map<string, number>();
+  for (const membership of state.request.scene.memberships ?? []) {
+    if (!membership.regionElementId) continue;
+    const member = immediateChildInGroup(membership.memberElementId, groupId, state.parents);
+    if (!member || !idSet.has(member)) continue;
+    const members = membersByRegion.get(membership.regionElementId) ?? [];
+    members.push(member);
+    membersByRegion.set(membership.regionElementId, members);
+    regionMembershipCountByMember.set(
+      member,
+      (regionMembershipCountByMember.get(member) ?? 0) + 1,
+    );
+  }
+  const useRegionBands = membersByRegion.size >= 2;
   for (const edge of state.edges) {
     const source = immediateChildInGroup(edge.sourceElementId, groupId, state.parents);
     const target = immediateChildInGroup(edge.targetElementId, groupId, state.parents);
     if (source && target && source !== target && idSet.has(source) && idSet.has(target)) {
+      if (
+        useRegionBands
+        && (!regionMembershipCountByMember.has(source) || !regionMembershipCountByMember.has(target))
+      ) continue;
       pairs.add(`${source}\u0000${target}`);
     }
   }
@@ -948,17 +1353,13 @@ function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): 
     const target = sequenceMembers[index + 1]!.memberElementId;
     if (source !== target) pairs.add(`${source}\u0000${target}`);
   }
-  const membersByRegion = new Map<string, string[]>();
-  for (const membership of state.request.scene.memberships ?? []) {
-    if (!membership.regionElementId) continue;
-    const member = immediateChildInGroup(membership.memberElementId, groupId, state.parents);
-    if (!member || !idSet.has(member)) continue;
-    const members = membersByRegion.get(membership.regionElementId) ?? [];
-    members.push(member);
-    membersByRegion.set(membership.regionElementId, members);
-  }
   for (const members of membersByRegion.values()) {
     const ordered = [...new Set(members)].sort(compareText);
+    // rdf:Bag/rdfs:member is unordered. It only contributes a stable matrix
+    // progression when a shared member needs an explicit intersection band.
+    if (!ordered.some((member) => (regionMembershipCountByMember.get(member) ?? 0) > 1)) {
+      continue;
+    }
     for (let index = 0; index < ordered.length - 1; index += 1) {
       pairs.add(`${ordered[index]}\u0000${ordered[index + 1]}`);
     }
@@ -969,8 +1370,31 @@ function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): 
     adjacency.get(source)!.push(target);
   }
   const components = stronglyConnectedComponents(ids, adjacency);
+  const expandCyclesAcrossRegionBands = useRegionBands;
   const componentById = new Map<string, number>();
   components.forEach((component, index) => component.forEach((id) => componentById.set(id, index)));
+  const localRankById = new Map(ids.map((id) => [id, 0]));
+  const componentSpans = components.map(() => 1);
+  if (expandCyclesAcrossRegionBands) {
+    components.forEach((component, componentIndex) => {
+      for (const source of component) {
+        for (const target of adjacency.get(source) ?? []) {
+          if (
+            componentById.get(target) !== componentIndex
+            || compareText(source, target) >= 0
+          ) continue;
+          localRankById.set(
+            target,
+            Math.max(localRankById.get(target)!, localRankById.get(source)! + 1),
+          );
+        }
+      }
+      componentSpans[componentIndex] = Math.max(
+        1,
+        ...component.map((id) => localRankById.get(id)! + 1),
+      );
+    });
+  }
   const componentKeys = components.map((component) => component[0]!);
   const outgoing = new Map(components.map((_, index) => [index, new Set<number>()]));
   const indegree = new Map(components.map((_, index) => [index, 0]));
@@ -993,7 +1417,13 @@ function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): 
     const targets = [...outgoing.get(current)!]
       .sort((left, right) => compareText(componentKeys[left]!, componentKeys[right]!));
     for (const target of targets) {
-      ranks.set(target, Math.max(ranks.get(target)!, ranks.get(current)! + 1));
+      ranks.set(
+        target,
+        Math.max(
+          ranks.get(target)!,
+          ranks.get(current)! + componentSpans[current]!,
+        ),
+      );
       indegree.set(target, indegree.get(target)! - 1);
       if (indegree.get(target) === 0) {
         ready.push(target);
@@ -1001,7 +1431,11 @@ function hierarchicalRanks(ids: string[], groupId: string, state: LayoutState): 
       }
     }
   }
-  return new Map(ids.map((id) => [id, ranks.get(componentById.get(id)!)!]));
+  return new Map(ids.map((id) => {
+    const componentIndex = componentById.get(id)!;
+    const localRank = localRankById.get(id)!;
+    return [id, ranks.get(componentIndex)! + localRank];
+  }));
 }
 
 function stronglyConnectedComponents(ids: string[], adjacency: Map<string, string[]>): string[][] {
@@ -1256,7 +1690,7 @@ function improveDerivedRoutes(
   if (
     state.elements.size > ROUTE_GRID_ELEMENT_LIMIT
     || state.edges.length > ROUTE_GRID_EDGE_LIMIT
-  ) return routes;
+  ) return compactLargeDerivedRoutes(routes, state);
 
   const sorted = [...state.edges].sort(compareEdge);
   const bundled = new Set(
@@ -1321,11 +1755,294 @@ function improveDerivedRoutes(
       const candidateCost = routeCost(candidate, edge, obstacles, others, state);
       if (
         (baseCost[0] === 0 || candidateCost[0] === 0)
+        && (!bundled.has(edge.elementId) || !duplicatesBundlePeer(candidate, edge, others))
         && compareRouteCandidate(candidateCost, candidate, baseCost, base) < 0
       ) routes[edge.elementId] = candidate;
     }
   }
+  return compactDerivedRoutes(routes, state);
+}
+
+/** Linear-time cardinality completion used beyond the bounded quality grid. */
+function compactLargeDerivedRoutes(
+  input: Record<string, Point[]>,
+  state: LayoutState,
+): Record<string, Point[]> {
+  const edges = new Map(state.edges.map((edge) => [edge.elementId, edge]));
+  return Object.fromEntries(Object.entries(input).map(([edgeId, points]) => {
+    const edge = edges.get(edgeId);
+    if (!edge || isImmutableRoute(edge) || edge.routeMode === "straight" || points.length <= 3) {
+      return [edgeId, points.map(copyPoint)];
+    }
+    const start = points[0]!;
+    const end = points.at(-1)!;
+    const internal = points.slice(1, -1);
+    const lineMiddle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    const pivot = internal.reduce((best, point) => (
+      pointDistance(point, lineMiddle) < pointDistance(best, lineMiddle) ? point : best
+    ), internal[0]!);
+    return [edgeId, [copyPoint(start), copyPoint(pivot), copyPoint(end)]];
+  }));
+}
+
+/**
+ * Keeps generated routes readable as either a direct segment or a two-leg
+ * route with one derived pivot. The visibility-grid pass above may use a
+ * richer private corridor while searching; this completion step deliberately
+ * exposes at most one intermediate point to renderer/host consumers.
+ *
+ * Manual routes are presentation input and remain exact hard constraints.
+ */
+function compactDerivedRoutes(
+  input: Record<string, Point[]>,
+  state: LayoutState,
+): Record<string, Point[]> {
+  const routes = Object.fromEntries(Object.entries(input).map(([id, points]) => [
+    id,
+    points.map(copyPoint),
+  ]));
+  const sorted = [...state.edges].sort(compareEdge);
+  const bundled = new Set(
+    [...edgeBundles(sorted).values()]
+      .filter((edges) => edges.length > 1)
+      .flatMap((edges) => edges.map((edge) => edge.elementId)),
+  );
+  const orders = [sorted, [...sorted].reverse()];
+  for (const order of orders) {
+    for (const edge of order) {
+      const base = routes[edge.elementId];
+      if (!base || base.length < 2 || isImmutableRoute(edge) || edge.routeMode === "straight") {
+        continue;
+      }
+      const others = sorted.flatMap((other): RoutedEdge[] => {
+        if (other.elementId === edge.elementId) return [];
+        const points = routes[other.elementId];
+        return points ? [{ edge: other, points }] : [];
+      });
+      const obstacles = routeObstacles(edge, state);
+      const candidates = compactRouteCandidates(
+        edge,
+        base,
+        obstacles,
+        others,
+        state,
+        bundled.has(edge.elementId),
+      );
+      const distinctCandidates = bundled.has(edge.elementId)
+        ? candidates.filter((candidate) => !duplicatesBundlePeer(candidate, edge, others))
+        : candidates;
+      if (distinctCandidates.length === 0) continue;
+      distinctCandidates.sort((left, right) => compareRouteCandidate(
+        routeCost(left, edge, obstacles, others, state),
+        left,
+        routeCost(right, edge, obstacles, others, state),
+        right,
+      ));
+      routes[edge.elementId] = distinctCandidates[0]!.map(copyPoint);
+    }
+  }
   return routes;
+}
+
+function compactRouteCandidates(
+  edge: LayoutEdge,
+  base: readonly Point[],
+  obstacles: readonly ElementGeometry[],
+  others: readonly RoutedEdge[],
+  state: LayoutState,
+  preserveLane: boolean,
+): Point[][] {
+  const source = state.geometries[edge.sourceElementId];
+  const target = state.geometries[edge.targetElementId];
+  if (!source || !target) return [];
+  if (edge.sourceElementId === edge.targetElementId) {
+    const start = base[0]!;
+    const end = base.at(-1)!;
+    const internal = base.slice(1, -1);
+    const center = centerOf(source);
+    const pivot = internal.length > 0
+      ? internal.reduce((best, point) => (
+          pointDistance(point, center) > pointDistance(best, center) ? point : best
+        ), internal[0]!)
+      : { x: source.x + source.width + SELF_LOOP_BASE, y: center.y };
+    const result = [copyPoint(start), copyPoint(pivot), copyPoint(end)];
+    return endpointLegsLeaveElements(result, source, target) ? [result] : [];
+  }
+
+  const sourceCenter = centerOf(source);
+  const targetCenter = centerOf(target);
+  // Keep a one-pivot route local. If 240 units cannot clear every competing
+  // edge, compactness wins over a scene-wide detour; node intersections still
+  // remain the first quality component within this bounded candidate set.
+  const maximumDetour = 240;
+  const pivotBounds = {
+    x: Math.min(source.x, target.x) - maximumDetour,
+    y: Math.min(source.y, target.y) - maximumDetour,
+    width: Math.max(source.x + source.width, target.x + target.width)
+      - Math.min(source.x, target.x) + maximumDetour * 2,
+    height: Math.max(source.y + source.height, target.y + target.height)
+      - Math.min(source.y, target.y) + maximumDetour * 2,
+  };
+  const pivots: Point[] = [
+    ...base.slice(1, -1).filter((point) => pointInsideOrOnGeometry(point, pivotBounds)).map(copyPoint),
+    { x: sourceCenter.x, y: targetCenter.y },
+    { x: targetCenter.x, y: sourceCenter.y },
+    { x: (sourceCenter.x + targetCenter.x) / 2, y: sourceCenter.y },
+    { x: (sourceCenter.x + targetCenter.x) / 2, y: targetCenter.y },
+    { x: sourceCenter.x, y: (sourceCenter.y + targetCenter.y) / 2 },
+    { x: targetCenter.x, y: (sourceCenter.y + targetCenter.y) / 2 },
+  ];
+  for (const obstacle of obstacles) {
+    pivots.push(...[
+      { x: obstacle.x, y: obstacle.y },
+      { x: obstacle.x + obstacle.width, y: obstacle.y },
+      { x: obstacle.x, y: obstacle.y + obstacle.height },
+      { x: obstacle.x + obstacle.width, y: obstacle.y + obstacle.height },
+    ].filter((point) => pointInsideOrOnGeometry(point, pivotBounds)));
+  }
+  const nearbyObstacles = obstacles.filter((obstacle) => geometriesOverlapOrTouch(
+    obstacle,
+    pivotBounds,
+  ));
+  if (nearbyObstacles.length > 0) {
+    const left = Math.min(...nearbyObstacles.map((obstacle) => obstacle.x));
+    const right = Math.max(...nearbyObstacles.map((obstacle) => obstacle.x + obstacle.width));
+    const top = Math.min(...nearbyObstacles.map((obstacle) => obstacle.y));
+    const bottom = Math.max(...nearbyObstacles.map((obstacle) => obstacle.y + obstacle.height));
+    const middleX = (sourceCenter.x + targetCenter.x) / 2;
+    const middleY = (sourceCenter.y + targetCenter.y) / 2;
+    for (const clearance of [48, 96, 192, maximumDetour]) {
+      pivots.push(
+        { x: middleX, y: Math.max(pivotBounds.y, top - clearance) },
+        { x: middleX, y: Math.min(pivotBounds.y + pivotBounds.height, bottom + clearance) },
+        { x: Math.max(pivotBounds.x, left - clearance), y: middleY },
+        { x: Math.min(pivotBounds.x + pivotBounds.width, right + clearance), y: middleY },
+      );
+    }
+  }
+  for (const other of preserveLane ? [] : others) {
+    for (let index = 0; index < other.points.length - 1; index += 1) {
+      const start = other.points[index]!;
+      const end = other.points[index + 1]!;
+      if (start.y === end.y) {
+        const y = start.y;
+        const left = Math.min(start.x, end.x) - ROUTE_OBSTACLE_PADDING;
+        const right = Math.max(start.x, end.x) + ROUTE_OBSTACLE_PADDING;
+        pivots.push(
+          { x: Math.max(pivotBounds.x, left), y },
+          { x: Math.min(pivotBounds.x + pivotBounds.width, right), y },
+        );
+      } else if (start.x === end.x) {
+        const x = start.x;
+        const top = Math.min(start.y, end.y) - ROUTE_OBSTACLE_PADDING;
+        const bottom = Math.max(start.y, end.y) + ROUTE_OBSTACLE_PADDING;
+        pivots.push(
+          { x, y: Math.max(pivotBounds.y, top) },
+          { x, y: Math.min(pivotBounds.y + pivotBounds.height, bottom) },
+        );
+      }
+    }
+  }
+  const candidates = new Map<string, Point[]>();
+  const add = (route: Point[]): void => {
+    const simplified = simplifyOrthogonalRoute(route);
+    if (
+      simplified.length < 2
+      || simplified.length > 3
+      || !endpointLegsLeaveElements(simplified, source, target)
+    ) return;
+    candidates.set(routeSignature(simplified), simplified.map(copyPoint));
+  };
+  if (!preserveLane) {
+    add(applyEndpointAnchors(
+      directRoute(edge, source, target, state),
+      edge,
+      source,
+      target,
+      state,
+    ));
+  }
+  const candidatePivots = preserveLane ? base.slice(1, -1) : pivots;
+  for (const pivot of candidatePivots) {
+    if (!pointInsideOrOnGeometry(pivot, pivotBounds)) continue;
+    if (!preserveLane) {
+      const sourcePoint = compactEndpointPoint(edge, "source", source, pivot, state);
+      const targetPoint = compactEndpointPoint(edge, "target", target, pivot, state);
+      if (!samePoint(sourcePoint, pivot) && !samePoint(targetPoint, pivot)) {
+        add([sourcePoint, copyPoint(pivot), targetPoint]);
+      }
+    }
+
+    // Preserve a stable lane/ELK attachment as another candidate. The outward
+    // leg check rejects stale attachments that would first traverse a node.
+    add([copyPoint(base[0]!), copyPoint(pivot), copyPoint(base.at(-1)!)]);
+  }
+  return [...candidates.values()];
+}
+
+/** Parallel and reciprocal statements must remain individually selectable. */
+function duplicatesBundlePeer(
+  candidate: readonly Point[],
+  edge: LayoutEdge,
+  others: readonly RoutedEdge[],
+): boolean {
+  const pair = canonicalEndpointPair(edge);
+  const signature = routeSignature(candidate);
+  return others.some((other) => {
+    const otherPair = canonicalEndpointPair(other.edge);
+    return pair[0] === otherPair[0]
+      && pair[1] === otherPair[1]
+      && routeSignature(other.points) === signature;
+  });
+}
+
+function geometriesOverlapOrTouch(left: ElementGeometry, right: ElementGeometry): boolean {
+  return left.x <= right.x + right.width
+    && left.x + left.width >= right.x
+    && left.y <= right.y + right.height
+    && left.y + left.height >= right.y;
+}
+
+function compactEndpointPoint(
+  edge: LayoutEdge,
+  endpoint: "source" | "target",
+  geometry: ElementGeometry,
+  toward: Point,
+  state: LayoutState,
+): Point {
+  const anchor = endpoint === "source" ? edge.sourceAnchor : edge.targetAnchor;
+  const elementId = endpoint === "source" ? edge.sourceElementId : edge.targetElementId;
+  return edgeEndpointAnchorPoint(
+    geometry,
+    layoutElementShape(state.elements.get(elementId)),
+    isValidEdgeEndpointAnchor(anchor) ? anchor : edgeEndpointAnchorFromPoint(geometry, toward),
+  );
+}
+
+function endpointLegsLeaveElements(
+  route: readonly Point[],
+  source: ElementGeometry,
+  target: ElementGeometry,
+): boolean {
+  const start = route[0];
+  const afterStart = route[1];
+  const beforeEnd = route.at(-2);
+  const end = route.at(-1);
+  if (!start || !afterStart || !beforeEnd || !end) return false;
+  const sourceCenter = centerOf(source);
+  const targetCenter = centerOf(target);
+  return dotProduct(
+    { x: start.x - sourceCenter.x, y: start.y - sourceCenter.y },
+    { x: afterStart.x - start.x, y: afterStart.y - start.y },
+  ) >= -1e-6
+    && dotProduct(
+      { x: end.x - targetCenter.x, y: end.y - targetCenter.y },
+      { x: beforeEnd.x - end.x, y: beforeEnd.y - end.y },
+    ) >= -1e-6;
+}
+
+function dotProduct(left: Point, right: Point): number {
+  return left.x * right.x + left.y * right.y;
 }
 
 function isImmutableRoute(edge: LayoutEdge): boolean {

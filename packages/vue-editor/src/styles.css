@@ -126,7 +126,7 @@
 
 .iriograph-editor-layout {
   --iriograph-left-sidebar-width: 226px;
-  --iriograph-right-sidebar-width: 370px;
+  --iriograph-right-sidebar-width: 252px;
   min-height: 0;
   position: relative;
   flex: 1;
@@ -188,7 +188,7 @@
 
 .iriograph-inspector {
   grid-column: 3;
-  padding: 16px;
+  padding: 10px;
   border-left: 1px solid var(--iriograph-line);
 }
 
@@ -196,8 +196,8 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
-  margin: -16px -16px 14px;
-  padding: 10px 16px;
+  margin: -10px -10px 10px;
+  padding: 7px 10px;
   border-bottom: 1px solid #cad7d3;
   background: #eef3f1;
 }
@@ -223,7 +223,7 @@
 
 .iriograph-intent-panel {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .iriograph-intent-guidance {
@@ -277,11 +277,11 @@
 }
 
 .iriograph-intent-grid button {
-  min-height: 84px;
+  min-height: 58px;
   display: grid;
   place-items: center;
   gap: 4px;
-  padding: 10px 6px;
+  padding: 7px 5px;
   border: 1px solid #adc2bc;
   border-radius: 8px;
   color: #294f4d;
@@ -290,13 +290,71 @@
 }
 
 .iriograph-intent-grid button b {
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1;
 }
 
 .iriograph-intent-fields {
   display: grid;
-  gap: 10px;
+  gap: 8px;
+}
+
+.iriograph-semantic-selection-summary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #c8d5d1;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.iriograph-semantic-selection-summary strong,
+.iriograph-semantic-selection-summary span {
+  overflow-wrap: anywhere;
+}
+
+.iriograph-semantic-selection-summary small,
+.iriograph-semantic-selection-summary span {
+  color: #667a77;
+  font-size: 9px;
+}
+
+.iriograph-selection-edit-actions {
+  display: grid;
+  gap: 5px;
+}
+
+.iriograph-selection-edit-actions button {
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #9db3ac;
+  border-radius: 5px;
+  color: #294f4d;
+  background: #fff;
+  text-align: left;
+}
+
+.iriograph-intent-diagnostics {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-intent-diagnostics li {
+  display: grid;
+  gap: 2px;
+  padding: 7px;
+  border-left: 3px solid #c18a2f;
+  background: #fff8e8;
+  font-size: 9px;
+}
+
+.iriograph-intent-diagnostics li.error {
+  border-color: #b04b45;
+  background: #fff0ef;
 }
 
 /* Isolate semantic forms from host-wide fieldset/legend rules. */
@@ -604,6 +662,68 @@
   place-items: center;
   padding: 24px;
   background: rgb(18 36 37 / 45%);
+}
+
+.iriograph-deletion-dialog-backdrop {
+  position: absolute;
+  z-index: 90;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(18 36 37 / 50%);
+}
+
+.iriograph-deletion-dialog {
+  width: min(520px, 100%);
+  max-height: min(640px, calc(100% - 24px));
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #b56963;
+  border-radius: 8px;
+  background: #fffefb;
+  box-shadow: 0 18px 48px rgb(18 36 37 / 28%);
+}
+
+.iriograph-deletion-dialog > header,
+.iriograph-deletion-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-deletion-dialog > ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-deletion-dialog > ul li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  padding: 8px;
+  border-radius: 5px;
+  background: #f9eeec;
+}
+
+.iriograph-deletion-dialog button {
+  min-height: 34px;
+  padding: 6px 12px;
+  border: 1px solid #8e6c68;
+  border-radius: 5px;
+  background: #fff;
+}
+
+.iriograph-deletion-dialog button.danger {
+  color: #fff;
+  border-color: #963f39;
+  background: #963f39;
 }
 
 .iriograph-view-dialog {
@@ -2140,6 +2260,15 @@
   text-align: center;
 }
 
+.iriograph-node-text.writing-horizontal {
+  writing-mode: horizontal-tb;
+}
+
+.iriograph-node-text.writing-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+}
+
 .iriograph-additional-labels {
   display: block;
   overflow: hidden;
@@ -2205,7 +2334,7 @@
   overflow: hidden;
   max-height: 100%;
   overflow-wrap: anywhere;
-  font-size: 10px;
+  font-size: 16px;
   font-weight: 650;
   text-align: center;
   white-space: pre-line;
@@ -2620,6 +2749,28 @@
 .iriograph-routing-inspector {
   display: grid;
   gap: 8px;
+}
+
+.iriograph-waypoint-list {
+  display: grid;
+  gap: 4px;
+}
+
+.iriograph-waypoint-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 7px;
+  border: 1px solid #d9e3e0;
+  border-radius: 5px;
+  background: #f8fbfa;
+  color: #45615f;
+  font-size: 9px;
+}
+
+.iriograph-waypoint-list button {
+  padding: 3px 7px;
+  font-size: 8px;
 }
 
 .iriograph-edge-view-summary {
@@ -3108,10 +3259,27 @@
   min-height: auto;
 }
 
+/* Keep the compact 252px Inspector readable: density comes from staged
+   disclosure and spacing, not 8px primary copy. */
+.iriograph-inspector :is(button, input, select, textarea),
+.iriograph-inspector :is(label, p, li) {
+  font-size: 10px;
+}
+
+.iriograph-inspector :is(small, code),
+.iriograph-inspector .iriograph-technical-details,
+.iriograph-inspector .iriograph-toolbar-technical {
+  font-size: 9px;
+}
+
+.iriograph-inspector :is(button.primary, .iriograph-selection-edit-actions button) {
+  min-height: 34px;
+}
+
 @media (max-width: 1200px) {
   .iriograph-editor-layout {
     --iriograph-left-sidebar-width: 190px;
-    --iriograph-right-sidebar-width: 330px;
+    --iriograph-right-sidebar-width: 240px;
     grid-template-columns: var(--iriograph-left-sidebar-width) minmax(320px, 1fr) var(--iriograph-right-sidebar-width);
   }
 

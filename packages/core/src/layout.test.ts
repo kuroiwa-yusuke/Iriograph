@@ -44,7 +44,8 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(result.geometries.bag!.x).toBeLessThan(result.geometries.outside!.x);
     expect(isInside(result.geometries["step-a"]!, result.geometries.bag!)).toBe(true);
     expect(isInside(result.geometries["step-b"]!, result.geometries.bag!)).toBe(true);
-    expect(result.routes["flow-1"]!.length).toBeGreaterThanOrEqual(4);
+    expect(result.routes["flow-1"]!.length).toBeGreaterThanOrEqual(2);
+    expect(result.routes["flow-1"]!.length).toBeLessThanOrEqual(3);
   });
 
   it("lays out the same hierarchy top-to-bottom for the TB adapter", async () => {
@@ -276,7 +277,7 @@ describe("StandardLightweightLayoutAdapter", () => {
     });
   });
 
-  it("keeps derived bend points for curve rendering", async () => {
+  it("uses no derived pivot when a direct curve corridor already satisfies quality", async () => {
     const scene: LayoutProjectedScene = {
       elements: [
         { elementId: "a", structuralKind: "node" },
@@ -288,7 +289,7 @@ describe("StandardLightweightLayoutAdapter", () => {
 
     const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
 
-    expect(result.routes.edge!.length).toBeGreaterThan(2);
+    expect(result.routes.edge).toHaveLength(2);
   });
 
   it("routes around fixed node and annotation obstacles without creating manual waypoints", async () => {
@@ -333,6 +334,7 @@ describe("StandardLightweightLayoutAdapter", () => {
 
     expect(scene.edges[0]!.waypoints).toBeUndefined();
     expect(route.length).toBeGreaterThan(2);
+    expect(route.length).toBeLessThanOrEqual(3);
     expect(polylineCrossesBox(route, scene.elements[1]!.geometry!)).toBe(false);
     expect(polylineCrossesBox(route, scene.elements[2]!.geometry!)).toBe(false);
     expect(result.geometries.source).toEqual(scene.elements[0]!.geometry);
@@ -535,7 +537,7 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(polylineCrossesBox(route.slice(0, 2), source)).toBe(false);
   });
 
-  it("refines generated routes against later manual routes using graph-global quality", async () => {
+  it("keeps generated routes local when avoiding a later manual route would require a remote pivot", async () => {
     const scene: LayoutProjectedScene = {
       elements: [
         { elementId: "top", structuralKind: "node", placement: "user", geometry: { x: 280, y: 20, width: 100, height: 60 } },
@@ -571,7 +573,7 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(polylineStrictCrossings(
       first.routes["a-generated"]!,
       first.routes["z-manual"]!,
-    )).toBe(0);
+    )).toBe(1);
   });
 
   it("keeps straight self-routes endpoint-only even with stale manual waypoints", async () => {
@@ -594,7 +596,7 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(result.routes.edge).not.toContainEqual({ x: 999, y: 999 });
   });
 
-  it("deterministically separates otherwise overlapping routes", async () => {
+  it("deterministically minimizes crossings without traversing nodes under the one-pivot limit", async () => {
     const scene: LayoutProjectedScene = {
       elements: [
         { elementId: "a", structuralKind: "node", placement: "user", geometry: { x: 20, y: 20, width: 80, height: 50 } },
@@ -616,8 +618,11 @@ describe("StandardLightweightLayoutAdapter", () => {
     });
 
     expect(first.routes).toEqual(second.routes);
+    expect(Object.values(first.routes).every((route) => route.length <= 3)).toBe(true);
     expect(polylineOverlapLength(first.routes["cross-a"]!, first.routes["cross-b"]!)).toBe(0);
-    expect(polylineStrictCrossings(first.routes["cross-a"]!, first.routes["cross-b"]!)).toBe(0);
+    // With four nodes at opposing corners, avoiding both non-endpoint nodes
+    // and the other diagonal is not possible with only one pivot per edge.
+    expect(polylineStrictCrossings(first.routes["cross-a"]!, first.routes["cross-b"]!)).toBe(1);
   });
 
   it("routes parallel, reciprocal, and self-loop edges deterministically with bounded lanes", async () => {
@@ -653,7 +658,7 @@ describe("StandardLightweightLayoutAdapter", () => {
     });
 
     expect(first.routes).toEqual(second.routes);
-    expect(Object.values(first.routes).every((route) => route.length >= 2)).toBe(true);
+    expect(Object.values(first.routes).every((route) => route.length >= 2 && route.length <= 3)).toBe(true);
     expect(new Set([
       JSON.stringify(first.routes["forward-a"]),
       JSON.stringify(first.routes["forward-z"]),
@@ -665,6 +670,36 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(Math.max(...first.routes["loop-a"]!.map((point) => point.x))).toBe(204);
     expect(Math.max(...first.routes["loop-z"]!.map((point) => point.x))).toBe(222);
     expect(first.width).toBeGreaterThanOrEqual(270);
+  });
+
+  it("keeps parallel lanes distinct when fixed endpoint boxes overlap on the primary axis", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        {
+          elementId: "review",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 430, y: 274, width: 170, height: 76 },
+        },
+        {
+          elementId: "policy",
+          structuralKind: "node",
+          placement: "user",
+          geometry: { x: 486, y: 382, width: 168, height: 72 },
+        },
+      ],
+      edges: [
+        { elementId: "related", sourceElementId: "review", targetElementId: "policy" },
+        { elementId: "reference", sourceElementId: "review", targetElementId: "policy" },
+      ],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:overlapping-primary-parallel", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.related).not.toEqual(result.routes.reference);
+    expect(result.routes.related).toHaveLength(3);
+    expect(result.routes.reference).toHaveLength(3);
   });
 
   it("honors independent boundary anchors for auto, manual, parallel, and self-loop routes", async () => {
@@ -762,9 +797,9 @@ describe("StandardLightweightLayoutAdapter", () => {
     const signatures = edges.map((edge) => JSON.stringify(result.routes[edge.elementId]));
 
     expect(new Set(signatures).size).toBe(edges.length);
-    expect(Object.values(result.routes).every((route) => route.length >= 2)).toBe(true);
+    expect(Object.values(result.routes).every((route) => route.length >= 2 && route.length <= 3)).toBe(true);
     expect(Object.values(result.routes).flat().every((point) => point.y >= 0)).toBe(true);
-    expect(result.height).toBeGreaterThan(98);
+    expect(result.height).toBeGreaterThanOrEqual(98);
   });
 });
 
@@ -926,6 +961,131 @@ describe("LayoutAdapterRegistry", () => {
     expect(isInside(first.geometries.shared!, first.geometries["region-left"]!)).toBe(true);
     expect(isInside(first.geometries.shared!, first.geometries["region-right"]!)).toBe(true);
     expect(aspect).toBeLessThan(4);
+  });
+
+  it("keeps disjoint region members in stable cross-axis bands across ranks", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "region-a", structuralKind: "region" },
+        { elementId: "region-b", structuralKind: "region" },
+        { elementId: "a1", structuralKind: "node" },
+        { elementId: "a2", structuralKind: "node" },
+        { elementId: "b1", structuralKind: "node" },
+        { elementId: "b2", structuralKind: "node" },
+      ],
+      edges: [
+        { elementId: "a-flow", sourceElementId: "a1", targetElementId: "a2" },
+        { elementId: "b-flow", sourceElementId: "b1", targetElementId: "b2" },
+      ],
+      memberships: [
+        { semanticRef: "a1-m", containerElementId: "region-a", regionElementId: "region-a", memberElementId: "a1" },
+        { semanticRef: "a2-m", containerElementId: "region-a", regionElementId: "region-a", memberElementId: "a2" },
+        { semanticRef: "b1-m", containerElementId: "region-b", regionElementId: "region-b", memberElementId: "b1" },
+        { semanticRef: "b2-m", containerElementId: "region-b", regionElementId: "region-b", memberElementId: "b2" },
+      ],
+    };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene,
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries.a1!.y).toBe(result.geometries.a2!.y);
+    expect(result.geometries.b1!.y).toBe(result.geometries.b2!.y);
+    expect(result.geometries.a1!.y).toBeLessThan(result.geometries.b1!.y);
+    expect(result.geometries.a1!.x).toBeLessThan(result.geometries.a2!.x);
+    expect(result.geometries.b1!.x).toBeLessThan(result.geometries.b2!.x);
+  });
+
+  it("aligns an unassigned directed resource with its producer and consumer columns", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "region-a", structuralKind: "region" },
+        { elementId: "region-b", structuralKind: "region" },
+        { elementId: "producer", structuralKind: "node" },
+        { elementId: "resource", structuralKind: "node" },
+        { elementId: "consumer", structuralKind: "node" },
+      ],
+      edges: [
+        { elementId: "produce", sourceElementId: "producer", targetElementId: "resource" },
+        { elementId: "consume", sourceElementId: "resource", targetElementId: "consumer" },
+      ],
+      memberships: [
+        { semanticRef: "producer-m", containerElementId: "region-a", regionElementId: "region-a", memberElementId: "producer" },
+        { semanticRef: "consumer-m", containerElementId: "region-b", regionElementId: "region-b", memberElementId: "consumer" },
+      ],
+    };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene,
+    }, createStandardLayoutRegistry());
+    const centers = ["producer", "resource", "consumer"].map((id) => (
+      result.geometries[id]!.x + result.geometries[id]!.width / 2
+    ));
+
+    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(1);
+    expect(result.geometries.resource!.y).toBeGreaterThan(
+      Math.min(result.geometries.producer!.y, result.geometries.consumer!.y),
+    );
+    expect(result.geometries.resource!.y).toBeLessThan(
+      Math.max(result.geometries.producer!.y, result.geometries.consumer!.y),
+    );
+  });
+
+  it("normalizes generated disjoint sibling regions to their outer owner's primary span", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "outer", structuralKind: "region" },
+        { elementId: "lane-a", structuralKind: "region" },
+        { elementId: "lane-b", structuralKind: "region" },
+        { elementId: "a1", structuralKind: "node" },
+        { elementId: "a2", structuralKind: "node" },
+        { elementId: "b1", structuralKind: "node" },
+      ],
+      edges: [{ elementId: "a-flow", sourceElementId: "a1", targetElementId: "a2" }],
+      memberships: [
+        { semanticRef: "outer-a", containerElementId: "outer", regionElementId: "outer", memberElementId: "lane-a" },
+        { semanticRef: "outer-b", containerElementId: "outer", regionElementId: "outer", memberElementId: "lane-b" },
+        { semanticRef: "a1-m", containerElementId: "lane-a", regionElementId: "lane-a", memberElementId: "a1" },
+        { semanticRef: "a2-m", containerElementId: "lane-a", regionElementId: "lane-a", memberElementId: "a2" },
+        { semanticRef: "b1-m", containerElementId: "lane-b", regionElementId: "lane-b", memberElementId: "b1" },
+      ],
+    };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene,
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries["lane-a"]!.x).toBe(result.geometries["lane-b"]!.x);
+    expect(result.geometries["lane-a"]!.width).toBe(result.geometries["lane-b"]!.width);
+    expect(result.geometries["lane-a"]!.x).toBe(result.geometries.outer!.x + 28);
+    expect(result.geometries["lane-a"]!.x + result.geometries["lane-a"]!.width)
+      .toBe(result.geometries.outer!.x + result.geometries.outer!.width - 28);
+    expect(isInside(result.geometries["lane-a"]!, result.geometries.outer!)).toBe(true);
+    expect(isInside(result.geometries["lane-b"]!, result.geometries.outer!)).toBe(true);
+  });
+
+  it("normalizes disjoint generated regions that share the virtual root", async () => {
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: {
+        elements: [
+          { elementId: "lane-a", structuralKind: "region" },
+          { elementId: "lane-b", structuralKind: "region" },
+          { elementId: "a1", structuralKind: "node" },
+          { elementId: "a2", structuralKind: "node" },
+          { elementId: "b1", structuralKind: "node" },
+        ],
+        edges: [{ elementId: "a-flow", sourceElementId: "a1", targetElementId: "a2" }],
+        memberships: [
+          { semanticRef: "a1-m", containerElementId: "lane-a", regionElementId: "lane-a", memberElementId: "a1" },
+          { semanticRef: "a2-m", containerElementId: "lane-a", regionElementId: "lane-a", memberElementId: "a2" },
+          { semanticRef: "b1-m", containerElementId: "lane-b", regionElementId: "lane-b", memberElementId: "b1" },
+        ],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries["lane-a"]!.x).toBe(result.geometries["lane-b"]!.x);
+    expect(result.geometries["lane-a"]!.width).toBe(result.geometries["lane-b"]!.width);
   });
 
   it("packs empty generated regions by aspect instead of preserving remote placeholder geometry", () => {

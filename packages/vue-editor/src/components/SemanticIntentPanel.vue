@@ -4,13 +4,13 @@ import { computed, nextTick, ref, watch } from "vue";
 import {
   statementIdentityForNamedStatement,
   type AuthoringCommand,
+  type ProjectionDiagnostic,
   type SemanticEditCapability,
 } from "@iriograph/core";
 
 import {
   emptyAuthoringDraft,
   type AuthoringChoice,
-  type AuthoringPreviewView,
   type EditorAuthoringDraft,
 } from "../authoring-draft";
 import { diagnosticGuidance } from "../diagnostic-guidance";
@@ -111,7 +111,7 @@ const props = withDefaults(defineProps<{
   requestedIntent?: SemanticIntent;
   pickedSourceIri?: string;
   pickedTargetIri?: string;
-  preview?: AuthoringPreviewView;
+  diagnostics?: ProjectionDiagnostic[];
 }>(), {
   enabled: true,
   blockedReason: "",
@@ -129,13 +129,13 @@ const props = withDefaults(defineProps<{
   requestedIntent: undefined,
   pickedSourceIri: "",
   pickedTargetIri: "",
-  preview: undefined,
+  diagnostics: () => [],
 });
 
 const emit = defineEmits<{
-  previewDraft: [draft: EditorAuthoringDraft, label: string];
-  previewCommands: [commands: AuthoringCommand[], label: string, resources: Array<{ iri: string; label: string; role: string }>];
-  apply: [];
+  executeDraft: [draft: EditorAuthoringDraft, label: string];
+  executeCommands: [commands: AuthoringCommand[], label: string, resources: Array<{ iri: string; label: string; role: string }>];
+  deleteSelection: [];
   cancel: [];
   pickResource: [field: "sourceIri" | "targetIri"];
   focusElement: [elementId: string];
@@ -161,13 +161,18 @@ const relationSelection = computed(() => ({
   source: props.selectedResources[0],
   targets: props.selectedResources.slice(1),
 }));
+const inspectedResources = computed<AuthoringChoice[]>(() => props.selectedResources.length
+  ? props.selectedResources
+  : props.elementDetails
+    ? [{ iri: props.elementDetails.iri, label: props.elementDetails.label }]
+    : []);
 const relationReady = computed(() => Boolean(
   relationSelection.value.source
   && relationSelection.value.targets.length
   && predicateIri.value,
 ));
 const selectedPredicateLabel = computed(() => props.predicates.find(
-  (choice) => choice.iri === predicateIri.value,
+  (choice) => choice.iri === (predicateIri.value || props.selectedEdge?.predicateIri),
 )?.label ?? "関係");
 const predicateGroups = computed(() => {
   const groups = new Map<string, AuthoringChoice[]>();
@@ -231,10 +236,6 @@ watch(() => props.requestedIntent, (requested) => {
   if (requested && requested !== intent.value) choose(requested);
 });
 watch(localDraftPending, (pending) => emit("draftStateChange", pending), { immediate: true });
-
-watch(() => props.preview, (next, previous) => {
-  if (!next && previous) reset();
-});
 
 watch(() => props.elementDetails, (details) => {
   if (intent.value !== "edit-element" || !details) return;
@@ -313,7 +314,7 @@ function cancel(): void {
 function previewElementCreation(): void {
   const draft = emptyAuthoringDraft("create-resource");
   draft.label = label.value;
-  emit("previewDraft", draft, "要素を追加");
+  emit("executeDraft", draft, "要素を追加");
 }
 
 function previewRelationCreation(): void {
@@ -324,7 +325,7 @@ function previewRelationCreation(): void {
   draft.targetIri = relationSelection.value.targets[0]?.iri ?? "";
   draft.targetIris = relationSelection.value.targets.slice(1).map((target) => target.iri);
   draft.predicateIri = predicateIri.value;
-  emit("previewDraft", draft, `${source.label ?? "基準要素"}から関係を追加`);
+  emit("executeDraft", draft, `${source.label ?? "基準要素"}から関係を追加`);
 }
 
 function previewElementEdit(): void {
@@ -355,20 +356,12 @@ function previewElementEdit(): void {
     predicateIri: RDF_TYPE,
     values: classIris.value.map((iri) => ({ kind: "iri", iri })),
   });
-  emit("previewCommands", commands, `${details.label}を編集`, [{ iri: details.iri, label: details.label, role: "対象" }]);
+  emit("executeCommands", commands, `${details.label}を編集`, [{ iri: details.iri, label: details.label, role: "対象" }]);
 }
 
 function previewElementDelete(): void {
-  const details = props.elementDetails;
-  if (!details) return;
-  emit("previewCommands", [{
-    type: "delete-resource",
-    commandId: "intent-delete-resource",
-    resourceIri: details.iri,
-    // The standard UI's delete action is itself the explicit cascade flow:
-    // every affected statement is shown in Preview before Apply is enabled.
-    cascade: true,
-  }], `${details.label}を削除`, [{ iri: details.iri, label: details.label, role: "削除対象" }]);
+  if (!props.elementDetails) return;
+  emit("deleteSelection");
 }
 
 function previewEdgeEdit(): void {
@@ -403,27 +396,15 @@ function previewEdgeEdit(): void {
         .map((item) => ({ kind: "literal", ...item })),
     });
   }
-  emit("previewCommands", commands, `${edge.label}を変更`, [
+  emit("executeCommands", commands, `${edge.label}を変更`, [
     { iri: sourceIri.value, label: resourceLabel(sourceIri.value), role: "始点" },
     { iri: targetIri.value, label: resourceLabel(targetIri.value), role: "終点" },
   ]);
 }
 
 function previewEdgeDelete(): void {
-  const edge = props.selectedEdge;
-  const capability = edge?.capability;
-  if (!edge || capability?.command !== "remove-statement") return;
-  emit("previewCommands", [{
-    type: "remove-statement",
-    commandId: "intent-remove-edge",
-    statementRef: capability.statementRef,
-    subjectIri: capability.subject,
-    predicateIri: capability.predicate,
-    objectIri: capability.object,
-  }], `${edge.label}を削除`, [
-    { iri: edge.sourceIri, label: edge.sourceLabel, role: "始点" },
-    { iri: edge.targetIri, label: edge.targetLabel, role: "終点" },
-  ]);
+  if (!props.selectedEdge?.capability) return;
+  emit("deleteSelection");
 }
 
 function previewMemberships(): void {
@@ -449,7 +430,7 @@ function previewMemberships(): void {
       });
     }
   }
-  emit("previewCommands", commands, "所属領域をまとめて変更", selected.map((item) => ({
+  emit("executeCommands", commands, "所属領域をまとめて変更", selected.map((item) => ({
     iri: item.iri,
     label: item.label ?? "要素",
     role: "対象",
@@ -498,7 +479,7 @@ function removeSequenceMember(index: number): void {
 function previewSequence(): void {
   const sequence = selectedSequence();
   if (!sequence || sequenceMemberIris.value.length === 0) return;
-  emit("previewCommands", [{
+  emit("executeCommands", [{
     type: "set-sequence",
     commandId: "intent-sequence",
     sequenceIri: sequence.sequenceIri,
@@ -559,7 +540,7 @@ function removeStatementComment(index: number): void {
 
 function focusPendingIntent(): void {
   const primaryAction = panelRoot.value?.querySelector<HTMLElement>(
-    ".iriograph-authoring-preview button.primary:not([disabled]), .iriograph-intent-fields button.primary:not([disabled])",
+    ".iriograph-intent-fields button.primary:not([disabled])",
   );
   const firstField = panelRoot.value?.querySelector<HTMLElement>(
     ".iriograph-intent-fields textarea:not([disabled]), .iriograph-intent-fields input:not([disabled]), .iriograph-intent-fields select:not([disabled])",
@@ -567,30 +548,58 @@ function focusPendingIntent(): void {
   (primaryAction ?? firstField ?? panelRoot.value)?.focus();
 }
 
-defineExpose({ focusPendingIntent });
+defineExpose({ focusPendingIntent, resetIntent: reset });
 </script>
 
 <template>
   <section ref="panelRoot" class="iriograph-intent-panel" aria-label="意味グラフを編集" tabindex="-1">
     <p v-if="blockedReason" class="iriograph-authoring-blocked">{{ blockedReason }}</p>
     <p v-if="guidance" class="iriograph-intent-guidance" role="status">{{ guidance }}</p>
-    <template v-if="!intent && !preview">
-      <header><small>意味編集</small><strong>何をしますか？</strong></header>
-      <nav class="iriograph-intent-grid" aria-label="意味編集の4つの操作">
-        <button type="button" :disabled="!enabled || busy" @click="choose('add-element')"><b>＋</b><span>新しい要素を作る</span></button>
-        <button type="button" :disabled="!enabled || busy" @click="choose('add-relation')"><b>→</b><span>関係を作る</span></button>
-        <button type="button" :disabled="!enabled || busy" @click="choose('edit-element')"><b>✎</b><span>要素を変更する</span></button>
-        <button type="button" :disabled="!enabled || busy" @click="choose('edit-relation')"><b>⌘</b><span>関係を変更する</span></button>
+    <ul v-if="diagnostics.length" class="iriograph-intent-diagnostics" aria-label="意味編集の結果" role="status">
+      <li v-for="(item, index) in diagnostics" :key="`${item.code}:${index}`" :class="item.severity">
+        <b>{{ diagnosticGuidance(item).title }}</b><span>{{ diagnosticGuidance(item).action }}</span>
+      </li>
+    </ul>
+    <template v-if="!intent">
+      <header><small>意味</small><strong>Canvasの選択</strong></header>
+      <section class="iriograph-semantic-selection-summary" aria-label="選択中の意味情報">
+        <template v-if="selectedEdge">
+          <small>関係</small>
+          <strong>{{ selectedEdge.sourceLabel }}（{{ selectedPredicateLabel }}）{{ selectedEdge.targetLabel }}</strong>
+          <span v-if="selectedEdge.derivedReason">{{ selectedEdge.derivedReason }}</span>
+          <span v-else>{{ statementCommentValues.length || selectedEdge.statementComments?.length ? `${selectedEdge.statementComments?.length ?? 0}件の説明` : '説明なし' }}</span>
+        </template>
+        <template v-else-if="inspectedResources.length">
+          <small>{{ inspectedResources.length === 1 ? '要素' : `${inspectedResources.length}件を選択` }}</small>
+          <strong>{{ inspectedResources.map((item) => item.label ?? '名前のない要素').join('、') }}</strong>
+          <span>{{ incidentRelations.length }}件の接続関係</span>
+        </template>
+        <template v-else>
+          <small>選択なし</small>
+          <strong>Canvasで要素か関係を選択</strong>
+          <span>選択した対象に使える編集だけを表示します。</span>
+        </template>
+      </section>
+      <nav class="iriograph-intent-grid iriograph-intent-add-actions" aria-label="意味を追加">
+        <button type="button" :disabled="!enabled || busy" @click="choose('add-element')"><b>＋</b><span>要素を追加</span></button>
+        <button type="button" :disabled="!enabled || busy" @click="choose('add-relation')"><b>→</b><span>関係を追加</span></button>
+      </nav>
+      <nav v-if="selectedEdge || inspectedResources.length" class="iriograph-selection-edit-actions" aria-label="選択中の意味を編集">
+        <button v-if="selectedEdge" type="button" :disabled="!enabled || busy" @click="choose('edit-relation')">関係の意味を編集</button>
+        <template v-else>
+          <button v-if="inspectedResources.length === 1" type="button" :disabled="!enabled || busy" @click="choose('edit-element')">要素の詳細を編集</button>
+          <button type="button" :disabled="!enabled || busy" @click="choose('edit-relation')">所属・並び順を編集</button>
+        </template>
       </nav>
     </template>
 
-    <template v-else-if="!preview">
-      <header><button type="button" aria-label="4つの操作へ戻る" @click="cancel">←</button><strong>{{ intent === 'add-element' ? '新しい要素を作る' : intent === 'add-relation' ? '関係を作る' : intent === 'edit-element' ? '要素を変更する' : '関係を変更する' }}</strong></header>
+    <template v-else>
+      <header><button type="button" aria-label="選択内容へ戻る" @click="cancel">←</button><strong>{{ intent === 'add-element' ? '要素を追加' : intent === 'add-relation' ? '関係を追加' : intent === 'edit-element' ? '要素の詳細を編集' : selectedEdge ? '関係の意味を編集' : '所属・並び順を編集' }}</strong></header>
 
       <section v-if="intent === 'add-element'" class="iriograph-intent-fields">
         <p>名前を入力します。識別子は自動で安全に採番されます。</p>
         <label><span>名前</span><textarea v-model="label" aria-label="新しい要素の名前" rows="2" /></label>
-        <button type="button" class="primary" :disabled="!label.trim() || busy" @click="previewElementCreation">変更内容を確認</button>
+        <button type="button" class="primary" :disabled="!label.trim() || busy" @click="previewElementCreation">要素を作成</button>
       </section>
 
       <section v-else-if="intent === 'add-relation'" class="iriograph-intent-fields">
@@ -609,7 +618,7 @@ defineExpose({ focusPendingIntent });
           </fieldset>
         </section>
         <p v-if="predicateIri">{{ relationSelection.targets.length }}本の「{{ selectedPredicateLabel }}」を作成します。</p>
-        <button type="button" class="primary" :disabled="!relationReady || busy" @click="previewRelationCreation">変更内容を確認</button>
+        <button type="button" class="primary" :disabled="!relationReady || busy" @click="previewRelationCreation">関係を作成</button>
       </section>
 
       <section v-else-if="intent === 'edit-element'" class="iriograph-intent-fields">
@@ -619,10 +628,10 @@ defineExpose({ focusPendingIntent });
           <fieldset class="iriograph-intent-group-card"><legend>別名</legend><label v-for="(item, index) in labelValues.slice(1)" :key="index"><span>{{ item.language ? `別名（${item.language}）` : '別名' }}</span><textarea v-model="item.value" :aria-label="`要素の別名 ${index + 1}`" rows="2" /><button type="button" :aria-label="`要素の別名 ${index + 1}を削除`" @click="removeAlias(index + 1)">この別名を削除</button></label><button type="button" @click="addAlias">別名を追加</button></fieldset>
           <fieldset class="iriograph-intent-group-card"><legend>説明</legend><label v-for="(item, index) in commentValues" :key="index"><span>{{ item.language ? `説明（${item.language}）` : '説明' }}</span><textarea v-model="item.value" :aria-label="`要素の説明 ${index + 1}`" rows="3" /><button type="button" :aria-label="`要素の説明 ${index + 1}を削除`" @click="removeComment(index)">この説明を削除</button></label><button type="button" @click="addComment">説明を追加</button></fieldset>
           <fieldset class="iriograph-intent-group-card iriograph-semantic-type-editor"><legend>要素の種類</legend><label v-for="choice in semanticTypeChoices" :key="choice.iri"><input v-model="classIris" type="checkbox" :value="choice.iri" /><span>{{ choice.label ?? '種類' }}<small v-if="classificationRegionIris.has(choice.iri)">このビューでは概念領域にも反映</small></span></label><p v-if="semanticTypeChoices.length === 0">選択できる種類はありません。</p></fieldset>
-          <section class="iriograph-intent-group-card iriograph-current-memberships" aria-label="所属する領域"><strong>所属する領域</strong><template v-if="currentConceptRegions.length"><small>概念領域（上の「要素の種類」と同じ設定）</small><ul><li v-for="option in currentConceptRegions" :key="option.containerIri">{{ option.label }}</li></ul></template><small>業務上の所属</small><ul v-if="currentBusinessMemberships.length"><li v-for="option in currentBusinessMemberships" :key="option.containerIri">{{ option.label }}</li></ul><p v-else>業務上の所属はありません。</p><small>業務上の所属の追加・解除は「関係を変更する」で行います。</small></section>
+          <section class="iriograph-intent-group-card iriograph-current-memberships" aria-label="所属する領域"><strong>所属する領域</strong><template v-if="currentConceptRegions.length"><small>概念領域（上の「要素の種類」と同じ設定）</small><ul><li v-for="option in currentConceptRegions" :key="option.containerIri">{{ option.label }}</li></ul></template><small>業務上の所属</small><ul v-if="currentBusinessMemberships.length"><li v-for="option in currentBusinessMemberships" :key="option.containerIri">{{ option.label }}</li></ul><p v-else>業務上の所属はありません。</p><small>業務上の所属の追加・解除は「所属・並び順を編集」で行います。</small></section>
           <section v-if="incidentRelations.length" class="iriograph-relation-overview" aria-label="接続している関係"><strong>接続している関係</strong><ul><li v-for="relation in incidentRelations" :key="relation.edgeElementId"><span>{{ relation.sourceLabel }}（{{ relation.predicateLabel }}）{{ relation.targetLabel }}</span><small>{{ relation.direction === 'outgoing' ? 'この要素から出る関係' : relation.direction === 'incoming' ? 'この要素へ入る関係' : 'この要素自身への関係' }}</small><button type="button" @click="emit('focusElement', relation.edgeElementId)">Canvasで確認</button></li></ul></section>
-          <button type="button" class="primary" :disabled="!label.trim() || busy" @click="previewElementEdit">変更内容を確認</button>
-          <details class="iriograph-danger-zone"><summary>要素を削除</summary><p>この要素を始点・終点・所属先として使う関係も、確認画面にまとめて表示して削除します。</p><button type="button" :disabled="busy" @click="previewElementDelete">要素と関係の削除内容を確認</button></details>
+          <button type="button" class="primary" :disabled="!label.trim() || busy" @click="previewElementEdit">変更を保存</button>
+          <details class="iriograph-danger-zone"><summary>要素を削除</summary><p>選択外の関係や並び順にも影響する場合だけ、削除前に一覧を表示します。</p><button type="button" :disabled="busy" @click="previewElementDelete">選択した要素を削除</button></details>
         </template>
       </section>
 
@@ -635,7 +644,7 @@ defineExpose({ focusPendingIntent });
             <button type="button" :disabled="!enabled || busy" @click="emit('pickResource', 'targetIri')">終点をCanvasから選択</button>
             <label><span>関係</span><select v-model="predicateIri"><optgroup v-for="group in predicateGroups" :key="group.category" :label="group.category"><option v-for="choice in group.choices" :key="choice.iri" :value="choice.iri">A（{{ choice.label ?? '関係' }}）B — {{ choice.sentencePattern ?? `A（${choice.label ?? '関係'}）B` }}</option></optgroup></select></label>
             <fieldset class="iriograph-intent-group-card"><legend>この関係だけの説明</legend><p>この矢印だけの意味としてTurtleへ保存され、LLMにも渡されます。</p><label v-for="(item, index) in statementCommentValues" :key="index"><span>{{ item.language ? `説明（${item.language}）` : '説明' }}</span><textarea v-model="item.value" :aria-label="`この関係だけの説明 ${index + 1}`" rows="3" /><button type="button" :aria-label="`この関係だけの説明 ${index + 1}を削除`" @click="removeStatementComment(index)">この説明を削除</button></label><button type="button" @click="addStatementComment">説明を追加</button></fieldset>
-            <button type="button" class="primary" :disabled="!sourceIri || !targetIri || !predicateIri || busy" @click="previewEdgeEdit">変更内容を確認</button>
+            <button type="button" class="primary" :disabled="!sourceIri || !targetIri || !predicateIri || busy" @click="previewEdgeEdit">関係を更新</button>
             <button type="button" :disabled="busy" @click="previewEdgeDelete">この関係を削除</button>
           </template>
         </template>
@@ -650,28 +659,19 @@ defineExpose({ focusPendingIntent });
                 <p>番号付きの枠内要素を並べ替えます。通常の関係線とは別の構造です。</p>
                 <ol><li v-for="(memberIri, index) in sequenceMemberIris" :key="`${memberIri}:${index}`"><b>{{ index + 1 }}</b><span>{{ sequenceMemberLabel(memberIri) }}</span><button type="button" :disabled="index === 0" :aria-label="`${sequenceMemberLabel(memberIri)}を前へ`" @click="moveSequenceMember(index, -1)">↑</button><button type="button" :disabled="index === sequenceMemberIris.length - 1" :aria-label="`${sequenceMemberLabel(memberIri)}を後ろへ`" @click="moveSequenceMember(index, 1)">↓</button><button type="button" :aria-label="`${sequenceMemberLabel(memberIri)}を並び順から外す`" @click="removeSequenceMember(index)">除外</button></li></ol>
                 <button v-if="sequenceCandidates().length" type="button" @click="addSelectedSequenceMembers">Canvasで選択した {{ sequenceCandidates().length }}件を末尾へ追加</button>
-                <button type="button" class="primary" :disabled="sequenceMemberIris.length === 0 || busy" @click="previewSequence">並び順の変更を確認</button>
+                <button type="button" class="primary" :disabled="sequenceMemberIris.length === 0 || busy" @click="previewSequence">並び順を更新</button>
               </template>
             </section>
             <section v-if="editableMemberships.length" class="iriograph-membership-editor" aria-label="所属する領域を編集">
               <strong>所属する領域</strong><p>選択した要素の所属先・包含対象だけを変更します。要素の種類とは別の設定です。</p>
               <label v-for="option in editableMemberships" :key="option.containerIri"><span>{{ option.label }}（{{ membershipState(option) }}）</span><select v-model="membershipActions[option.containerIri]"><option value="keep">変更しない</option><option value="add">選択中をすべて追加</option><option value="remove">選択中をすべて解除</option></select></label>
-              <button type="button" class="primary" :disabled="!Object.values(membershipActions).some((value) => value !== 'keep') || busy" @click="previewMemberships">変更内容を確認</button>
+              <button type="button" class="primary" :disabled="!Object.values(membershipActions).some((value) => value !== 'keep') || busy" @click="previewMemberships">所属を更新</button>
             </section>
-            <p v-if="!sequences.length && !editableMemberships.length">この選択に変更できる並び順・業務上の所属はありません。概念領域は「要素を変更する」の種類から設定します。</p>
+            <p v-if="!sequences.length && !editableMemberships.length">この選択に変更できる並び順・業務上の所属はありません。概念領域は「要素の詳細を編集」の種類から設定します。</p>
           </template>
         </template>
       </section>
     </template>
 
-    <section v-else class="iriograph-authoring-preview">
-      <div><b>{{ preview.operationLabel }}</b><span>{{ preview.valid ? '適用可能' : '適用不可' }}</span></div>
-      <div class="iriograph-preview-summary"><span class="iriograph-preview-count add">追加 {{ preview.addedStatements.length }}件</span><span class="iriograph-preview-count remove">削除 {{ preview.removedStatements.length }}件</span></div>
-      <div v-if="preview.resourceChips.length" class="iriograph-preview-resources"><span v-for="chip in preview.resourceChips" :key="`${chip.role}:${chip.iri}`" class="iriograph-resource-chip"><small>{{ chip.role }}</small>{{ chip.label }}</span></div>
-      <ul v-if="preview.relations.length" class="iriograph-preview-relations" aria-label="変更される関係"><li v-for="(relation, index) in preview.relations" :key="`${relation.action}:${relation.kind}:${relation.label}:${index}`" :class="relation.action"><span>{{ relation.action === 'remove' ? '削除' : '追加' }}</span><b>{{ relation.label }}</b></li></ul>
-      <ul v-if="preview.diagnostics.length"><li v-for="(item, index) in preview.diagnostics" :key="`${item.code}:${index}`" :class="item.severity"><b>{{ diagnosticGuidance(item).title }}</b><span>{{ diagnosticGuidance(item).action }}</span></li></ul>
-      <details><summary>追加・削除される関係</summary><h5>削除</h5><pre>{{ preview.removedStatements.join('\n') }}</pre><h5>追加</h5><pre>{{ preview.addedStatements.join('\n') }}</pre></details>
-      <footer><button type="button" @click="cancel">キャンセル</button><button type="button" class="primary" :disabled="busy || !preview.valid" @click="emit('apply')">明示的に適用</button></footer>
-    </section>
   </section>
 </template>

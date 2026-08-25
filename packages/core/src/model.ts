@@ -75,6 +75,8 @@ export type ViewElementOverlay = {
     labelPlacement?: LabelPlacement;
     /** Node-local presentation offset from the template's label position. */
     nodeLabelOffset?: Point;
+    /** Node label glyph flow, independent of label/icon offsets and geometry. */
+    nodeLabelWritingDirection?: NodeLabelWritingDirection;
     /** Node-local presentation offset from the template's icon position. */
     nodeIconOffset?: Point;
     /** Normalized clockwise position on a region perimeter: 0 is top-left. */
@@ -129,6 +131,8 @@ export type EdgeEndpointShape = NonNullable<VisualTemplate["shape"]> | "containe
 export type LabelPlacement = "top" | "right" | "bottom" | "left" | "center";
 
 export type RegionLabelWritingDirection = "horizontal-right" | "vertical-down";
+
+export type NodeLabelWritingDirection = RegionLabelWritingDirection;
 
 export type EdgeRouteMode = "auto" | "straight" | "orthogonal" | "curve" | "manual";
 
@@ -445,6 +449,7 @@ export type ProjectedNode = {
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
   nodeLabelOffset?: Point;
+  nodeLabelWritingDirection?: NodeLabelWritingDirection;
   nodeIconOffset?: Point;
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
@@ -550,6 +555,7 @@ export type SceneNode = {
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
   nodeLabelOffset?: Point;
+  nodeLabelWritingDirection?: NodeLabelWritingDirection;
   nodeIconOffset?: Point;
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;

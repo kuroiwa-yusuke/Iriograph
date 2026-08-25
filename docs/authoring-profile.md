@@ -108,7 +108,7 @@ Rich editorはTurtle文字列の書き換えをUI独自の実装で行わず、a
 
 Predicate候補はlocale別label/commentに加え、category、短いexample、`sentencePattern`を持てます。`sentencePattern`はsubjectを仮の`A`、objectを仮の`B`とする自然文（例「AはBから派生した」）で、pickerはcategory別にこの文を並べます。A/Bは入力対象の役割を説明する表示専用placeholderであり、確定edgeのlabel、caption、Turtleへ保存しません。文型metadataはcatalog/vocabulary正本から解決し、IRI local nameや英語labelの分割から助詞を推測しません。Metadataがない場合は`A（通常label）B`という決定的fallbackを使い、選択支援のために新しいsemantic termを作りません。
 
-関係候補はprofileが許可する`rdf:Property`、`owl:ObjectProperty`、`owl:DatatypeProperty`等に加え、解決済み標準catalogが提供するDCTERMS、PROV-O、SKOS等の既知predicateとsemantic capabilityから作ります。Source/targetの明示`rdf:type`と限定`rdfs:subClassOf` closure、predicateの`rdfs:domain`/`rdfs:range`、object/literal kindに明確に反する候補は除外します。型が不明な候補は適合と断定せず「型未確認」として後順位に残し、Apply前のprofile/domain validationで最終判定します。Pickerが完全なOWL reasonerを内包したり、label文字列からdomain/rangeを推測したりしてはなりません。Category、example、`sentencePattern`は表示metadataであり、predicateのidentityや推論規則を置き換えません。
+関係候補はprofileが許可する`rdf:Property`、`owl:ObjectProperty`、`owl:DatatypeProperty`等に加え、解決済み標準catalogが提供するDCTERMS、PROV-O、SKOS等の既知predicateとsemantic capabilityから作ります。Source/targetの明示`rdf:type`と限定`rdfs:subClassOf` closure、predicateの`rdfs:domain`/`rdfs:range`、object/literal kindに明確に反する候補は除外します。型が不明な候補は適合と断定せず「型未確認」として後順位に残し、実行操作内のprofile/domain validationで最終判定します。Pickerが完全なOWL reasonerを内包したり、label文字列からdomain/rangeを推測したりしてはなりません。Category、example、`sentencePattern`は表示metadataであり、predicateのidentityや推論規則を置き換えません。
 
 Standard editorの通常UIとAdvanced詳細は完全IRIの入力欄を持ちません。新規resourceはhost注入のIRI allocatorからnamed IRIを得て、既存resourceと語彙termは解決済み候補から選びます。Advancedはidentityとexact statementのread-only確認だけです。直接IRIを扱う必要がある管理者・開発者は、standard editorのstructured formではなく、別権限のTurtle source editorまたはhost固有vocabulary管理を使います。Allocator結果とsource editはいずれも`allowedMintNamespaces`、graph内衝突、actor policyを検証し、authoring policyを迂回できません。
 
@@ -125,16 +125,16 @@ Human structured commandは次のpolicyに従います。
 - 包含、順序、選択は、structure profileとprojection capabilityで許可されたgraph patchとして一括適用する。Dragをmembershipと解釈するなど、presentation gestureからsemantic tripleを暗黙生成しない
 - 一つのresourceが複数containerへ属するmembershipを許容する。階層container viewで単一parentとして描けないことをsemantic errorにせず、region view等の適合する空間文法を選ぶ。どのviewでもgeometryからmembershipを生成しない
 - `set-alternatives`では`memberIris`を最終ordinal順の正本とし、重複IRIも並び替えない。`defaultMemberIri`は`memberIris[defaultOrdinal - 1]`と一致しなければならない
-- Coreのresource削除commandは参照statementが残る場合にcascade省略を拒否する。標準Editorは全影響statementを人向けにpreviewする明示cascadeだけを提供し、Seq/Alt memberの削除では残るordinalを同じpatchで再採番する
-- `humanUnknown: warn`の操作はdiagnosticと完全IRIを提示し、人が明示確認した場合だけ再実行できる
+- Coreのresource削除commandは参照statementが残る場合にcascade省略を拒否する。標準Editorは選択外のedge、membership、Seq/Alt membershipへ影響が及ぶ場合だけlabel付きの影響一覧とCanvas previewを示して明示cascadeを確認し、影響objectをすべて選択済みなら一回の操作で直接確定する。Seq/Alt memberの削除では残るordinalを同じpatchで再採番する
+- `humanUnknown: warn`は低水準controlled source APIではdiagnostic、完全IRI、再実行tokenを返す。Standard editorは未登録IRIを入力候補にせず、非削除warningを該当fieldのinline guidanceとして示して同じ操作を確定しない
 
-Standard editorの`新しい要素を作る`は上記の一般commandを、allocatorが発行したopaque IRIとactive localeの`rdfs:label`一文だけへ制約します。作成formにtype、comment、上位概念、edge、membership、initial geometryを含めません。これらは作成Apply後に`要素を変更する`、`関係を変更する`、`ビュー`から別transactionとして追加します。Core commandやLLM adapterが複数initial statementを扱えることを、standard editorが複合作成formを公開する理由にしません。
+Standard editorの`要素を追加`は上記の一般commandを、allocatorが発行したopaque IRIとactive localeの`rdfs:label`一文だけへ制約します。作成formにtype、comment、上位概念、edge、membership、initial geometryを含めません。これらは作成確定後に`要素の詳細を編集`、`所属・並び順を編集`、`ビュー`から別transactionとして追加します。Core commandやLLM adapterが複数initial statementを扱えることを、standard editorが複合作成formを公開する理由にしません。
 
 Structured commandはRDF datasetへのgraph patchに変換した後、Turtle textareaの候補sourceおよびLLMが返した候補sourceと同じパイプラインへ合流します。Actor policyは差分検証時に適用し、その後の構造検証、domain validation、全viewの再投影、display reconciliationはactor間で共通にします。
 
-Domain validationは[semantic-validation.md](./semantic-validation.md)のhost注入portを使います。Authoring profileのunknown term warningとdomain validator warningは発生源を分けますが、いずれもcandidateを黙って確定しません。Domain warningの再実行tokenはvalidation context、exact source、安定diagnostic ID集合へ束縛します。
+Domain validationは[semantic-validation.md](./semantic-validation.md)のhost注入portを使います。Authoring profileのunknown term warningとdomain validator warningは発生源を分けますが、いずれもcandidateを黙って確定しません。Domain warningの再実行tokenはvalidation context、exact source、安定diagnostic ID集合へ束縛します。Standard editorは非削除warningをmodal確認にせず該当段階のinline guidanceとして返し、削除影響modalと混同しません。
 
-Node、edge、属性、包含、削除は右Inspectorの`新しい要素を作る`、`関係を作る`、`要素を変更する`、`関係を変更する`のいずれかからだけ開始し、段階入力のcommand draftへ必要値をseedします。Object detailsは`要素を変更する`選択後の一段階であり、第5の入口にしません。右クリックはappearance editorの入口に限定し、semantic commandを開始しません。Canvas gestureはsource/targetや候補containerをdraftへseedできますが、それだけではsemantic graphを変更しません。`新しい要素を作る`はCanvas位置を受け取りません。通常UIはresource・predicateのlabel/cardとCanvas上のobject選択を使い、完全IRI、内部operation名、capability graph patchはread-only Advanced詳細にだけ表示します。Editorは追加・削除予定のtripleまたは構造graph patch、完全IRI、validation結果と候補Sceneのrich previewを提示し、ユーザーの明示適用後にだけtransactionを開始します。適用前のghost elementと削除対象の赤線はephemeral UI stateでありdocumentへ保存しません。
+右InspectorはCanvas選択中心とし、常設入口は`要素を追加`と`関係を追加`だけにします。Resource選択時に`要素の詳細を編集`と`所属・並び順を編集`、direct edge選択時に`関係の意味を編集`を段階表示します。Object detailsは選択後の一段階であり、独立した常設入口にしません。右クリックはappearance editorの入口に限定し、semantic commandを開始しません。Canvas gestureは作成formのsource/targetをseedできますが、それだけではsemantic graphを変更しません。`要素を追加`はCanvas位置を受け取りません。通常UIはresource・predicateのlabel/cardとCanvas上のobject選択を使い、完全IRI、内部operation名、capability graph patchはread-only Advanced詳細にだけ表示します。非削除操作は利用者の実行一回の内部でcandidate graphを検証してatomic transactionを確定し、別のPreview/Apply画面を挟みません。選択外へ波及する削除だけ、影響一覧とCanvas上の赤線をsession-only previewとして示して明示確認します。
 
 Capability parameterは省略時をrequiredとし、`required: false`だけをoptionalとします。Optional bindingが省略された場合、そのbindingを参照するtemplate statementをadd/removeの双方で一文単位にskipします。値の推測や空文字列への置換は行いません。
 

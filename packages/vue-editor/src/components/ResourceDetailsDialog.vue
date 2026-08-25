@@ -30,7 +30,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  preview: [commands: AuthoringCommand[]];
+  execute: [commands: AuthoringCommand[]];
   close: [];
 }>();
 
@@ -95,7 +95,7 @@ function resourcesFor(row: ResourcePropertyEditorRow): AuthoringChoice[] {
 }
 
 function submit(): void {
-  if (commands.value.length > 0) emit("preview", commands.value);
+  if (commands.value.length > 0) emit("execute", commands.value);
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -111,7 +111,7 @@ function handleKeydown(event: KeyboardEvent): void {
     <section ref="dialog" class="iriograph-resource-details-dialog" role="dialog" aria-modal="true" aria-labelledby="iriograph-details-title" @keydown="handleKeydown">
       <header><div><small>DETAILS &amp; PROPERTIES</small><strong id="iriograph-details-title">{{ title }}</strong></div><button type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
       <p v-if="notice" class="iriograph-property-notice" role="note">{{ notice }}</p>
-      <p>名前や説明、分類、関連、属性を区分して編集し、一つの変更内容として確認します。</p>
+      <p>名前や説明、分類、関連、属性を区分して編集し、一つの変更として保存します。</p>
       <section v-for="section in sections" :key="section.category" class="iriograph-property-section" :data-category="section.category">
         <header><div><strong>{{ section.title }}</strong><small>{{ section.description }}</small></div><span>{{ rowsFor(section.category).length }}</span></header>
         <p v-if="rowsFor(section.category).length === 0" class="iriograph-property-empty">編集できる項目はありません。</p>
@@ -129,7 +129,7 @@ function handleKeydown(event: KeyboardEvent): void {
         </section>
       </section>
       <details class="iriograph-property-advanced"><summary>Advanced: resource identity</summary><code>{{ subjectIri }}</code></details>
-      <footer><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" :disabled="busy || commands.length === 0" @click="submit">{{ busy ? '検証中…' : `変更${commands.length}件を確認` }}</button></footer>
+      <footer><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" :disabled="busy || commands.length === 0" @click="submit">{{ busy ? '保存中…' : `変更${commands.length}件を保存` }}</button></footer>
     </section>
   </div>
 </template>

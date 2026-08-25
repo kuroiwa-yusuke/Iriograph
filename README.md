@@ -22,7 +22,8 @@ docker compose up --build
 
 ブラウザで `http://localhost:5173` を開きます。mock hostは
 `apps/mock/public/workspace`にある実際の`.iriograph`と画像assetをtree表示し、
-編集内容はbrowserのpath別working copyへ保存します。検証一式は次で実行できます。
+編集内容はbrowserのpath別working copyへ保存します。初期ファイルは、表示座標を写経せず
+semantic Turtleと空のview overlayから自動配置するピザ注文・配送フローです。検証一式は次で実行できます。
 
 ```sh
 npm run verify
@@ -30,10 +31,10 @@ npm run verify
 
 ## Package境界
 
-- `@iriograph/core`: document model、Turtle parse、catalog投影、actor別controlled source write、検証、display reconciliation、semantic command preview/apply
+- `@iriograph/core`: document model、Turtle parse、catalog投影、actor別controlled source write、検証、display reconciliation、内部のsemantic command prepare/apply
 - `@iriograph/semantic-access`: label/comment検索、describe・近傍/subgraph、revision alias、Core commandへの安全なwrite bridge
 - `@iriograph/layout-elk`: compound graph、port、直交routingを扱う任意導入のELK Layered adapter。Worker engineをhostから注入可能
-- `@iriograph/vue-editor`: 表示overlayと意味グラフを分離し、context menu/detailsからpreview→明示Applyで編集する埋め込みVue component
+- `@iriograph/vue-editor`: 表示overlayと意味グラフを分離し、Canvas選択中心の意味編集と右Inspector内の直接確定ビュー編集を提供する埋め込みVue component
 - `@iriograph/mock`: localStorage、workspace asset、static authoring context/IRI allocatorを接続したlocal host例
 
 `@iriograph/vue-editor`はworkspace、HTTP、認証、永続化を知りません。hostは`v-model`でdocumentを受け取り、`save` eventを任意の保存APIへ接続します。

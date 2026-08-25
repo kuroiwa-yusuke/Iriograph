@@ -56,12 +56,16 @@ import {
   resolveCanvasKeyboardCommand,
 } from "../keyboard-commands";
 import {
+  diagramContentBounds,
+  diagramWorkAreaBounds,
   diagramFitZoom,
+  expandDiagramWorkAreaBounds,
   normalizeDiagramZoom,
   scrollToRevealBounds,
   type DiagramCanvasNavigationApi,
   type DiagramViewportMetrics,
   type DiagramViewportState,
+  type DiagramWorkAreaBounds,
 } from "../viewport";
 import {
   normalizeDiagramSnapSettings,
@@ -149,7 +153,7 @@ const emit = defineEmits<{
     offset?: Point;
   }];
   regionLabelUpdate: [payload: { elementId: string; anchor: number }];
-  /** Seeds a semantic authoring draft; it never mutates the graph directly. */
+  /** Requests atomic deletion of the active semantic selection. */
   semanticEditRequest: [elementId: string];
   /** Seeds draft coordinates only; it never mutates the graph or history. */
   semanticPositionRequest: [position: Point, containerIri?: string];
@@ -190,6 +194,7 @@ const viewport = reactive<DiagramViewportMetrics>({
   width: 0,
   height: 0,
 });
+const workArea = ref<DiagramWorkAreaBounds>(diagramWorkAreaBounds(props.scene));
 const viewportPanning = ref(false);
 const previewGeometries = ref<Record<string, ElementGeometry>>({});
 const previewRouting = ref<Record<string, EditableEdgeRouting | null>>({});
@@ -259,13 +264,23 @@ const orderedRegions = computed(() => [...(props.scene.regions ?? [])].sort((lef
 )));
 const minimapViewport = computed(() => {
   const offset = stageOffset();
-  const x = clamp((viewport.scrollLeft - offset.x) / props.zoom, 0, props.scene.width);
-  const y = clamp((viewport.scrollTop - offset.y) / props.zoom, 0, props.scene.height);
+  const right = workArea.value.x + workArea.value.width;
+  const bottom = workArea.value.y + workArea.value.height;
+  const x = clamp(
+    workArea.value.x + (viewport.scrollLeft - offset.x) / props.zoom,
+    workArea.value.x,
+    right,
+  );
+  const y = clamp(
+    workArea.value.y + (viewport.scrollTop - offset.y) / props.zoom,
+    workArea.value.y,
+    bottom,
+  );
   return {
     x,
     y,
-    width: Math.min(props.scene.width - x, viewport.width / props.zoom),
-    height: Math.min(props.scene.height - y, viewport.height / props.zoom),
+    width: Math.min(right - x, viewport.width / props.zoom),
+    height: Math.min(bottom - y, viewport.height / props.zoom),
   };
 });
 const viewportLabel = computed(() => [
@@ -383,6 +398,7 @@ watch(
     // not let a later keyup commit geometry or routing derived from stale IDs.
     if (keyboardGesture) cancelKeyboardGesture();
     else clearKeyboardPreview();
+    replaceWorkArea(diagramWorkAreaBounds(props.scene));
     if (props.semanticPositionPicking || props.semanticResourcePicking) emit("semanticPickCancel");
   },
 );
@@ -694,16 +710,27 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
   emit("gestureStart");
   regionConstraintMessage.value = "";
   const origin = { x: event.clientX, y: event.clientY };
+  updateViewportMetrics();
+  const originScroll = { x: viewport.scrollLeft, y: viewport.scrollTop };
+  const originWorkArea = { x: workArea.value.x, y: workArea.value.y };
   let pendingChanges: GeometryChange[] = [];
+  let latestMoveEvent: PointerEvent | undefined;
+  let animationFrame: number | undefined;
 
-  trackPointer((moveEvent) => {
-    autoPanForPointer(moveEvent);
+  const updatePreview = (moveEvent: PointerEvent): void => {
+    updateViewportMetrics();
+    const workspaceShift = {
+      x: (originWorkArea.x - workArea.value.x) * props.zoom,
+      y: (originWorkArea.y - workArea.value.y) * props.zoom,
+    };
     const translated = translateSelection(
       initialScene,
       movingElementIds,
       {
-        x: (moveEvent.clientX - origin.x) / props.zoom,
-        y: (moveEvent.clientY - origin.y) / props.zoom,
+        x: (moveEvent.clientX - origin.x
+          + viewport.scrollLeft - originScroll.x - workspaceShift.x) / props.zoom,
+        y: (moveEvent.clientY - origin.y
+          + viewport.scrollTop - originScroll.y - workspaceShift.y) / props.zoom,
       },
       moveEvent.altKey
         ? {
@@ -721,10 +748,27 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
     const constrained = constrainMembershipRegionMovement(initialScene, translated);
     pendingChanges = constrained.changes;
     regionConstraintMessage.value = constrained.issue?.message ?? "";
+    const expanded = expandWorkAreaFor(pendingChanges);
     previewGeometries.value = Object.fromEntries(
       pendingChanges.map((change) => [change.elementId, change.geometry]),
     );
+    const panned = autoPanForPointer(moveEvent);
+    if (expanded || panned) scheduleNextFrame();
+  };
+  const scheduleNextFrame = (): void => {
+    if (animationFrame !== undefined || !latestMoveEvent) return;
+    animationFrame = window.requestAnimationFrame(() => {
+      animationFrame = undefined;
+      if (latestMoveEvent) updatePreview(latestMoveEvent);
+    });
+  };
+
+  trackPointer((moveEvent) => {
+    latestMoveEvent = moveEvent;
+    updatePreview(moveEvent);
   }, (cancelled) => {
+    latestMoveEvent = undefined;
+    if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
     if (cancelled) {
       previewGeometries.value = {};
       return;
@@ -745,19 +789,55 @@ function startResize(event: PointerEvent, element: GeometryElement, handle: Resi
   regionConstraintMessage.value = "";
   const origin = { x: event.clientX, y: event.clientY };
   const initialScene = snapshotScene(props.scene);
+  updateViewportMetrics();
+  const originScroll = { x: viewport.scrollLeft, y: viewport.scrollTop };
+  const originWorkArea = { x: workArea.value.x, y: workArea.value.y };
+  let pendingChange: GeometryChange | undefined;
+  let latestMoveEvent: PointerEvent | undefined;
+  let animationFrame: number | undefined;
 
-  trackPointer((moveEvent) => {
+  const updatePreview = (moveEvent: PointerEvent): void => {
+    updateViewportMetrics();
+    const workspaceShift = {
+      x: (originWorkArea.x - workArea.value.x) * props.zoom,
+      y: (originWorkArea.y - workArea.value.y) * props.zoom,
+    };
     const change = resizeGeometryElementFromHandle(initialScene, element.elementId, handle, {
-      x: (moveEvent.clientX - origin.x) / props.zoom,
-      y: (moveEvent.clientY - origin.y) / props.zoom,
+      x: (moveEvent.clientX - origin.x
+        + viewport.scrollLeft - originScroll.x - workspaceShift.x) / props.zoom,
+      y: (moveEvent.clientY - origin.y
+        + viewport.scrollTop - originScroll.y - workspaceShift.y) / props.zoom,
     });
     if (!change) return;
     const constrained = constrainMembershipRegionMovement(initialScene, [change]);
     regionConstraintMessage.value = constrained.issue?.message ?? "";
     const accepted = constrained.changes[0];
     if (!accepted) return;
-    emit("resizeChange", accepted);
-    emit("geometryChange", accepted);
+    pendingChange = accepted;
+    const expanded = expandWorkAreaFor([accepted]);
+    previewGeometries.value = { [accepted.elementId]: accepted.geometry };
+    const panned = autoPanForPointer(moveEvent);
+    if (expanded || panned) scheduleNextFrame();
+  };
+  const scheduleNextFrame = (): void => {
+    if (animationFrame !== undefined || !latestMoveEvent) return;
+    animationFrame = window.requestAnimationFrame(() => {
+      animationFrame = undefined;
+      if (latestMoveEvent) updatePreview(latestMoveEvent);
+    });
+  };
+
+  trackPointer((moveEvent) => {
+    latestMoveEvent = moveEvent;
+    updatePreview(moveEvent);
+  }, (cancelled) => {
+    latestMoveEvent = undefined;
+    if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
+    previewGeometries.value = {};
+    if (!cancelled && pendingChange) {
+      emit("resizeChange", pendingChange);
+      emit("geometryChange", pendingChange);
+    }
   });
 }
 
@@ -884,7 +964,10 @@ function resizeHandleStyle(element: GeometryElement, handle: ResizeHandle): Reco
   const vertical = handle.includes("n") ? geometry.y
     : handle.includes("s") ? geometry.y + geometry.height
       : geometry.y + geometry.height / 2;
-  return { left: `${horizontal}px`, top: `${vertical}px` };
+  return {
+    left: `${horizontal - workArea.value.x}px`,
+    top: `${vertical - workArea.value.y}px`,
+  };
 }
 
 function startRegionLabelMove(event: PointerEvent, region: SceneRegion): void {
@@ -1137,7 +1220,10 @@ function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
   if (event.key === "Delete" || event.key === "Backspace") {
     event.preventDefault();
     event.stopPropagation();
-    if (!props.readOnly) announce("意味の削除は右側の「関係を変更する」から行います");
+    if (!props.readOnly) {
+      emit("semanticEditRequest", edge.elementId);
+      announce("選択した関係を削除します");
+    }
   }
 }
 
@@ -1149,7 +1235,10 @@ function handleGeometrySemanticKeydown(event: KeyboardEvent, elementId: string):
   if (event.key !== "Delete" && event.key !== "Backspace") return;
   event.preventDefault();
   event.stopPropagation();
-  if (!props.readOnly) announce("意味の削除は右側の「要素を変更する」から行います");
+  if (!props.readOnly) {
+    emit("semanticEditRequest", elementId);
+    announce("選択した要素を削除します");
+  }
 }
 
 function emitWaypointRouting(edge: SceneEdge, waypoints: readonly Point[] | undefined): void {
@@ -1260,15 +1349,15 @@ function canvasPoint(event: MouseEvent): Point | undefined {
   const bounds = svg?.getBoundingClientRect();
   if (!bounds || bounds.width <= 0 || bounds.height <= 0) return undefined;
   return {
-    x: (event.clientX - bounds.left) * props.scene.width / bounds.width,
-    y: (event.clientY - bounds.top) * props.scene.height / bounds.height,
+    x: workArea.value.x + (event.clientX - bounds.left) * workArea.value.width / bounds.width,
+    y: workArea.value.y + (event.clientY - bounds.top) * workArea.value.height / bounds.height,
   };
 }
 
 function clampPointToScene(point: Point): Point {
   return {
-    x: clamp(point.x, 8, Math.max(8, props.scene.width - 8)),
-    y: clamp(point.y, 8, Math.max(8, props.scene.height - 8)),
+    x: clamp(point.x, workArea.value.x + 8, workArea.value.x + workArea.value.width - 8),
+    y: clamp(point.y, workArea.value.y + 8, workArea.value.y + workArea.value.height - 8),
   };
 }
 
@@ -1321,8 +1410,8 @@ function semanticPositionAt(event: PointerEvent): Point | undefined {
   const bounds = stageElement.value?.getBoundingClientRect();
   if (!bounds) return undefined;
   return clampPointToScene({
-    x: (event.clientX - bounds.left) / props.zoom,
-    y: (event.clientY - bounds.top) / props.zoom,
+    x: workArea.value.x + (event.clientX - bounds.left) / props.zoom,
+    y: workArea.value.y + (event.clientY - bounds.top) / props.zoom,
   });
 }
 
@@ -1417,7 +1506,10 @@ function handleViewportKeydown(event: KeyboardEvent): void {
   if (command.kind === "semantic-edit") {
     event.preventDefault();
     event.stopPropagation();
-    if (!props.readOnly && activeNavigatorElementId.value) announce("意味の変更は右側の4つの操作から行います");
+    if (!props.readOnly && activeNavigatorElementId.value) {
+      emit("semanticEditRequest", activeNavigatorElementId.value);
+      announce("選択した意味情報を削除します");
+    }
     return;
   }
   if (command.kind === "focus") {
@@ -1738,8 +1830,10 @@ function centerFromMinimapEvent(map: SVGSVGElement, event: PointerEvent): void {
   const bounds = map.getBoundingClientRect();
   if (bounds.width <= 0 || bounds.height <= 0) return;
   centerOn({
-    x: clamp((event.clientX - bounds.left) / bounds.width, 0, 1) * props.scene.width,
-    y: clamp((event.clientY - bounds.top) / bounds.height, 0, 1) * props.scene.height,
+    x: workArea.value.x
+      + clamp((event.clientX - bounds.left) / bounds.width, 0, 1) * workArea.value.width,
+    y: workArea.value.y
+      + clamp((event.clientY - bounds.top) / bounds.height, 0, 1) * workArea.value.height,
   });
 }
 
@@ -1764,8 +1858,8 @@ function setViewportScroll(left: number, top: number): void {
 function maximumScroll(): Point {
   const offset = stageOffset();
   return {
-    x: Math.max(0, offset.x + props.scene.width * props.zoom + CANVAS_PADDING - viewport.width),
-    y: Math.max(0, offset.y + props.scene.height * props.zoom + CANVAS_PADDING - viewport.height),
+    x: Math.max(0, offset.x + workArea.value.width * props.zoom + CANVAS_PADDING - viewport.width),
+    y: Math.max(0, offset.y + workArea.value.height * props.zoom + CANVAS_PADDING - viewport.height),
   };
 }
 
@@ -1780,11 +1874,11 @@ function panBy(deltaX: number, deltaY: number): void {
   setViewportScroll(viewport.scrollLeft + deltaX, viewport.scrollTop + deltaY);
 }
 
-function autoPanForPointer(event: PointerEvent): void {
+function autoPanForPointer(event: PointerEvent): boolean {
   const element = scrollElement.value;
-  if (!element) return;
+  if (!element) return false;
   const bounds = element.getBoundingClientRect();
-  if (bounds.width <= 0 || bounds.height <= 0) return;
+  if (bounds.width <= 0 || bounds.height <= 0) return false;
   const axisDelta = (position: number, start: number, end: number): number => {
     if (position < start + DRAG_AUTO_PAN_MARGIN) {
       return -Math.min(DRAG_AUTO_PAN_MAX_STEP, start + DRAG_AUTO_PAN_MARGIN - position);
@@ -1796,7 +1890,10 @@ function autoPanForPointer(event: PointerEvent): void {
   };
   const deltaX = axisDelta(event.clientX, bounds.left, bounds.right);
   const deltaY = axisDelta(event.clientY, bounds.top, bounds.bottom);
-  if (deltaX || deltaY) panBy(deltaX, deltaY);
+  if (!deltaX && !deltaY) return false;
+  const previous = { x: viewport.scrollLeft, y: viewport.scrollTop };
+  panBy(deltaX, deltaY);
+  return viewport.scrollLeft !== previous.x || viewport.scrollTop !== previous.y;
 }
 
 function getViewportState(): DiagramViewportState {
@@ -1819,16 +1916,8 @@ async function zoomTo(value: number): Promise<void> {
   updateViewportMetrics();
   const offset = stageOffset();
   const center = {
-    x: clamp(
-      (viewport.scrollLeft - offset.x + viewport.width / 2) / props.zoom,
-      0,
-      props.scene.width,
-    ),
-    y: clamp(
-      (viewport.scrollTop - offset.y + viewport.height / 2) / props.zoom,
-      0,
-      props.scene.height,
-    ),
+    x: workArea.value.x + (viewport.scrollLeft - offset.x + viewport.width / 2) / props.zoom,
+    y: workArea.value.y + (viewport.scrollTop - offset.y + viewport.height / 2) / props.zoom,
   };
   emit("zoomChange", normalizeDiagramZoom(value));
   await nextTick();
@@ -1838,17 +1927,21 @@ async function zoomTo(value: number): Promise<void> {
 
 async function fitToView(): Promise<void> {
   updateViewportMetrics();
-  emit("zoomChange", diagramFitZoom(props.scene, viewport));
+  const content = diagramContentBounds(props.scene);
+  emit("zoomChange", diagramFitZoom(content, viewport));
   await nextTick();
   updateViewportMetrics();
-  centerOn({ x: props.scene.width / 2, y: props.scene.height / 2 });
+  centerOn({
+    x: content.x + content.width / 2,
+    y: content.y + content.height / 2,
+  });
 }
 
 function centerOn(point: Point): void {
   const offset = stageOffset();
   setViewportScroll(
-    offset.x + point.x * props.zoom - viewport.width / 2,
-    offset.y + point.y * props.zoom - viewport.height / 2,
+    offset.x + (point.x - workArea.value.x) * props.zoom - viewport.width / 2,
+    offset.y + (point.y - workArea.value.y) * props.zoom - viewport.height / 2,
   );
 }
 
@@ -1857,7 +1950,7 @@ async function revealElement(elementId: string): Promise<boolean> {
   updateViewportMetrics();
   const bounds = elementBounds(elementId);
   if (!bounds) return false;
-  const next = scrollToRevealBounds(bounds, props.zoom, viewport, stageOffset());
+  const next = scrollToRevealBounds(bounds, props.zoom, viewport, semanticContentOffset());
   setViewportScroll(next.x, next.y);
   return true;
 }
@@ -2002,6 +2095,55 @@ function geometryFor(element: GeometryElement): ElementGeometry {
   return previewGeometries.value[element.elementId] ?? element.geometry;
 }
 
+function semanticContentOffset(): Point {
+  const offset = stageOffset();
+  return {
+    x: offset.x - workArea.value.x * props.zoom,
+    y: offset.y - workArea.value.y * props.zoom,
+  };
+}
+
+function canvasPosition(geometry: ElementGeometry): Point {
+  return {
+    x: geometry.x - workArea.value.x,
+    y: geometry.y - workArea.value.y,
+  };
+}
+
+function workAreaViewBox(): string {
+  return `${workArea.value.x} ${workArea.value.y} ${workArea.value.width} ${workArea.value.height}`;
+}
+
+function expandWorkAreaFor(changes: readonly GeometryChange[]): boolean {
+  if (changes.length === 0) return false;
+  const previous = workArea.value;
+  const next = expandDiagramWorkAreaBounds(
+    previous,
+    changes.map((change) => change.geometry),
+  );
+  return replaceWorkArea(next);
+}
+
+function replaceWorkArea(next: DiagramWorkAreaBounds): boolean {
+  const previous = workArea.value;
+  if (
+    next.x === previous.x
+    && next.y === previous.y
+    && next.width === previous.width
+    && next.height === previous.height
+  ) return false;
+  workArea.value = next;
+  const shiftX = (previous.x - next.x) * props.zoom;
+  const shiftY = (previous.y - next.y) * props.zoom;
+  if (!shiftX && !shiftY) return true;
+  void nextTick(() => {
+    const element = scrollElement.value;
+    if (!element) return;
+    setViewportScroll(element.scrollLeft + shiftX, element.scrollTop + shiftY);
+  });
+  return true;
+}
+
 function snapshotScene(scene: DiagramScene): DiagramScene {
   return {
     ...scene,
@@ -2067,12 +2209,13 @@ defineExpose<DiagramCanvasNavigationApi>({
       <div
         ref="stageElement"
         class="iriograph-canvas-stage"
-        :style="{ width: `${scene.width * zoom}px`, height: `${scene.height * zoom}px` }"
+        :style="{ width: `${workArea.width * zoom}px`, height: `${workArea.height * zoom}px` }"
       >
         <div
           class="iriograph-diagram-canvas"
           v-memo="[
             scene,
+            workArea,
             zoom,
             previewGeometries,
             previewRouting,
@@ -2093,20 +2236,25 @@ defineExpose<DiagramCanvasNavigationApi>({
             deletionPreviewStatementRefs,
           ]"
           :style="{
-            width: `${scene.width}px`,
-            height: `${scene.height}px`,
+            width: `${workArea.width}px`,
+            height: `${workArea.height}px`,
             transform: `scale(${zoom})`,
             '--iriograph-grid-size': `${snap.grid.size}px`,
           }"
           @contextmenu="requestBlankContextMenu"
         >
-          <div v-if="showGrid" class="iriograph-canvas-grid" aria-hidden="true" />
+          <div
+            v-if="showGrid"
+            class="iriograph-canvas-grid"
+            aria-hidden="true"
+            :style="{ backgroundPosition: `${-workArea.x}px ${-workArea.y}px` }"
+          />
           <p v-if="regionConstraintMessage" class="iriograph-region-constraint-warning" role="alert">{{ regionConstraintMessage }}</p>
           <span
             v-if="semanticDraftPosition"
             class="iriograph-semantic-position-marker"
             aria-label="Semantic draft position"
-            :style="{ left: `${semanticDraftPosition.x}px`, top: `${semanticDraftPosition.y}px` }"
+            :style="{ left: `${semanticDraftPosition.x - workArea.x}px`, top: `${semanticDraftPosition.y - workArea.y}px` }"
           />
 
           <div
@@ -2123,8 +2271,8 @@ defineExpose<DiagramCanvasNavigationApi>({
             :aria-posinset="navigatorPosition(region.elementId)"
             :aria-setsize="navigatorItems.length"
             :style="{
-              left: `${geometryFor(region).x}px`,
-              top: `${geometryFor(region).y}px`,
+              left: `${canvasPosition(geometryFor(region)).x}px`,
+              top: `${canvasPosition(geometryFor(region)).y}px`,
               width: `${geometryFor(region).width}px`,
               height: `${geometryFor(region).height}px`,
               borderColor: region.style.stroke,
@@ -2179,8 +2327,8 @@ defineExpose<DiagramCanvasNavigationApi>({
             :aria-posinset="navigatorPosition(container.elementId)"
             :aria-setsize="navigatorItems.length"
             :style="{
-              left: `${geometryFor(container).x}px`,
-              top: `${geometryFor(container).y}px`,
+              left: `${canvasPosition(geometryFor(container)).x}px`,
+              top: `${canvasPosition(geometryFor(container)).y}px`,
               width: `${geometryFor(container).width}px`,
               height: `${geometryFor(container).height}px`,
               background: container.style.fill,
@@ -2208,9 +2356,9 @@ defineExpose<DiagramCanvasNavigationApi>({
           <svg
             ref="edgeLayerElement"
             class="iriograph-edge-layer"
-            :width="scene.width"
-            :height="scene.height"
-            :viewBox="`0 0 ${scene.width} ${scene.height}`"
+            :width="workArea.width"
+            :height="workArea.height"
+            :viewBox="workAreaViewBox()"
             aria-label="関係edge"
           >
             <defs>
@@ -2342,8 +2490,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               },
             ]"
             :style="{
-              left: `${geometryFor(node).x}px`,
-              top: `${geometryFor(node).y}px`,
+              left: `${canvasPosition(geometryFor(node)).x}px`,
+              top: `${canvasPosition(geometryFor(node)).y}px`,
               width: `${geometryFor(node).width}px`,
               height: `${geometryFor(node).height}px`,
               background: node.style.fill,
@@ -2375,7 +2523,10 @@ defineExpose<DiagramCanvasNavigationApi>({
               />
               <span
                 class="iriograph-node-text"
-                :class="{ editable: nodeContentEditing && selectedElementIdsSet.has(node.elementId) && !readOnly }"
+                :class="[
+                  `writing-${node.nodeLabelWritingDirection === 'vertical-down' ? 'vertical' : 'horizontal'}`,
+                  { editable: nodeContentEditing && selectedElementIdsSet.has(node.elementId) && !readOnly },
+                ]"
                 :style="nodeContentOffsetStyle(node, 'label')"
                 :title="nodeContentEditing ? 'ドラッグしてラベル位置を調整' : undefined"
                 @pointerdown="startNodeContentMove($event, node, 'label')"
@@ -2387,7 +2538,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span v-if="sequenceMemberBadges(node.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
           </div>
 
-          <svg class="iriograph-edge-interaction-layer" :width="scene.width" :height="scene.height" :viewBox="`0 0 ${scene.width} ${scene.height}`" aria-hidden="true">
+          <svg class="iriograph-edge-interaction-layer" :width="workArea.width" :height="workArea.height" :viewBox="workAreaViewBox()" aria-hidden="true">
             <path
               v-if="semanticReconnectPreview"
               class="iriograph-semantic-reconnect-preview"
@@ -2449,14 +2600,14 @@ defineExpose<DiagramCanvasNavigationApi>({
 
     <aside class="iriograph-minimap" aria-label="Diagram minimap">
       <svg
-        :viewBox="`0 0 ${scene.width} ${scene.height}`"
+        :viewBox="workAreaViewBox()"
         preserveAspectRatio="none"
         tabindex="-1"
         aria-label="Minimapでviewportを移動"
         @keydown="handleMinimapKeydown"
         @pointerdown="beginMinimapPan"
       >
-        <rect class="iriograph-minimap-paper" x="0" y="0" :width="scene.width" :height="scene.height" />
+        <rect class="iriograph-minimap-paper" :x="workArea.x" :y="workArea.y" :width="workArea.width" :height="workArea.height" />
         <rect
           v-for="container in scene.containers"
           :key="container.elementId"

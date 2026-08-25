@@ -1,7 +1,9 @@
-import type {
-  DiagramScene,
-  ElementGeometry,
-  Point,
+import {
+  containerContentBounds,
+  type DiagramScene,
+  type ElementGeometry,
+  type Point,
+  type SceneMembership,
 } from "@iriograph/core";
 
 import type { GeometryChange, GeometryElement } from "./selection";
@@ -18,10 +20,9 @@ export type RegionMembershipConstraintResult = {
 };
 
 /**
- * Constrains presentation movement only for `membership-region` projections.
- * It neither infers nor mutates semantic membership from geometry. Hierarchy
- * containers (`membership-container`) intentionally remain under their own
- * parent/child constraint path.
+ * Keeps a member inside the intersection of every semantic membership target.
+ * Targets may be overlapping regions, Seq containers, or ordinary containers.
+ * Geometry never creates or removes membership; it only constrains presentation.
  */
 export function constrainMembershipRegionMovement(
   scene: DiagramScene,
@@ -33,7 +34,6 @@ export function constrainMembershipRegionMovement(
     ...scene.containers,
     ...(scene.regions ?? []),
   ].map((element) => [element.elementId, element]));
-  const regionById = new Map((scene.regions ?? []).map((region) => [region.elementId, region]));
   const requestedById = new Map(requested.map((change) => [change.elementId, change]));
   const first = requested.find((change) => geometryElement(scene, change.elementId));
   const original = first ? geometryElement(scene, first.elementId) : undefined;
@@ -42,14 +42,13 @@ export function constrainMembershipRegionMovement(
     x: first.geometry.x - original.x,
     y: first.geometry.y - original.y,
   };
-  const requestedIssue = validateRequestedRegionGeometry(
+  const requestedIssue = validateRequestedMembershipGeometry(
     scene,
     requestedById,
     elementById,
-    regionById,
   );
   if (!requestedIssue) return { changes: [...requested] };
-  if (requested.length > 1 && !isUniformTranslation(requested, elementById)) {
+  if (!isUniformTranslation(requested, elementById)) {
     return { changes: [], issue: requestedIssue };
   }
   let minimumX = Number.NEGATIVE_INFINITY;
@@ -57,70 +56,42 @@ export function constrainMembershipRegionMovement(
   let minimumY = Number.NEGATIVE_INFINITY;
   let maximumY = Number.POSITIVE_INFINITY;
 
-  for (const change of requested) {
-    const member = elementById.get(change.elementId);
-    if (!member) continue;
-    const memberships = (scene.memberships ?? []).filter((membership) => (
-      membership.memberElementId === member.elementId
-      && membership.regionElementId
-      && membership.provenance.operator === "membership-region"
-    ));
-    if (memberships.length === 0) continue;
-    const regions = memberships.map((membership) => regionById.get(membership.regionElementId!));
-    if (regions.some((region) => !region)) {
-      return rejected(member.elementId, "membership-region-missing", "所属する概念領域を表示上で解決できないため、移動を取り消しました。");
+  const bindings = membershipBindings(scene);
+  const affectedMemberIds = new Set(bindings
+    .filter(({ membership, targetElementId }) => (
+      requestedById.has(membership.memberElementId) || requestedById.has(targetElementId)
+    ))
+    .map(({ membership }) => membership.memberElementId));
+  for (const { membership, targetElementId } of bindings) {
+    if (!affectedMemberIds.has(membership.memberElementId)) continue;
+    const member = elementById.get(membership.memberElementId);
+    const target = elementById.get(targetElementId);
+    if (!member || !target || target.structuralKind === "node") {
+      return rejected(
+        membership.memberElementId,
+        "membership-region-missing",
+        "所属する要素または領域を表示上で解決できないため、変更を取り消しました。",
+      );
     }
-    const intersection = intersectRectangles(regions.map((region) => (
-      requestedById.get(region!.elementId)?.geometry ?? region!.geometry
-    )));
-    if (
-      !intersection
-      || intersection.width < change.geometry.width
-      || intersection.height < change.geometry.height
-    ) {
-      return rejected(member.elementId, "membership-region-intersection-empty", "所属する概念領域の交差が要素より小さいため、現在位置を維持します。領域の配置またはサイズを調整してください。");
-    }
-    minimumX = Math.max(minimumX, intersection.x - member.geometry.x);
-    maximumX = Math.min(maximumX, intersection.x + intersection.width - member.geometry.x - change.geometry.width);
-    minimumY = Math.max(minimumY, intersection.y - member.geometry.y);
-    maximumY = Math.min(maximumY, intersection.y + intersection.height - member.geometry.y - change.geometry.height);
-  }
-
-  for (const change of requested) {
-    const region = regionById.get(change.elementId);
-    if (!region) continue;
-    const members = (scene.memberships ?? []).filter((membership) => (
-      membership.regionElementId === region.elementId
-      && membership.provenance.operator === "membership-region"
-    ));
-    for (const membership of members) {
-      const member = geometryElement(scene, membership.memberElementId);
-      if (!member) {
-        return rejected(region.elementId, "membership-region-missing", "所属要素を表示上で解決できないため、領域の変更を取り消しました。");
-      }
-      const memberChange = requestedById.get(membership.memberElementId);
-      const memberMovesTogether = Boolean(memberChange
-        && memberChange.geometry.width === member.width
-        && memberChange.geometry.height === member.height
-        && memberChange.geometry.x - member.x === requestedDelta.x
-        && memberChange.geometry.y - member.y === requestedDelta.y);
-      if (memberMovesTogether) continue;
-      const finalMember = memberChange?.geometry ?? member;
-      if (change.geometry.width !== region.geometry.width || change.geometry.height !== region.geometry.height) {
-        if (!containsRectangle(change.geometry, finalMember)) {
-          return rejected(region.elementId, "membership-region-intersection-empty", "領域を縮小すると所属要素が外へ出るため、サイズ変更を取り消しました。");
-        }
-        continue;
-      }
-      minimumX = Math.max(minimumX, finalMember.x + finalMember.width - region.geometry.x - region.geometry.width);
-      maximumX = Math.min(maximumX, finalMember.x - region.geometry.x);
-      minimumY = Math.max(minimumY, finalMember.y + finalMember.height - region.geometry.y - region.geometry.height);
-      maximumY = Math.min(maximumY, finalMember.y - region.geometry.y);
+    const memberMoves = requestedById.has(member.elementId);
+    const targetMoves = requestedById.has(target.elementId);
+    if (memberMoves === targetMoves) continue;
+    const bounds = membershipTargetBounds(target, target.geometry);
+    if (memberMoves) {
+      minimumX = Math.max(minimumX, bounds.x - member.geometry.x);
+      maximumX = Math.min(maximumX, right(bounds) - right(member.geometry));
+      minimumY = Math.max(minimumY, bounds.y - member.geometry.y);
+      maximumY = Math.min(maximumY, bottom(bounds) - bottom(member.geometry));
+    } else {
+      minimumX = Math.max(minimumX, right(member.geometry) - right(bounds));
+      maximumX = Math.min(maximumX, member.geometry.x - bounds.x);
+      minimumY = Math.max(minimumY, bottom(member.geometry) - bottom(bounds));
+      maximumY = Math.min(maximumY, member.geometry.y - bounds.y);
     }
   }
 
   if (minimumX > maximumX || minimumY > maximumY) {
-    return rejected(requested[0]!.elementId, "membership-region-intersection-empty", "選択した要素を同じ移動量で所属領域内に保てないため、移動を取り消しました。");
+    return rejected(requested[0]!.elementId, "membership-region-intersection-empty", "選択した要素を同じ移動量で全所属領域内に保てないため、移動を取り消しました。");
   }
   if (
     !Number.isFinite(minimumX)
@@ -143,42 +114,29 @@ export function constrainMembershipRegionMovement(
         },
       } : change;
   });
-  const finalIssue = validateRequestedRegionGeometry(
+  const finalIssue = validateRequestedMembershipGeometry(
     scene,
     new Map(changes.map((change) => [change.elementId, change])),
     elementById,
-    regionById,
   );
   return finalIssue ? { changes: [], issue: finalIssue } : { changes };
 }
 
-function validateRequestedRegionGeometry(
+function validateRequestedMembershipGeometry(
   scene: DiagramScene,
   requestedById: ReadonlyMap<string, GeometryChange>,
   elementById: ReadonlyMap<string, GeometryElement>,
-  regionById: ReadonlyMap<string, Extract<GeometryElement, { structuralKind: "region" }>>,
 ): RegionMembershipConstraintIssue | undefined {
-  const regionMemberships = (scene.memberships ?? []).filter((membership) => (
-    membership.regionElementId
-    && membership.provenance.operator === "membership-region"
-  ));
-  const affectedMemberIds = new Set(regionMemberships
-    .filter((membership) => requestedById.has(membership.memberElementId)
-      || requestedById.has(membership.regionElementId!))
-    .map((membership) => membership.memberElementId));
+  const bindings = membershipBindings(scene);
+  const affectedMemberIds = new Set(bindings
+    .filter(({ membership, targetElementId }) => (
+      requestedById.has(membership.memberElementId) || requestedById.has(targetElementId)
+    ))
+    .map(({ membership }) => membership.memberElementId));
   if (affectedMemberIds.size === 0) return undefined;
-  const byMember = new Map<string, typeof regionMemberships>();
-  // A changed region may be only one of a member's regions. Once the member is
-  // affected, validate against every semantic region membership, not merely
-  // the changed region; otherwise a candidate inside that one region could
-  // still escape the common intersection.
-  for (const membership of regionMemberships) {
-    if (!affectedMemberIds.has(membership.memberElementId)) continue;
-    const entries = byMember.get(membership.memberElementId) ?? [];
-    entries.push(membership);
-    byMember.set(membership.memberElementId, entries);
-  }
-  for (const [memberId, memberships] of byMember) {
+  for (const { membership, targetElementId } of bindings) {
+    const memberId = membership.memberElementId;
+    if (!affectedMemberIds.has(memberId)) continue;
     const member = elementById.get(memberId);
     if (!member) {
       return {
@@ -187,27 +145,55 @@ function validateRequestedRegionGeometry(
         message: "所属要素を表示上で解決できないため、変更を取り消しました。",
       };
     }
-    const regions = memberships.map((membership) => regionById.get(membership.regionElementId!));
-    if (regions.some((region) => !region)) {
+    const target = elementById.get(targetElementId);
+    if (!target || target.structuralKind === "node") {
       return {
         code: "membership-region-missing",
         elementId: memberId,
-        message: "所属する概念領域を表示上で解決できないため、変更を取り消しました。",
+        message: "所属する領域または並び順の枠を表示上で解決できないため、変更を取り消しました。",
       };
     }
-    const intersection = intersectRectangles(regions.map((region) => (
-      requestedById.get(region!.elementId)?.geometry ?? region!.geometry
-    )));
+    const finalTargetGeometry = requestedById.get(targetElementId)?.geometry ?? target.geometry;
+    const bounds = membershipTargetBounds(target, finalTargetGeometry);
     const finalMember = requestedById.get(memberId)?.geometry ?? member.geometry;
-    if (!intersection || !containsRectangle(intersection, finalMember)) {
+    if (!containsRectangle(bounds, finalMember)) {
       return {
         code: "membership-region-intersection-empty",
         elementId: memberId,
-        message: "所属する概念領域の交差内に要素全体を保てないため、変更を取り消しました。領域の配置またはサイズを調整してください。",
+        message: "全所属領域・並び順・コンテナの共通範囲内に要素全体を保てないため、変更を取り消しました。枠の配置またはサイズを調整してください。",
       };
     }
   }
   return undefined;
+}
+
+type MembershipBinding = {
+  membership: SceneMembership;
+  targetElementId: string;
+};
+
+function membershipBindings(scene: DiagramScene): MembershipBinding[] {
+  return (scene.memberships ?? []).map((membership) => ({
+    membership,
+    targetElementId: membership.regionElementId ?? membership.containerElementId,
+  }));
+}
+
+function membershipTargetBounds(
+  target: Exclude<GeometryElement, { structuralKind: "node" }>,
+  geometry: ElementGeometry,
+): ElementGeometry {
+  return target.structuralKind === "container"
+    ? containerContentBounds(geometry, target.headerPosition)
+    : geometry;
+}
+
+function right(geometry: ElementGeometry): number {
+  return geometry.x + geometry.width;
+}
+
+function bottom(geometry: ElementGeometry): number {
+  return geometry.y + geometry.height;
 }
 
 function isUniformTranslation(
@@ -240,15 +226,6 @@ export function membershipRegionClassIrisAtPoint(scene: DiagramScene, point: Poi
     result.push(region.semanticRef);
   }
   return result;
-}
-
-function intersectRectangles(rectangles: readonly ElementGeometry[]): ElementGeometry | undefined {
-  if (rectangles.length === 0) return undefined;
-  const x = Math.max(...rectangles.map((rectangle) => rectangle.x));
-  const y = Math.max(...rectangles.map((rectangle) => rectangle.y));
-  const right = Math.min(...rectangles.map((rectangle) => rectangle.x + rectangle.width));
-  const bottom = Math.min(...rectangles.map((rectangle) => rectangle.y + rectangle.height));
-  return right > x && bottom > y ? { x, y, width: right - x, height: bottom - y } : undefined;
 }
 
 function containsPoint(geometry: ElementGeometry, point: Point): boolean {

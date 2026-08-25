@@ -68,7 +68,7 @@ describe("structured semantic authoring", () => {
             object: { kind: "literal", value: "D" },
           },
         ],
-        initialPosition: { viewId: "main", x: 400, y: 400 },
+        initialPosition: { viewId: "main", x: 360, y: 400 },
       },
       {
         type: "set-property",
@@ -155,7 +155,7 @@ describe("structured semantic authoring", () => {
     const mainD = Object.values(result.document.views[0]!.overlay)
       .find((entry) => entry.semanticRef === `${NS}d`)!;
     expect(mainD).toMatchObject({
-      geometry: { x: 400, y: 400 },
+      geometry: { x: 360, y: 400 },
       pinned: true,
       placement: "user",
     });
