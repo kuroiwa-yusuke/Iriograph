@@ -67,7 +67,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.publish == 'true')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -118,40 +118,25 @@ jobs:
           esac
           npm config set "@iriograph:registry" "${codeartifact_registry}"
       - run: npm run publish:packages
-      - name: Mark published package version
+
+  audit:
+    needs: [verify, publish]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record immutable package publish diagnostic
         shell: bash
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
         run: |
           set -euo pipefail
-
-          published_version="$(node --input-type=module -e "import { readFileSync } from 'node:fs'; console.log(JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version)")"
-          if [[ ! "${published_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid published package version" >&2
-            exit 1
-          fi
-
-          published_tag="packages-published-v${published_version}"
-          target_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
-
-          verify_remote_tag() {
-            git fetch --no-tags origin "refs/tags/${published_tag}"
-            remote_commit="$(git rev-parse 'FETCH_HEAD^{commit}')"
-            if [[ "${remote_commit}" == "${target_commit}" ]]; then
-              echo "${published_tag} already marks the published commit"
-              return 0
-            fi
-            echo "${published_tag} already marks a different commit" >&2
-            return 1
-          }
-
-          if git ls-remote --exit-code --refs origin "refs/tags/${published_tag}" >/dev/null 2>&1; then
-            verify_remote_tag
-            exit 0
-          fi
-
-          git tag "${published_tag}" "${target_commit}"
-          if git push origin "refs/tags/${published_tag}"; then
-            exit 0
-          fi
-
-          # A concurrent successful release may have created the same immutable tag.
-          verify_remote_tag
+          package_version="$(node --input-type=module -e "import { readFileSync } from 'node:fs'; console.log(JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version)")"
+          TARGET_COMMIT="${GITHUB_SHA}" \
+          PACKAGE_VERSION="${package_version}" \
+          VERIFY_RESULT="${VERIFY_RESULT}" \
+          PUBLISH_RESULT="${PUBLISH_RESULT}" \
+          bash scripts/write-package-publish-audit.sh
