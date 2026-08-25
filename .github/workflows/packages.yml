@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       failedStage: ${{ steps.failure_summary.outputs.failedStage }}
+      failureTailBase64: ${{ steps.failure_summary.outputs.failureTailBase64 }}
     steps:
       - id: verify_checkout
         uses: actions/checkout@v4
@@ -66,7 +67,10 @@ jobs:
           EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
       - name: Verify workspaces
         id: verify_workspaces
-        run: npm run verify
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee /tmp/iriograph-workspace-verify.log
       - name: Summarize failed stage
         id: failure_summary
         if: ${{ always() }}
@@ -91,6 +95,14 @@ jobs:
           record_failure "version-check" "${VERSION_OUTCOME}"
           record_failure "workspace-verify" "${WORKSPACE_OUTCOME}"
           echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
+          failure_tail_base64=""
+          if [[ "${failed_stage}" == "workspace-verify" && -f /tmp/iriograph-workspace-verify.log ]]; then
+            failure_tail_base64="$(tail -c 1200 /tmp/iriograph-workspace-verify.log \
+              | sed -E $'s/\\x1b\\[[0-?]*[ -\\/]*[@-~]//g' \
+              | sed -E '/token|password|secret|credential|authorization|_authToken|private[_-]?key/I c\[REDACTED-SENSITIVE-LINE]' \
+              | base64 -w0)"
+          fi
+          echo "failureTailBase64=${failure_tail_base64}" >> "${GITHUB_OUTPUT}"
 
   publish:
     needs: verify
@@ -209,6 +221,7 @@ jobs:
           PUBLISH_RESULT: ${{ needs.publish.result }}
           VERIFY_FAILED_STAGE: ${{ needs.verify.outputs.failedStage || 'none' }}
           PUBLISH_FAILED_STAGE: ${{ needs.publish.outputs.failedStage || 'none' }}
+          VERIFY_LOG_TAIL_BASE64: ${{ needs.verify.outputs.failureTailBase64 || '' }}
         run: |
           set -euo pipefail
           package_version="$(node --input-type=module -e "import { readFileSync } from 'node:fs'; console.log(JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version)")"
@@ -218,4 +231,5 @@ jobs:
           PUBLISH_RESULT="${PUBLISH_RESULT}" \
           VERIFY_FAILED_STAGE="${VERIFY_FAILED_STAGE}" \
           PUBLISH_FAILED_STAGE="${PUBLISH_FAILED_STAGE}" \
+          VERIFY_LOG_TAIL_BASE64="${VERIFY_LOG_TAIL_BASE64}" \
           bash scripts/write-package-publish-audit.sh
