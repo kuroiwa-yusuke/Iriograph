@@ -116,6 +116,62 @@ describe("ProjectedScene conversion", () => {
     });
   });
 
+  it("curve controlsをTurtleとlayout routeから独立したsparse Scene routingとして渡す", async () => {
+    const extensionIri = "https://example.test/curve-point-meta";
+    const semanticRef = statementIdentity(
+      "urn:test:scene:a",
+      "urn:test:scene:p",
+      "urn:test:scene:b",
+    );
+    const document = documentFor({
+      edge: {
+        semanticRef,
+        routing: {
+          routeMode: "curve",
+          curve: {
+            sourceHandle: {
+              x: 42,
+              y: -12,
+              extensions: { [extensionIri]: { tags: ["source"] } },
+            },
+            targetHandle: { x: -36, y: 16 },
+            knots: [{
+              point: {
+                x: 260,
+                y: 140,
+                extensions: { [extensionIri]: { tags: ["knot"] } },
+              },
+              incomingHandle: { x: -24, y: 8 },
+              outgoingHandle: { x: 30, y: -10 },
+            }],
+          },
+        },
+      },
+    });
+    const semanticSource = document.semantic.source;
+    const projected = projectSemanticView(document, standardRdfRdfsCatalog);
+    expect(projected.edges[0]).toMatchObject({
+      routeMode: "curve",
+      routingPlacement: "generated",
+      curve: document.views[0]!.overlay.edge!.routing!.curve,
+    });
+
+    const scene = await layoutProjectedDiagramScene(
+      projected,
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    expect(scene.edges[0]?.curve).toEqual(document.views[0]!.overlay.edge!.routing!.curve);
+    expect(scene.edges[0]?.curve?.sourceHandle?.extensions).not.toBe(
+      document.views[0]!.overlay.edge!.routing!.curve?.sourceHandle?.extensions,
+    );
+    expect(scene.edges[0]?.curve?.knots?.[0]?.point.extensions).not.toBe(
+      document.views[0]!.overlay.edge!.routing!.curve?.knots?.[0]?.point.extensions,
+    );
+    expect(scene.edges[0]?.waypoints).toBeUndefined();
+    expect(document.semantic.source).toBe(semanticSource);
+  });
+
   it("node内label/icon offsetと文字方向を意味グラフと独立したappearanceとしてSceneへ渡す", async () => {
     const document = documentFor({
       a: {

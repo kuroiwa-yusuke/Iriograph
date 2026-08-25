@@ -1,4 +1,6 @@
-import type { DiagramScene, ElementGeometry, Point } from "@iriograph/core";
+import type { DiagramScene, ElementGeometry, Point, SceneEdge } from "@iriograph/core";
+
+import { edgeCurveSegments } from "./edge-routing";
 
 export const DIAGRAM_ZOOM_MIN = 0.1;
 export const DIAGRAM_ZOOM_MAX = 2;
@@ -78,10 +80,7 @@ export function diagramContentBounds(scene: DiagramScene): ElementGeometry {
     ...(scene.regions ?? []),
     ...scene.nodes,
   ].map((element) => element.geometry);
-  const routePoints = scene.edges.flatMap((edge) => [
-    ...(edge.route ?? []),
-    ...(edge.waypoints ?? []),
-  ]).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const routePoints = scene.edges.flatMap((edge) => edgeRenderedBoundsPoints(edge));
   const left = Math.min(
     0,
     ...geometries.map((geometry) => geometry.x),
@@ -103,6 +102,30 @@ export function diagramContentBounds(scene: DiagramScene): ElementGeometry {
     ...routePoints.map((point) => point.y),
   );
   return { x: left, y: top, width: Math.max(1, right - left), height: Math.max(1, bottom - top) };
+}
+
+/**
+ * Conservative bounds points for one rendered edge. Cubic Bezier curves stay
+ * inside the convex hull of their endpoints and controls, so including that
+ * hull keeps fit and selection reveal on the same clipping-safe contract.
+ */
+export function edgeRenderedBoundsPoints(
+  edge: Pick<SceneEdge, "curve" | "route" | "routeMode" | "waypoints">,
+  renderedRoute: readonly Point[] = edge.route ?? [],
+): Point[] {
+  const curvePoints = edge.routeMode === "curve"
+    ? edgeCurveSegments(renderedRoute, edge.curve).flatMap((segment) => [
+        segment.start,
+        segment.control1,
+        segment.control2,
+        segment.end,
+      ])
+    : [];
+  return [
+    ...renderedRoute,
+    ...(edge.waypoints ?? []),
+    ...curvePoints,
+  ].filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
 }
 
 /** Monotonically grows a work area during one editor session/gesture. */

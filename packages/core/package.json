@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/core",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Framework-independent semantic graph projection and validation for Iriograph.",
   "type": "module",
   "license": "UNLICENSED",

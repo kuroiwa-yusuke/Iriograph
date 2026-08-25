@@ -17,6 +17,54 @@ describe("SemanticIntentPanel", () => {
     expect(wrapper.text()).not.toContain("IRI");
   });
 
+  it("選択要素の所属と包含をlabel-firstで示し一覧clickをfocusへ渡す", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      selectedResources: [{ iri: "urn:test:inner", label: "申請部門" }],
+      membershipOverview: {
+        belongsTo: [{
+          semanticRef: "urn:test:membership:outer-inner",
+          relatedElementId: "outer",
+          relatedSemanticRef: "urn:test:outer",
+          label: "全社",
+          relatedStructuralKind: "container" as const,
+          containerKind: "container" as const,
+          role: "membership" as const,
+          provenance: {
+            sourceStatementRefs: ["urn:test:statement:outer-inner"],
+            operator: "membership-container" as const,
+            derivation: "derived" as const,
+          },
+        }],
+        contains: [{
+          semanticRef: "urn:test:membership:inner-step",
+          relatedElementId: "step",
+          relatedSemanticRef: "urn:test:step",
+          label: "審査",
+          relatedStructuralKind: "node" as const,
+          containerKind: "sequence" as const,
+          role: "sequence-member" as const,
+          ordinal: 3,
+          provenance: {
+            sourceStatementRefs: ["urn:test:statement:inner-step"],
+            operator: "ordinal-sequence" as const,
+            derivation: "derived" as const,
+          },
+        }],
+      },
+    } });
+
+    const overview = wrapper.get('[aria-label="選択要素の包含一覧"]');
+    expect(overview.text()).toContain("属する領域 1件");
+    expect(overview.text()).toContain("全社");
+    expect(overview.text()).toContain("包含領域・所属");
+    expect(overview.text()).toContain("含む要素 1件");
+    expect(overview.text()).toContain("審査");
+    expect(overview.text()).toContain("並び順・順番 3");
+
+    await overview.findAll("button")[1]!.trigger("click");
+    expect(wrapper.emitted("focusElement")?.at(-1)?.[0]).toBe("step");
+  });
+
   it("新規要素は名前だけをallocator向けdraftへ渡す", async () => {
     const wrapper = mount(SemanticIntentPanel, { attachTo: document.body });
     await click(wrapper, "要素を追加");
@@ -33,13 +81,14 @@ describe("SemanticIntentPanel", () => {
     wrapper.unmount();
   });
 
-  it("Canvasの先頭選択をbase、残りをpartnersとして同じpredicateで一括作成する", async () => {
+  it("選択済み要素を始点にしCanvasの通常クリックで終点を段階選択する", async () => {
     const wrapper = mount(SemanticIntentPanel, { props: {
-      selectedResources: [
+      resources: [
         { iri: "urn:test:a", label: "申請" },
         { iri: "urn:test:b", label: "審査" },
         { iri: "urn:test:c", label: "承認" },
       ],
+      selectedResources: [{ iri: "urn:test:a", label: "申請" }],
       predicates: [{
         iri: "urn:test:precedes",
         label: "先行する",
@@ -49,17 +98,66 @@ describe("SemanticIntentPanel", () => {
       }],
     } });
     await click(wrapper, "関係を追加");
+    expect(wrapper.emitted("pickResource")?.at(-1)?.[0]).toBe("targetIri");
+    expect(wrapper.text()).toContain("申請");
+    expect(wrapper.text()).toContain("未選択");
     expect(wrapper.text()).toContain("依存・順序");
     expect(wrapper.text()).toContain("A（先行する）B");
     expect(wrapper.text()).toContain("AはBに先行する");
-    await wrapper.get<HTMLInputElement>('input[type="radio"]').setValue(true);
+    await wrapper.setProps({ pickedTargetIri: "urn:test:b" });
     await click(wrapper, "関係を作成");
     expect(wrapper.emitted("executeDraft")?.[0]?.[0]).toMatchObject({
       kind: "connect-resources",
       sourceIri: "urn:test:a",
       targetIri: "urn:test:b",
-      targetIris: ["urn:test:c"],
+      targetIris: [],
       predicateIri: "urn:test:precedes",
+    });
+  });
+
+  it("端点変更で候補外になった関係を解除し再選択まで作成を止める", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      resources: [
+        { iri: "urn:test:a", label: "申請" },
+        { iri: "urn:test:b", label: "審査" },
+      ],
+      selectedResources: [{ iri: "urn:test:a", label: "申請" }],
+      predicates: [{ iri: "urn:test:old", label: "古い関係" }],
+    } });
+
+    await click(wrapper, "関係を追加");
+    await wrapper.setProps({ pickedTargetIri: "urn:test:b" });
+    expect(button(wrapper, "関係を作成").attributes("disabled")).toBeUndefined();
+
+    await wrapper.setProps({ predicates: [{ iri: "urn:test:new", label: "選び直す関係" }] });
+    expect(wrapper.text()).toContain("始点・終点に合う関係の種類を選び直してください。");
+    expect(wrapper.find('input[value="urn:test:old"]').exists()).toBe(false);
+    expect(button(wrapper, "関係を作成").attributes("disabled")).toBeDefined();
+
+    await wrapper.get('input[value="urn:test:new"]').setValue(true);
+    expect(wrapper.text()).not.toContain("始点・終点に合う関係の種類を選び直してください。");
+    expect(button(wrapper, "関係を作成").attributes("disabled")).toBeUndefined();
+  });
+
+  it("自己関係は同じ終点を拾うだけでは確定できず明示操作でだけ許可する", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      resources: [{ iri: "urn:test:a", label: "申請" }],
+      selectedResources: [{ iri: "urn:test:a", label: "申請" }],
+      predicates: [{ iri: "urn:test:rel", label: "関連する" }],
+    } });
+    await click(wrapper, "関係を追加");
+    await wrapper.setProps({ pickedTargetIri: "urn:test:a" });
+    expect(button(wrapper, "関係を作成").attributes("disabled")).toBeDefined();
+
+    await click(wrapper, "明示的に始点自身へ接続");
+    expect(wrapper.emitted("useSelfTarget")?.at(-1)?.[0]).toBe("urn:test:a");
+    expect(button(wrapper, "関係を作成").attributes("disabled")).toBeUndefined();
+    await click(wrapper, "関係を作成");
+    expect(wrapper.emitted("executeDraft")?.[0]?.[0]).toMatchObject({
+      kind: "connect-resources",
+      sourceIri: "urn:test:a",
+      targetIri: "urn:test:a",
+      predicateIri: "urn:test:rel",
     });
   });
 
@@ -330,7 +428,11 @@ describe("SemanticIntentPanel", () => {
 });
 
 async function click(wrapper: VueWrapper, text: string): Promise<void> {
-  const button = wrapper.findAll("button").find((candidate) => candidate.text().includes(text));
-  if (!button) throw new Error(`${text} button not found`);
-  await button.trigger("click");
+  await button(wrapper, text).trigger("click");
+}
+
+function button(wrapper: VueWrapper, text: string) {
+  const candidate = wrapper.findAll("button").find((item) => item.text().includes(text));
+  if (!candidate) throw new Error(`${text} button not found`);
+  return candidate;
 }

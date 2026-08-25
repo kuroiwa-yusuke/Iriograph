@@ -148,7 +148,7 @@ describe("semantic validation port", () => {
     expect(validate).toHaveBeenCalledTimes(3);
   });
 
-  it("structured previewのwarningをtokenへ束縛しApply時に再検証する", async () => {
+  it("structured previewのwarningをtokenへ束縛しidentity applyはprepared結果、cloneは再検証する", async () => {
     const validate = vi.fn(async (request: Parameters<SemanticValidationPort["validate"]>[0]) => (
       echo(request, [warning("structured-warning", `${BASE}b`)])
     ));
@@ -170,6 +170,14 @@ describe("semantic validation port", () => {
     });
     expect(update.accepted).toBe(true);
     expect(update.document.semantic.source).toContain("Changed");
+    expect(validate).toHaveBeenCalledTimes(2);
+
+    const clonedPreview = structuredClone(preview);
+    const clonedUpdate = await applyAuthoringPreview(document, clonedPreview, context, {
+      confirmationId: clonedPreview.confirmationId,
+    });
+    expect(clonedUpdate.accepted).toBe(true);
+    expect(clonedUpdate.warningConfirmation).toEqual(update.warningConfirmation);
     expect(validate).toHaveBeenCalledTimes(3);
   });
 

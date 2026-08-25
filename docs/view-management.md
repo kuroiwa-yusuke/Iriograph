@@ -22,8 +22,32 @@ resetは対象viewだけをprojection/reconciliation/layoutし、無関係なvie
 localeだけの変更とduplicateではoverlayをbyte-equivalentなJSON値として維持します。
 壊れたviewもdeleteでき、他viewの不正状態はdeleteを妨げません。
 
-Semantic transactionはこの最適化を使わず、従来どおり全viewを一つのatomic transactionとして
-再投影・検証します。一つでも失敗すればTurtleと全overlayをrollbackします。
+## 配置方向
+
+標準Editorの通常UIは`layoutRef` IRIを直接入力させず、`横方向（左→右）`と
+`縦方向（上→下）`だけを選択肢として示します。新規viewは標準軽量layoutのLRを既定にします。
+既存viewの方向変更は現在のadapter familyを維持し、標準LR/TBは標準LR/TBへ、ELK
+Layered LR/TBはELK Layered LR/TBへ対応付けます。Engine固有optionや方向をTurtle、要素の
+appearance overlayへ保存しません。
+
+方向切替は対象viewへの`configure` ViewCommand一件です。対象adapterはgenerated geometryと
+derived routeを再計算し、`placement: "user"`、pinned geometry、manual route、membership、
+semantic source、他viewを維持します。Undo/redoはこのdocument transactionを一件として扱い、
+再読込後もviewごとの`layoutRef`から同じ方向を解決します。
+
+標準Editorが方向pairを知らない`layoutRef`は、現在値を技術情報としてread-only表示します。
+そのviewでは方向selectを無効にし、profileやlocaleだけを変更しても元の`layoutRef`を保持します。
+名前の類似からadapter familyや方向を推測せず、未知layoutを標準layoutへ黙って置換しません。
+
+Semantic transactionはViewCommandの対象view限定処理とは別に、原則として全viewを一つの
+atomic transactionとして再投影・検証します。ただし、可視primitive集合、membership、ordinal、
+layoutRefとgenerated geometryが変わらないdirect-edge-only変更では、各viewの配置を維持して
+incident edgeのderived routeだけを`route-only`で再計算できます。追加・削除・identityまたは
+endpoint変更edgeの旧新endpointをseedとし、そのendpointに接続するcandidate edgeまでを一段だけ
+affected集合へ含めます。無関係なgenerated edgeは旧Scene routeを`fixedDerivedRoutes`として
+byte-equivalentに再利用し、manual/user routeは従来どおりhard constraintとして扱います。
+この最適化を使う場合も
+transactionと検証の境界は全viewであり、一つでも失敗すればTurtleと全overlayをrollbackします。
 
 標準RDF/RDFS profileは投影目的別に`full`、`instance-flow`、
 `classification-region`のpresetを持ちます。業務フローは`instance-flow`、class分類の交差を

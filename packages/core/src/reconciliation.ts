@@ -5,6 +5,7 @@ import type {
   DiagramScene,
   DiagramView,
   IriographDocument,
+  Point,
   ProjectedContainer,
   ProjectedEdge,
   ProjectedNode,
@@ -34,11 +35,29 @@ export type DisplayReconciliationResult = {
   diagnostics: ProjectionDiagnostic[];
 };
 
+export type DisplayReconciliationOptions = {
+  mode?: "full" | "edge-only";
+  observer?: (event: Readonly<DisplayReconciliationEvent>) => void;
+};
+
+export type DisplayReconciliationEvent = {
+  viewId: string;
+  requestedMode: "full" | "edge-only";
+  actualMode: "incremental" | "route-only";
+  fallbackReason?: "previous-scene-missing" | "profile-changed" | "layout-changed"
+    | "view-kind-changed" | "visible-structure-changed";
+  /** Candidate edges whose route may be recomputed in this view. */
+  affectedEdges?: number;
+  /** Previous generated routes reused exactly by this view. */
+  fixedDerivedRoutes?: number;
+};
+
 /** Reprojects and lays out every candidate view as one atomic operation. */
 export async function reconcileIriographDocumentViews(
   previous: IriographDocument,
   candidate: IriographDocument,
   context: ProjectionRuntimeContext,
+  options: DisplayReconciliationOptions = {},
 ): Promise<DisplayReconciliationResult> {
   const next = clone(candidate);
   const scenes: Record<string, DiagramScene> = {};
@@ -83,9 +102,48 @@ export async function reconcileIriographDocumentViews(
       profile.catalog,
     );
     diagnostics.push(...reconciled.diagnostics);
-    view.overlay = reconciled.overlay;
-
-    const scene = await buildIriographView(next, view.viewId, context, "incremental");
+    const fallbackReason = options.mode === "edge-only"
+      ? edgeOnlyFallbackReason(previousView, previousScene, view, rawProjected)
+      : undefined;
+    const edgeOnly = options.mode === "edge-only" && fallbackReason === undefined;
+    if (options.mode === "edge-only" && fallbackReason) {
+      diagnostics.push({
+        severity: "info",
+        category: "layout",
+        code: "reconcile-edge-only-fallback",
+        message: `Edge-only reconciliation fell back to incremental layout: ${fallbackReason}`,
+        semanticRef: view.viewId,
+      });
+    }
+    view.overlay = edgeOnly
+      ? preservePreviousGeometry(reconciled.overlay, previousScene!, rawProjected)
+      : reconciled.overlay;
+    const routePlan = edgeOnly
+      ? planEdgeOnlyRoutes(previousScene!, rawProjected, view.overlay)
+      : undefined;
+    if (options.observer) {
+      try {
+        options.observer(Object.freeze({
+          viewId: view.viewId,
+          requestedMode: options.mode ?? "full",
+          actualMode: edgeOnly ? "route-only" : "incremental",
+          ...(fallbackReason ? { fallbackReason } : {}),
+          ...(routePlan ? {
+            affectedEdges: routePlan.affectedEdgeIds.size,
+            fixedDerivedRoutes: Object.keys(routePlan.fixedDerivedRoutes).length,
+          } : {}),
+        }));
+      } catch {
+        // Reconciliation instrumentation is observational and cannot fail a transaction.
+      }
+    }
+    const scene = await buildIriographView(
+      next,
+      view.viewId,
+      context,
+      edgeOnly ? "route-only" : "incremental",
+      routePlan?.fixedDerivedRoutes,
+    );
     diagnostics.push(...scene.diagnostics);
     if (hasBlockingDiagnostics(scene.diagnostics)) return rejected(previous, diagnostics);
     view.overlay = persistLayoutGeometry(view, scene);
@@ -98,6 +156,196 @@ export async function reconcileIriographDocumentViews(
     scenes,
     diagnostics: sortDiagnostics(diagnostics),
   };
+}
+
+type EdgeOnlyRoutePlan = {
+  affectedEdgeIds: Set<string>;
+  fixedDerivedRoutes: Record<string, Point[]>;
+};
+
+/**
+ * Limits an edge-only transaction to a deterministic one-hop incident set.
+ * Added/deleted/identity-or-endpoint-changed edges seed their old and new
+ * endpoints. Candidate edges touching any seed endpoint are affected; every
+ * other generated edge reuses the previous renderer route exactly.
+ */
+function planEdgeOnlyRoutes(
+  previous: DiagramScene,
+  projected: {
+    nodes: ProjectedNode[];
+    containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
+    edges: ProjectedEdge[];
+  },
+  overlay: Readonly<Record<string, ViewElementOverlay>>,
+): EdgeOnlyRoutePlan {
+  const overlayElementBySemantic = new Map(Object.entries(overlay).map(([elementId, entry]) => [
+    entry.semanticRef,
+    elementId,
+  ]));
+  const projectedSemanticByElement = new Map([
+    ...projected.nodes,
+    ...projected.containers,
+    ...(projected.regions ?? []),
+  ].map((element) => [element.elementId, element.semanticRef]));
+  const effectiveElementId = (elementId: string): string => {
+    const semanticRef = projectedSemanticByElement.get(elementId);
+    return semanticRef ? overlayElementBySemantic.get(semanticRef) ?? elementId : elementId;
+  };
+  const candidates = projected.edges.map((edge) => ({
+    edge,
+    elementId: overlayElementBySemantic.get(edge.semanticRef) ?? edge.elementId,
+    sourceElementId: effectiveElementId(edge.sourceElementId),
+    targetElementId: effectiveElementId(edge.targetElementId),
+  })).sort((left, right) => compareIdentity(left.elementId, right.elementId));
+  const previousById = new Map(previous.edges.map((edge) => [edge.elementId, edge]));
+  const candidateById = new Map(candidates.map((edge) => [edge.elementId, edge]));
+  const changedCandidateIds = new Set<string>();
+  const changedEndpointIds = new Set<string>();
+
+  for (const oldEdge of [...previous.edges].sort((left, right) => (
+    compareIdentity(left.elementId, right.elementId)
+  ))) {
+    const candidate = candidateById.get(oldEdge.elementId);
+    if (
+      !candidate
+      || candidate.sourceElementId !== oldEdge.sourceElementId
+      || candidate.targetElementId !== oldEdge.targetElementId
+    ) {
+      changedEndpointIds.add(oldEdge.sourceElementId);
+      changedEndpointIds.add(oldEdge.targetElementId);
+    }
+  }
+  for (const candidate of candidates) {
+    const oldEdge = previousById.get(candidate.elementId);
+    if (
+      !oldEdge
+      || candidate.sourceElementId !== oldEdge.sourceElementId
+      || candidate.targetElementId !== oldEdge.targetElementId
+    ) {
+      changedCandidateIds.add(candidate.elementId);
+      changedEndpointIds.add(candidate.sourceElementId);
+      changedEndpointIds.add(candidate.targetElementId);
+    }
+  }
+
+  const affectedEdgeIds = new Set(candidates.filter((candidate) => (
+    changedCandidateIds.has(candidate.elementId)
+    || changedEndpointIds.has(candidate.sourceElementId)
+    || changedEndpointIds.has(candidate.targetElementId)
+  )).map((candidate) => candidate.elementId));
+  const fixedDerivedRoutes: Record<string, Point[]> = {};
+  for (const candidate of candidates) {
+    if (affectedEdgeIds.has(candidate.elementId)) continue;
+    const oldEdge = previousById.get(candidate.elementId);
+    const derived = candidate.edge.routingPlacement !== "user"
+      && candidate.edge.routeMode !== "manual";
+    if (!oldEdge?.route || oldEdge.route.length < 2 || !derived) continue;
+    fixedDerivedRoutes[candidate.elementId] = oldEdge.route.map((point) => clone(point));
+  }
+  return { affectedEdgeIds, fixedDerivedRoutes };
+}
+
+function edgeOnlyFallbackReason(
+  previousView: DiagramView | undefined,
+  previousScene: DiagramScene | undefined,
+  nextView: DiagramView,
+  nextScene: {
+    nodes: ProjectedNode[];
+    containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
+    memberships?: DiagramScene["memberships"];
+  },
+): DisplayReconciliationEvent["fallbackReason"] {
+  if (!previousScene || !previousView) return "previous-scene-missing";
+  if (previousView.profileRef !== nextView.profileRef) return "profile-changed";
+  if (previousView.layoutRef !== nextView.layoutRef) return "layout-changed";
+  if (previousView.kind !== nextView.kind) return "view-kind-changed";
+  if (!sameVisibleStructure(previousScene, nextScene)) return "visible-structure-changed";
+  return undefined;
+}
+
+function sameVisibleStructure(
+  previous: DiagramScene,
+  next: {
+    nodes: ProjectedNode[];
+    containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
+    memberships?: DiagramScene["memberships"];
+  },
+): boolean {
+  const elementSignature = (elements: readonly (SceneElement | ProjectedElement)[]) => elements
+    .filter((element) => element.structuralKind !== "edge")
+    .map((element) => ({
+      elementId: element.elementId,
+      semanticRef: element.semanticRef,
+      structuralKind: element.structuralKind,
+      parentElementId: "parentElementId" in element ? element.parentElementId : undefined,
+      templateRef: element.templateRef,
+      label: element.label,
+      semanticText: element.semanticText,
+      shape: element.structuralKind === "node" ? element.shape : undefined,
+      groupRole: element.structuralKind === "container" ? element.groupRole : undefined,
+      headerPosition: element.structuralKind === "container" ? element.headerPosition : undefined,
+    }))
+    .sort((left, right) => compareIdentity(left.elementId, right.elementId));
+  const membershipSignature = (memberships: DiagramScene["memberships"] | undefined) =>
+    [...(memberships ?? [])].map((membership) => ({
+      semanticRef: membership.semanticRef,
+      containerElementId: membership.containerElementId,
+      memberElementId: membership.memberElementId,
+      regionElementId: membership.regionElementId,
+      role: membership.role,
+      ordinal: membership.ordinal,
+    })).sort((left, right) => (
+      compareIdentity(left.semanticRef, right.semanticRef)
+      || compareIdentity(left.containerElementId, right.containerElementId)
+      || compareIdentity(left.memberElementId, right.memberElementId)
+      || compareIdentity(left.regionElementId ?? "", right.regionElementId ?? "")
+      || compareIdentity(left.role ?? "", right.role ?? "")
+      || (left.ordinal ?? 0) - (right.ordinal ?? 0)
+    ));
+  return JSON.stringify(elementSignature([
+    ...previous.containers,
+    ...(previous.regions ?? []),
+    ...previous.nodes,
+  ])) === JSON.stringify(elementSignature([
+    ...next.containers,
+    ...(next.regions ?? []),
+    ...next.nodes,
+  ]))
+    && JSON.stringify(membershipSignature(previous.memberships))
+      === JSON.stringify(membershipSignature(next.memberships));
+}
+
+function preservePreviousGeometry(
+  overlay: Record<string, ViewElementOverlay>,
+  previous: DiagramScene,
+  next: {
+    nodes: ProjectedNode[];
+    containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
+  },
+): Record<string, ViewElementOverlay> {
+  const result = clone(overlay);
+  const previousByElementId = new Map([
+    ...previous.containers,
+    ...(previous.regions ?? []),
+    ...previous.nodes,
+  ].map((element) => [element.elementId, element]));
+  for (const element of [...next.containers, ...(next.regions ?? []), ...next.nodes]) {
+    const oldElement = previousByElementId.get(element.elementId);
+    if (!oldElement || oldElement.structuralKind !== element.structuralKind) continue;
+    const existing = result[element.elementId];
+    result[element.elementId] = {
+      ...(existing ?? { semanticRef: element.semanticRef }),
+      semanticRef: element.semanticRef,
+      geometry: clone(oldElement.geometry),
+      pinned: oldElement.pinned,
+      placement: oldElement.placement,
+    };
+  }
+  return result;
 }
 
 function reconcileViewOverlay(
@@ -363,6 +611,8 @@ function normalizeRouting(
   if (!routing) return undefined;
   const result = clone(routing);
   if (result.waypoints?.length === 0) delete result.waypoints;
+  if (result.curve?.knots?.length === 0) delete result.curve.knots;
+  if (result.curve && Object.keys(result.curve).length === 0) delete result.curve;
   if (result.sourceAnchor && !isValidEdgeEndpointAnchor(result.sourceAnchor)) {
     delete result.sourceAnchor;
   }
@@ -387,4 +637,8 @@ function rejected(
 function clone<T>(value: T): T {
   if (value === undefined) return value;
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function compareIdentity(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -98,6 +98,55 @@ describe("Iriograph document v1 schema", () => {
     },
   );
 
+  it("accepts closed sparse cubic controls only for curve mode and rejects malformed values", () => {
+    const source = structuredClone(fixture("document.valid.json")) as {
+      views: Array<{ overlay: Record<string, unknown> }>;
+    };
+    const routing = {
+      routeMode: "curve",
+      curve: {
+        sourceHandle: {
+          x: 48,
+          y: -12,
+          extensions: { "https://example.test/curve-point-meta": { preserved: true } },
+        },
+        targetHandle: { x: -42, y: 8 },
+        knots: [{
+          point: {
+            x: 240,
+            y: 120,
+            extensions: { "https://example.test/curve-knot-meta": ["forward-compatible"] },
+          },
+          incomingHandle: { x: -28, y: 4 },
+          outgoingHandle: { x: 28, y: -4 },
+        }],
+      },
+    };
+    source.views[0]!.overlay.edge = {
+      semanticRef: "urn:iriograph:semantic-ref:v1:statement:test",
+      routing,
+    };
+    expect(validateIriographDocumentV1(source).valid).toBe(true);
+
+    for (const invalidCurve of [
+      {},
+      { knots: [] },
+      { knots: [{ incomingHandle: { x: 1, y: 2 } }] },
+      { knots: [{ point: { x: Number.NaN, y: 2 } }] },
+      { knots: "not-an-array" },
+      { sourceHandle: { x: 2, y: 3 }, arbitrary: true },
+    ]) {
+      (source.views[0]!.overlay.edge as { routing: { curve: unknown } }).routing.curve = invalidCurve;
+      expect(validateIriographDocumentV1(source).valid).toBe(false);
+    }
+
+    (source.views[0]!.overlay.edge as { routing: { routeMode: string; curve: unknown } }).routing = {
+      routeMode: "manual",
+      curve: { sourceHandle: { x: 2, y: 3 } },
+    };
+    expect(validateIriographDocumentV1(source).valid).toBe(false);
+  });
+
   it("accepts region views and safe sparse style overrides while rejecting CSS injection", () => {
     const source = structuredClone(fixture("document.valid.json")) as {
       views: Array<{ kind: string; overlay: Record<string, unknown> }>;

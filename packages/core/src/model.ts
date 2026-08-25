@@ -93,6 +93,8 @@ export type ViewElementOverlay = {
     /** Rendering/routing policy. Legacy waypoint overlays imply `manual`. */
     routeMode?: EdgeRouteMode;
     waypoints?: Point[];
+    /** Sparse manual controls for `curve`; endpoints remain derived from nodes/layout. */
+    curve?: EdgeCurveRouting;
     labelOffset?: Point;
     sourceAnchor?: EdgeEndpointAnchor;
     targetAnchor?: EdgeEndpointAnchor;
@@ -115,6 +117,28 @@ export type ElementGeometry = {
 export type Point = {
   x: number;
   y: number;
+  extensions?: IriographExtensions;
+};
+
+/**
+ * One user-authored point that the curve must pass through. Handle values are
+ * vectors relative to the knot so moving the knot keeps its local curvature.
+ */
+export type EdgeCurveKnot = {
+  point: Point;
+  incomingHandle?: Point;
+  outgoingHandle?: Point;
+  extensions?: IriographExtensions;
+};
+
+/**
+ * Sparse cubic Bezier controls. Endpoint handles are vectors relative to the
+ * current attachment points; endpoint coordinates themselves are never saved.
+ */
+export type EdgeCurveRouting = {
+  sourceHandle?: Point;
+  targetHandle?: Point;
+  knots?: EdgeCurveKnot[];
   extensions?: IriographExtensions;
 };
 
@@ -520,6 +544,7 @@ export type ProjectedEdge = {
   templateRef: string;
   style: VisualTemplate["style"];
   waypoints?: Point[];
+  curve?: EdgeCurveRouting;
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
@@ -631,6 +656,8 @@ export type SceneEdge = {
   route?: Point[];
   /** User-authored intermediate points only; endpoints are present in route. */
   waypoints?: Point[];
+  /** Sparse manual cubic controls; derived automatic controls are not persisted. */
+  curve?: EdgeCurveRouting;
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
@@ -684,6 +711,12 @@ export type SemanticSourceUpdate = {
   aborted?: boolean;
   document: IriographDocument;
   diagnostics: ProjectionDiagnostic[];
+  /**
+   * Transaction内で検証済みのrenderer-ready Scene。Hostが同じrevisionを
+   * publishするときの再projection/layoutを避けるためのtransient resultで、
+   * portable documentへは保存しない。
+   */
+  scenes?: Record<string, DiagramScene>;
   /** Present when domain warnings require an explicit, source-bound retry. */
   warningConfirmation?: import("./semantic-validation.js").SemanticWarningConfirmation;
 };

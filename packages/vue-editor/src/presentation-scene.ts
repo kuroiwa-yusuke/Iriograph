@@ -2,6 +2,7 @@ import {
   edgeEndpointAnchorFromPoint,
   edgeEndpointAnchorPoint,
   type DiagramScene,
+  type EdgeCurveRouting,
   type EdgeEndpointAnchor,
   type EdgeEndpointShape,
   type ElementGeometry,
@@ -106,6 +107,7 @@ function reconcileEdge(
     templateRef: projected.templateRef,
     style: projected.style,
     waypoints: copyPoints(projected.waypoints),
+    curve: copyCurve(projected.curve),
     labelOffset: copyPoint(projected.labelOffset),
     sourceAnchor: copyAnchor(projected.sourceAnchor),
     targetAnchor: copyAnchor(projected.targetAnchor),
@@ -268,11 +270,13 @@ function geometryElementMap(scene: DiagramScene): Map<string, GeometrySceneEleme
 function sameRouting(left: SceneEdge, right: SceneEdge): boolean {
   return JSON.stringify({
     waypoints: left.waypoints,
+    curve: left.curve,
     sourceAnchor: left.sourceAnchor,
     targetAnchor: left.targetAnchor,
     routeMode: left.routeMode,
   }) === JSON.stringify({
     waypoints: right.waypoints,
+    curve: right.curve,
     sourceAnchor: right.sourceAnchor,
     targetAnchor: right.targetAnchor,
     routeMode: right.routeMode,
@@ -320,6 +324,32 @@ function copyPoint(point: Point | undefined): Point | undefined {
 
 function copyPoints(points: readonly Point[] | undefined): Point[] | undefined {
   return points?.map(copyRequiredPoint);
+}
+
+function copyCurve(curve: EdgeCurveRouting | undefined): EdgeCurveRouting | undefined {
+  return curve ? {
+    sourceHandle: copyCurvePoint(curve.sourceHandle),
+    targetHandle: copyCurvePoint(curve.targetHandle),
+    knots: curve.knots?.map((knot) => ({
+      point: copyCurvePoint(knot.point)!,
+      incomingHandle: copyCurvePoint(knot.incomingHandle),
+      outgoingHandle: copyCurvePoint(knot.outgoingHandle),
+      extensions: knot.extensions ? cloneJson(knot.extensions) : undefined,
+    })),
+    extensions: curve.extensions ? cloneJson(curve.extensions) : undefined,
+  } : undefined;
+}
+
+function copyCurvePoint(point: Point | undefined): Point | undefined {
+  return point ? {
+    x: point.x,
+    y: point.y,
+    extensions: point.extensions ? cloneJson(point.extensions) : undefined,
+  } : undefined;
+}
+
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function copyRequiredPoint(point: Point): Point {

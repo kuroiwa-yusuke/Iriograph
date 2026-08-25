@@ -369,7 +369,8 @@ describe("DiagramCanvas pointer gestures", () => {
     scene.edges[0]!.route = [{ x: 140, y: 70 }, { x: 300, y: 70 }];
     await wrapper.setProps({ scene: structuredClone(scene), edgeRouteModes: { [edgeId]: "curve" } });
     const curve = wrapper.get(".iriograph-edge-path").attributes("d");
-    expect(curve).toContain(" Q ");
+    expect(curve).toContain(" C ");
+    expect(curve).not.toMatch(/[LQ]/u);
     expect(curve).not.toBe("M 140 70 L 300 70");
 
     await wrapper.setProps({ edgeRouteModes: { [edgeId]: "auto" } });
@@ -432,6 +433,136 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("nodeContentOffsetUpdate")).toHaveLength(2);
   });
 
+  it("Diamondは図形surfaceだけを描画し横書き・縦書きの日本語labelを内接contentに保つ", () => {
+    const scene = sceneFixture();
+    const base = scene.nodes[0]!;
+    scene.edges = [];
+    scene.nodes = [
+      {
+        ...structuredClone(base),
+        elementId: "diamond-horizontal-short",
+        semanticRef: "urn:test:diamond:horizontal-short",
+        label: "承認",
+        shape: "diamond",
+        geometry: { x: 20, y: 40, width: 104, height: 104 },
+      },
+      {
+        ...structuredClone(base),
+        elementId: "diamond-horizontal-long-icon",
+        semanticRef: "urn:test:diamond:horizontal-long-icon",
+        label: "承認条件を確認して次の処理を選択する",
+        shape: "diamond",
+        iconUrl: "data:image/svg+xml,%3Csvg/%3E",
+        geometry: { x: 160, y: 40, width: 144, height: 112 },
+      },
+      {
+        ...structuredClone(base),
+        elementId: "diamond-vertical-short-icon",
+        semanticRef: "urn:test:diamond:vertical-short-icon",
+        label: "確認",
+        shape: "diamond",
+        iconUrl: "data:image/svg+xml,%3Csvg/%3E",
+        nodeLabelWritingDirection: "vertical-down",
+        nodeLabelOffset: { x: 3, y: -2 },
+        nodeIconOffset: { x: -2, y: 3 },
+        geometry: { x: 340, y: 40, width: 112, height: 144 },
+      },
+      {
+        ...structuredClone(base),
+        elementId: "diamond-vertical-long",
+        semanticRef: "urn:test:diamond:vertical-long",
+        label: "問い合わせ内容を確認して対応方法を選択する",
+        shape: "diamond",
+        nodeLabelWritingDirection: "vertical-down",
+        geometry: { x: 500, y: 40, width: 120, height: 160 },
+      },
+    ];
+    const original = structuredClone(scene);
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+
+    for (const node of scene.nodes) {
+      const rendered = wrapper.get(`.iriograph-scene-node[data-element-id="${node.elementId}"]`);
+      expect(rendered.attributes("style")).toContain("background: transparent");
+      expect(rendered.attributes("style")).toContain("border-color: transparent");
+      expect(rendered.get(".iriograph-node-diamond-surface polygon").attributes("points"))
+        .toBe("50,1 99,50 50,99 1,50");
+      expect(rendered.get(".iriograph-node-label").text()).toBe(node.label);
+    }
+
+    const horizontalShort = wrapper.get('[data-element-id="diamond-horizontal-short"]');
+    expect(horizontalShort.get(".iriograph-node-content").classes()).toContain("content-horizontal");
+    expect(horizontalShort.get(".iriograph-node-text").classes()).toContain("writing-horizontal");
+    expect(horizontalShort.find(".iriograph-node-icon").exists()).toBe(false);
+
+    const horizontalLong = wrapper.get('[data-element-id="diamond-horizontal-long-icon"]');
+    expect(horizontalLong.get(".iriograph-node-content").classes()).toContain("content-horizontal");
+    expect(horizontalLong.find(".iriograph-node-icon").exists()).toBe(true);
+
+    const verticalShort = wrapper.get('[data-element-id="diamond-vertical-short-icon"]');
+    expect(verticalShort.classes()).toContain("label-direction-vertical");
+    expect(verticalShort.get(".iriograph-node-content").classes()).toContain("content-vertical");
+    expect(verticalShort.get(".iriograph-node-text").classes()).toContain("writing-vertical");
+    expect(verticalShort.get(".iriograph-node-text").attributes("style"))
+      .toContain("translate(3px, -2px)");
+    expect(verticalShort.get(".iriograph-node-icon").attributes("style"))
+      .toContain("translate(-2px, 3px)");
+
+    const verticalLong = wrapper.get('[data-element-id="diamond-vertical-long"]');
+    expect(verticalLong.get(".iriograph-node-content").classes()).toContain("content-vertical");
+    expect(verticalLong.find(".iriograph-node-icon").exists()).toBe(false);
+    expect(scene).toEqual(original);
+  });
+
+  it("Diamond resizeは未回転の8 handle座標でpreviewしlabel本文と方向を維持する", async () => {
+    const scene = sceneFixture();
+    scene.edges = [];
+    scene.nodes = [{
+      ...scene.nodes[0]!,
+      elementId: "diamond-resize",
+      semanticRef: "urn:test:diamond:resize",
+      label: "長い承認条件を確認する",
+      shape: "diamond",
+      nodeLabelWritingDirection: "vertical-down",
+      iconUrl: "data:image/svg+xml,%3Csvg/%3E",
+      geometry: { x: 20, y: 40, width: 104, height: 104 },
+    }];
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "diamond-resize",
+        selectedElementIds: ["diamond-resize"],
+      },
+    });
+
+    expect(wrapper.findAll(".iriograph-transient-resize-layer .iriograph-resize-handle"))
+      .toHaveLength(8);
+    expect(wrapper.find(".iriograph-scene-node .iriograph-resize-handle").exists()).toBe(false);
+    await wrapper.get('.iriograph-resize-handle[data-handle="se"]').trigger("pointerdown", {
+      button: 0,
+      clientX: 124,
+      clientY: 144,
+    });
+    dispatchPointer("pointermove", 164, 184);
+    await wrapper.vm.$nextTick();
+
+    const preview = wrapper.get('[data-element-id="diamond-resize"]');
+    expect(preview.attributes("style")).toContain("width: 144px");
+    expect(preview.attributes("style")).toContain("height: 144px");
+    expect(preview.get(".iriograph-node-content").classes()).toContain("content-vertical");
+    expect(preview.get(".iriograph-node-label").text()).toBe("長い承認条件を確認する");
+    expect(preview.find(".iriograph-node-diamond-surface").exists()).toBe(true);
+
+    dispatchPointer("pointerup", 164, 184);
+    expect(lastPayload<{ elementId: string; geometry: ElementGeometry }>(wrapper, "geometryChange"))
+      .toEqual({
+        elementId: "diamond-resize",
+        geometry: { x: 20, y: 40, width: 144, height: 144 },
+      });
+    expect(scene.nodes[0]!.geometry).toEqual({ x: 20, y: 40, width: 104, height: 104 });
+    expect(wrapper.emitted("nodeContentOffsetUpdate")).toBeUndefined();
+  });
+
   it("path double-clickでderived bendをseedしnearest segmentへwaypointを追加する", async () => {
     const scene = generatedRouteScene();
     wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
@@ -460,7 +591,7 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
   });
 
-  it.each(["straight", "curve"] as const)(
+  it.each(["straight"] as const)(
     "%s routeではgenerated waypoint handleもdouble-click追加も無効にする",
     async (routeMode) => {
       const scene = generatedRouteScene();
@@ -492,6 +623,144 @@ describe("DiagramCanvas pointer gestures", () => {
       expect(wrapper.emitted("gestureStart")).toBeUndefined();
     },
   );
+
+  it("curve pathのdouble-clickでon-curve knotを一操作として追加する", async () => {
+    const scene = generatedRouteScene();
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "edge-a-b",
+        edgeRouteModes: { "edge-a-b": "curve" },
+      },
+    });
+    const svg = wrapper.get<SVGSVGElement>(".iriograph-edge-layer");
+    svg.element.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 800,
+      bottom: 500,
+      width: 800,
+      height: 500,
+      toJSON: () => undefined,
+    });
+
+    expect(wrapper.find(".iriograph-waypoints").exists()).toBe(false);
+    expect(wrapper.findAll(".iriograph-curve-handle")).toHaveLength(2);
+    await wrapper.get(".iriograph-edge-group").trigger("dblclick", { clientX: 220, clientY: 110 });
+
+    const update = lastPayload<{ elementId: string; routing?: { curve?: { knots?: Array<{ point: Point }> } } }>(
+      wrapper,
+      "routingUpdate",
+    );
+    expect(update!.elementId).toBe("edge-a-b");
+    expect(update!.routing?.curve?.knots).toHaveLength(1);
+    expect(update!.routing?.curve?.knots?.[0]?.point).toEqual(expect.objectContaining({
+      x: expect.any(Number),
+      y: expect.any(Number),
+    }));
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("curve knot/handleを操作層でdrag・keyboard resetし一gesture一履歴境界にする", async () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.routeMode = "curve";
+    scene.edges[0]!.curve = {
+      sourceHandle: { x: 35, y: 20 },
+      knots: [{ point: { x: 220, y: 125 } }],
+    };
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene, selectedElementId: "edge-a-b" },
+    });
+
+    expect(wrapper.findAll(".iriograph-curve-handle")).toHaveLength(4);
+    const knot = wrapper.get(".iriograph-curve-knot");
+    await knot.trigger("pointerdown", { button: 0, clientX: 100, clientY: 100 });
+    dispatchPointer("pointermove", 120, 110);
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+    dispatchPointer("pointerup", 120, 110);
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: {
+        curve: {
+          sourceHandle: { x: 35, y: 20 },
+          knots: [{ point: { x: 240, y: 135 } }],
+        },
+      },
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+
+    const manualSource = wrapper.findAll(".iriograph-curve-handle")
+      .find((handle) => handle.classes().includes("manual"));
+    expect(manualSource).toBeDefined();
+    await manualSource!.trigger("keydown", { key: "Delete" });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: { curve: { knots: [{ point: { x: 220, y: 125 } }] } },
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(2);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(2);
+  });
+
+  it("curve controlのhit targetをzoomに対して一定screen sizeに保つ", () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.routeMode = "curve";
+    scene.edges[0]!.curve = { knots: [{ point: { x: 220, y: 125 } }] };
+    wrapper = mount(DiagramCanvas, {
+      props: { scene, selectedElementId: "edge-a-b", zoom: 2 },
+    });
+
+    expect(wrapper.get(".iriograph-curve-knot").attributes("r")).toBe("4.5");
+    expect(wrapper.get(".iriograph-curve-handle").attributes("r")).toBe("3.5");
+    expect(wrapper.get(".iriograph-edge-hitarea").classes()).toContain("iriograph-edge-hitarea");
+  });
+
+  it("curve captionを実Bezier弧長の中央へ置きself-loop/parallelでもpathから外さない", () => {
+    const scene = generatedRouteScene();
+    const base = scene.edges[0]!;
+    scene.edges = [
+      {
+        ...structuredClone(base),
+        elementId: "parallel-upper",
+        routeMode: "curve",
+        label: "upper",
+        route: [{ x: 140, y: 70 }, { x: 220, y: 20 }, { x: 300, y: 190 }],
+      },
+      {
+        ...structuredClone(base),
+        elementId: "parallel-lower",
+        routeMode: "curve",
+        label: "lower",
+        route: [{ x: 140, y: 70 }, { x: 220, y: 240 }, { x: 300, y: 190 }],
+      },
+      {
+        ...structuredClone(base),
+        elementId: "self-loop",
+        routeMode: "curve",
+        label: "loop",
+        sourceElementId: "node-a",
+        targetElementId: "node-a",
+        route: [{ x: 140, y: 70 }, { x: 210, y: 10 }, { x: 140, y: 70 }],
+      },
+    ];
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+
+    const labels = wrapper.findAll(".iriograph-edge-label");
+    const upper = Number(labels[0]!.attributes("y"));
+    const lower = Number(labels[1]!.attributes("y"));
+    const loopX = Number(labels[2]!.attributes("x"));
+    const loopY = Number(labels[2]!.attributes("y"));
+    expect(upper).toBeLessThan(lower);
+    expect({ x: loopX, y: loopY }).not.toEqual({ x: 140, y: 70 });
+    expect(wrapper.findAll(".iriograph-edge-path").every((path) => (
+      /^M .* C /u.test(path.attributes("d") ?? "") && !/[LQ]/u.test(path.attributes("d") ?? "")
+    ))).toBe(true);
+  });
 
   it("focused waypointのkeyboard移動と最後のDeleteを一操作ずつ通知する", async () => {
     wrapper = mount(DiagramCanvas, {
@@ -762,6 +1031,78 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("routingChange")).toHaveLength(legacyWaypointChanges ?? 0);
   });
 
+  it("curve controlをCanvas単一tab-stopからcycleしkeyboard gestureで編集する", async () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.routeMode = "curve";
+    scene.edges[0]!.curve = {
+      sourceHandle: { x: 35, y: 20 },
+      knots: [{ point: { x: 220, y: 125 } }],
+    };
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "edge-a-b",
+        selectedElementIds: ["edge-a-b"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    expect(wrapper.findAll('[tabindex="0"]')).toHaveLength(1);
+    expect(wrapper.findAll(".iriograph-curve-controls circle").every((control) => (
+      control.attributes("tabindex") === "-1"
+    ))).toBe(true);
+
+    // Knot index 0から次のsource handleへcomposite内のactive targetを移す。
+    await viewport.trigger("keydown", { key: "]" });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[role="status"]').text()).toContain("曲線制御点 2/5");
+    expect(wrapper.find(".iriograph-curve-handle.active").exists()).toBe(true);
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true, repeat: true });
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    expect(lastPayload(wrapper, "routingUpdate")).toEqual({
+      elementId: "edge-a-b",
+      routing: {
+        curve: {
+          sourceHandle: { x: 37, y: 20 },
+          knots: [{ point: { x: 220, y: 125 } }],
+        },
+      },
+    });
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+  });
+
+  it("keyboard knot追加後は末尾仮定せず実際のlongest segment挿入位置をactiveにする", async () => {
+    const scene = generatedRouteScene();
+    scene.edges[0]!.routeMode = "curve";
+    scene.edges[0]!.curve = {
+      knots: [
+        { point: { x: 165, y: 74 } },
+        { point: { x: 185, y: 82 } },
+      ],
+    };
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "edge-a-b",
+        selectedElementIds: ["edge-a-b"],
+      },
+    });
+    const viewport = wrapper.get(".iriograph-canvas-scroll");
+    await viewport.trigger("keydown", { key: "w" });
+    const active = wrapper.get(".iriograph-curve-knot.active");
+    const previewKnots = wrapper.findAll(".iriograph-curve-knot");
+    expect(previewKnots).toHaveLength(3);
+    expect(active.element).toBe(previewKnots[2]!.element);
+    await viewport.trigger("keyup", { key: "w" });
+    expect((lastPayload(wrapper, "routingUpdate") as {
+      routing: { curve: { knots: unknown[] } };
+    }).routing.curve.knots).toHaveLength(3);
+  });
+
   it("blank canvasのmouse drag、Page key pan、Arrow scene navigationを分離する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
@@ -860,6 +1201,25 @@ describe("DiagramCanvas pointer gestures", () => {
     const minimapLeft = viewport.element.scrollLeft;
     await minimap.trigger("keydown", { key: "ArrowLeft" });
     expect(viewport.element.scrollLeft).toBe(minimapLeft - 64);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+  });
+
+  it("curve edgeのrevealはBezier control hullを含めて膨らみをviewportへ収める", async () => {
+    const scene = sceneFixture();
+    scene.edges[0]!.routeMode = "curve";
+    scene.edges[0]!.curve = { sourceHandle: { x: 0, y: 600 } };
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene, zoom: 1 },
+    });
+    configureViewport(wrapper, 220, 160);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const api = wrapper.vm as unknown as DiagramCanvasNavigationApi;
+
+    expect(await api.revealElement("edge-a-b")).toBe(true);
+    // Route vertices alone center near 390px; the manual handle at y=670
+    // expands the cubic hull and therefore moves reveal substantially lower.
+    expect(viewport.element.scrollTop).toBeGreaterThan(550);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
   });
 
@@ -1256,7 +1616,7 @@ describe("DiagramCanvas pointer gestures", () => {
     });
   });
 
-  it("curveはderived routeの全bendを保ちterminal markerと複数label/commentを表示する", async () => {
+  it("curveは一つのcubic pathでguide routeを反映しterminal markerと複数label/commentを表示する", async () => {
     const scene = generatedRouteScene();
     scene.edges[0]!.routeMode = "curve";
     scene.edges[0]!.sourceMarker = "diamond";
@@ -1273,8 +1633,8 @@ describe("DiagramCanvas pointer gestures", () => {
       },
     });
     const path = wrapper.get(".iriograph-edge-path");
-    expect(path.attributes("d")).toContain("Q 220 70");
-    expect(path.attributes("d")).toContain("Q 220 190");
+    expect(path.attributes("d")).toMatch(/^M .* C /u);
+    expect(path.attributes("d")).not.toMatch(/[LQ]/u);
     expect(path.attributes("marker-start")).toMatch(/diamond/u);
     expect(path.attributes("marker-end")).toMatch(/circle/u);
     expect(wrapper.get(".iriograph-additional-labels").text()).toContain("別名A");

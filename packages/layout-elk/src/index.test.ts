@@ -1,9 +1,16 @@
 import {
+  STANDARD_LAYOUT_REFS,
+  StandardLightweightLayoutAdapter,
+  buildIriographView,
   edgeEndpointAnchorFromPoint,
   edgeEndpointAnchorPoint,
   layoutExternalReservationGeometries,
   LayoutAdapterRegistry,
   layoutProjectedScene,
+  reconcileIriographDocumentViews,
+  standardRdfRdfsCatalog,
+  statementIdentity,
+  type IriographDocumentV1,
   type LayoutEdge,
   type LayoutElement,
   type LayoutRequest,
@@ -328,6 +335,121 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(result.routes.flow!.length).toBeGreaterThanOrEqual(2);
     expect(result.diagnostics.some((item) => item.code === "elk-fixed-conservative-fallback")).toBe(true);
     expect(result.diagnostics.some((item) => item.code === "layout-result-invalid")).toBe(false);
+  });
+
+  test("route-onlyではfixed derived routeをexact維持し対象edgeだけをStandard fallbackで再計算する", async () => {
+    const layout = vi.fn<ElkLayoutEngine["layout"]>();
+    const adapter = new ElkLayeredLayoutAdapter("urn:test:elk-localized-route", "LR", {
+      engine: { layout },
+    });
+    const fixedRoute = [
+      { x: 140, y: 60, extensions: { stable: true } },
+      { x: 300, y: 60 },
+    ];
+    const layoutRequest = request([
+      { ...element("a"), pinned: true, placement: "user", geometry: { x: 40, y: 30, width: 100, height: 60 } },
+      { ...element("b"), pinned: true, placement: "user", geometry: { x: 300, y: 30, width: 100, height: 60 } },
+      { ...element("c"), pinned: true, placement: "user", geometry: { x: 40, y: 190, width: 100, height: 60 } },
+      { ...element("d"), pinned: true, placement: "user", geometry: { x: 300, y: 190, width: 100, height: 60 } },
+    ], [
+      edge("stable", "a", "b"),
+      edge("affected", "c", "d"),
+    ], adapter.layoutRef);
+    layoutRequest.mode = "route-only";
+    layoutRequest.fixedDerivedRoutes = { stable: fixedRoute };
+
+    const result = await layoutProjectedScene(
+      layoutRequest,
+      new LayoutAdapterRegistry([adapter]),
+    );
+
+    expect(layout).not.toHaveBeenCalled();
+    expect(result.routes.stable).toEqual(fixedRoute);
+    expect(result.routes.affected!.length).toBeGreaterThanOrEqual(2);
+    expect(result.routes.affected!.length).toBeLessThanOrEqual(3);
+    expect(result.diagnostics.some((item) => item.code === "layout-result-invalid")).toBe(false);
+  });
+
+  test("StandardとELKを含むmulti-view edge-only transactionでunaffected routeをexact維持する", async () => {
+    const engine = new RecordingEngine();
+    const elk = new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR", { engine });
+    const layouts = new LayoutAdapterRegistry([
+      new StandardLightweightLayoutAdapter(STANDARD_LAYOUT_REFS.hierarchicalLr, "LR"),
+      elk,
+    ]);
+    const source = `
+@prefix : <urn:test:elk-multi:> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:a rdfs:label "A" ; :p :b .
+:b rdfs:label "B" .
+:c rdfs:label "C" ; :p :d .
+:d rdfs:label "D" .
+`;
+    const previous: IriographDocumentV1 = {
+      schemaVersion: "1",
+      kind: "iriograph.document",
+      documentId: "elk-multi-view",
+      semantic: {
+        format: "text/turtle",
+        baseIri: "urn:test:elk-multi:",
+        authoringProfileRef: "urn:test:authoring:1",
+        source,
+      },
+      imports: [{ catalogRef: "urn:iriograph:catalog:rdf-rdfs@1" }],
+      views: [
+        {
+          viewId: "standard",
+          kind: "node-link",
+          profileRef: standardRdfRdfsCatalog.profileRef,
+          layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+          overlay: {},
+        },
+        {
+          viewId: "elk",
+          kind: "node-link",
+          profileRef: standardRdfRdfsCatalog.profileRef,
+          layoutRef: ELK_LAYOUT_REFS.layeredLr,
+          overlay: {},
+        },
+      ],
+    };
+    const context = {
+      catalogsByProfile: new Map([[
+        standardRdfRdfsCatalog.profileRef,
+        { catalog: standardRdfRdfsCatalog },
+      ]]),
+      layouts,
+    };
+    const before = Object.fromEntries(await Promise.all(previous.views.map(async (view) => [
+      view.viewId,
+      await buildIriographView(previous, view.viewId, context),
+    ] as const)));
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = `${source}\n:a :added :b .\n`;
+    const events: Array<{ viewId: string; affectedEdges?: number; fixedDerivedRoutes?: number }> = [];
+
+    const result = await reconcileIriographDocumentViews(previous, candidate, context, {
+      mode: "edge-only",
+      observer: (event) => { events.push(event); },
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(events).toEqual([
+      expect.objectContaining({ viewId: "standard", affectedEdges: 2, fixedDerivedRoutes: 1 }),
+      expect.objectContaining({ viewId: "elk", affectedEdges: 2, fixedDerivedRoutes: 1 }),
+    ]);
+    const stableRef = statementIdentity(
+      "urn:test:elk-multi:c",
+      "urn:test:elk-multi:p",
+      "urn:test:elk-multi:d",
+    );
+    for (const view of previous.views) {
+      expect(result.scenes[view.viewId]!.edges.find((edge) => edge.semanticRef === stableRef)?.route)
+        .toEqual(before[view.viewId]!.edges.find((edge) => edge.semanticRef === stableRef)?.route);
+    }
+    // Initial comparison and reconciliation's previous Scene use ELK. The
+    // candidate route-only pass detects fixed geometry and uses Core routing.
+    expect(engine.inputs).toHaveLength(2);
   });
 
   test("diagnoses impossible fixed overlap without changing either geometry", async () => {

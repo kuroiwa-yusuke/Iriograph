@@ -14,6 +14,7 @@ import {
   type EditorAuthoringDraft,
 } from "../authoring-draft";
 import { diagnosticGuidance } from "../diagnostic-guidance";
+import type { MembershipOverview } from "../membership-overview";
 
 export type SemanticIntent = "add-element" | "add-relation" | "edit-element" | "edit-relation";
 
@@ -108,6 +109,7 @@ const props = withDefaults(defineProps<{
   memberships?: IntentMembershipOption[];
   sequences?: IntentSequenceOption[];
   incidentRelations?: IntentRelationOverview[];
+  membershipOverview?: MembershipOverview;
   requestedIntent?: SemanticIntent;
   pickedSourceIri?: string;
   pickedTargetIri?: string;
@@ -126,6 +128,7 @@ const props = withDefaults(defineProps<{
   memberships: () => [],
   sequences: () => [],
   incidentRelations: () => [],
+  membershipOverview: () => ({ belongsTo: [], contains: [] }),
   requestedIntent: undefined,
   pickedSourceIri: "",
   pickedTargetIri: "",
@@ -138,6 +141,7 @@ const emit = defineEmits<{
   deleteSelection: [];
   cancel: [];
   pickResource: [field: "sourceIri" | "targetIri"];
+  useSelfTarget: [sourceIri: string];
   focusElement: [elementId: string];
   intentChange: [intent: SemanticIntent | undefined];
   draftStateChange: [pending: boolean];
@@ -152,28 +156,41 @@ const classIris = ref<string[]>([]);
 const predicateIri = ref("");
 const sourceIri = ref("");
 const targetIri = ref("");
+const selfRelationExplicit = ref(false);
+const predicateSelectionGuidance = ref("");
 const membershipActions = ref<Record<string, "keep" | "add" | "remove">>({});
 const sequenceIri = ref("");
 const sequenceMemberIris = ref<string[]>([]);
 const panelRoot = ref<HTMLElement>();
 
+const relationResourceChoices = computed(() => [...props.resources, ...props.selectedResources]
+  .filter((resource, index, all) => (
+    all.findIndex((candidate) => candidate.iri === resource.iri) === index
+  )));
 const relationSelection = computed(() => ({
-  source: props.selectedResources[0],
-  targets: props.selectedResources.slice(1),
+  source: relationResourceChoices.value.find((resource) => resource.iri === sourceIri.value),
+  targets: relationResourceChoices.value.filter((resource) => resource.iri === targetIri.value),
 }));
 const inspectedResources = computed<AuthoringChoice[]>(() => props.selectedResources.length
   ? props.selectedResources
   : props.elementDetails
     ? [{ iri: props.elementDetails.iri, label: props.elementDetails.label }]
     : []);
+const predicateSelectionValid = computed(() => Boolean(
+  predicateIri.value && props.predicates.some((choice) => choice.iri === predicateIri.value),
+));
 const relationReady = computed(() => Boolean(
   relationSelection.value.source
   && relationSelection.value.targets.length
-  && predicateIri.value,
+  && predicateSelectionValid.value
+  && (sourceIri.value !== targetIri.value || selfRelationExplicit.value),
 ));
 const selectedPredicateLabel = computed(() => props.predicates.find(
   (choice) => choice.iri === (predicateIri.value || props.selectedEdge?.predicateIri),
 )?.label ?? "関係");
+const inspectedMembershipCount = computed(() => (
+  props.membershipOverview.belongsTo.length + props.membershipOverview.contains.length
+));
 const predicateGroups = computed(() => {
   const groups = new Map<string, AuthoringChoice[]>();
   for (const choice of props.predicates) {
@@ -247,9 +264,15 @@ watch(() => props.elementDetails, (details) => {
 watch(() => props.selectedEdge, (edge) => {
   if (intent.value !== "edit-relation" || !edge) return;
   predicateIri.value = edge.predicateIri;
+  predicateSelectionGuidance.value = "";
   sourceIri.value = edge.sourceIri;
   targetIri.value = edge.targetIri;
   statementCommentValues.value = cloneTextValues(edge.statementComments ?? []);
+});
+watch(() => props.predicates.map((choice) => choice.iri), (availablePredicateIris) => {
+  if (!predicateIri.value || availablePredicateIris.includes(predicateIri.value)) return;
+  predicateIri.value = "";
+  predicateSelectionGuidance.value = "始点・終点に合う関係の種類を選び直してください。";
 });
 watch([() => props.sequences, intent], ([sequences, currentIntent]) => {
   if (currentIntent !== "edit-relation") return;
@@ -259,17 +282,44 @@ watch([() => props.sequences, intent], ([sequences, currentIntent]) => {
   syncSequenceMembers();
 }, { deep: true });
 watch(() => props.pickedSourceIri, (value) => {
-  if (value) sourceIri.value = value;
+  if (!value) {
+    if (intent.value === "add-relation") {
+      sourceIri.value = "";
+      targetIri.value = "";
+      selfRelationExplicit.value = false;
+    }
+    return;
+  }
+  if (sourceIri.value !== value) {
+    targetIri.value = "";
+    selfRelationExplicit.value = false;
+  }
+  sourceIri.value = value;
 });
 watch(() => props.pickedTargetIri, (value) => {
-  if (value) targetIri.value = value;
+  if (!value) {
+    if (intent.value === "add-relation") {
+      targetIri.value = "";
+      selfRelationExplicit.value = false;
+    }
+    return;
+  }
+  targetIri.value = value;
+  if (value !== sourceIri.value) selfRelationExplicit.value = false;
 });
 
 function choose(next: SemanticIntent): void {
   intent.value = next;
+  predicateSelectionGuidance.value = "";
   emit("intentChange", next);
   if (next === "add-element") label.value = "";
-  if (next === "add-relation") predicateIri.value = props.predicates.length === 1 ? props.predicates[0]?.iri ?? "" : "";
+  if (next === "add-relation") {
+    predicateIri.value = props.predicates.length === 1 ? props.predicates[0]?.iri ?? "" : "";
+    sourceIri.value = props.selectedResources.length === 1 ? props.selectedResources[0]!.iri : "";
+    targetIri.value = "";
+    selfRelationExplicit.value = false;
+    emit("pickResource", sourceIri.value ? "targetIri" : "sourceIri");
+  }
   if (next === "edit-element" && props.elementDetails) {
     label.value = props.elementDetails.label;
     labelValues.value = cloneTextValues(props.elementDetails.labelValues, props.elementDetails.label);
@@ -298,8 +348,10 @@ function reset(): void {
   commentValues.value = [];
   classIris.value = [];
   predicateIri.value = "";
+  predicateSelectionGuidance.value = "";
   sourceIri.value = "";
   targetIri.value = "";
+  selfRelationExplicit.value = false;
   statementCommentValues.value = [];
   membershipActions.value = {};
   sequenceIri.value = "";
@@ -322,10 +374,21 @@ function previewRelationCreation(): void {
   if (!source || !relationReady.value) return;
   const draft = emptyAuthoringDraft("connect-resources", source.iri);
   draft.sourceIri = source.iri;
-  draft.targetIri = relationSelection.value.targets[0]?.iri ?? "";
-  draft.targetIris = relationSelection.value.targets.slice(1).map((target) => target.iri);
+  draft.targetIri = targetIri.value;
+  draft.targetIris = [];
   draft.predicateIri = predicateIri.value;
   emit("executeDraft", draft, `${source.label ?? "基準要素"}から関係を追加`);
+}
+
+function useSourceAsTarget(): void {
+  if (!sourceIri.value) return;
+  targetIri.value = sourceIri.value;
+  selfRelationExplicit.value = true;
+  emit("useSelfTarget", sourceIri.value);
+}
+
+function confirmPredicateSelection(): void {
+  predicateSelectionGuidance.value = "";
 }
 
 function previewElementEdit(): void {
@@ -367,7 +430,7 @@ function previewElementDelete(): void {
 function previewEdgeEdit(): void {
   const edge = props.selectedEdge;
   const capability = edge?.capability;
-  if (!edge || capability?.command !== "remove-statement") return;
+  if (!edge || capability?.command !== "remove-statement" || !predicateSelectionValid.value) return;
   const commands: AuthoringCommand[] = [{
     type: "remove-statement",
     commandId: "intent-replace-edge-remove",
@@ -508,6 +571,16 @@ function resourceLabel(iri: string): string {
     ?? "Canvasで選択した要素";
 }
 
+function membershipContainerKindLabel(kind: MembershipOverview["belongsTo"][number]["containerKind"]): string {
+  if (kind === "sequence") return "並び順";
+  return kind === "region" ? "領域" : "包含領域";
+}
+
+function membershipRoleLabel(item: MembershipOverview["belongsTo"][number]): string {
+  if (item.role === "sequence-member") return `順番 ${item.ordinal ?? "?"}`;
+  return "所属";
+}
+
 function cloneTextValues(values: readonly IntentTextValue[], fallback = ""): IntentTextValue[] {
   const result = values.map((item) => ({ ...item }));
   if (result.length === 0 && fallback) result.push({ value: fallback });
@@ -572,13 +645,41 @@ defineExpose({ focusPendingIntent, resetIntent: reset });
         <template v-else-if="inspectedResources.length">
           <small>{{ inspectedResources.length === 1 ? '要素' : `${inspectedResources.length}件を選択` }}</small>
           <strong>{{ inspectedResources.map((item) => item.label ?? '名前のない要素').join('、') }}</strong>
-          <span>{{ incidentRelations.length }}件の接続関係</span>
+          <span>{{ incidentRelations.length }}件の接続関係・{{ inspectedMembershipCount }}件の包含情報</span>
         </template>
         <template v-else>
           <small>選択なし</small>
           <strong>Canvasで要素か関係を選択</strong>
           <span>選択した対象に使える編集だけを表示します。</span>
         </template>
+      </section>
+      <section
+        v-if="!selectedEdge && inspectedResources.length === 1"
+        class="iriograph-relation-overview iriograph-membership-overview"
+        aria-label="選択要素の包含一覧"
+      >
+        <section aria-label="属する領域">
+          <strong>属する領域 <small>{{ membershipOverview.belongsTo.length }}件</small></strong>
+          <ul v-if="membershipOverview.belongsTo.length">
+            <li v-for="item in membershipOverview.belongsTo" :key="`parent:${item.semanticRef}:${item.relatedElementId}:${item.ordinal ?? 0}`">
+              <span>{{ item.label }}</span>
+              <small>{{ membershipContainerKindLabel(item.containerKind) }}・{{ membershipRoleLabel(item) }}</small>
+              <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
+            </li>
+          </ul>
+          <p v-else>属する領域はありません。</p>
+        </section>
+        <section aria-label="含む要素">
+          <strong>含む要素 <small>{{ membershipOverview.contains.length }}件</small></strong>
+          <ul v-if="membershipOverview.contains.length">
+            <li v-for="item in membershipOverview.contains" :key="`child:${item.semanticRef}:${item.relatedElementId}:${item.ordinal ?? 0}`">
+              <span>{{ item.label }}</span>
+              <small>{{ membershipContainerKindLabel(item.containerKind) }}・{{ membershipRoleLabel(item) }}</small>
+              <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
+            </li>
+          </ul>
+          <p v-else>含む要素はありません。</p>
+        </section>
       </section>
       <nav class="iriograph-intent-grid iriograph-intent-add-actions" aria-label="意味を追加">
         <button type="button" :disabled="!enabled || busy" @click="choose('add-element')"><b>＋</b><span>要素を追加</span></button>
@@ -603,21 +704,28 @@ defineExpose({ focusPendingIntent, resetIntent: reset });
       </section>
 
       <section v-else-if="intent === 'add-relation'" class="iriograph-intent-fields">
-        <p>Canvasで基準要素を最初に選び、Ctrl/CmdまたはShiftを押しながら相手を追加します。</p>
-        <div class="iriograph-intent-selection"><b>基準</b><span>{{ relationSelection.source?.label ?? '未選択' }}</span><b>相手</b><span>{{ relationSelection.targets.map((item) => item.label).join('、') || '未選択' }}</span></div>
+        <p>始点、終点の順にCanvas上の要素を通常クリックで選びます。</p>
+        <div class="iriograph-intent-selection"><b>始点</b><span>{{ relationSelection.source?.label ?? '未選択' }}</span><b>終点</b><span>{{ relationSelection.targets[0]?.label ?? '未選択' }}</span></div>
+        <div class="iriograph-intent-grid">
+          <button type="button" :disabled="!enabled || busy" @click="emit('pickResource', 'sourceIri')">始点を選び直す</button>
+          <button type="button" :disabled="!enabled || busy || !sourceIri" @click="emit('pickResource', 'targetIri')">終点を選び直す</button>
+        </div>
+        <p v-if="sourceIri && !targetIri">始点とは別の要素を終点としてクリックしてください。</p>
+        <button v-if="sourceIri" type="button" :disabled="!enabled || busy || !predicateIri" @click="useSourceAsTarget">明示的に始点自身へ接続</button>
+        <p v-if="predicateSelectionGuidance" class="iriograph-intent-guidance" role="status">{{ predicateSelectionGuidance }}</p>
         <section class="iriograph-predicate-cards" aria-label="関係の種類">
-          <header><strong>関係の種類</strong><small>A = 基準要素、B = 相手要素として候補の意味を示します。</small></header>
+          <header><strong>関係の種類</strong><small>A = 始点、B = 終点として候補の意味を示します。</small></header>
           <fieldset v-for="group in predicateGroups" :key="group.category" class="iriograph-intent-group-card iriograph-predicate-group">
             <legend>{{ group.category }}</legend>
             <label v-for="choice in group.choices" :key="choice.iri" :class="{ selected: predicateIri === choice.iri }">
-              <input v-model="predicateIri" type="radio" :value="choice.iri" />
+              <input v-model="predicateIri" type="radio" :value="choice.iri" @change="confirmPredicateSelection" />
               <strong>A（{{ choice.label ?? '関係' }}）B</strong>
               <span class="iriograph-predicate-sentence">{{ choice.sentencePattern ?? `A（${choice.label ?? '関係'}）B` }}</span>
               <small v-if="choice.description">{{ choice.description }}</small>
             </label>
           </fieldset>
         </section>
-        <p v-if="predicateIri">{{ relationSelection.targets.length }}本の「{{ selectedPredicateLabel }}」を作成します。</p>
+        <p v-if="predicateIri && targetIri">「{{ selectedPredicateLabel }}」を1本作成します。</p>
         <button type="button" class="primary" :disabled="!relationReady || busy" @click="previewRelationCreation">関係を作成</button>
       </section>
 
@@ -642,9 +750,10 @@ defineExpose({ focusPendingIntent, resetIntent: reset });
             <section class="iriograph-relation-overview" aria-label="接続している要素"><strong>接続している要素</strong><div class="iriograph-intent-selection"><b>始点</b><span>{{ resourceLabel(sourceIri) }}</span><b>関係</b><span>{{ selectedPredicateLabel }}</span><b>終点</b><span>{{ resourceLabel(targetIri) }}</span></div></section>
             <button type="button" :disabled="!enabled || busy" @click="emit('pickResource', 'sourceIri')">始点をCanvasから選択</button>
             <button type="button" :disabled="!enabled || busy" @click="emit('pickResource', 'targetIri')">終点をCanvasから選択</button>
-            <label><span>関係</span><select v-model="predicateIri"><optgroup v-for="group in predicateGroups" :key="group.category" :label="group.category"><option v-for="choice in group.choices" :key="choice.iri" :value="choice.iri">A（{{ choice.label ?? '関係' }}）B — {{ choice.sentencePattern ?? `A（${choice.label ?? '関係'}）B` }}</option></optgroup></select></label>
+            <label><span>関係</span><select v-model="predicateIri" @change="confirmPredicateSelection"><optgroup v-for="group in predicateGroups" :key="group.category" :label="group.category"><option v-for="choice in group.choices" :key="choice.iri" :value="choice.iri">A（{{ choice.label ?? '関係' }}）B — {{ choice.sentencePattern ?? `A（${choice.label ?? '関係'}）B` }}</option></optgroup></select></label>
+            <p v-if="predicateSelectionGuidance" class="iriograph-intent-guidance" role="status">{{ predicateSelectionGuidance }}</p>
             <fieldset class="iriograph-intent-group-card"><legend>この関係だけの説明</legend><p>この矢印だけの意味としてTurtleへ保存され、LLMにも渡されます。</p><label v-for="(item, index) in statementCommentValues" :key="index"><span>{{ item.language ? `説明（${item.language}）` : '説明' }}</span><textarea v-model="item.value" :aria-label="`この関係だけの説明 ${index + 1}`" rows="3" /><button type="button" :aria-label="`この関係だけの説明 ${index + 1}を削除`" @click="removeStatementComment(index)">この説明を削除</button></label><button type="button" @click="addStatementComment">説明を追加</button></fieldset>
-            <button type="button" class="primary" :disabled="!sourceIri || !targetIri || !predicateIri || busy" @click="previewEdgeEdit">関係を更新</button>
+            <button type="button" class="primary" :disabled="!sourceIri || !targetIri || !predicateSelectionValid || busy" @click="previewEdgeEdit">関係を更新</button>
             <button type="button" :disabled="busy" @click="previewEdgeDelete">この関係を削除</button>
           </template>
         </template>

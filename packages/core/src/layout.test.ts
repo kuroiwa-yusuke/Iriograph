@@ -48,6 +48,105 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(result.routes["flow-1"]!.length).toBeLessThanOrEqual(3);
   });
 
+  it("route-onlyでfixed derived routeを全routing段階から除外し実処理数を観測する", async () => {
+    const samples: Array<{ routedEdges: number; fixedDerivedRoutes: number }> = [];
+    const adapter = new StandardLightweightLayoutAdapter(
+      "urn:test:localized-route",
+      "LR",
+      (sample) => { samples.push(sample); },
+    );
+    const fixedRoute = [
+      { x: 148, y: 78, extensions: { token: "keep" } },
+      { x: 268, y: 78 },
+    ];
+    const result = await layoutProjectedScene({
+      layoutRef: adapter.layoutRef,
+      mode: "route-only",
+      fixedDerivedRoutes: { stable: fixedRoute },
+      scene: {
+        elements: [
+          { elementId: "a", structuralKind: "node", geometry: { x: 48, y: 48, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "b", structuralKind: "node", geometry: { x: 268, y: 48, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "c", structuralKind: "node", geometry: { x: 48, y: 208, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "d", structuralKind: "node", geometry: { x: 268, y: 208, width: 100, height: 60 }, pinned: true, placement: "user" },
+        ],
+        edges: [
+          { elementId: "stable", sourceElementId: "a", targetElementId: "b" },
+          { elementId: "affected", sourceElementId: "c", targetElementId: "d" },
+        ],
+      },
+    }, new LayoutAdapterRegistry([adapter]));
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.routes.stable).toEqual(fixedRoute);
+    expect(samples).toEqual([expect.objectContaining({
+      routedEdges: 1,
+      fixedDerivedRoutes: 1,
+    })]);
+  });
+
+  it("optional fixed routeを無視するthird-party adapterも共通completionでexact維持する", async () => {
+    const fixedRoute = [{ x: 10, y: 10 }, { x: 90, y: 10 }];
+    const adapter: LayoutAdapter = {
+      layoutRef: "urn:test:third-party-fixed-route",
+      async layout(request) {
+        return {
+          layoutRef: request.layoutRef,
+          geometries: {
+            a: { x: 0, y: 0, width: 20, height: 20 },
+            b: { x: 80, y: 0, width: 20, height: 20 },
+          },
+          routes: { stable: [{ x: 0, y: 0 }, { x: 100, y: 20 }] },
+          width: 100,
+          height: 20,
+          diagnostics: [],
+        };
+      },
+    };
+    const result = await layoutProjectedScene({
+      layoutRef: adapter.layoutRef,
+      mode: "route-only",
+      fixedDerivedRoutes: { stable: fixedRoute },
+      scene: {
+        elements: [
+          { elementId: "a", structuralKind: "node", geometry: { x: 0, y: 0, width: 20, height: 20 }, pinned: true, placement: "user" },
+          { elementId: "b", structuralKind: "node", geometry: { x: 80, y: 0, width: 20, height: 20 }, pinned: true, placement: "user" },
+        ],
+        edges: [{ elementId: "stable", sourceElementId: "a", targetElementId: "b" }],
+      },
+    }, new LayoutAdapterRegistry([adapter]));
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.routes.stable).toEqual(fixedRoute);
+  });
+
+  it("affected routeの交差costへfixed peer routeを含める", async () => {
+    const fixedRoute = [{ x: 320, y: -40 }, { x: 320, y: 300 }];
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "left", structuralKind: "node", geometry: { x: 20, y: 100, width: 100, height: 60 }, pinned: true, placement: "user" },
+        { elementId: "right", structuralKind: "node", geometry: { x: 520, y: 100, width: 100, height: 60 }, pinned: true, placement: "user" },
+        { elementId: "top", structuralKind: "node", geometry: { x: 270, y: -400, width: 100, height: 60 }, pinned: true, placement: "user" },
+        { elementId: "bottom", structuralKind: "node", geometry: { x: 270, y: 600, width: 100, height: 60 }, pinned: true, placement: "user" },
+      ],
+      edges: [
+        { elementId: "fixed", sourceElementId: "top", targetElementId: "bottom" },
+        { elementId: "affected", sourceElementId: "left", targetElementId: "right" },
+      ],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:fixed-peer-cost", "LR");
+
+    const result = await adapter.layout({
+      layoutRef: adapter.layoutRef,
+      mode: "route-only",
+      fixedDerivedRoutes: { fixed: fixedRoute },
+      scene,
+    });
+
+    expect(result.routes.fixed).toEqual(fixedRoute);
+    expect(polylineStrictCrossings(result.routes.affected!, result.routes.fixed!)).toBe(0);
+  });
+
   it("lays out the same hierarchy top-to-bottom for the TB adapter", async () => {
     const result = await layoutProjectedScene({
       layoutRef: STANDARD_LAYOUT_REFS.hierarchicalTb,
@@ -339,6 +438,24 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(polylineCrossesBox(route, scene.elements[2]!.geometry!)).toBe(false);
     expect(result.geometries.source).toEqual(scene.elements[0]!.geometry);
     expect(result.geometries.target).toEqual(scene.elements[3]!.geometry);
+  });
+
+  it("derives fallback clearance from a very large resized obstacle", async () => {
+    const blocker = { x: 220, y: -1_500, width: 160, height: 3_000 };
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "source", structuralKind: "node", placement: "user", geometry: { x: 20, y: 100, width: 100, height: 60 } },
+        { elementId: "giant", structuralKind: "node", placement: "user", geometry: blocker },
+        { elementId: "target", structuralKind: "node", placement: "user", geometry: { x: 500, y: 100, width: 100, height: 60 } },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "source", targetElementId: "target" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:giant-obstacle", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+
+    expect(result.routes.edge!.length).toBeLessThanOrEqual(3);
+    expect(polylineIntersectsBoxInterior(result.routes.edge!, blocker)).toBe(false);
   });
 
   it("reserves hidden comment callouts for node placement and edge routing", async () => {
@@ -1395,6 +1512,37 @@ function polylineCrossesBox(
     }
   }
   return false;
+}
+
+function polylineIntersectsBoxInterior(
+  route: readonly { x: number; y: number }[],
+  box: { x: number; y: number; width: number; height: number },
+): boolean {
+  const epsilon = 1e-6;
+  const left = box.x + epsilon;
+  const right = box.x + box.width - epsilon;
+  const top = box.y + epsilon;
+  const bottom = box.y + box.height - epsilon;
+  return route.slice(0, -1).some((start, index) => {
+    const end = route[index + 1]!;
+    let near = 0;
+    let far = 1;
+    for (const [origin, delta, minimum, maximum] of [
+      [start.x, end.x - start.x, left, right],
+      [start.y, end.y - start.y, top, bottom],
+    ] as const) {
+      if (Math.abs(delta) < epsilon) {
+        if (origin <= minimum || origin >= maximum) return false;
+        continue;
+      }
+      const first = (minimum - origin) / delta;
+      const second = (maximum - origin) / delta;
+      near = Math.max(near, Math.min(first, second));
+      far = Math.min(far, Math.max(first, second));
+      if (near > far) return false;
+    }
+    return far > 0 && near < 1 && near <= far;
+  });
 }
 
 function polylineOverlapLength(

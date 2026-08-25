@@ -8,6 +8,8 @@ import {
 import { resolveAppearance } from "./appearance.js";
 import type {
   DiagramView,
+  EdgeCurveRouting,
+  Point,
   ProjectedContainer,
   ProjectedEdge,
   ProjectedNode,
@@ -455,6 +457,7 @@ function projectDirectEdge(
       diagnostics,
     ).style,
     waypoints: manualWaypoints,
+    curve: copyCurveRouting(overlay?.overlay.routing?.curve),
     labelOffset: overlay?.overlay.routing?.labelOffset,
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
     targetAnchor: overlay?.overlay.routing?.targetAnchor,
@@ -615,6 +618,7 @@ function projectDerivedEdge(
       diagnostics,
     ).style,
     waypoints: manualWaypoints,
+    curve: copyCurveRouting(overlay?.overlay.routing?.curve),
     labelOffset: overlay?.overlay.routing?.labelOffset,
     sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
     targetAnchor: overlay?.overlay.routing?.targetAnchor,
@@ -866,6 +870,29 @@ function regionZOrder(
   const value = appearance?.regionZOrder
     ?? appearance?.extensions?.[LEGACY_REGION_Z_ORDER];
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
+}
+
+function copyCurveRouting(curve: EdgeCurveRouting | undefined): EdgeCurveRouting | undefined {
+  if (!curve) return undefined;
+  return {
+    sourceHandle: curve.sourceHandle ? copyCurvePoint(curve.sourceHandle) : undefined,
+    targetHandle: curve.targetHandle ? copyCurvePoint(curve.targetHandle) : undefined,
+    knots: curve.knots?.map((knot) => ({
+      point: copyCurvePoint(knot.point),
+      incomingHandle: knot.incomingHandle ? copyCurvePoint(knot.incomingHandle) : undefined,
+      outgoingHandle: knot.outgoingHandle ? copyCurvePoint(knot.outgoingHandle) : undefined,
+      extensions: knot.extensions ? structuredClone(knot.extensions) : undefined,
+    })),
+    extensions: curve.extensions ? structuredClone(curve.extensions) : undefined,
+  };
+}
+
+function copyCurvePoint(point: Point): Point {
+  return {
+    x: point.x,
+    y: point.y,
+    extensions: point.extensions ? structuredClone(point.extensions) : undefined,
+  };
 }
 
 function compactIri(value: string): string {

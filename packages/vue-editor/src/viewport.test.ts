@@ -55,6 +55,63 @@ describe("ephemeral Canvas work area", () => {
     });
   });
 
+  it("curve knotと相対handleをcontent boundsへ含め操作点を切らない", () => {
+    const scene = sceneFixture();
+    scene.edges = [{
+      elementId: "curve",
+      semanticRef: "urn:test:curve",
+      structuralKind: "edge",
+      label: "Curve",
+      sourceElementId: "a",
+      targetElementId: "b",
+      templateRef: "urn:test:edge",
+      style: { fill: "none", stroke: "#000", text: "#000" },
+      route: [{ x: 20, y: 40 }, { x: 580, y: 360 }],
+      routeMode: "curve",
+      curve: {
+        sourceHandle: { x: -120, y: -90 },
+        targetHandle: { x: 180, y: 140 },
+        knots: [{
+          point: { x: 300, y: 200 },
+          incomingHandle: { x: -350, y: 0 },
+        }],
+      },
+      fallback: false,
+    }];
+
+    expect(diagramContentBounds(scene)).toEqual({
+      x: -100,
+      y: -50,
+      width: 860,
+      height: 550,
+    });
+  });
+
+  it("automatic curveの補完controlとbowもcontent boundsへ含める", () => {
+    const scene = sceneFixture();
+    scene.edges = [{
+      elementId: "automatic-curve",
+      semanticRef: "urn:test:automatic-curve",
+      structuralKind: "edge",
+      label: "Automatic curve",
+      sourceElementId: "a",
+      targetElementId: "b",
+      templateRef: "urn:test:edge",
+      style: { fill: "none", stroke: "#000", text: "#000" },
+      route: [{ x: 20, y: 390 }, { x: 580, y: 390 }],
+      routeMode: "curve",
+      fallback: false,
+    }];
+
+    // Direct horizontal curveのautomatic bowは+80でcontrol y=470になる。
+    expect(diagramContentBounds(scene)).toEqual({
+      x: 0,
+      y: 0,
+      width: 600,
+      height: 470,
+    });
+  });
+
   it("Sceneの全周へ大きな初期余白を設ける", () => {
     const workArea = diagramWorkAreaBounds(sceneFixture());
 

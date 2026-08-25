@@ -1,15 +1,27 @@
 import { performance } from "node:perf_hooks";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
+
+import { applyAuthoringPreview, previewAuthoringCommands } from "./authoring";
+import type { AuthoringCommand, ResolvedAuthoringContext } from "./authoring-model";
+import { statementIdentityForNamedStatement } from "./identity";
 
 import {
   createStandardLayoutRegistry,
   layoutProjectedDiagramScene,
+  LayoutAdapterRegistry,
   projectSemanticView,
   STANDARD_LAYOUT_REFS,
+  StandardLightweightLayoutAdapter,
   standardRdfRdfsCatalog,
+  standardRdfRdfsClassificationRegionCatalog,
   type DiagramScene,
+  type ElementGeometry,
   type IriographDocumentV1,
+  type Point,
+  type ProjectionCatalogV1,
+  type StandardLayoutPerformanceSample,
 } from "./index";
 
 const NORMAL_SCALE = { nodes: 500, edges: 1_000 } as const;
@@ -19,7 +31,12 @@ const STRESS_SCALE = { nodes: 2_000, edges: 4_000 } as const;
 // absorb startup noise without weakening the completion criterion.
 const INITIAL_PIPELINE_BUDGET_MS = 2_000;
 const EDIT_REPROJECTION_BUDGET_MS = 100;
+const SMALL_INITIAL_PIPELINE_BUDGET_MS = 300;
 const SAMPLE_COUNT = 3;
+const SMALL_SAMPLE_COUNT = 5;
+const AUTHORING_WARM_COUNT = 20;
+const AUTHORING_SAMPLE_COUNT = 20;
+const AUTHORING_PIPELINE_BUDGET_MS = 150;
 const CONTAINER_SIZE = 50;
 
 describe("P1-08 fixed graph performance", () => {
@@ -65,6 +82,152 @@ describe("P1-08 fixed graph performance", () => {
     expect(result.value.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
     expect(result.medianMs).toBeLessThan(EDIT_REPROJECTION_BUDGET_MS);
   }, 10_000);
+
+  it("keeps pizza, sparse-small, and dense-small initial projection/layout p95 under 300ms", async () => {
+    const fixtures = [{
+      name: "pizza",
+      document: pizzaFixture(),
+      catalog: standardRdfRdfsClassificationRegionCatalog,
+      maximumStrictCrossings: 9,
+    }, {
+      name: "sparse-small",
+      document: createFixture(24, 23),
+      catalog: standardRdfRdfsCatalog,
+      maximumStrictCrossings: 0,
+    }, {
+      name: "dense-small",
+      document: createFixture(24, 120),
+      catalog: standardRdfRdfsCatalog,
+      maximumStrictCrossings: 398,
+    }];
+
+    for (const fixture of fixtures) {
+      await measureInitialPhases(fixture.document, fixture.catalog, 1);
+      const samples = await measureInitialPhases(
+        fixture.document,
+        fixture.catalog,
+        SMALL_SAMPLE_COUNT,
+      );
+      reportInitialPhases(fixture.name, samples);
+      const last = samples.at(-1)!;
+      const quality = routeQuality(last.scene);
+      expect(last.scene.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+      expect(quality.nodeObstacleIntersections).toBe(0);
+      expect(quality.endpointInteriorTraversals).toBe(0);
+      expect(quality.maximumRoutePoints).toBeLessThanOrEqual(3);
+      expect(quality.strictCrossings).toBeLessThanOrEqual(fixture.maximumStrictCrossings);
+      expect(quality.overlapLength).toBe(0);
+      expect(samples.map((sample) => sample.totalMs).sort((left, right) => left - right)
+        .at(percentileIndex(samples.length, .95)))
+        .toBeLessThan(SMALL_INITIAL_PIPELINE_BUDGET_MS);
+    }
+  }, 20_000);
+
+  it("keeps route quality independent of labels, opaque IRIs, and pizza topology", async () => {
+    const baselineDocument = createFixture(24, 120);
+    const labelVariant = withGenericLabels(baselineDocument);
+    const opaqueVariant = withOpaqueIris(baselineDocument);
+    const containmentDocument = createFixture(60, 59);
+    const [baseline, labels, opaque, containment] = await Promise.all([
+      measureInitialPhases(baselineDocument, standardRdfRdfsCatalog, 1),
+      measureInitialPhases(labelVariant, standardRdfRdfsCatalog, 1),
+      measureInitialPhases(opaqueVariant, standardRdfRdfsCatalog, 1),
+      measureInitialPhases(containmentDocument, standardRdfRdfsCatalog, 1),
+    ]);
+    const baselineQuality = routeQuality(baseline[0]!.scene);
+    const labelQuality = routeQuality(labels[0]!.scene);
+    const opaqueQuality = routeQuality(opaque[0]!.scene);
+    const containmentQuality = routeQuality(containment[0]!.scene);
+
+    console.info(JSON.stringify({
+      benchmark: "layout-genericity-quality",
+      baseline: baselineQuality,
+      labels: labelQuality,
+      opaque: opaqueQuality,
+      nonPizzaContainment: containmentQuality,
+    }));
+    for (const quality of [baselineQuality, labelQuality, opaqueQuality, containmentQuality]) {
+      expect(quality.nodeObstacleIntersections).toBe(0);
+      expect(quality.endpointInteriorTraversals).toBe(0);
+      expect(quality.maximumRoutePoints).toBeLessThanOrEqual(3);
+    }
+    expect(labelQuality).toEqual(baselineQuality);
+    expect(opaqueQuality).toEqual(baselineQuality);
+    expect(containment[0]!.scene.containers).toHaveLength(2);
+    expect(containment[0]!.totalMs).toBeLessThan(SMALL_INITIAL_PIPELINE_BUDGET_MS);
+  }, 10_000);
+
+  it("keeps prepared relation add, predicate change, and endpoint change core p95 under 150ms", async () => {
+    const document = pizzaFixture();
+    const namespace = document.semantic.baseIri;
+    const relation = {
+      subjectIri: `${namespace}lane1-c01`,
+      predicateIri: `${namespace}next`,
+      objectIri: `${namespace}lane1-c02`,
+    };
+    const operations: Array<{ name: string; commands: readonly AuthoringCommand[] }> = [{
+      name: "relation-add",
+      commands: [{
+        type: "connect-resources",
+        commandId: "benchmark-add",
+        subjectIri: `${namespace}lane1-c01`,
+        predicateIri: `${namespace}about`,
+        objectIri: `${namespace}lane1-c03`,
+      }],
+    }, {
+      name: "predicate-change",
+      commands: [{
+        type: "remove-statement",
+        commandId: "benchmark-remove-old-predicate",
+        statementRef: statementIdentityForNamedStatement(relation),
+        ...relation,
+      }, {
+        type: "connect-resources",
+        commandId: "benchmark-add-new-predicate",
+        subjectIri: relation.subjectIri,
+        predicateIri: `${namespace}branchesTo`,
+        objectIri: relation.objectIri,
+      }],
+    }, {
+      name: "endpoint-change",
+      commands: [{
+        type: "remove-statement",
+        commandId: "benchmark-remove-old-endpoint",
+        statementRef: statementIdentityForNamedStatement(relation),
+        ...relation,
+      }, {
+        type: "connect-resources",
+        commandId: "benchmark-add-new-endpoint",
+        subjectIri: relation.subjectIri,
+        predicateIri: relation.predicateIri,
+        objectIri: `${namespace}lane1-c03`,
+      }],
+    }];
+    const context = performanceAuthoringContext(document);
+
+    for (const operation of operations) {
+      for (let warm = 0; warm < AUTHORING_WARM_COUNT; warm += 1) {
+        await applyPreparedOperation(document, operation.commands, context);
+      }
+      const samples: number[] = [];
+      for (let sample = 0; sample < AUTHORING_SAMPLE_COUNT; sample += 1) {
+        const startedAt = performance.now();
+        const update = await applyPreparedOperation(document, operation.commands, context);
+        samples.push(performance.now() - startedAt);
+        expect(update.accepted).toBe(true);
+      }
+      const p95Ms = [...samples].sort((left, right) => left - right)
+        .at(percentileIndex(samples.length, .95))!;
+      console.info(JSON.stringify({
+        benchmark: `authoring-${operation.name}`,
+        warmRuns: AUTHORING_WARM_COUNT,
+        samples: AUTHORING_SAMPLE_COUNT,
+        p95Ms: roundMilliseconds(p95Ms),
+        referenceBudgetMs: AUTHORING_PIPELINE_BUDGET_MS,
+      }));
+      expect(p95Ms).toBeLessThan(AUTHORING_PIPELINE_BUDGET_MS);
+    }
+  }, 30_000);
 });
 
 type Scale = { nodes: number; edges: number };
@@ -73,6 +236,13 @@ type Measurement<T> = {
   value: T;
   samplesMs: number[];
   medianMs: number;
+};
+
+type InitialPhaseMeasurement = {
+  projectionMs: number;
+  totalMs: number;
+  layout: StandardLayoutPerformanceSample;
+  scene: DiagramScene;
 };
 
 function createFixture(nodeCount: number, edgeCount: number): IriographDocumentV1 {
@@ -141,6 +311,33 @@ function withEditedLabel(
   };
 }
 
+function withGenericLabels(document: IriographDocumentV1): IriographDocumentV1 {
+  return {
+    ...document,
+    documentId: `${document.documentId}-generic-labels`,
+    semantic: {
+      ...document.semantic,
+      source: document.semantic.source.replace(/"Node ([^"]+)"/g, '"Item $1"'),
+    },
+  };
+}
+
+function withOpaqueIris(document: IriographDocumentV1): IriographDocumentV1 {
+  return {
+    ...document,
+    documentId: `${document.documentId}-opaque-iris`,
+    semantic: {
+      ...document.semantic,
+      baseIri: "urn:opaque:",
+      source: document.semantic.source
+        .replaceAll("urn:iriograph:benchmark:", "urn:opaque:")
+        .replaceAll(":connects", ":p-000")
+        .replace(/:node-/g, ":r-")
+        .replace(/:group-/g, ":c-"),
+    },
+  };
+}
+
 async function projectAndLayout(
   document: IriographDocumentV1,
   registry: ReturnType<typeof createStandardLayoutRegistry>,
@@ -152,6 +349,78 @@ async function projectAndLayout(
     registry,
     "full",
   );
+}
+
+function performanceAuthoringContext(document: IriographDocumentV1): ResolvedAuthoringContext {
+  return {
+    contextId: "urn:iriograph:performance-context:1",
+    contextRevision: "1",
+    documentRevision: "1",
+    authoringProfileRef: document.semantic.authoringProfileRef,
+    runtime: {
+      catalogsByProfile: new Map([[
+        standardRdfRdfsClassificationRegionCatalog.profileRef,
+        { catalog: standardRdfRdfsClassificationRegionCatalog },
+      ]]),
+      layouts: createStandardLayoutRegistry(),
+    },
+    resourcePolicy: { allowedMintNamespaces: [document.semantic.baseIri] },
+    termPolicy: {
+      existingUnknown: "preserve",
+      humanUnknown: "warn",
+      llmUnknown: "reject",
+      humanMinting: "warn",
+      llmMinting: "deny",
+    },
+    terms: [],
+    capabilities: [],
+  };
+}
+
+async function applyPreparedOperation(
+  document: IriographDocumentV1,
+  commands: readonly AuthoringCommand[],
+  context: ResolvedAuthoringContext,
+) {
+  const preview = await previewAuthoringCommands(document, commands, context);
+  if (!preview.valid) throw new Error(`performance preview was invalid: ${preview.diagnostics.map((item) => item.code).join(",")}`);
+  return applyAuthoringPreview(document, preview, context, {
+    confirmationId: preview.confirmationId,
+  });
+}
+
+async function measureInitialPhases(
+  document: IriographDocumentV1,
+  catalog: ProjectionCatalogV1,
+  sampleCount: number,
+): Promise<InitialPhaseMeasurement[]> {
+  const samples: InitialPhaseMeasurement[] = [];
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    const totalStartedAt = performance.now();
+    const projectionStartedAt = performance.now();
+    const projected = projectSemanticView(document, catalog);
+    const projectionMs = performance.now() - projectionStartedAt;
+    let layoutSample: StandardLayoutPerformanceSample | undefined;
+    const adapter = new StandardLightweightLayoutAdapter(
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      "LR",
+      (value) => { layoutSample = value; },
+    );
+    const scene = await layoutProjectedDiagramScene(
+      projected,
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      new LayoutAdapterRegistry([adapter]),
+      "full",
+    );
+    if (!layoutSample) throw new Error("standard layout performance sample was not emitted");
+    samples.push({
+      projectionMs,
+      totalMs: performance.now() - totalStartedAt,
+      layout: layoutSample,
+      scene,
+    });
+  }
+  return samples;
 }
 
 async function measure<T>(operation: () => T | Promise<T>): Promise<Measurement<T>> {
@@ -178,6 +447,247 @@ function reportMeasurement<T>(
     medianMs: roundMilliseconds(measurement.medianMs),
     referenceBudgetMs,
   }));
+}
+
+function reportInitialPhases(
+  name: string,
+  samples: readonly InitialPhaseMeasurement[],
+): void {
+  const values = (select: (sample: InitialPhaseMeasurement) => number) => (
+    samples.map(select).sort((left, right) => left - right)
+  );
+  const p95 = (select: (sample: InitialPhaseMeasurement) => number) => {
+    const sorted = values(select);
+    return sorted[percentileIndex(sorted.length, .95)]!;
+  };
+  console.info(JSON.stringify({
+    benchmark: `initial-${name}`,
+    samples: samples.length,
+    p95Ms: roundMilliseconds(p95((sample) => sample.totalMs)),
+    phasesP95Ms: {
+      projection: roundMilliseconds(p95((sample) => sample.projectionMs)),
+      placement: roundMilliseconds(p95((sample) => sample.layout.placementMs)),
+      initialRoute: roundMilliseconds(p95((sample) => sample.layout.initialRouteMs)),
+      refinement: roundMilliseconds(p95((sample) => sample.layout.refinementMs)),
+      compaction: roundMilliseconds(p95((sample) => sample.layout.compactionMs)),
+      bounds: roundMilliseconds(p95((sample) => sample.layout.boundsMs)),
+    },
+    counts: samples.map((sample) => ({
+      visibilitySearches: sample.layout.visibilitySearches,
+      compactedEdges: sample.layout.compactedEdges,
+      compactionCandidates: sample.layout.compactionCandidates,
+      routedEdges: sample.layout.routedEdges,
+      fixedDerivedRoutes: sample.layout.fixedDerivedRoutes,
+    })),
+    quality: routeQuality(samples.at(-1)!.scene),
+    referenceBudgetMs: SMALL_INITIAL_PIPELINE_BUDGET_MS,
+  }));
+}
+
+function pizzaFixture(): IriographDocumentV1 {
+  return JSON.parse(readFileSync(new URL(
+    "../../../apps/mock/public/workspace/models/pizza-order-delivery.iriograph",
+    import.meta.url,
+  ), "utf8")) as IriographDocumentV1;
+}
+
+type RouteQuality = {
+  nodeObstacleIntersections: number;
+  endpointInteriorTraversals: number;
+  strictCrossings: number;
+  overlapLength: number;
+  maximumRoutePoints: number;
+};
+
+function routeQuality(scene: DiagramScene): RouteQuality {
+  let nodeObstacleIntersections = 0;
+  let endpointInteriorTraversals = 0;
+  let strictCrossings = 0;
+  let overlapLength = 0;
+  let maximumRoutePoints = 0;
+  const nodes = new Map(scene.nodes.map((node) => [node.elementId, node]));
+  for (const edge of scene.edges) {
+    const route = edge.route ?? [];
+    maximumRoutePoints = Math.max(maximumRoutePoints, route.length);
+    for (const node of scene.nodes) {
+      if (node.elementId === edge.sourceElementId || node.elementId === edge.targetElementId) continue;
+      if (polylineCrossesGeometryInterior(route, node.geometry)) {
+        nodeObstacleIntersections += 1;
+      }
+    }
+    const source = nodes.get(edge.sourceElementId)?.geometry;
+    const target = nodes.get(edge.targetElementId)?.geometry;
+    if (source && route.length >= 2 && !endpointLegLeaves(route[0]!, route[1]!, source)) {
+      endpointInteriorTraversals += 1;
+    }
+    if (target && route.length >= 2 && !endpointLegLeaves(route.at(-1)!, route.at(-2)!, target)) {
+      endpointInteriorTraversals += 1;
+    }
+  }
+  for (let left = 0; left < scene.edges.length; left += 1) {
+    const leftRoute = scene.edges[left]!.route ?? [];
+    for (let right = left + 1; right < scene.edges.length; right += 1) {
+      const leftEdge = scene.edges[left]!;
+      const rightEdge = scene.edges[right]!;
+      const rightRoute = rightEdge.route ?? [];
+      const sharedEndpointGeometries = [leftEdge.sourceElementId, leftEdge.targetElementId]
+        .filter((id) => id === rightEdge.sourceElementId || id === rightEdge.targetElementId)
+        .flatMap((id) => {
+          const geometry = nodes.get(id)?.geometry;
+          return geometry ? [expandTestGeometry(geometry, 15)] : [];
+        });
+      strictCrossings += polylineStrictCrossings(
+        leftRoute,
+        rightRoute,
+        sharedEndpointGeometries,
+      );
+      overlapLength += polylineOverlapLength(leftRoute, rightRoute);
+    }
+  }
+  return {
+    nodeObstacleIntersections,
+    endpointInteriorTraversals,
+    strictCrossings,
+    overlapLength: Math.round(overlapLength * 1_000) / 1_000,
+    maximumRoutePoints,
+  };
+}
+
+function endpointLegLeaves(endpoint: Point, next: Point, geometry: ElementGeometry): boolean {
+  const center = {
+    x: geometry.x + geometry.width / 2,
+    y: geometry.y + geometry.height / 2,
+  };
+  return (endpoint.x - center.x) * (next.x - endpoint.x)
+    + (endpoint.y - center.y) * (next.y - endpoint.y) >= -1e-6;
+}
+
+function polylineCrossesGeometryInterior(
+  route: readonly Point[],
+  geometry: ElementGeometry,
+): boolean {
+  for (let index = 0; index < route.length - 1; index += 1) {
+    if (segmentCrossesGeometryInterior(route[index]!, route[index + 1]!, geometry)) return true;
+  }
+  return false;
+}
+
+function segmentCrossesGeometryInterior(
+  start: Point,
+  end: Point,
+  geometry: ElementGeometry,
+): boolean {
+  const epsilon = 1e-7;
+  let lower = 0;
+  let upper = 1;
+  for (const [origin, delta, minimum, maximum] of [
+    [start.x, end.x - start.x, geometry.x + epsilon, geometry.x + geometry.width - epsilon],
+    [start.y, end.y - start.y, geometry.y + epsilon, geometry.y + geometry.height - epsilon],
+  ] as const) {
+    if (Math.abs(delta) < epsilon) {
+      if (origin <= minimum || origin >= maximum) return false;
+      continue;
+    }
+    const first = (minimum - origin) / delta;
+    const second = (maximum - origin) / delta;
+    lower = Math.max(lower, Math.min(first, second));
+    upper = Math.min(upper, Math.max(first, second));
+    if (lower > upper) return false;
+  }
+  return upper >= 0 && lower <= 1 && lower <= upper;
+}
+
+function polylineStrictCrossings(
+  left: readonly Point[],
+  right: readonly Point[],
+  excluded: readonly ElementGeometry[],
+): number {
+  const crossings = new Set<string>();
+  for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
+    for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
+      const intersection = segmentStrictIntersection(
+        left[leftIndex]!,
+        left[leftIndex + 1]!,
+        right[rightIndex]!,
+        right[rightIndex + 1]!,
+      );
+      if (intersection && !excluded.some((geometry) => pointInsideOrOn(intersection, geometry))) {
+        crossings.add(`${intersection.x},${intersection.y}`);
+      }
+    }
+  }
+  return crossings.size;
+}
+
+function segmentStrictIntersection(
+  leftStart: Point,
+  leftEnd: Point,
+  rightStart: Point,
+  rightEnd: Point,
+): Point | undefined {
+  const leftDx = leftEnd.x - leftStart.x;
+  const leftDy = leftEnd.y - leftStart.y;
+  const rightDx = rightEnd.x - rightStart.x;
+  const rightDy = rightEnd.y - rightStart.y;
+  const denominator = leftDx * rightDy - leftDy * rightDx;
+  if (denominator === 0) return undefined;
+  const offsetX = rightStart.x - leftStart.x;
+  const offsetY = rightStart.y - leftStart.y;
+  const leftRatio = (offsetX * rightDy - offsetY * rightDx) / denominator;
+  const rightRatio = (offsetX * leftDy - offsetY * leftDx) / denominator;
+  if (!(leftRatio > 0 && leftRatio < 1 && rightRatio > 0 && rightRatio < 1)) {
+    return undefined;
+  }
+  return {
+    x: leftStart.x + leftRatio * leftDx,
+    y: leftStart.y + leftRatio * leftDy,
+  };
+}
+
+function expandTestGeometry(geometry: ElementGeometry, amount: number): ElementGeometry {
+  return {
+    x: geometry.x - amount,
+    y: geometry.y - amount,
+    width: geometry.width + amount * 2,
+    height: geometry.height + amount * 2,
+  };
+}
+
+function pointInsideOrOn(point: Point, geometry: ElementGeometry): boolean {
+  return point.x >= geometry.x
+    && point.x <= geometry.x + geometry.width
+    && point.y >= geometry.y
+    && point.y <= geometry.y + geometry.height;
+}
+
+function polylineOverlapLength(left: readonly Point[], right: readonly Point[]): number {
+  let total = 0;
+  for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
+    const leftStart = left[leftIndex]!;
+    const leftEnd = left[leftIndex + 1]!;
+    for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
+      const rightStart = right[rightIndex]!;
+      const rightEnd = right[rightIndex + 1]!;
+      if (leftStart.x === leftEnd.x && rightStart.x === rightEnd.x && leftStart.x === rightStart.x) {
+        total += intervalOverlap(leftStart.y, leftEnd.y, rightStart.y, rightEnd.y);
+      } else if (leftStart.y === leftEnd.y && rightStart.y === rightEnd.y && leftStart.y === rightStart.y) {
+        total += intervalOverlap(leftStart.x, leftEnd.x, rightStart.x, rightEnd.x);
+      }
+    }
+  }
+  return total;
+}
+
+function intervalOverlap(leftA: number, leftB: number, rightA: number, rightB: number): number {
+  return Math.max(
+    0,
+    Math.min(Math.max(leftA, leftB), Math.max(rightA, rightB))
+      - Math.max(Math.min(leftA, leftB), Math.min(rightA, rightB)),
+  );
+}
+
+function percentileIndex(length: number, percentile: number): number {
+  return Math.max(0, Math.ceil(length * percentile) - 1);
 }
 
 function nodeName(index: number, nodeCount: number): string {

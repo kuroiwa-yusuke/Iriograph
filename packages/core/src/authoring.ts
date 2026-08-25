@@ -31,7 +31,9 @@ import type {
 import { statementIdentityFromQuad } from "./identity.js";
 import { buildIriographView } from "./scene.js";
 import {
+  RDF_ORDINAL_PREFIX,
   RDF_TYPE,
+  RDFS_MEMBER,
   validateAuthoringGraphPolicy,
   validateResolvedAuthoringContext,
 } from "./authoring-validation.js";
@@ -42,13 +44,37 @@ import {
 } from "./serializer.js";
 import { containerContentBounds as boundsForContainer } from "./container-content.js";
 
+type PreparedAuthoringResult = {
+  confirmationId: string;
+  previewCore: string;
+  baseDocumentFingerprint: string;
+  contextBinding: string;
+  update: SemanticSourceUpdate;
+};
+
+/**
+ * Prepared candidates are deliberately process-local and identity-bound. They
+ * never become executable data inside a serializable AuthoringPreview.
+ */
+const preparedAuthoringResults = new WeakMap<AuthoringPreview, PreparedAuthoringResult>();
+
 export async function previewAuthoringCommands(
   document: IriographDocument,
   commands: readonly AuthoringCommand[],
   context: ResolvedAuthoringContext,
   options: PreviewAuthoringOptions = {},
 ): Promise<AuthoringPreview> {
-  return (await previewInternal(document, commands, context, options)).preview;
+  const prepared = await previewInternal(document, commands, context, options);
+  if (prepared.preview.valid && prepared.update?.accepted) {
+    preparedAuthoringResults.set(prepared.preview, {
+      confirmationId: prepared.preview.confirmationId,
+      previewCore: stableJson(previewCore(prepared.preview)),
+      baseDocumentFingerprint: authoringDocumentFingerprint(document),
+      contextBinding: authoringContextBinding(context),
+      update: clone(prepared.update),
+    });
+  }
+  return prepared.preview;
 }
 
 export async function applyAuthoringPreview(
@@ -74,8 +100,28 @@ export async function applyAuthoringPreview(
     }]);
   }
 
+  const prepared = preparedAuthoringResults.get(preview);
+  if (
+    prepared
+    && prepared.confirmationId === preview.confirmationId
+    && prepared.baseDocumentFingerprint === authoringDocumentFingerprint(document)
+    && prepared.contextBinding === authoringContextBinding(context)
+    && prepared.previewCore === stableJson(previewCore(preview))
+    && prepared.update.accepted
+  ) {
+    return {
+      accepted: true,
+      document: clone(prepared.update.document),
+      diagnostics: [...preview.diagnostics],
+      scenes: prepared.update.scenes ? clone(prepared.update.scenes) : undefined,
+      warningConfirmation: prepared.update.warningConfirmation,
+    };
+  }
+
   // Recompile and rerun policy, structure, layout and reconciliation. The
   // preview is evidence for confirmation, never trusted as an executable patch.
+  // A deserialized/cloned preview has no identity-bound prepared result and
+  // therefore follows this conservative verification fallback.
   const current = await previewInternal(document, preview.commands, context, {
     signal: options.signal,
     semanticWarningConfirmation: preview.semanticWarningConfirmation,
@@ -104,6 +150,8 @@ export async function applyAuthoringPreview(
     accepted: true,
     document: clone(current.update.document),
     diagnostics: [...current.preview.diagnostics],
+    scenes: current.update.scenes ? clone(current.update.scenes) : undefined,
+    warningConfirmation: current.update.warningConfirmation,
   };
 }
 
@@ -193,6 +241,8 @@ export async function applyAuthoringSource(
     accepted: true,
     document: clone(update.document),
     diagnostics,
+    scenes: update.scenes ? clone(update.scenes) : undefined,
+    warningConfirmation: update.warningConfirmation,
   };
 }
 
@@ -371,6 +421,7 @@ async function previewInternal(
         validationContext: context.semanticValidation,
         warningConfirmation: options.semanticWarningConfirmation,
         signal: options.signal,
+        reconciliationMode: edgeOnlyCommands(compilation.commands, context) ? "edge-only" : "full",
       } as const;
       update = await applyCanonicalSemanticDataset(
         document,
@@ -380,7 +431,8 @@ async function previewInternal(
       );
       // Preview needs the reconciled candidate for geometry/diff, but does not
       // commit it. Bind the validator-issued warning token and rerun the exact
-      // candidate; applyAuthoringPreview will independently do this again.
+      // candidate. Identity-bound apply may reuse this accepted result; cloned
+      // or stale previews independently rerun the same conservative pipeline.
       if (
         !update.accepted
         && update.warningConfirmation
@@ -406,7 +458,14 @@ async function previewInternal(
         diagnostics.push(...positioned.diagnostics);
         if (options.signal?.aborted) diagnostics.push(abortedDiagnostic());
         if (!hasErrors(positioned.diagnostics)) {
-          update = { ...update, document: positioned.document };
+          update = {
+            ...update,
+            document: positioned.document,
+            // Initial position authoring mutates overlay geometry after the
+            // reconciled scenes were built. Do not hand a stale scene to the
+            // host; creation takes the conservative refresh path.
+            ...(compilation.positions.length > 0 ? { scenes: undefined } : {}),
+          };
         }
       }
     }
@@ -608,6 +667,44 @@ function previewCore(preview: AuthoringPreview): Omit<AuthoringPreview, "valid" 
     ...core
   } = preview;
   return core;
+}
+
+function edgeOnlyCommands(
+  commands: readonly AuthoringCommand[],
+  context: ResolvedAuthoringContext,
+): boolean {
+  return commands.length > 0 && commands.every((command) => {
+    if (
+      command.type !== "connect-resources"
+      && command.type !== "remove-statement"
+      && command.type !== "set-statement-comments"
+    ) return false;
+    return !isKnownStructuralPredicate(command.predicateIri, context);
+  });
+}
+
+function isKnownStructuralPredicate(
+  predicateIri: string,
+  context: ResolvedAuthoringContext,
+): boolean {
+  const term = context.terms.find((candidate) => candidate.iri === predicateIri);
+  return predicateIri === RDF_TYPE
+    || predicateIri === RDFS_MEMBER
+    || (
+      predicateIri.startsWith(RDF_ORDINAL_PREFIX)
+      && /^[1-9][0-9]*$/u.test(predicateIri.slice(RDF_ORDINAL_PREFIX.length))
+    )
+    || term?.structural === true
+    || term?.kind === "structure";
+}
+
+function authoringContextBinding(context: ResolvedAuthoringContext): string {
+  return stableJson({
+    contextId: context.contextId,
+    contextRevision: context.contextRevision,
+    documentRevision: context.documentRevision,
+    authoringProfileRef: context.authoringProfileRef,
+  });
 }
 
 function uniqueDiagnostics(

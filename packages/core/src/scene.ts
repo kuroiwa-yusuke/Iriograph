@@ -13,7 +13,9 @@ import {
 import { containerContentInsets } from "./container-content.js";
 import type {
   DiagramScene,
+  EdgeCurveRouting,
   IriographDocument,
+  Point,
   ProjectedScene,
   ProjectionCatalogV1,
   ProjectionDiagnostic,
@@ -59,6 +61,7 @@ export async function buildIriographView(
   viewId: string,
   context: ProjectionRuntimeContext,
   mode: LayoutMode = "incremental",
+  fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
 ): Promise<DiagramScene> {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
   if (!view) {
@@ -93,6 +96,7 @@ export async function buildIriographView(
     view.layoutRef,
     context.layouts,
     mode,
+    fixedDerivedRoutes,
   );
 }
 
@@ -102,6 +106,7 @@ export async function layoutProjectedDiagramScene(
   layoutRef: string,
   registry: LayoutAdapterRegistry,
   mode: LayoutMode = "incremental",
+  fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
 ): Promise<DiagramScene> {
   if (hasBlockingDiagnostics(projected.diagnostics)) {
     return emptyScene(projected.viewId, projected.diagnostics);
@@ -109,6 +114,7 @@ export async function layoutProjectedDiagramScene(
   const layout = await layoutProjectedScene({
     layoutRef,
     mode,
+    fixedDerivedRoutes,
     scene: {
       elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
         elementId: element.elementId,
@@ -117,8 +123,11 @@ export async function layoutProjectedDiagramScene(
         parentElementId: element.structuralKind === "region" ? undefined : element.parentElementId,
         geometry: element.geometry,
         size: element.defaultSize,
-        pinned: element.pinned,
-        placement: element.placement,
+        // route-only is a transaction-local constraint. The returned Scene
+        // retains the projected pin/placement values below; only the adapter
+        // request treats every existing geometry as fixed.
+        pinned: mode === "route-only" ? true : element.pinned,
+        placement: mode === "route-only" ? "user" : element.placement,
         shape: element.structuralKind === "container"
           ? "container"
           : element.structuralKind === "region" ? "region" : element.shape,
@@ -234,6 +243,7 @@ export async function layoutProjectedDiagramScene(
       style: edge.style,
       route: route?.map((point) => ({ ...point })),
       waypoints,
+      curve: edge.curve ? cloneCurveRouting(edge.curve) : undefined,
       labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
       sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
       targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
@@ -257,6 +267,28 @@ export async function layoutProjectedDiagramScene(
     })),
     edges,
     diagnostics,
+  };
+}
+
+function cloneCurveRouting(curve: EdgeCurveRouting): EdgeCurveRouting {
+  return {
+    sourceHandle: curve.sourceHandle ? cloneCurvePoint(curve.sourceHandle) : undefined,
+    targetHandle: curve.targetHandle ? cloneCurvePoint(curve.targetHandle) : undefined,
+    knots: curve.knots?.map((knot) => ({
+      point: cloneCurvePoint(knot.point),
+      incomingHandle: knot.incomingHandle ? cloneCurvePoint(knot.incomingHandle) : undefined,
+      outgoingHandle: knot.outgoingHandle ? cloneCurvePoint(knot.outgoingHandle) : undefined,
+      extensions: knot.extensions ? structuredClone(knot.extensions) : undefined,
+    })),
+    extensions: curve.extensions ? structuredClone(curve.extensions) : undefined,
+  };
+}
+
+function cloneCurvePoint(point: Point): Point {
+  return {
+    x: point.x,
+    y: point.y,
+    extensions: point.extensions ? structuredClone(point.extensions) : undefined,
   };
 }
 

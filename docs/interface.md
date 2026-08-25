@@ -67,8 +67,12 @@ overlayには次を保持できます。
 endpoint込みrouteのarc-length 50%地点からの相対値で、labelがないedgeには作成しません。
 Edge routingの編集ではnode/container用の`pinned`、`placement`をedge overlayへ付けません。
 `routeMode`は`auto`、`straight`、`orthogonal`、`curve`、`manual`の閉じた値です。`straight`と
-`curve`はportable waypointを持ちません。`curve`の制御点はendpoint、layout corridor、任意のsparseな
-curvatureから導出します。`orthogonal`等の自動modeが生成した障害物回避用の補助点もoverlayへ保存せず、
+`curve`はportable waypointを持ちません。`routing.curve`はendpointを重複保存せず、始点・終点からの相対
+`sourceHandle`/`targetHandle`と、絶対座標の0〜64個のon-curve `knots`を持つsparse objectです。各knotは
+`point`と任意の相対`incomingHandle`/`outgoingHandle`を持ち、handle未指定部分はendpointとlayout guide routeから
+決定的に補完します。各Pointとcurve/knot自身のIRI-keyed `extensions`は座標編集・丸め・Scene投影・保存再読込を
+通してdeep-copyで保持します。空の`curve`、NaN/Infinity、不正なknot配列はschemaで拒否し、最後の手動handle/knotを
+除いた空状態は`curve`自体を省略したautomatic cubicへ正規化します。`orthogonal`等の自動modeが生成した障害物回避用の補助点もoverlayへ保存せず、
 `manual`へ明示変換した場合だけmanual waypointとして保存します。
 
 Region labelの`regionLabelAnchor`は外周上の0以上1未満の正規化位置、
@@ -167,6 +171,13 @@ export interface LayoutAdapter {
   layout(request: LayoutRequest): Promise<LayoutResult>;
 }
 ```
+
+`LayoutRequest.fixedDerivedRoutes?`は`route-only` transactionだけが使うoptionalな
+`edgeId -> endpoint込みroute`です。指定routeはadapterの自動routing対象外で、返却値でも
+JSON値として完全一致しなければなりません。標準adapterはinitial/refinement/compactionから除外し、
+他のaffected routeの交差・重複costには固定peerとして含めます。未対応のthird-party adapterが
+fieldを無視してもCore共通completionが指定routeを復元するため後方互換ですが、局所計算量の削減を
+保証するにはadapter自身の対応が必要です。このfieldとrouteはdocument overlay、waypointへ保存しません。
 
 Coreはnode-link、LR/TB階層、Bag container、pinned geometryを扱う決定的な標準軽量adapterを提供し、Vue editorはこれをdefaultとして利用します。Hostがlayout adapterを明示注入した場合は同じinterfaceでworkerを使う高機能adapter等へ差し替えます。Adapter未解決、失敗、結果不正はdiagnosticとし、異なるlayoutへ黙ってfallbackしません。標準adapterはunordered endpoint pair内をelement IDのcode-point順で束ね、parallel laneを20 unit間隔、右側self-loopを36 unitから兄弟ごとに18 unit拡張して決定的にrouteします。Node attachmentの範囲を超えるparallel laneはnode外stubを使って間隔を維持し、routeの正方向への張り出しをScene boundsへ含めます。自動生成routeはsource/target以外の中間点を最大1個にし、直線で障害物回避と接続品質を満たす場合は0個にします。Optional adapterの結果も同じcompletionを通し、manual waypointはこの上限の対象外です。
 
@@ -352,7 +363,7 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `pendingDraftsChanged(pending)`: 未適用のTurtleまたはstructured authoring draftの有無。hostの保存可否・離脱確認に利用
 
 公開`IriographDiagramCanvas`はedge編集時に
-`routingUpdate({ elementId, routing?: { waypoints?, labelOffset? } })`を発行します。`routing`は
+`routingUpdate({ elementId, routing?: { waypoints?, curve?, labelOffset?, sourceAnchor?, targetAnchor? } })`を発行します。`routing`は
 その操作後のeditable routing全体を表すsparse valueです。Waypoint操作では旧host向けの
 `routingChange({ elementId, waypoints })`も併発しますが、標準Editorは`routingUpdate`だけを
 購読して二重適用を避けます。
@@ -379,7 +390,7 @@ Resize可能なnode、container、regionは選択時に四隅と四辺中央の8
 Canvas gridはsnapの`gridSize`と同じcanvas unit間隔を描画し、既定値8を重複定義しません。Gridの原点とpattern offsetはCanvas座標変換から求め、zoom、scroll、panへ追従します。描画layerはhit-test対象外で、表示toggleは`ビュー`tabから変更できるsession stateです。Toggle操作は`update:modelValue`、presentation history、dirty stateを発生させず、Turtle、overlay、portable documentへ保存しません。
 
 Edgeはclick/focusで個別選択し、parallel edgeとself-loopも各routeのhit areaを持ちます。選択edgeの
-ビューtabはroute modeとsource/target terminalを先に表示し、captionとendpoint anchor操作は折り畳み段階へ分けます。Anchorの正規化数値とprojection ruleは通常UIへ出しません。`straight`と`curve`ではwaypoint追加UIを表示せず、portable waypointを必ず除去します。
+ビューtabはroute modeとsource/target terminalを先に表示し、captionとendpoint anchor操作は折り畳み段階へ分けます。Anchorの正規化数値とprojection ruleは通常UIへ出しません。`straight`と`curve`ではwaypoint追加UIを表示せず、portable waypointを必ず除去します。Curveでは生の座標表を出さず、Inspectorから曲線点の追加・個別削除・automatic復帰を行います。
 `orthogonal`または`auto`のgenerated bend handleを初めて編集するとderived route中間点をmanual waypointへseedします。
 Path double clickとInspectorはwaypoint追加、handle dragとArrow keyは移動、Delete/Backspaceは削除を
 行い、最後のmanual waypoint削除はautomaticへ戻します。Labelはroute全長の中央をbaseとし、drag、
@@ -388,6 +399,17 @@ Arrow key、Inspector数値入力でoffsetを編集し、Home/Delete/Backspace�
 Scene内側8 unitへclampします。旧documentから読み込んだ負座標は勝手に正規化せず、そのままでは
 Scene原点外がclipされ得るため、handle編集またはautomatic resetで現行境界へ戻します。`readOnly`は
 edge選択を許可しますが編集handleを表示せず、routing eventを受けてもdocumentを変更しません。
+Curve pathのdouble clickは描画曲線上へknotを追加し、選択中はon-curve knot、接線line、Bezier handleだけを
+transient interaction layerへ表示します。Knot/handleはdragまたはArrow key（Shiftで10 unit）で操作し、
+Delete/Backspaceで削除・automatic resetします。Knotの片側handle変更は反対側へ鏡映して接線を保ちます。
+Knot/handle自体は追加tab stopにせず、Canvasの単一tab stopと`aria-activedescendant`を維持します。選択edgeでは
+`[`/`]`でactive curve controlを循環し、Ctrl/Cmd+Arrow、`W`/Insert、Ctrl/Cmd+Deleteを既存の
+keyboard routing commandとして適用します。
+描画本体は`M`と連続するcubic `C`だけからなる一つのvisible pathで、別のstraight/polylineを重ねません。
+透明な太いhit pathは選択専用に分離し、control半径はzoomの逆数で補正します。Curve label/captionのbaseは
+実cubicを弧長近似した50%地点です。
+Content bounds、fit、revealは保存済みknot/handleだけでなく、automatic curveが補完したcontrolとbowも含む
+cubic control hullから求め、画面外の曲線や操作点を切りません。
 
 Canvasの`semanticEndpointReconnectRequest({ edgeElementId, endpoint, targetSemanticRef })`は、意味tabでdirect edge端子を別nodeへdropした場合だけ発行します。空白、container、region、同じendpoint nodeへのdropでは発行しません。標準Editorは既存statement削除、新statement追加、exact statement comment移行を一つのatomic semantic transactionとして実行し、未接続の中間状態を作りません。ビューtabで同じhaloをdragした場合は従来どおり`routingUpdate`だけを発行します。
 Edge本体のDelete/Backspaceはprovenanceからexact semantic commandを構成し、candidate validation後に削除します。直接edgeだけの削除や影響objectをすべて選択した削除は確認画面を挟まず確定し、選択外のedge、membership、Seq/Alt membershipへ波及するときだけ影響modalを表示します。Provenanceがない場合はpredicateや構造を見た目から推測しません。

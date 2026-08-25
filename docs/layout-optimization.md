@@ -54,7 +54,7 @@ Portable overlayの経路modeは`auto`、`straight`、`orthogonal`、`curve`、`
 
 `curve`もportable waypointを持ちません。Endpoint、採用した障害物回避corridor、利用者が明示したsparseなcurvatureからrenderer用Bezier制御点を導出します。自動品質探索は内部候補として複数segmentを扱えますが、公開するderived routeはendpoint二点または中間点一つへcompletionし、overlayのwaypoint数を増やしません。利用者が明示した`manual`だけがwaypointを所有します。Parallel/reciprocal edgeはcompletion後もroute signatureを共有させず、個別選択可能なlaneを保ちます。
 
-User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutをpadding付き障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/comment交差、endpoint共有を除くedge交差数、edge重複長、距離、bend数の辞書順で比較します。Stable edge ID順と逆順を含む固定回数だけ、他の全routeを現在状態として混雑penalty付きrerouteを行います。各置換はgraph全体の辞書順品質を単調改善する場合だけ採用し、同一入力の決定性と計算上限を保ちます。
+User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutを障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/annotation本体交差、endpoint共有を除くedge交差数、comment等のrenderer予約領域交差、edge重複長、距離、bend数の辞書順で比較します。本体交差と予約余白を一つの重みに潰さないため、comment余白を避ける代わりにnodeを横切るrouteは採用されません。Stable edge ID順と逆順を含む固定回数だけ、他の全routeを現在状態として混雑penalty付きrerouteを行います。各置換はgraph全体の辞書順品質を単調改善する場合だけ採用し、同一入力の決定性と計算上限を保ちます。
 
 Auto routeは実shape境界でclipし、境界から外向きのderived stubを経て障害物探索へ接続します。これによりsource/target nodeを中心点から出る偽の障害物として扱わず、最初と最後のsegmentがnode内部を通ることも防ぎます。Manual/user routeは表示polyline全体がhard constraintであり、node/commentや他edgeと衝突しても変更せずdiagnosticだけを返します。`straight`は古いmanual waypointが残っていても常にendpoint二点を優先します。
 
@@ -112,7 +112,7 @@ Engine名ではなくview要求でadapterを選びます。単純flowとfallback
 
 最初の実用UIでは標準adapterを常時利用可能なbaselineとし、hostが`@iriograph/layout-elk`を導入した場合は階層flowと直交routeの高品質actionで明示選択します。Engine選択をportable document内の細かなoptionへ展開せず、stableな`layoutRef`からversioned adapter policyを解決します。自動配置のUIは採用engine名より、移動対象、pin保持、交差・重なりの改善見込み、失敗時のdiagnosticを利用者へ説明します。
 
-0.6.0のピザ注文・配送fixtureでは、同一ProjectedSceneを固定1920×1080で比較し、標準adapterを採用しました。Optional ELKはnode overlap 0、edge交差6でしたが、route-node交差3、fit 24%、aspect 3.18、lane順不成立でした。標準adapterはnode overlap 0、route-node交差1、edge交差9、fit 57%、aspect 2.99、lane順成立です。この結果はadapter選択の検証証拠であり、fixtureのIRIやlabelを検出するruntime分岐には使いません。
+0.7.0のピザ注文・配送fixtureでは、同一ProjectedSceneを固定1920×1080で比較し、標準adapterを採用しました。Optional ELKの既存比較値はnode overlap 0、edge交差6、route-node交差3、fit 24%、aspect 3.18、lane順不成立でした。現在の標準adapterはnode overlap 0、route-node交差1、edge交差6、fit 57%、aspect 3.025、lane順成立です。この結果はadapter選択の検証証拠であり、fixtureのIRIやlabelを検出するruntime分岐には使いません。
 
 ## 4. 品質指標
 
@@ -147,7 +147,19 @@ JIT、module初期化、Docker/CI schedulingの揺らぎに対し、各operation
 
 Fixtureとsample数を変更する場合はbudgetを暗黙に維持せず、同じcommitで本書、`docs/testing.md`、backlogを更新します。継続的な時系列比較では固定Node/Docker imageとrunner classを使い、異なるmachineの絶対値を直接比較しません。
 
-## 6. Pan/dragの30 fps境界
+## 6. P1-46 小規模初期表示と関係transaction
+
+標準adapterは任意のobserverで`placement`、初期route、refinement、compaction、bounds、合計時間、visibility探索回数、候補数、実際に初期routeを生成したedge数、固定再利用したderived route数を計測できます。Observerは観測専用で、throwしてもlayoutを失敗させません。Route obstacleはendpoint pairでcacheし、route state Mapは他routeのboundsを初期化時と採用時だけ計算します。共有endpoint geometryもedge pair単位でcacheし、候補の辞書順第一成分であるnode本体交差の最小値が確定した候補だけにedge相互作用を計算します。この枝刈りは候補集合、同点時のroute signature、stable ID順を変更しません。
+
+Core CI gateはpizza、24 node/23 edgeの疎small、24 node/120 edgeの密smallを一回warmup後5回測り、projectionからsettled Sceneまでのp95を300 ms未満とします。2026-08-26の固定Docker実測はpizza 31.9 ms、疎small 6.1 ms、密small 209.2 msです。全fixtureで非endpoint node交差0、endpoint内部進入0、edge overlap 0、生成route最大3点を要求し、crossing上限はpizza 9、疎small 0、密small 398です。現結果は順に5、0、338で、最適化前の固定上限を悪化させません。
+
+Label置換、code-point順を保つopaque IRI写像、60 nodeを2つの`rdf:Bag`へ分けた非pizza包含fixtureでも同じ品質を検証します。Core layoutはTurtle、label、predicate、pizza namespaceを入力に取らず、Projection後のgeometry・membership・endpointだけで処理します。
+
+Relation add、predicate change、endpoint changeはpreviewで作ったidentity-bound prepared resultをapplyで再利用し、clone/deserialization、revision・context・confirmation不一致だけを保守的再検証へ戻します。20回warm後20 sampleのCore preview+apply p95は固定Dockerで37.9、36.4、37.3 msで、150 ms gate内です。Edge-onlyでは変更edgeの旧新endpointに一段でincidentなcandidate edgeだけをrerouteし、unaffected generated routeを`fixedDerivedRoutes`でexact維持します。Fixed peerはaffected routeの交差・重複costへ含めます。StandardとELKの混在view、parallel/self-loop、12 node/36 edgeのdense fixtureでもaffected/fixed件数とunaffected route完全一致を検証します。Edge-only要求がvisible structure、membership、profile、layout、view kindの互換条件を満たさない場合は`reconcile-edge-only-fallback` diagnosticとobserver eventへ理由を残します。
+
+Core値とは別に、production buildをVite previewで配信する固定Docker Chromium testを実行します。Sceneの期待node/edgeと対象関係、asset decode、`aria-busy=false`、DOM mutation停止後2 frameをsettled条件とし、Navigation Timing、Resource/Paint Timing、Long Task、CDPのLayout/RecalcStyle/Script/Taskを同じsampleへ記録します。2026-08-26の実測は初期pizza Sceneのbody受領からsettledまでp95 215.4 ms、各20回warm後20 sampleのrelation追加、predicate変更、endpoint変更がp95 78.2、62.3、75.2 msで、300/150 ms gate内です。機能E2E、pan/drag frame gate、このproduction transaction gateは別configとし、失敗原因を分離します。
+
+## 7. Pan/dragの30 fps境界
 
 DOMなしのCore testは、実browserのpaint、SVG更新、pointer event、Vue scheduling、GC pauseを測れないため「pan/drag 30 fps」を証明しません。Test用だけのgeometry loopを作って30 fpsと呼ぶこともしません。
 

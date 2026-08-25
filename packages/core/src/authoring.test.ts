@@ -900,6 +900,145 @@ ex:b rdfs:label "B" .
     }));
   });
 
+  it("direct edge編集は既存geometryを固定して一度だけrouteしprepared applyを再利用する", async () => {
+    const document = documentFor(baseSource);
+    const calls: Array<{ layoutRef: string; mode: string; fixed: boolean }> = [];
+    const adapters = ([
+      [STANDARD_LAYOUT_REFS.hierarchicalLr, "LR"],
+      [STANDARD_LAYOUT_REFS.hierarchicalTb, "TB"],
+    ] as const).map(([layoutRef, direction]): LayoutAdapter => {
+      const standard = new StandardLightweightLayoutAdapter(layoutRef, direction);
+      return {
+        layoutRef,
+        async layout(request) {
+          calls.push({
+            layoutRef,
+            mode: request.mode ?? "incremental",
+            fixed: request.scene.elements.every((element) => (
+              element.pinned && element.placement === "user"
+            )),
+          });
+          return standard.layout(request);
+        },
+      };
+    });
+    const context: ResolvedAuthoringContext = {
+      ...contextFor("revision-1"),
+      runtime: {
+        catalogsByProfile: new Map([[
+          standardRdfRdfsCatalog.profileRef,
+          { catalog: standardRdfRdfsCatalog },
+        ]]),
+        layouts: new LayoutAdapterRegistry(adapters),
+      },
+    };
+    const before = Object.fromEntries(await Promise.all(document.views.map(async (view) => (
+      [view.viewId, await buildIriographView(document, view.viewId, context.runtime)] as const
+    ))));
+    calls.length = 0;
+
+    const preview = await previewAuthoringCommands(document, [{
+      type: "connect-resources",
+      commandId: "edge-only-connect",
+      subjectIri: `${NS}b`,
+      predicateIri: `${NS}rel`,
+      objectIri: `${NS}a`,
+    }], context);
+
+    expect(preview.valid).toBe(true);
+    expect(calls.map((call) => call.mode)).toEqual([
+      "incremental", "route-only", "incremental", "route-only",
+    ]);
+    expect(calls.filter((call) => call.mode === "route-only").every((call) => call.fixed)).toBe(true);
+    const callsAfterPreview = calls.length;
+    const result = await applyAuthoringPreview(document, preview, context, {
+      confirmationId: preview.confirmationId,
+    });
+    expect(result.accepted).toBe(true);
+    expect(calls).toHaveLength(callsAfterPreview);
+    expect(result.scenes).toBeDefined();
+    for (const view of document.views) {
+      const previousScene = before[view.viewId]!;
+      const nextScene = result.scenes![view.viewId]!;
+      const previousGeometry = [...previousScene.containers, ...(previousScene.regions ?? []), ...previousScene.nodes]
+        .map((element) => [element.elementId, {
+          geometry: element.geometry,
+          pinned: element.pinned,
+          placement: element.placement,
+        }]);
+      const nextGeometry = [...nextScene.containers, ...(nextScene.regions ?? []), ...nextScene.nodes]
+        .map((element) => [element.elementId, {
+          geometry: element.geometry,
+          pinned: element.pinned,
+          placement: element.placement,
+        }]);
+      expect(Object.fromEntries(nextGeometry)).toEqual(Object.fromEntries(previousGeometry));
+    }
+
+    const staleDocument = structuredClone(document);
+    staleDocument.semantic.source += "\n";
+    const stale = await applyAuthoringPreview(staleDocument, preview, context, {
+      confirmationId: preview.confirmationId,
+    });
+    expect(stale.accepted).toBe(false);
+    expect(stale.diagnostics).toContainEqual(expect.objectContaining({ code: "authoring-preview-stale" }));
+    expect(calls).toHaveLength(callsAfterPreview);
+
+    const clonedPreview = structuredClone(preview);
+    const clonedApply = await applyAuthoringPreview(document, clonedPreview, context, {
+      confirmationId: clonedPreview.confirmationId,
+    });
+    expect(clonedApply.accepted).toBe(true);
+    expect(calls.slice(callsAfterPreview).map((call) => call.mode)).toEqual([
+      "incremental", "route-only", "incremental", "route-only",
+    ]);
+  });
+
+  it("rdf:type removalをdirect edge編集として扱わずroute-onlyへ誤分類しない", async () => {
+    const document = documentFor(baseSource);
+    const modes: string[] = [];
+    const adapters = ([
+      [STANDARD_LAYOUT_REFS.hierarchicalLr, "LR"],
+      [STANDARD_LAYOUT_REFS.hierarchicalTb, "TB"],
+    ] as const).map(([layoutRef, direction]): LayoutAdapter => {
+      const standard = new StandardLightweightLayoutAdapter(layoutRef, direction);
+      return {
+        layoutRef,
+        async layout(request) {
+          modes.push(request.mode ?? "incremental");
+          return standard.layout(request);
+        },
+      };
+    });
+    const source = `${baseSource}\n<${NS}a> <${RDF_TYPE}> <${NS}Task> .\n`;
+    const context: ResolvedAuthoringContext = {
+      ...contextFor("revision-1"),
+      runtime: {
+        catalogsByProfile: new Map([[
+          standardRdfRdfsCatalog.profileRef,
+          { catalog: standardRdfRdfsCatalog },
+        ]]),
+        layouts: new LayoutAdapterRegistry(adapters),
+      },
+    };
+    const preview = await previewAuthoringCommands(documentFor(source), [{
+      type: "remove-statement",
+      commandId: "remove-type",
+      statementRef: statementIdentityForNamedStatement({
+        subjectIri: `${NS}a`,
+        predicateIri: RDF_TYPE,
+        objectIri: `${NS}Task`,
+      }),
+      subjectIri: `${NS}a`,
+      predicateIri: RDF_TYPE,
+      objectIri: `${NS}Task`,
+    }], context);
+
+    expect(preview.valid).toBe(true);
+    expect(modes).not.toContain("route-only");
+    expect(modes).toEqual(["incremental", "incremental", "incremental", "incremental"]);
+  });
+
   it("multi-view failureとinvalid initial positionを元documentへrollbackする", async () => {
     const document = documentFor(baseSource);
     const brokenRuntime: ProjectionRuntimeContext = {
@@ -971,7 +1110,7 @@ ex:b rdfs:label "B" .
     expect(document).toEqual(documentFor(baseSource));
   });
 
-  it("preview後にasync layoutが失敗してもapply再検証で元documentへrollbackする", async () => {
+  it("preview済みcandidateはapplyで外部layoutを再実行せず同一結果を確定する", async () => {
     const document = documentFor(baseSource);
     const stableLr = new StandardLightweightLayoutAdapter(
       STANDARD_LAYOUT_REFS.hierarchicalLr,
@@ -1023,9 +1162,10 @@ ex:b rdfs:label "B" .
     const result = await applyAuthoringPreview(document, preview, context, {
       confirmationId: preview.confirmationId,
     });
-    expect(result.accepted).toBe(false);
-    expect(result.document).toEqual(document);
-    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+    expect(result.accepted).toBe(true);
+    expect(tbCalls).toBe(2);
+    expect(result.document).not.toEqual(document);
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({
       code: "layout-became-unavailable",
     }));
   });

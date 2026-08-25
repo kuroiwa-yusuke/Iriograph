@@ -47,7 +47,7 @@ Pickerもhost注入の非同期callbackです。Editorはcancel・stale・不正
 
 ## 編集transaction
 
-drag、resize、waypoint変更、template/icon overrideはpresentation transactionです。選択elementのoverlay entryだけを更新し、Turtleを変更しません。一つのpointer gestureを一つのundo履歴として扱います。
+drag、resize、waypoint/Bezier control変更、template/icon overrideはpresentation transactionです。選択elementのoverlay entryだけを更新し、Turtleを変更しません。一つのpointer gestureを一つのundo履歴として扱います。
 
 Edge routingはCore Sceneのderived `route`とportable overlayのmanual `waypoints`を分けます。
 Layout adapterの全routeはsource/target attachment込み2点以上で、Canvasはこれを直接描画します。
@@ -56,6 +56,20 @@ Label baseはpolyline arc-length 50%で、overlayには相対`labelOffset`だけ
 waypointとlabel offsetをまとめたsparse `routingUpdate`を渡し、Editorはnested routing extensionを保持しつつ
 空waypointとzero offsetを省略します。Edge overlayへgeometry、pinned、placementを混入させません。
 Public Canvasのlegacy `routingChange`はwaypoint操作時だけ併発し、Editorは購読しません。
+
+Curve routingは`routing.curve`へ、endpointからの相対handleと絶対座標のon-curve knotだけを保存します。
+描画時は0 knotならlayoutのguide routeから一組のcubic controlを補完し、1個以上なら隣接anchorから
+Catmull-Rom相当の接線を補完して、全segmentを一つの`M ... C ... C ...` pathへ連結します。利用者が
+knot handleを動かすと反対側を鏡映し、明示controlがない部分は常に自動補完へ戻ります。Curveのlabel baseは
+cubicを区分サンプリングした弧長50%であり、polyline midpointを流用しません。Canvasのpointer中は
+`previewRouting`だけを更新し、pointerupで一度だけsparse routingを確定します。Inspectorは座標表を持たず、
+knot追加・削除・全manual controlのresetだけを提供します。Projection、Scene、presentation-only reconciliationは
+curveとcurve内PointのIRI-keyed `extensions`をdeep copyし、座標丸め後も保持します。Turtle、node geometry、
+他edge routeは変更しません。Canvas content boundsはknot、実座標へ解決した明示handle、automatic補完した
+Bezier control/bowのcontrol hullも含めるため、負座標、拡大縮小、fit/reveal、保存再読込後も曲線と操作点をclipしません。
+Catalog既定curveは通常どおりroute modeをoverlayへ複製しませんが、初めてcurve controlを保存する場合だけ、
+`curve`には`routeMode: "curve"`が必須というportable schema不変条件を満たすため同じrouting entryへ明示します。
+Curve controlはCanvas compositeへtab stopを増やさず、既存active edgeとrouting keyboard commandで循環・編集します。
 
 標準軽量layoutはunordered endpoint pairごとにedgeを束ね、code-point順element IDから20 unit laneを
 決定します。Attachmentはnode辺内へclampし、外側stub/middle laneはclampせず多数edgeでも一意性を
@@ -101,7 +115,9 @@ Canvasからのedge削除やcontainerからの取り出しは、Scene elementを
 
 Resource自体の削除では、そのresourceをsubjectとするtype、label、property等を削除対象に含めます。低水準Core commandは別subjectからの参照やstructure membershipが残る場合にcascade省略を拒否します。標準Editorは現在の選択集合からcascade候補を構成し、選択外のincident edge、membership、Seq/Alt membershipへ波及する場合だけ削除modalを開き、Canvasの赤線と人向け影響一覧を示します。影響objectもすべて選択済みならmodalなしで一つのgraph patchを確定します。Seq/Alt memberを除く場合は残る`rdf:_n`も同じpatchで連番へ再構成し、最終candidateが構造制約を満たさなければ全体をrollbackします。
 
-P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とresource IRI allocatorを受け取ります。Editorはcommand draftをportable documentと別のsession stateとして保持し、Coreのprepare APIでcandidate dataset、graph patch、diagnostic、confirmation IDを得ます。Coreのapply APIは同じ元source、document fingerprint、context identity、正規化command、追加・削除statement集合からconfirmation IDを再計算し、prepared結果を再compileしてから既存の全view reconciliationへ渡します。標準Editorの非削除操作はこの2段階を一回の利用者action内で連続実行し、Preview/Apply画面として露出しません。
+P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とresource IRI allocatorを受け取ります。Editorはcommand draftをportable documentと別のsession stateとして保持し、Coreのprepare APIでcandidate dataset、graph patch、diagnostic、confirmation IDと全viewの検証済みSceneを得ます。Prepared resultはprocess-localなpreview object identityにだけ結び付け、document fingerprint、context identity/revision、confirmation ID、warning tokenを含むpreview coreが一致するときだけapplyで再利用します。Cloneまたはserializeされたpreview、stale document、context変更、core改変はprepared resultを実行データとして信用せず、従来のcompile、policy、reconciliationを再実行する保守経路へ戻します。標準Editorは同じrevisionの確定時にprepared Sceneをasset enrichmentへ直接渡し、publishで同じprojection/layoutを再実行しません。この2段階は一回の利用者action内で連続実行し、Preview/Apply画面として露出しません。
+
+既存direct edgeの追加、削除、predicate/endpoint置換、個別statement comment変更は、全viewの可視node・container・region集合、template、parent、membership、Seq/Alt ordinalが不変な場合だけedge-only reconciliationを使います。旧Sceneのgeometry、pinned、placementをelement identityでcandidate overlayへ移し、layout adapterへは既存geometryを全て固定した`route-only` requestを一回だけ渡します。追加・削除・identity/endpoint変更edgeの旧新endpointをseedに、そのendpointへ接続するcandidate edgeまでを決定的な一段のaffected集合とします。存続するunaffected generated edgeの旧Scene routeはoptional `fixedDerivedRoutes`へ渡し、標準adapterではinitial route、refinement、compactionの対象から除外します。Fixed routeは他のaffected routeの交差・重複costには含め、共通completion層がoptional fieldを無視するthird-party adapterの結果にも旧routeを復元します。この一時routeはSceneのderived値でありportable overlayやwaypointへ保存しません。Manual/user routeは従来のhard constraintです。返却Sceneのpinned/placementは元の値へ戻し、固定指定をportable overlayへ漏らしません。`rdf:type`、`rdfs:member`、ordinal、profileでstructuralと宣言されたpredicate、可視primitive/template/parent/membershipの差分、初期位置の後適用はfull reconciliationまたは通常refreshへfallbackします。Fallback時は`reconcile-edge-only-fallback`のinfo diagnosticへ固定理由codeを残し、任意observerへview ID、要求mode、実行mode、fallback理由を通知します。成功したroute-onlyはaffected/fixed件数、標準layout observerは実際に初期routeを計算した件数も通知し、observer例外はtransactionの成否へ影響させません。Direct Turtle適用は常に全view reconciliationを行い、そのtransactionで得たSceneだけをpublishへ再利用します。
 
 Allocatorは内部prepare時だけ呼び、返したIRIを正規化commandへ固定します。Coreはallowed namespaceだけでなく、graphのsubject、predicate、objectに同じIRIが既に使われていないことも検査します。Allocatorのcancel、error、古い非同期resultはdocumentへ入りません。Turtle textareaの未適用draftとstructured command draftは同時に有効にせず、どちらかが存在する間はもう一方のwrite入口を無効にします。
 
@@ -131,7 +147,7 @@ Rendererのsemantic object本体は固定したz bandへ分け、選択中も`re
 
 ## 性能基準
 
-500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集再投影を100ms未満、実Chromiumのpan/drag frame間隔p95を33.3ms以下、stress規模では初回projectionと標準軽量layoutを合計2秒未満とする固定benchmarkをCIで監視します。測定環境、fixture scale、warm-up回数を固定し、絶対budgetを動的倍率なしで判定します。Vue Canvasはviewport変更とScene要素変更を別のmemo境界で扱い、pan時の静的Scene全体のDOM patchとdrag時の無関係要素更新を避けます。
+500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集再投影を100ms未満、実Chromiumのpan/drag frame間隔p95を33.3ms以下、stress規模では初回projectionと標準軽量layoutを合計2秒未満とする固定benchmarkをCIで監視します。測定環境、fixture scale、warm-up回数を固定し、絶対budgetを動的倍率なしで判定します。P1-46のsmall graph gateはpizza、疎small、密smallでprojectionとlayoutのphase observerを収集し、固定Dockerの合計p95はそれぞれ31.9、6.1、209.2 msです。非endpoint node交差、endpoint内部進入、edge overlapはすべて0、最大中継点は1です。Relation追加、predicate変更、endpoint変更のprepared Core preview+applyは各20回warm後20 sampleでp95 37.9、36.4、37.3 msです。Production buildの実browser gateは、初期pizza Sceneのbody受領からsettledまでp95 215.4 ms、同じ3操作がp95 78.2、62.3、75.2 msで、Navigation/Resource/Paint/Long TaskとCDP phaseも記録します。Vue Canvasはviewport変更とScene要素変更を別のmemo境界で扱い、pan時の静的Scene全体のDOM patchとdrag時の無関係要素更新を避けます。
 
 表示要求をLLMへ接続するhostは、まずpresentationだけで達成できるか判定します。意味構造が必要な場合だけ、view profile/catalogからprojection capability summaryを導出し、許可語彙とともにLLM adapterへ渡します。分類、検証、失敗時rollbackは[authoring-profile.md](./authoring-profile.md)に従います。
 
@@ -143,7 +159,7 @@ Editorはdrag、resize、edge route mode・waypoint追加/削除/移動、edge l
 
 同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
 
-現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、5種のroute mode、endpoint anchor、parallel edge、reciprocal edge、self-loopを決定的に扱います。配置後のbounded routerはnodeとcomment reservationを障害物とし、既存edgeとの交差・重複、bend、距離を順に抑えます。自動生成routeはsource/target以外の中間点を最大1個とし、品質を満たす直線は0個にします。Manual waypointは通過必須のhard gateで、CanvasまたはInspectorから個別削除でき、最後の削除でautomaticへ戻ります。自動補助点はportable overlayへ保存しません。`@iriograph/layout-elk`はcompound graphと直交routing向けのoptional adapterとして実装済みで、固定user geometryをhard constraintとして保証できない入力では標準adapterへ保守的にfallbackします。ELK配置後もcommentがあるSceneはgeometry固定のroute-only refinementを行い、同じ最大1中間点のcompletionを通します。大規模browser実行ではhost-managed Worker engineを注入できます。
+現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、5種のroute mode、endpoint anchor、parallel edge、reciprocal edge、self-loopを決定的に扱います。配置後のbounded routerはnode本体とcomment reservationを区別し、候補を本体交差、共有endpointを除くedge交差、reservation交差、edge重複長、距離、bend数の辞書順で比較します。Route state Mapは各routeのboundsを初期化時に一回計算し、route採用時だけ更新します。共有endpoint geometryもedge pair単位でcacheし、boundsが交差しない障害物・routeはexactに候補比較から除外します。自動生成routeはsource/target以外の中間点を最大1個とし、品質を満たす直線は0個にします。Obstacle fallbackは固定720 unitに閉じず、実際に遮るnode spanと一pivotの接線条件から決定的な探索範囲を求め、巨大resize nodeでも本体回避を優先します。探索格子は各軸最大41点に制限します。Manual waypointは通過必須のhard gateで、CanvasまたはInspectorから個別削除でき、最後の削除でautomaticへ戻ります。自動補助点はportable overlayへ保存しません。`@iriograph/layout-elk`はcompound graphと直交routing向けのoptional adapterとして実装済みで、固定user geometryをhard constraintとして保証できない入力では標準adapterへ保守的にfallbackします。ELK配置後もcommentがあるSceneはgeometry固定のroute-only refinementを行い、同じ最大1中間点のcompletionを通します。大規模browser実行ではhost-managed Worker engineを注入できます。
 
 ## Editor回帰test境界
 

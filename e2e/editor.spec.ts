@@ -208,6 +208,46 @@ test("選択中心Inspectorの追加入口から名前だけでopaque IRIの要�
   expect(consoleErrors).toEqual([]);
 });
 
+test("関係追加はCanvasの通常クリックで始点から終点へ進み自己関係を暗黙作成しない", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await openPurchaseSample(page);
+  const inspector = page.locator(".iriograph-inspector");
+  const source = page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" });
+  const target = page.locator(".iriograph-scene-node").filter({ hasText: "完了" });
+  const geometryBefore = await canvasGeometrySnapshot(page);
+  const turtleBefore = await readTurtle(page);
+
+  await source.click();
+  await inspector.getByRole("button", { name: "関係を追加" }).click();
+  await expect(inspector.locator(".iriograph-intent-selection")).toContainText("始点内容を審査");
+  await expect(inspector.locator(".iriograph-intent-selection")).toContainText("終点未選択");
+
+  await source.click();
+  await expect(inspector).toContainText("始点とは別の要素");
+  await expect(inspector.locator(".iriograph-intent-selection")).toContainText("終点未選択");
+  await expect(page.locator(".iriograph-edge-group")).toHaveCount(5);
+
+  await target.click();
+  await expect(inspector.locator(".iriograph-intent-selection")).toContainText("終点完了");
+  const referenceRelation = inspector.locator(".iriograph-predicate-cards label")
+    .filter({ hasText: "参照" })
+    .first();
+  await expect(referenceRelation).toBeVisible();
+  await referenceRelation.locator('input[type="radio"]').check();
+  await inspector.getByRole("button", { name: "関係を作成" }).click();
+
+  await expect(page.locator(".iriograph-edge-group")).toHaveCount(6);
+  await expect.poll(async () => JSON.stringify(await canvasGeometrySnapshot(page)))
+    .toBe(JSON.stringify(geometryBefore));
+  expect(await readTurtle(page)).not.toBe(turtleBefore);
+  expect(consoleErrors).toEqual([]);
+});
+
 test("意味Inspectorをcategory・近傍・型/所属・host CSS・狭幅で一貫表示する", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -750,7 +790,52 @@ test("parallel/self-loopを個別選択しstraight/curve・端子・manual routi
   await routeMode.selectOption("curve");
   await expect(routeMode).toHaveValue("curve");
   await expect(page.locator(".iriograph-waypoints circle")).toHaveCount(0);
-  await expect(selfLoop.locator(".iriograph-edge-path")).toHaveAttribute("d", /[CQ]/u);
+  const curvePath = selfLoop.locator(".iriograph-edge-path");
+  await expect(curvePath).toHaveCount(1);
+  await expect(curvePath).toHaveAttribute("d", /^M .* C /u);
+  await expect(curvePath).not.toHaveAttribute("d", /[LQ]/u);
+
+  await routing.getByRole("button", { name: "曲線点を追加" }).click();
+  await expect(page.locator(".iriograph-curve-knot")).toHaveCount(1);
+  await expect(page.locator(".iriograph-curve-handle")).toHaveCount(4);
+  await page.locator(".iriograph-editor-header button").click();
+  await expect(page.getByText("browser working copyを保存しました")).toBeVisible();
+  const savedCurveOverlay = await page.evaluate(() => {
+    const source = window.localStorage.getItem(
+      "iriograph.mock.workspace:models/purchase-approval.iriograph",
+    );
+    if (!source) return undefined;
+    const saved = JSON.parse(source) as {
+      views: Array<{ overlay: Record<string, {
+        routing?: { routeMode?: string; curve?: { knots?: unknown[] } };
+      }> }>;
+    };
+    return Object.values(saved.views[0]?.overlay ?? {}).find(
+      (entry) => entry.routing?.curve?.knots?.length === 1,
+    );
+  });
+  expect(savedCurveOverlay).toMatchObject({
+    routing: { routeMode: "curve", curve: { knots: [expect.any(Object)] } },
+  });
+
+  await openPurchaseSample(page);
+  await selfLoop.dispatchEvent("click");
+  await page.locator(".iriograph-inspector-mode-tabs")
+    .getByRole("button", { name: "ビュー", exact: true }).click();
+  await expect(routeMode).toHaveValue("curve");
+  await expect(page.locator(".iriograph-curve-knot")).toHaveCount(1);
+  await expect(curvePath).toHaveAttribute("d", /^M .* C /u);
+  await expect(curvePath).not.toHaveAttribute("d", /[LQ]/u);
+
+  await routing.getByRole("button", { name: "曲線点 1を削除" }).click();
+  await expect(page.locator(".iriograph-curve-knot")).toHaveCount(0);
+  await expect(page.locator(".iriograph-curve-handle")).toHaveCount(2);
+  await expect(curvePath).toHaveAttribute("d", /^M .* C /u);
+  await routing.getByRole("button", { name: "曲線点を追加" }).click();
+  await expect(page.locator(".iriograph-curve-knot")).toHaveCount(1);
+  await routing.getByRole("button", { name: "自動曲線へ戻す" }).click();
+  await expect(page.locator(".iriograph-curve-knot")).toHaveCount(0);
+  await expect(page.locator(".iriograph-curve-handle")).toHaveCount(2);
 
   await routing.getByLabel("source terminal marker").selectOption("diamond");
   await routing.getByLabel("target terminal marker").selectOption("circle");
@@ -873,6 +958,53 @@ test("single-tab-stop navigatorで選択・geometry・routingをkeyboard完結�
   expect(consoleErrors).toEqual([]);
 });
 
+test("選択要素の包含一覧から所属先と包含要素をCanvasで確認する", async ({ page }) => {
+  await openPurchaseSample(page);
+  const review = page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" });
+  await review.click();
+
+  const overview = page.getByLabel("選択要素の包含一覧");
+  const belongsTo = overview.getByLabel("属する領域");
+  await expect(belongsTo).toContainText("業務オペレーション");
+  await expect(overview.getByLabel("含む要素")).toContainText("含む要素はありません");
+
+  await belongsTo.locator("li").filter({ hasText: "業務オペレーション" })
+    .getByRole("button", { name: "Canvasで確認" }).click();
+  const operations = page.locator(".iriograph-scene-region").filter({ hasText: "業務オペレーション" });
+  await expect(operations).toHaveClass(/selected/u);
+  await expect(page.getByLabel("選択要素の包含一覧").getByLabel("含む要素"))
+    .toContainText("内容を審査");
+});
+
+test("既存viewを縦方向へ切り替えてもTurtleとユーザー配置を保持する", async ({ page }) => {
+  await openPurchaseSample(page);
+  const turtleBefore = await readTurtle(page);
+  const start = page.locator(".iriograph-scene-node").filter({ hasText: "開始" });
+  await start.click();
+  const viewport = page.locator(".iriograph-canvas-scroll");
+  const generatedLeft = await numericStyle(start, "left");
+  await viewport.focus();
+  await page.keyboard.press("Control+ArrowRight");
+  await expect.poll(() => numericStyle(start, "left")).toBeCloseTo(generatedLeft + 1, 0);
+  const userPosition = {
+    left: await numericStyle(start, "left"),
+    top: await numericStyle(start, "top"),
+  };
+
+  await page.locator(".iriograph-view-actions").getByRole("button", { name: "設定" }).click();
+  const dialog = page.locator(".iriograph-view-dialog");
+  const direction = dialog.getByLabel("配置方向");
+  await expect(direction).toHaveValue("LR");
+  await direction.selectOption("TB");
+  await dialog.getByRole("button", { name: "適用", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator(".iriograph-canvas-scroll")).toHaveAttribute("aria-busy", "false");
+
+  await expect.poll(() => numericStyle(start, "left")).toBeCloseTo(userPosition.left, 0);
+  await expect.poll(() => numericStyle(start, "top")).toBeCloseTo(userPosition.top, 0);
+  expect(await readTurtle(page)).toBe(turtleBefore);
+});
+
 async function requiredBox(locator: Locator, label: string) {
   const box = await locator.boundingBox();
   if (!box) throw new Error(`${label} does not have a bounding box`);
@@ -884,6 +1016,27 @@ async function readTurtle(page: Page): Promise<string> {
   const source = await page.getByLabel("Turtle source").inputValue();
   await page.getByRole("button", { name: /Diagram/ }).click();
   return source;
+}
+
+async function canvasGeometrySnapshot(page: Page): Promise<Record<string, {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}>> {
+  return page.locator([
+    ".iriograph-scene-region[data-element-id]",
+    ".iriograph-scene-container[data-element-id]",
+    ".iriograph-scene-node[data-element-id]",
+  ].join(",")).evaluateAll((elements) => Object.fromEntries(elements.map((element) => {
+    const style = getComputedStyle(element);
+    return [element.getAttribute("data-element-id") ?? "", {
+      left: Number.parseFloat(style.left),
+      top: Number.parseFloat(style.top),
+      width: Number.parseFloat(style.width),
+      height: Number.parseFloat(style.height),
+    }];
+  }).sort(([left], [right]) => left.localeCompare(right))));
 }
 
 async function dispatchPointerDrag(

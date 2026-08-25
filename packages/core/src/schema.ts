@@ -157,6 +157,33 @@ export const iriographDocumentSchema = {
         extensions: extensionProperty,
       },
     },
+    curveKnot: {
+      type: "object",
+      additionalProperties: false,
+      required: ["point"],
+      properties: {
+        point: { $ref: "#/$defs/point" },
+        incomingHandle: { $ref: "#/$defs/point" },
+        outgoingHandle: { $ref: "#/$defs/point" },
+        extensions: extensionProperty,
+      },
+    },
+    curveRouting: {
+      type: "object",
+      additionalProperties: false,
+      minProperties: 1,
+      properties: {
+        sourceHandle: { $ref: "#/$defs/point" },
+        targetHandle: { $ref: "#/$defs/point" },
+        knots: {
+          type: "array",
+          minItems: 1,
+          maxItems: 64,
+          items: { $ref: "#/$defs/curveKnot" },
+        },
+        extensions: extensionProperty,
+      },
+    },
     styleOverride: {
       type: "object",
       additionalProperties: false,
@@ -211,7 +238,19 @@ export const iriographDocumentSchema = {
       allOf: [{
         if: {
           required: ["routeMode"],
-          properties: { routeMode: { enum: ["straight", "curve"] } },
+          properties: { routeMode: { const: "straight" } },
+        },
+        then: { properties: { waypoints: false, curve: false } },
+      }, {
+        if: { required: ["curve"] },
+        then: {
+          required: ["routeMode"],
+          properties: { routeMode: { const: "curve" }, waypoints: false },
+        },
+      }, {
+        if: {
+          required: ["routeMode"],
+          properties: { routeMode: { const: "curve" } },
         },
         then: { properties: { waypoints: false } },
       }],
@@ -221,6 +260,7 @@ export const iriographDocumentSchema = {
           type: "array",
           items: { $ref: "#/$defs/point" },
         },
+        curve: { $ref: "#/$defs/curveRouting" },
         labelOffset: { $ref: "#/$defs/point" },
         sourceAnchor: { $ref: "#/$defs/endpointAnchor" },
         targetAnchor: { $ref: "#/$defs/endpointAnchor" },

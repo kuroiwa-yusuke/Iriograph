@@ -30,6 +30,8 @@ export type CanonicalSemanticDatasetOptions = {
   serializerVersion: TurtleSerializerVersion;
   baseIri?: string;
   prefixes?: Readonly<Record<string, string>>;
+  /** Structured authoring may request a verified edge-only fast path. */
+  reconciliationMode?: "full" | "edge-only";
 } & SemanticValidationTransactionOptions;
 
 /**
@@ -132,13 +134,17 @@ async function applyPreparedSemanticSourceTarget(
   document: IriographDocument,
   source: string,
   context: ProjectionRuntimeContext,
-  options: SemanticValidationTransactionOptions,
+  options: SemanticValidationTransactionOptions & {
+    reconciliationMode?: "full" | "edge-only";
+  },
 ): Promise<SemanticSourceUpdate> {
   const candidate = clone(document);
   // Direct source editing keeps the user's exact accepted Turtle text. Rich
   // command canonical serialization is a separate authoring concern.
   candidate.semantic.source = source;
-  const result = await reconcileIriographDocumentViews(document, candidate, context);
+  const result = await reconcileIriographDocumentViews(document, candidate, context, {
+    mode: options.reconciliationMode ?? "full",
+  });
   const categorized = categorizePipelineDiagnostics(result.diagnostics);
   if (!result.accepted) {
     return {
@@ -180,6 +186,7 @@ async function applyPreparedSemanticSourceTarget(
     accepted: true,
     document: result.document,
     diagnostics,
+    scenes: clone(result.scenes),
     warningConfirmation: validation.warningConfirmation,
   };
 }

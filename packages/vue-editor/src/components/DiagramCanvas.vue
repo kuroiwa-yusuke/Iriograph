@@ -12,6 +12,7 @@ import {
 
 import type {
   DiagramScene,
+  EdgeCurveRouting,
   EdgeTerminalMarker,
   EdgeEndpointShape,
   ElementGeometry,
@@ -30,18 +31,31 @@ import {
 } from "@iriograph/core";
 
 import {
+  appendEdgeCurveKnot,
   appendEdgeWaypoint,
+  copyEdgeCurveRouting,
+  cubicCurvePath,
   derivedEdgeRoute,
   editableEdgeWaypoints,
+  edgeCurveControlHandles,
+  edgeCurveKnotAppendIndex,
   edgeLabelBase,
+  insertEdgeCurveKnot,
   insertEdgeWaypoint,
+  moveEdgeCurveKnot,
   moveEdgeWaypoint,
+  pointAtCurveFraction,
   previewEdgeRoute,
+  removeEdgeCurveHandle,
+  removeEdgeCurveKnot,
   removeEdgeWaypoint,
+  routingWithCurve,
   routingWithLabelOffset,
   routingWithEndpointAnchor,
   routingWithWaypoints,
+  updateEdgeCurveHandle,
   type EditableEdgeRouting,
+  type EdgeCurveControlHandle,
   type EdgeRoutingUpdate,
 } from "../edge-routing";
 import {
@@ -59,6 +73,7 @@ import {
   diagramContentBounds,
   diagramWorkAreaBounds,
   diagramFitZoom,
+  edgeRenderedBoundsPoints,
   expandDiagramWorkAreaBounds,
   normalizeDiagramZoom,
   scrollToRevealBounds,
@@ -225,6 +240,10 @@ type KeyboardGesture = {
   geometryChanges?: GeometryChange[];
   routing?: EditableEdgeRouting;
 };
+
+type CurveKeyboardTarget =
+  | { kind: "knot"; knotIndex: number }
+  | { kind: "handle"; handle: EdgeCurveControlHandle };
 
 const originalEndpointElementsById = computed(() => new Map(
   [...props.scene.containers, ...(props.scene.regions ?? []), ...props.scene.nodes]
@@ -409,6 +428,7 @@ watch(() => props.readOnly, (readOnly) => {
   if (readOnly && keyboardGesture) cancelKeyboardGesture();
   if (readOnly) {
     previewNodeContentOffsets.value = {};
+    previewRouting.value = {};
   }
 });
 
@@ -467,7 +487,7 @@ function displayRoutePath(edge: SceneEdge, route: readonly Point[]): string {
     ?? (edge.waypoints?.length ? "manual" : "auto");
   if (mode === "straight") return polylinePath([start, end]);
   if (mode === "orthogonal") return orthogonalPath(route);
-  if (mode === "curve") return curvedPath(route);
+  if (mode === "curve") return cubicCurvePath(route, currentCurve(edge));
   return polylinePath(route);
 }
 
@@ -483,64 +503,60 @@ function orthogonalPath(points: readonly Point[]): string {
   return polylinePath(result);
 }
 
-/** Keeps a derived obstacle-avoiding corridor and visibly bows a direct route. */
-function curvedPath(points: readonly Point[]): string {
-  const start = points[0];
-  const end = points.at(-1);
-  if (!start || !end) return "";
-  if (points.length < 3) {
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance === 0) {
-      return `M ${start.x} ${start.y} C ${start.x + 36} ${start.y - 48}, ${start.x + 64} ${start.y + 48}, ${start.x} ${start.y}`;
-    }
-    const bow = clamp(distance * .18, 24, 80);
-    const control = {
-      x: (start.x + end.x) / 2 - dy / distance * bow,
-      y: (start.y + end.y) / 2 + dx / distance * bow,
-    };
-    return `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`;
-  }
-  return roundedPolylinePath(points);
-}
-
-/** Rounds only bend neighborhoods so curves do not leave the layout corridor. */
-function roundedPolylinePath(points: readonly Point[], radius = 10): string {
-  const start = points[0];
-  const end = points.at(-1);
-  if (!start || !end) return "";
-  const parts = [`M ${start.x} ${start.y}`];
-  for (let index = 1; index < points.length - 1; index += 1) {
-    const previous = points[index - 1]!;
-    const corner = points[index]!;
-    const next = points[index + 1]!;
-    const incoming = Math.hypot(corner.x - previous.x, corner.y - previous.y);
-    const outgoing = Math.hypot(next.x - corner.x, next.y - corner.y);
-    if (incoming === 0 || outgoing === 0) continue;
-    const inset = Math.min(radius, incoming / 2, outgoing / 2);
-    const before = {
-      x: corner.x + (previous.x - corner.x) * inset / incoming,
-      y: corner.y + (previous.y - corner.y) * inset / incoming,
-    };
-    const after = {
-      x: corner.x + (next.x - corner.x) * inset / outgoing,
-      y: corner.y + (next.y - corner.y) * inset / outgoing,
-    };
-    parts.push(`L ${before.x} ${before.y}`, `Q ${corner.x} ${corner.y} ${after.x} ${after.y}`);
-  }
-  parts.push(`L ${end.x} ${end.y}`);
-  return parts.join(" ");
-}
-
 function edgeLabelPosition(edge: SceneEdge): Point {
-  const base = edgeLabelBase({ route: renderedRoute(edge) });
+  const route = renderedRoute(edge);
+  const base = edgeRouteMode(edge) === "curve"
+    ? pointAtCurveFraction(route, currentCurve(edge), .5)
+    : edgeLabelBase({ route });
   const preview = previewRouting.value[edge.elementId];
   const labelOffset = preview === undefined ? edge.labelOffset : preview?.labelOffset;
   return {
     x: base.x + (labelOffset?.x ?? 0),
     y: base.y + (labelOffset?.y ?? 0),
   };
+}
+
+function currentCurve(edge: SceneEdge): EdgeCurveRouting | undefined {
+  const preview = previewRouting.value[edge.elementId];
+  return preview === undefined ? edge.curve : preview?.curve;
+}
+
+function selectedCurveHandles(edge: SceneEdge): EdgeCurveControlHandle[] {
+  if (edgeRouteMode(edge) !== "curve") return [];
+  return edgeCurveControlHandles(renderedRoute(edge), currentCurve(edge));
+}
+
+function selectedCurveKnots(edge: SceneEdge): NonNullable<EdgeCurveRouting["knots"]> {
+  return currentCurve(edge)?.knots ?? [];
+}
+
+function isActiveCurveKnot(index: number): boolean {
+  return index === activeWaypointIndex.value;
+}
+
+function isActiveCurveHandle(edge: SceneEdge, handleIndex: number): boolean {
+  return selectedCurveKnots(edge).length + handleIndex === activeWaypointIndex.value;
+}
+
+function curveKeyboardTargets(
+  edge: SceneEdge,
+  curve: EdgeCurveRouting | undefined = currentCurve(edge),
+): CurveKeyboardTarget[] {
+  return [
+    ...(curve?.knots ?? []).map((_, knotIndex): CurveKeyboardTarget => ({
+      kind: "knot",
+      knotIndex,
+    })),
+    ...edgeCurveControlHandles(renderedRoute(edge), curve).map((handle): CurveKeyboardTarget => ({
+      kind: "handle",
+      handle,
+    })),
+  ];
+}
+
+/** Keeps curve controls approximately constant-sized on screen at every zoom. */
+function curveControlRadius(kind: "knot" | "handle"): number {
+  return (kind === "knot" ? 9 : 7) / Math.max(.1, props.zoom);
 }
 
 function editableWaypoints(edge: SceneEdge): Point[] {
@@ -859,6 +875,69 @@ function startWaypointMove(event: PointerEvent, edge: SceneEdge, index: number):
   });
 }
 
+function startCurveKnotMove(event: PointerEvent, edge: SceneEdge, index: number): void {
+  if (props.readOnly || event.button !== 0 || edgeRouteMode(edge) !== "curve") return;
+  event.preventDefault();
+  event.stopPropagation();
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
+  emit("gestureStart");
+  const origin = { x: event.clientX, y: event.clientY };
+  const initial = currentCurve(edge);
+  let pending = initial;
+  let changed = false;
+  trackPointer((moveEvent) => {
+    pending = moveEdgeCurveKnot(initial, index, {
+      x: (moveEvent.clientX - origin.x) / props.zoom,
+      y: (moveEvent.clientY - origin.y) / props.zoom,
+    }, { width: props.scene.width, height: props.scene.height, padding: 8 });
+    previewRouting.value = {
+      ...previewRouting.value,
+      [edge.elementId]: routingWithCurve(edge, pending) ?? null,
+    };
+    changed = true;
+  }, (cancelled) => {
+    clearRoutingPreview(edge.elementId);
+    if (!cancelled && changed && !props.readOnly) emitCurveRouting(edge, pending);
+  });
+}
+
+function startCurveHandleMove(
+  event: PointerEvent,
+  edge: SceneEdge,
+  handle: EdgeCurveControlHandle,
+): void {
+  if (props.readOnly || event.button !== 0 || edgeRouteMode(edge) !== "curve") return;
+  event.preventDefault();
+  event.stopPropagation();
+  requestSelection({ elementId: edge.elementId, mode: "replace" });
+  emit("gestureStart");
+  const origin = { x: event.clientX, y: event.clientY };
+  const initial = currentCurve(edge);
+  const route = renderedRoute(edge);
+  let pending = initial;
+  let changed = false;
+  trackPointer((moveEvent) => {
+    pending = updateEdgeCurveHandle(route, initial, handle, {
+      x: handle.point.x + (moveEvent.clientX - origin.x) / props.zoom,
+      y: handle.point.y + (moveEvent.clientY - origin.y) / props.zoom,
+    });
+    previewRouting.value = {
+      ...previewRouting.value,
+      [edge.elementId]: routingWithCurve(edge, pending) ?? null,
+    };
+    changed = true;
+  }, (cancelled) => {
+    clearRoutingPreview(edge.elementId);
+    if (!cancelled && changed && !props.readOnly) emitCurveRouting(edge, pending);
+  });
+}
+
+function clearRoutingPreview(elementId: string): void {
+  const next = { ...previewRouting.value };
+  delete next[elementId];
+  previewRouting.value = next;
+}
+
 function startLabelMove(event: PointerEvent, edge: SceneEdge): void {
   requestSelection({ elementId: edge.elementId, mode: "replace" });
   if (props.readOnly || event.button !== 0) return;
@@ -1134,16 +1213,89 @@ function semanticReconnectPath(): string {
 
 function addWaypointAtPointer(event: MouseEvent, edge: SceneEdge): void {
   requestSelection({ elementId: edge.elementId, mode: "replace" });
-  if (props.readOnly || !waypointEditingAllowed(edge)) return;
+  if (props.readOnly) return;
   const requested = canvasPoint(event);
   if (!requested) return;
   event.preventDefault();
+  if (edgeRouteMode(edge) === "curve") {
+    emit("gestureStart");
+    emitCurveRouting(edge, insertEdgeCurveKnot(
+      renderedRoute(edge),
+      currentCurve(edge),
+      clampPointToScene(requested),
+    ));
+    emit("gestureEnd");
+    return;
+  }
+  if (!waypointEditingAllowed(edge)) return;
   emit("gestureStart");
   emitWaypointRouting(edge, insertEdgeWaypoint({
     route: renderedRoute(edge),
     waypoints: edge.waypoints,
   }, clampPointToScene(requested)));
   emit("gestureEnd");
+}
+
+function handleCurveKnotKeydown(event: KeyboardEvent, edge: SceneEdge, index: number): void {
+  if (props.readOnly || edgeRouteMode(edge) !== "curve") return;
+  if (event.key === "Delete" || event.key === "Backspace") {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("gestureStart");
+    emitCurveRouting(edge, removeEdgeCurveKnot(currentCurve(edge), index));
+    emit("gestureEnd");
+    return;
+  }
+  const movement = curveKeyboardMovement(event);
+  if (!movement) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("gestureStart");
+  emitCurveRouting(edge, moveEdgeCurveKnot(
+    currentCurve(edge),
+    index,
+    movement,
+    { width: props.scene.width, height: props.scene.height, padding: 8 },
+  ));
+  emit("gestureEnd");
+}
+
+function handleCurveHandleKeydown(
+  event: KeyboardEvent,
+  edge: SceneEdge,
+  handle: EdgeCurveControlHandle,
+): void {
+  if (props.readOnly || edgeRouteMode(edge) !== "curve") return;
+  if ((event.key === "Delete" || event.key === "Backspace") && handle.manual) {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("gestureStart");
+    emitCurveRouting(edge, removeEdgeCurveHandle(currentCurve(edge), handle));
+    emit("gestureEnd");
+    return;
+  }
+  const movement = curveKeyboardMovement(event);
+  if (!movement) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("gestureStart");
+  emitCurveRouting(edge, updateEdgeCurveHandle(
+    renderedRoute(edge),
+    currentCurve(edge),
+    handle,
+    { x: handle.point.x + movement.x, y: handle.point.y + movement.y },
+  ));
+  emit("gestureEnd");
+}
+
+function curveKeyboardMovement(event: KeyboardEvent): Point | undefined {
+  const step = event.shiftKey ? 10 : 1;
+  return {
+    ArrowLeft: { x: -step, y: 0 },
+    ArrowRight: { x: step, y: 0 },
+    ArrowUp: { x: 0, y: -step },
+    ArrowDown: { x: 0, y: step },
+  }[event.key];
 }
 
 function handleWaypointKeydown(event: KeyboardEvent, edge: SceneEdge, index: number): void {
@@ -1247,6 +1399,13 @@ function emitWaypointRouting(edge: SceneEdge, waypoints: readonly Point[] | unde
   emit("routingChange", {
     elementId: edge.elementId,
     waypoints: routing?.waypoints?.map((point) => ({ ...point })) ?? [],
+  });
+}
+
+function emitCurveRouting(edge: SceneEdge, curve: EdgeCurveRouting | undefined): void {
+  emit("routingUpdate", {
+    elementId: edge.elementId,
+    routing: routingWithCurve(edge, curve),
   });
 }
 
@@ -1559,6 +1718,41 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
   const activeId = activeNavigatorElementId.value;
   const edge = props.scene.edges.find((candidate) => candidate.elementId === activeId);
   if (edge) {
+    if (edgeRouteMode(edge) === "curve") {
+      if (!selectedElementIdsSet.value.has(activeId)) {
+        requestSelection({ elementId: activeId, mode: "replace" });
+      }
+      // Use the committed curve as the gesture origin. previewRouting changes
+      // every repeat, so deriving handles from it would add 1, 3, 6... units.
+      const targets = curveKeyboardTargets(edge, edge.curve);
+      if (targets.length === 0) return;
+      const index = clamp(activeWaypointIndex.value, 0, targets.length - 1);
+      activeWaypointIndex.value = index;
+      const target = targets[index]!;
+      const gesture = beginKeyboardGesture("waypoint", edge.elementId, event.key);
+      gesture.delta.x += movement.x;
+      gesture.delta.y += movement.y;
+      const curve = target.kind === "knot"
+        ? moveEdgeCurveKnot(
+            edge.curve,
+            target.knotIndex,
+            gesture.delta,
+            { width: props.scene.width, height: props.scene.height, padding: 8 },
+          )
+        : updateEdgeCurveHandle(
+            renderedRoute(edge),
+            edge.curve,
+            target.handle,
+            {
+              x: target.handle.point.x + gesture.delta.x,
+              y: target.handle.point.y + gesture.delta.y,
+            },
+          );
+      gesture.routing = routingWithCurve(edge, curve);
+      previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
+      announce(target.kind === "knot" ? `曲線点 ${target.knotIndex + 1}を移動` : "曲線ハンドルを調整");
+      return;
+    }
     if (!waypointEditingAllowed(edge)) {
       announce("直線・曲線ではWaypointを編集しません");
       return;
@@ -1667,11 +1861,41 @@ function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | 
   const edge = props.scene.edges.find((candidate) => (
     candidate.elementId === activeNavigatorElementId.value
   ));
-  if (!edge || !waypointEditingAllowed(edge)) return;
+  if (!edge) return;
   if (!selectedElementIdsSet.value.has(edge.elementId)) {
     requestSelection({ elementId: edge.elementId, mode: "replace" });
   }
   if (event.repeat) return;
+  if (edgeRouteMode(edge) === "curve") {
+    const targets = curveKeyboardTargets(edge, edge.curve);
+    const target = targets[clamp(activeWaypointIndex.value, 0, Math.max(0, targets.length - 1))];
+    let curve: EdgeCurveRouting | undefined;
+    let addedKnotIndex = -1;
+    if (operation === "add") {
+      addedKnotIndex = edgeCurveKnotAppendIndex(renderedRoute(edge), edge.curve);
+      curve = appendEdgeCurveKnot(renderedRoute(edge), edge.curve);
+    } else if (target?.kind === "knot") {
+      curve = removeEdgeCurveKnot(edge.curve, target.knotIndex);
+    } else if (target?.kind === "handle" && target.handle.manual) {
+      curve = removeEdgeCurveHandle(edge.curve, target.handle);
+    } else {
+      announce("自動曲線ハンドルは削除せず、矢印キーで手動調整できます");
+      return;
+    }
+    const gesture = beginKeyboardGesture(
+      operation === "add" ? "waypoint-add" : "waypoint-remove",
+      edge.elementId,
+      event.key,
+    );
+    gesture.routing = routingWithCurve(edge, curve);
+    previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
+    activeWaypointIndex.value = operation === "add"
+      ? Math.max(0, addedKnotIndex)
+      : Math.min(activeWaypointIndex.value, Math.max(0, curveKeyboardTargets(edge, curve).length - 1));
+    announce(operation === "add" ? "曲線点を追加" : "曲線の制御点を削除");
+    return;
+  }
+  if (!waypointEditingAllowed(edge)) return;
   const gesture = beginKeyboardGesture(
     operation === "add" ? "waypoint-add" : "waypoint-remove",
     edge.elementId,
@@ -1691,15 +1915,17 @@ function moveActiveWaypoint(movement: "previous" | "next"): void {
   const edge = props.scene.edges.find((candidate) => (
     candidate.elementId === activeNavigatorElementId.value
   ));
-  if (!edge || !waypointEditingAllowed(edge)) return;
-  const count = editableEdgeWaypoints(edge).length;
+  if (!edge) return;
+  const curveMode = edgeRouteMode(edge) === "curve";
+  if (!curveMode && !waypointEditingAllowed(edge)) return;
+  const count = curveMode ? curveKeyboardTargets(edge).length : editableEdgeWaypoints(edge).length;
   if (count === 0) {
-    announce("Waypointはありません");
+    announce(curveMode ? "曲線の制御点はありません" : "Waypointはありません");
     return;
   }
   const delta = movement === "next" ? 1 : -1;
   activeWaypointIndex.value = (activeWaypointIndex.value + delta + count) % count;
-  announce(`Waypoint ${activeWaypointIndex.value + 1}/${count}を対象にしました`);
+  announce(`${curveMode ? "曲線制御点" : "Waypoint"} ${activeWaypointIndex.value + 1}/${count}を対象にしました`);
 }
 
 function beginKeyboardGesture(
@@ -1964,7 +2190,13 @@ function elementBounds(elementId: string): ElementGeometry | undefined {
   if (geometryElement) return geometryElement.geometry;
   const edge = props.scene.edges.find((candidate) => candidate.elementId === elementId);
   if (!edge) return undefined;
-  const points = renderedRoute(edge);
+  const route = renderedRoute(edge);
+  const points = edgeRenderedBoundsPoints({
+    route,
+    routeMode: edgeRouteMode(edge),
+    curve: currentCurve(edge),
+    waypoints: undefined,
+  }, route);
   if (points.length === 0) return undefined;
   const xs = points.map((point) => point.x);
   const ys = points.map((point) => point.y);
@@ -1986,6 +2218,7 @@ function isBlankCanvasTarget(target: EventTarget | null): boolean {
     ".iriograph-scene-region",
     ".iriograph-edge-group",
     ".iriograph-waypoints",
+    ".iriograph-curve-controls",
     ".iriograph-endpoint-anchors",
     ".iriograph-resize-handle",
   ].join(","));
@@ -2158,14 +2391,19 @@ function snapshotScene(scene: DiagramScene): DiagramScene {
     })),
     edges: scene.edges.map((edge) => ({
       ...edge,
-      route: edge.route?.map((point) => ({ ...point })),
-      waypoints: edge.waypoints?.map((point) => ({ ...point })),
-      labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
+      route: edge.route?.map(cloneScenePoint),
+      waypoints: edge.waypoints?.map(cloneScenePoint),
+      curve: copyEdgeCurveRouting(edge.curve),
+      labelOffset: edge.labelOffset ? cloneScenePoint(edge.labelOffset) : undefined,
       sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
       targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
     })),
     diagnostics: [...scene.diagnostics],
   };
+}
+
+function cloneScenePoint(point: Point): Point {
+  return JSON.parse(JSON.stringify(point)) as Point;
 }
 
 defineExpose<DiagramCanvasNavigationApi>({
@@ -2222,6 +2460,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             selectedElementId,
             selectedElementIds,
             activeNavigatorElementId,
+            activeWaypointIndex,
             readOnly,
             semanticDraftPosition,
             semanticEndpointReconnect,
@@ -2479,6 +2718,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             :data-parent-element-id="node.parentElementId ?? ''"
             :class="[
               `shape-${node.shape}`,
+              `label-direction-${node.nodeLabelWritingDirection === 'vertical-down' ? 'vertical' : 'horizontal'}`,
               {
                 selected: selectedElementIdsSet.has(node.elementId),
                 'navigator-active': activeNavigatorElementId === node.elementId,
@@ -2494,9 +2734,9 @@ defineExpose<DiagramCanvasNavigationApi>({
               top: `${canvasPosition(geometryFor(node)).y}px`,
               width: `${geometryFor(node).width}px`,
               height: `${geometryFor(node).height}px`,
-              background: node.style.fill,
-              borderColor: node.style.stroke,
-              borderWidth: `${node.style.strokeWidth ?? 1}px`,
+              background: node.shape === 'diamond' ? 'transparent' : node.style.fill,
+              borderColor: node.shape === 'diamond' ? 'transparent' : node.style.stroke,
+              borderWidth: node.shape === 'diamond' ? '0px' : `${node.style.strokeWidth ?? 1}px`,
               borderStyle: node.style.dash && node.style.dash !== '0' ? 'dashed' : 'solid',
               color: node.style.text,
               '--iriograph-node-accent': node.style.accent ?? node.style.stroke,
@@ -2509,7 +2749,30 @@ defineExpose<DiagramCanvasNavigationApi>({
             @keydown="handleGeometrySemanticKeydown($event, node.elementId)"
             @contextmenu="requestPointerContextMenu($event, 'node', node.elementId)"
           >
-            <span class="iriograph-node-content" :class="{ editable: nodeContentEditing && selectedElementIdsSet.has(node.elementId) && !readOnly }">
+            <svg
+              v-if="node.shape === 'diamond'"
+              class="iriograph-node-diamond-surface"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+              aria-hidden="true"
+            >
+              <polygon
+                points="50,1 99,50 50,99 1,50"
+                :fill="node.style.fill"
+                :stroke="node.style.stroke"
+                :stroke-width="node.style.strokeWidth ?? 1.5"
+                :stroke-dasharray="node.style.dash && node.style.dash !== '0' ? node.style.dash : undefined"
+                stroke-linejoin="round"
+                vector-effect="non-scaling-stroke"
+              />
+            </svg>
+            <span
+              class="iriograph-node-content"
+              :class="[
+                `content-${node.nodeLabelWritingDirection === 'vertical-down' ? 'vertical' : 'horizontal'}`,
+                { editable: nodeContentEditing && selectedElementIdsSet.has(node.elementId) && !readOnly },
+              ]"
+            >
               <img
                 v-if="node.iconUrl"
                 class="iriograph-node-icon"
@@ -2538,11 +2801,12 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span v-if="sequenceMemberBadges(node.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
           </div>
 
-          <svg class="iriograph-edge-interaction-layer" :width="workArea.width" :height="workArea.height" :viewBox="workAreaViewBox()" aria-hidden="true">
+          <svg class="iriograph-edge-interaction-layer" :width="workArea.width" :height="workArea.height" :viewBox="workAreaViewBox()">
             <path
               v-if="semanticReconnectPreview"
               class="iriograph-semantic-reconnect-preview"
               :d="semanticReconnectPath()"
+              aria-hidden="true"
             />
             <g v-if="selectedEdge && !readOnly && waypointEditingAllowed(selectedEdge)" class="iriograph-waypoints">
               <circle
@@ -2557,6 +2821,51 @@ defineExpose<DiagramCanvasNavigationApi>({
                 @pointerdown="startWaypointMove($event, selectedEdge, index)"
                 @keydown="handleWaypointKeydown($event, selectedEdge, index)"
               />
+            </g>
+            <g
+              v-if="selectedEdge && !readOnly && edgeRouteMode(selectedEdge) === 'curve'"
+              class="iriograph-curve-controls"
+              role="group"
+              aria-label="曲線の制御点"
+            >
+              <line
+                v-for="handle in selectedCurveHandles(selectedEdge)"
+                :key="`line-${handle.key}`"
+                class="iriograph-curve-handle-line"
+                :x1="handle.anchor.x"
+                :y1="handle.anchor.y"
+                :x2="handle.point.x"
+                :y2="handle.point.y"
+                aria-hidden="true"
+              />
+              <circle
+                v-for="(knot, index) in selectedCurveKnots(selectedEdge)"
+                :key="`knot-${index}`"
+                class="iriograph-curve-knot"
+                :cx="knot.point.x"
+                :cy="knot.point.y"
+                :r="curveControlRadius('knot')"
+                :class="{ active: isActiveCurveKnot(index) }"
+                tabindex="-1"
+                role="button"
+                :aria-label="`曲線点${index + 1}。矢印キーで移動、Deleteで削除`"
+                @pointerdown="startCurveKnotMove($event, selectedEdge, index)"
+                @keydown="handleCurveKnotKeydown($event, selectedEdge, index)"
+              ><title>曲線点 {{ index + 1 }}</title></circle>
+              <circle
+                v-for="(handle, handleIndex) in selectedCurveHandles(selectedEdge)"
+                :key="handle.key"
+                class="iriograph-curve-handle"
+                :class="{ manual: handle.manual, active: isActiveCurveHandle(selectedEdge, handleIndex) }"
+                :cx="handle.point.x"
+                :cy="handle.point.y"
+                :r="curveControlRadius('handle')"
+                tabindex="-1"
+                role="button"
+                :aria-label="`${handle.manual ? '手動' : '自動'}曲線ハンドル。矢印キーで調整${handle.manual ? '、Deleteで自動へ戻す' : ''}`"
+                @pointerdown="startCurveHandleMove($event, selectedEdge, handle)"
+                @keydown="handleCurveHandleKeydown($event, selectedEdge, handle)"
+              ><title>{{ handle.manual ? '手動曲線ハンドル（Deleteで自動へ戻す）' : '自動曲線ハンドル' }}</title></circle>
             </g>
             <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors" :class="{ semantic: semanticEndpointReconnect }">
               <template v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">

@@ -10,9 +10,16 @@ import {
   LayoutAdapterRegistry,
   STANDARD_LAYOUT_REFS,
   StandardLightweightLayoutAdapter,
+  type LayoutAdapter,
+  type LayoutRequest,
+  type StandardLayoutPerformanceSample,
 } from "./layout";
 import type { IriographDocumentV1 } from "./model";
 import { buildIriographView, type ProjectionRuntimeContext } from "./scene";
+import {
+  reconcileIriographDocumentViews,
+  type DisplayReconciliationEvent,
+} from "./reconciliation";
 import { standardRdfRdfsCatalog } from "./standard-catalog";
 
 const NS = "urn:test:reconcile:";
@@ -83,6 +90,138 @@ describe("display reconciliation", () => {
       severity: "error",
       code: "layout-adapter-unresolved",
     }));
+  });
+
+  it("edge-only要求のfull fallback理由をdiagnosticとobserverへ残す", async () => {
+    const previous = documentFor(oldSource);
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = newSource;
+    const events: DisplayReconciliationEvent[] = [];
+
+    const result = await reconcileIriographDocumentViews(
+      previous,
+      candidate,
+      runtimeContext(),
+      { mode: "edge-only", observer: (event) => { events.push(event); } },
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.filter((item) => item.code === "reconcile-edge-only-fallback"))
+      .toHaveLength(previous.views.length);
+    expect(events).toEqual(previous.views.map(() => ({
+      actualMode: "incremental",
+      fallbackReason: "visible-structure-changed",
+      requestedMode: "edge-only",
+      viewId: expect.any(String),
+    })));
+  });
+
+  it.each([
+    {
+      name: "relation追加とparallel/self-loop",
+      source: localizedAddSource,
+      expectedAffected: 4,
+      expectedFixed: 2,
+    },
+    {
+      name: "predicate変更",
+      source: localizedPredicateSource,
+      expectedAffected: 1,
+      expectedFixed: 4,
+    },
+    {
+      name: "endpoint変更",
+      source: localizedEndpointSource,
+      expectedAffected: 2,
+      expectedFixed: 3,
+    },
+  ])("$nameを各viewのincident routeだけへ局所化する", async ({
+    source,
+    expectedAffected,
+    expectedFixed,
+  }) => {
+    const previous = localizedDocumentFor(localizedOldSource);
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = source;
+    const requests: LayoutRequest[] = [];
+    const samples: StandardLayoutPerformanceSample[] = [];
+    const context = localizedRuntimeContext(requests, samples);
+    const before = Object.fromEntries(await Promise.all(previous.views.map(async (view) => [
+      view.viewId,
+      await buildIriographView(previous, view.viewId, context),
+    ] as const)));
+    requests.length = 0;
+    samples.length = 0;
+    const events: DisplayReconciliationEvent[] = [];
+
+    const result = await reconcileIriographDocumentViews(previous, candidate, context, {
+      mode: "edge-only",
+      observer: (event) => { events.push(event); },
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(events).toEqual(previous.views.map((view) => ({
+      actualMode: "route-only",
+      affectedEdges: expectedAffected,
+      fixedDerivedRoutes: expectedFixed,
+      requestedMode: "edge-only",
+      viewId: view.viewId,
+    })));
+    const routeOnlyRequests = requests.filter((request) => request.mode === "route-only");
+    expect(routeOnlyRequests).toHaveLength(previous.views.length);
+    expect(routeOnlyRequests.map((request) => Object.keys(request.fixedDerivedRoutes ?? {}).length))
+      .toEqual(previous.views.map(() => expectedFixed));
+    expect(samples.filter((sample) => sample.mode === "route-only").map((sample) => ({
+      fixed: sample.fixedDerivedRoutes,
+      routed: sample.routedEdges,
+    }))).toEqual(previous.views.map(() => ({ fixed: expectedFixed, routed: expectedAffected })));
+
+    for (const view of previous.views) {
+      const previousRoutes = new Map(before[view.viewId]!.edges.map((edge) => [edge.elementId, edge.route]));
+      const request = routeOnlyRequests.find((entry) => entry.layoutRef === view.layoutRef)!;
+      for (const edgeId of Object.keys(request.fixedDerivedRoutes ?? {})) {
+        expect(JSON.stringify(
+          result.scenes[view.viewId]!.edges.find((edge) => edge.elementId === edgeId)?.route,
+        )).toBe(JSON.stringify(previousRoutes.get(edgeId)));
+      }
+    }
+  });
+
+  it("dense graphでもunaffected routeをexact維持しreroute数をobserverへ限定する", async () => {
+    const previous = localizedDocumentFor(denseSource(false));
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = denseSource(true);
+    const requests: LayoutRequest[] = [];
+    const samples: StandardLayoutPerformanceSample[] = [];
+    const context = localizedRuntimeContext(requests, samples);
+    const before = await buildIriographView(previous, "main", context);
+    requests.length = 0;
+    samples.length = 0;
+    const events: DisplayReconciliationEvent[] = [];
+
+    const result = await reconcileIriographDocumentViews(previous, candidate, context, {
+      mode: "edge-only",
+      observer: (event) => { events.push(event); },
+    });
+
+    expect(result.accepted).toBe(true);
+    const mainRequest = requests.find((request) => (
+      request.mode === "route-only" && request.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalLr
+    ))!;
+    const fixedIds = Object.keys(mainRequest.fixedDerivedRoutes ?? {});
+    expect(fixedIds.length).toBeGreaterThan(20);
+    expect(events.find((event) => event.viewId === "main")).toMatchObject({
+      affectedEdges: 12,
+      fixedDerivedRoutes: fixedIds.length,
+    });
+    expect(samples.find((sample) => sample.mode === "route-only" && sample.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalLr))
+      .toMatchObject({ routedEdges: 12, fixedDerivedRoutes: fixedIds.length });
+    const previousRoutes = new Map(before.edges.map((edge) => [edge.elementId, edge.route]));
+    for (const edgeId of fixedIds) {
+      expect(JSON.stringify(
+        result.scenes.main!.edges.find((edge) => edge.elementId === edgeId)?.route,
+      )).toBe(JSON.stringify(previousRoutes.get(edgeId)));
+    }
   });
 
   it("Bagでないsubjectのrdfs:memberを全rollbackする", async () => {
@@ -182,6 +321,97 @@ describe("display reconciliation", () => {
     }));
   });
 });
+
+const localizedOldSource = `
+@prefix : <${NS}> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:a rdfs:label "A" ; :p :b ; :q :b ; :loop :a .
+:b rdfs:label "B" .
+:c rdfs:label "C" ; :p :d .
+:d rdfs:label "D" .
+:e rdfs:label "E" ; :p :f .
+:f rdfs:label "F" .
+`;
+
+const localizedAddSource = `${localizedOldSource}\n:a :added :b .\n`;
+const localizedPredicateSource = localizedOldSource.replace(":c rdfs:label \"C\" ; :p :d .", (
+  ":c rdfs:label \"C\" ; :changed :d ."
+));
+const localizedEndpointSource = localizedOldSource.replace(":c rdfs:label \"C\" ; :p :d .", (
+  ":c rdfs:label \"C\" ; :p :e ."
+));
+
+function localizedDocumentFor(source: string): IriographDocumentV1 {
+  return {
+    schemaVersion: "1",
+    kind: "iriograph.document",
+    documentId: "localized-reconciliation-test",
+    semantic: {
+      format: "text/turtle",
+      baseIri: NS,
+      authoringProfileRef: "urn:test:authoring:1",
+      source,
+    },
+    imports: [{ catalogRef: "urn:iriograph:catalog:rdf-rdfs@1" }],
+    views: [
+      {
+        viewId: "main",
+        kind: "node-link",
+        profileRef: standardRdfRdfsCatalog.profileRef,
+        layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+        overlay: {},
+      },
+      {
+        viewId: "alternate",
+        kind: "node-link",
+        profileRef: standardRdfRdfsCatalog.profileRef,
+        layoutRef: STANDARD_LAYOUT_REFS.hierarchicalTb,
+        overlay: {},
+      },
+    ],
+  };
+}
+
+function localizedRuntimeContext(
+  requests: LayoutRequest[],
+  samples: StandardLayoutPerformanceSample[],
+): ProjectionRuntimeContext {
+  const adapters = ([
+    [STANDARD_LAYOUT_REFS.hierarchicalLr, "LR"],
+    [STANDARD_LAYOUT_REFS.hierarchicalTb, "TB"],
+  ] as const).map(([layoutRef, direction]): LayoutAdapter => {
+    const standard = new StandardLightweightLayoutAdapter(
+      layoutRef,
+      direction,
+      (sample) => { samples.push(sample); },
+    );
+    return {
+      layoutRef,
+      async layout(request) {
+        requests.push(request);
+        return standard.layout(request);
+      },
+    };
+  });
+  return runtimeContext(new LayoutAdapterRegistry(adapters));
+}
+
+function denseSource(withAddedEdge: boolean): string {
+  const triples: string[] = [
+    `@prefix : <${NS}> .`,
+    "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+  ];
+  for (let index = 0; index < 12; index += 1) {
+    triples.push(`:n${index} rdfs:label "Node ${index}" .`);
+  }
+  for (let source = 0; source < 12; source += 1) {
+    for (let offset = 1; offset <= 3; offset += 1) {
+      triples.push(`:n${source} :p${offset} :n${(source + offset) % 12} .`);
+    }
+  }
+  if (withAddedEdge) triples.push(":n0 :added :n1 .");
+  return `${triples.join("\n")}\n`;
+}
 
 const oldSource = `
 @prefix : <${NS}> .

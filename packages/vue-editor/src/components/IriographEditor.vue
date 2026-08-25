@@ -29,11 +29,13 @@ import {
   type AssetAccess,
   type AssetDefinition,
   type DiagramScene,
+  type EdgeCurveRouting,
   type EdgeRouteMode,
   type EdgeTerminalMarker,
   type ElementGeometry,
   type IriographDocument,
   type LayoutAdapterRegistry,
+  type LayoutDirection,
   type NodeLabelWritingDirection,
   type Point,
   type ProjectionCatalogV1,
@@ -94,9 +96,12 @@ import {
   type AssetPicker,
 } from "../asset-session";
 import {
+  appendEdgeCurveKnot,
   appendEdgeWaypoint,
   normalizeEditableRouting,
+  removeEdgeCurveKnot,
   removeEdgeWaypoint,
+  routingWithCurve,
   routingWithEndpointAnchor,
   type EdgeRoutingUpdate,
 } from "../edge-routing";
@@ -132,6 +137,12 @@ import type { DiagramContextMenuRequest } from "../context-actions";
 import { catalogCreationPalette } from "../creation-palette";
 import { diagnosticGuidance } from "../diagnostic-guidance";
 import { semanticDisplayMetadata } from "../semantic-metadata";
+import { membershipOverviewForElement } from "../membership-overview";
+import {
+  layoutDirectionForRef,
+  layoutRefForDirection,
+  standardLayoutRefForDirection,
+} from "../layout-direction";
 import {
   constrainMembershipRegionMovement,
   membershipRegionClassIrisAtPoint,
@@ -241,7 +252,13 @@ const authoringBusy = ref(false);
 const pickingAsset = ref(false);
 const viewCommandBusy = ref(false);
 const viewDialogMode = ref<"add" | "configure">();
-const viewForm = ref({ viewId: "", profileRef: "", layoutRef: "", locale: "" });
+const viewForm = ref<{
+  viewId: string;
+  profileRef: string;
+  layoutRef: string;
+  layoutDirection: LayoutDirection | "";
+  locale: string;
+}>({ viewId: "", profileRef: "", layoutRef: "", layoutDirection: "LR", locale: "" });
 const viewDialog = ref<HTMLFormElement>();
 const viewDialogInitialFocus = ref<HTMLInputElement>();
 const viewDialogTitleId = `${useId()}-view-dialog-title`;
@@ -355,11 +372,6 @@ const activeCatalog = computed(() => {
   return view ? projectionRuntimeContext.value?.catalogsByProfile.get(view.profileRef)?.catalog : undefined;
 });
 const profileChoices = computed(() => [...(projectionRuntimeContext.value?.catalogsByProfile.keys() ?? [])]);
-const layoutChoices = computed(() => [...new Set([
-  ...draft.value.views.map((view) => view.layoutRef),
-  "urn:iriograph:layout:hierarchical-lr:1",
-  "urn:iriograph:layout:hierarchical-tb:1",
-])].sort((left, right) => left < right ? -1 : left > right ? 1 : 0));
 const selectedEdge = computed(() => selectedElement.value?.structuralKind === "edge"
   ? selectedElement.value
   : undefined);
@@ -375,6 +387,9 @@ const selectedWaypointEditingAvailable = computed(() => (
 ));
 const selectedManualWaypoints = computed(() => (
   selectedWaypointEditingAvailable.value ? selectedEdge.value?.waypoints ?? [] : []
+));
+const selectedCurveKnots = computed(() => (
+  selectedRouteMode.value === "curve" ? selectedEdge.value?.curve?.knots ?? [] : []
 ));
 const selectedEdgeDisplayName = computed(() => {
   const edge = selectedEdge.value;
@@ -405,6 +420,7 @@ const regionZOrders = computed<Record<string, number>>(() => Object.fromEntries(
 ));
 const hasSelectedEditableRouting = computed(() => Boolean(
   selectedEdge.value?.waypoints?.length
+    || selectedEdge.value?.curve
     || selectedEdge.value?.labelOffset
     || selectedEdge.value?.sourceAnchor
     || selectedEdge.value?.targetAnchor
@@ -749,6 +765,10 @@ const intentIncidentRelations = computed<IntentRelationOverview[]>(() => {
     || left.targetLabel.localeCompare(right.targetLabel, "ja")
   ));
 });
+const intentMembershipOverview = computed(() => membershipOverviewForElement(
+  scene.value,
+  selectedElement.value?.structuralKind === "edge" ? "" : selectedElement.value?.elementId ?? "",
+));
 const intentMembershipOptions = computed<IntentMembershipOption[]>(() => {
   const result: IntentMembershipOption[] = [];
   const candidates = [...scene.value.containers, ...(scene.value.regions ?? [])];
@@ -1431,6 +1451,46 @@ async function refreshPresentationScene(): Promise<void> {
   }
 }
 
+async function refreshPreparedScene(prepared: DiagramScene): Promise<void> {
+  const requestToken = ++sceneRequestToken;
+  sceneValidationAbortController?.abort();
+  sceneValidationAbortController = undefined;
+  const assetRequest = assetSceneSession.begin();
+  const catalog = activeCatalog.value;
+  if (!catalog || prepared.viewId !== currentActiveViewId.value) {
+    await refreshScene();
+    return;
+  }
+  try {
+    const result = await assetSceneSession.enrich(
+      assetRequest,
+      clone(prepared),
+      availableAssetDefinitions(catalog),
+      withPackageDefaultIconAccess(props.assetAccess),
+    );
+    if (requestToken !== sceneRequestToken || !result.accepted) return;
+    rawScene.value = result.scene;
+    clearMissingSelection(scene.value);
+  } catch (cause) {
+    if (requestToken !== sceneRequestToken) return;
+    applyDiagnostics.value = [{
+      severity: "error",
+      category: "internal",
+      code: "prepared-scene-enrichment-failed",
+      message: cause instanceof Error ? cause.message : String(cause),
+    }];
+  }
+}
+
+function preparedSceneFor(result: SemanticSourceUpdate): DiagramScene | undefined {
+  const prepared = result.scenes?.[currentActiveViewId.value];
+  if (!prepared) return undefined;
+  return {
+    ...clone(prepared),
+    diagnostics: [...prepared.diagnostics, ...result.diagnostics].filter(uniqueDiagnostic()),
+  };
+}
+
 function projectionContextFromLegacyCatalog(catalog: ProjectionCatalogV1): ProjectionRuntimeContext {
   const catalogRef = `${catalog.catalogId}@${catalog.catalogVersion}`;
   return createProjectionRuntimeContext([{
@@ -1733,6 +1793,9 @@ function changeRouting(
       ? current.routing?.routeMode === "manual"
         ? routingValue?.waypoints?.length ? "manual" : undefined
         : current.routing?.routeMode
+          // Catalog defaults normally stay derived. Curve controls are the
+          // exception because the portable schema requires their routeMode.
+          ?? (routingValue?.curve && effectiveRouteMode === "curve" ? "curve" : undefined)
       : undefined;
     const sourceMarker = preserveRouteMode
       ? routingValue?.sourceMarker ?? current.routing?.sourceMarker
@@ -1756,6 +1819,7 @@ function changeRouting(
         ? {
             ...routing,
             waypoints: routing.waypoints?.map(roundPoint),
+            curve: routing.curve ? roundCurveRouting(routing.curve) : undefined,
             labelOffset: routing.labelOffset ? roundPoint(routing.labelOffset) : undefined,
           }
         : undefined,
@@ -1856,6 +1920,33 @@ function removeSelectedWaypointAt(index: number): void {
   }, true);
 }
 
+function addSelectedCurveKnot(): void {
+  const edge = selectedEdge.value;
+  if (!edge || selectedRouteMode.value !== "curve") return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: routingWithCurve(edge, appendEdgeCurveKnot(edge.route ?? [], edge.curve)),
+  }, true);
+}
+
+function removeSelectedCurveKnotAt(index: number): void {
+  const edge = selectedEdge.value;
+  if (!edge || selectedRouteMode.value !== "curve") return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: routingWithCurve(edge, removeEdgeCurveKnot(edge.curve, index)),
+  }, true);
+}
+
+function resetSelectedCurveControls(): void {
+  const edge = selectedEdge.value;
+  if (!edge || selectedRouteMode.value !== "curve") return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: routingWithCurve(edge, undefined),
+  }, true);
+}
+
 function resetSelectedLabelOffset(): void {
   const edge = selectedEdge.value;
   if (!edge?.label) return;
@@ -1863,6 +1954,7 @@ function resetSelectedLabelOffset(): void {
     elementId: edge.elementId,
     routing: {
       waypoints: edge.waypoints,
+      curve: edge.curve,
       sourceAnchor: edge.sourceAnchor,
       targetAnchor: edge.targetAnchor,
     },
@@ -1885,6 +1977,7 @@ function resetSelectedEndpointAnchors(): void {
     elementId: edge.elementId,
     routing: {
       waypoints: edge.waypoints,
+      curve: edge.curve,
       labelOffset: edge.labelOffset,
       sourceMarker: edge.sourceMarker,
       targetMarker: edge.targetMarker,
@@ -1917,9 +2010,11 @@ function setSelectedRouteMode(mode: EdgeRouteMode): void {
     const routing = clone(current.routing) ?? {};
     routing.routeMode = mode;
     if (mode !== "manual") delete routing.waypoints;
+    if (mode !== "curve") delete routing.curve;
     const hasRouting = Boolean(
       routing.routeMode
       || routing.waypoints?.length
+      || routing.curve
       || routing.labelOffset
       || routing.sourceAnchor
       || routing.targetAnchor
@@ -1945,6 +2040,7 @@ function setSelectedTerminalMarker(
     elementId: edge.elementId,
     routing: {
       waypoints: edge.waypoints,
+      curve: edge.curve,
       labelOffset: edge.labelOffset,
       sourceAnchor: edge.sourceAnchor,
       targetAnchor: edge.targetAnchor,
@@ -2471,7 +2567,12 @@ async function executeIntentCommands(
       : result.document;
     resetAuthoringDraft();
     semanticIntentPanel.value?.resetIntent();
-    publish(committed, true, "semantic");
+    publish(
+      committed,
+      true,
+      "semantic",
+      creationPresentation ? undefined : preparedSceneFor(result),
+    );
     turtleDraft.value = committed.semantic.source;
   } catch (cause) {
     if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
@@ -2493,7 +2594,33 @@ function beginIntentResourcePicking(field: "sourceIri" | "targetIri"): void {
     next.predicateIri = edge.predicateIri;
     updateAuthoringDraft(next);
   }
+  if (activeSemanticIntent.value === "add-relation" && authoringDraft.value.kind !== "connect-resources") {
+    const selectedSource = selectedAuthoringResources.value.length === 1
+      ? selectedAuthoringResources.value[0]?.iri ?? ""
+      : "";
+    const next = emptyAuthoringDraft("connect-resources", selectedSource);
+    next.sourceIri = selectedSource;
+    updateAuthoringDraft(next);
+  }
+  if (activeSemanticIntent.value === "add-relation" && authoringDraft.value.kind === "connect-resources") {
+    const next = clone(authoringDraft.value);
+    if (field === "sourceIri") next.sourceIri = "";
+    next.targetIri = "";
+    updateAuthoringDraft(next);
+  }
   beginResourcePicking({ field });
+}
+
+function useIntentSelfTarget(sourceIri: string): void {
+  if (!sourceIri || props.readOnly || activeSemanticIntent.value !== "add-relation") return;
+  const next = authoringDraft.value.kind === "connect-resources"
+    ? clone(authoringDraft.value)
+    : emptyAuthoringDraft("connect-resources", sourceIri);
+  next.sourceIri = sourceIri;
+  next.targetIri = sourceIri;
+  authoringResourcePicker.value = undefined;
+  pendingAuthoringGuidance.value = "始点自身への関係を明示的に選びました。関係の種類を確認してください。";
+  updateAuthoringDraft(next);
 }
 
 function seedSemanticEdgeEndpoint(payload: {
@@ -2720,7 +2847,7 @@ async function applyDeletionPreview(
   resetAuthoringDraft();
   semanticIntentPanel.value?.resetIntent();
   clearSelection();
-  publish(result.document, true, "semantic");
+  publish(result.document, true, "semantic", preparedSceneFor(result));
   turtleDraft.value = result.document.semantic.source;
   restoreDeletionDialogFocus();
 }
@@ -3042,6 +3169,16 @@ function seedDraftResource(semanticRef: string): void {
     if (!value || value.objectKind !== "iri") return;
     next.propertyValues[target.index] = { ...value, value: semanticRef };
   } else {
+    if (
+      activeSemanticIntent.value === "add-relation"
+      && target.field === "targetIri"
+      && next.sourceIri === semanticRef
+    ) {
+      next.targetIri = "";
+      pendingAuthoringGuidance.value = "通常の終点には始点とは別の要素を選んでください。自身へ接続する場合は右の明示操作を使います。";
+      updateAuthoringDraft(next);
+      return;
+    }
     next[target.field] = semanticRef;
     if (target.field === "containerIri" && next.kind === "set-membership") {
       const container = [...scene.value.containers, ...(scene.value.regions ?? [])]
@@ -3053,7 +3190,14 @@ function seedDraftResource(semanticRef: string): void {
       next.membershipPredicateIri = selected?.predicateIri ?? "";
     }
   }
-  authoringResourcePicker.value = undefined;
+  if (activeSemanticIntent.value === "add-relation" && target.field === "sourceIri") {
+    next.targetIri = "";
+    authoringResourcePicker.value = { field: "targetIri" };
+    pendingAuthoringGuidance.value = "続けて、始点とは別の終点をクリックしてください。";
+  } else {
+    authoringResourcePicker.value = undefined;
+    pendingAuthoringGuidance.value = "";
+  }
   updateAuthoringDraft(next);
 }
 
@@ -3097,8 +3241,8 @@ function authoringFailureDiagnostic(code: string, cause: unknown): ProjectionDia
 }
 
 function layoutPurposeLabel(layoutRef: string | undefined): string {
-  if (layoutRef?.includes("hierarchical-lr")) return "左から右へ自動配置";
-  if (layoutRef?.includes("hierarchical-tb")) return "上から下へ自動配置";
+  if (layoutRef && layoutDirectionForRef(layoutRef) === "LR") return "左から右へ自動配置";
+  if (layoutRef && layoutDirectionForRef(layoutRef) === "TB") return "上から下へ自動配置";
   return layoutRef ? "自動配置" : "配置方法なし";
 }
 
@@ -3192,7 +3336,7 @@ async function applyTurtleDraft(): Promise<boolean> {
     return false;
   }
   if (requestToken !== semanticRequestToken || controller.signal.aborted || props.readOnly) return false;
-  publish(result.document, true, "semantic");
+  publish(result.document, true, "semantic", preparedSceneFor(result));
   semanticWarningConfirmation.value = undefined;
   turtleDraft.value = result.document.semantic.source;
   return true;
@@ -3321,7 +3465,8 @@ function openAddViewDialog(): void {
   viewForm.value = {
     viewId: allocateViewId("view"),
     profileRef,
-    layoutRef: activeView.value?.layoutRef ?? layoutChoices.value[0] ?? "",
+    layoutRef: standardLayoutRefForDirection("LR"),
+    layoutDirection: "LR",
     locale: activeView.value?.locale ?? "",
   };
   openViewDialog("add");
@@ -3334,6 +3479,7 @@ function openConfigureViewDialog(): void {
     viewId: view.viewId,
     profileRef: view.profileRef,
     layoutRef: view.layoutRef,
+    layoutDirection: layoutDirectionForRef(view.layoutRef) ?? "",
     locale: view.locale ?? "",
   };
   openViewDialog("configure");
@@ -3385,19 +3531,24 @@ function handleViewDialogKeydown(event: KeyboardEvent): void {
 
 async function submitViewDialog(): Promise<void> {
   const form = viewForm.value;
+  const layoutRef = form.layoutDirection
+    ? viewDialogMode.value === "add"
+      ? standardLayoutRefForDirection(form.layoutDirection)
+      : layoutRefForDirection(form.layoutRef, form.layoutDirection) ?? form.layoutRef
+    : form.layoutRef;
   const command: ViewCommand = viewDialogMode.value === "add"
     ? {
         command: "add",
         viewId: form.viewId,
         profileRef: form.profileRef,
-        layoutRef: form.layoutRef,
+        layoutRef,
         ...(form.locale.trim() ? { locale: form.locale.trim() } : {}),
       }
     : {
         command: "configure",
         viewId: form.viewId,
         profileRef: form.profileRef,
-        layoutRef: form.layoutRef,
+        layoutRef,
         locale: form.locale.trim() || null,
       };
   if (await executeViewCommand(command)) finishViewDialog();
@@ -3556,6 +3707,7 @@ function publish(
   next: IriographDocument,
   recordHistory: boolean,
   refreshKind: DocumentRefreshKind,
+  preparedScene?: DiagramScene,
 ): Promise<void> {
   invalidateAuthoringPreview();
   if (recordHistory) {
@@ -3566,7 +3718,9 @@ function publish(
   draft.value = clone(next);
   lastEmittedJson = JSON.stringify(draft.value);
   emit("update:modelValue", clone(draft.value));
-  return refreshKind === "presentation" ? refreshPresentationScene() : refreshScene();
+  return refreshKind === "presentation"
+    ? refreshPresentationScene()
+    : preparedScene ? refreshPreparedScene(preparedScene) : refreshScene();
 }
 
 function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): void {
@@ -3720,6 +3874,29 @@ function roundGeometry(geometry: ElementGeometry): ElementGeometry {
 
 function roundPoint(point: Point): Point {
   return { x: Math.round(point.x), y: Math.round(point.y) };
+}
+
+function roundCurveRouting(curve: EdgeCurveRouting): EdgeCurveRouting {
+  return {
+    ...(curve.sourceHandle ? { sourceHandle: roundCurvePoint(curve.sourceHandle) } : {}),
+    ...(curve.targetHandle ? { targetHandle: roundCurvePoint(curve.targetHandle) } : {}),
+    ...(curve.knots?.length ? {
+      knots: curve.knots.map((knot) => ({
+        point: roundCurvePoint(knot.point),
+        ...(knot.incomingHandle ? { incomingHandle: roundCurvePoint(knot.incomingHandle) } : {}),
+        ...(knot.outgoingHandle ? { outgoingHandle: roundCurvePoint(knot.outgoingHandle) } : {}),
+        ...(knot.extensions ? { extensions: clone(knot.extensions) } : {}),
+      })),
+    } : {}),
+    ...(curve.extensions ? { extensions: clone(curve.extensions) } : {}),
+  };
+}
+
+function roundCurvePoint(point: Point): Point {
+  return {
+    ...roundPoint(point),
+    ...(point.extensions ? { extensions: clone(point.extensions) } : {}),
+  };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -4146,6 +4323,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           :memberships="intentMembershipOptions"
           :sequences="intentSequenceOptions"
           :incident-relations="intentIncidentRelations"
+          :membership-overview="intentMembershipOverview"
           :requested-intent="activeSemanticIntent"
           :picked-source-iri="authoringDraft.sourceIri"
           :picked-target-iri="authoringDraft.targetIri"
@@ -4155,6 +4333,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           @delete-selection="requestSemanticDeletion()"
           @cancel="cancelAuthoringDraft"
           @pick-resource="beginIntentResourcePicking"
+          @use-self-target="useIntentSelfTarget"
           @focus-element="focusElement"
           @intent-change="activeSemanticIntent = $event"
           @draft-state-change="semanticIntentDraftPending = $event"
@@ -4367,6 +4546,32 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 </div>
               </div>
             </template>
+            <template v-if="selectedRouteMode === 'curve'">
+              <button
+                type="button"
+                class="iriograph-wide-button"
+                :disabled="readOnly"
+                @click="addSelectedCurveKnot"
+              >曲線点を追加</button>
+              <small>{{ selectedCurveKnots.length }}個の曲線点。Canvas上の点とハンドルをドラッグして調整します。</small>
+              <div v-if="selectedCurveKnots.length" class="iriograph-waypoint-list" role="list" aria-label="曲線点">
+                <div v-for="(_, index) in selectedCurveKnots" :key="index" role="listitem">
+                  <span>曲線点 {{ index + 1 }}</span>
+                  <button
+                    type="button"
+                    :aria-label="`曲線点 ${index + 1}を削除`"
+                    :disabled="readOnly"
+                    @click="removeSelectedCurveKnotAt(index)"
+                  >削除</button>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="iriograph-wide-button"
+                :disabled="readOnly || !selectedElement.curve"
+                @click="resetSelectedCurveControls"
+              >自動曲線へ戻す</button>
+            </template>
             <label>端子の形</label>
             <div class="iriograph-endpoint-marker-fields">
               <label v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
@@ -4471,11 +4676,18 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           </select>
         </label>
         <label>
-          Layout
-          <input v-model="viewForm.layoutRef" list="iriograph-layout-options" required />
-          <datalist id="iriograph-layout-options">
-            <option v-for="layoutRef in layoutChoices" :key="layoutRef" :value="layoutRef" />
-          </datalist>
+          配置方向
+          <select
+            v-model="viewForm.layoutDirection"
+            aria-label="配置方向"
+            :disabled="!viewForm.layoutDirection"
+            required
+          >
+            <option value="LR">横方向（左→右）</option>
+            <option value="TB">縦方向（上→下）</option>
+          </select>
+          <small v-if="!viewForm.layoutDirection">現在の配置方法は方向変更に対応していません。</small>
+          <details class="iriograph-technical-details"><summary>技術情報</summary><code>{{ viewForm.layoutRef }}</code></details>
         </label>
         <label>
           Locale (BCP 47)

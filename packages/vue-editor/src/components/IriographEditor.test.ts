@@ -12,6 +12,7 @@ import {
   createStandardLayoutRegistry,
   STANDARD_LAYOUT_REFS,
   standardRdfRdfsCatalog,
+  validateIriographDocumentV1,
   type DiagramScene,
   type ElementGeometry,
   type IriographDocument,
@@ -274,6 +275,203 @@ describe("IriographEditor transaction regression", () => {
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.waypoints)
       .toEqual(before);
+  });
+
+  it("曲線Inspectorは座標表を見せず曲線点の追加・削除・自動復帰をsparse overlayへ保存する", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    const turtle = initialSource;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    await openAppearanceInspector(wrapper);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="線の形式"]').setValue("curve");
+    await buttonWithText(wrapper, "曲線点を追加").trigger("click");
+    await settle();
+    await buttonWithText(wrapper, "曲線点を追加").trigger("click");
+    await settle();
+
+    const curved = overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing;
+    expect(curved?.routeMode).toBe("curve");
+    expect(curved?.curve?.knots).toHaveLength(2);
+    expect(wrapper.get(".iriograph-routing-inspector").find('input[type="number"]').exists()).toBe(false);
+    expect(latestDocument(wrapper).semantic.source).toBe(turtle);
+
+    await wrapper.get('button[aria-label="曲線点 1を削除"]').trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.curve?.knots)
+      .toEqual([curved!.curve!.knots![1]]);
+
+    await buttonWithText(wrapper, "自動曲線へ戻す").trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
+      routeMode: "curve",
+    });
+    expect(latestDocument(wrapper).semantic.source).toBe(turtle);
+  });
+
+  it("Canvas curve gestureを丸めたoverlayへ一履歴で保存しundoする", async () => {
+    wrapper = await mountEditor();
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    await openAppearanceInspector(wrapper);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="線の形式"]').setValue("curve");
+    await settle();
+    const extensionIri = "https://example.test/curve-point-meta";
+
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: {
+        curve: {
+          sourceHandle: {
+            x: 42.4,
+            y: 13.7,
+            extensions: { [extensionIri]: { source: true } },
+          },
+          knots: [{
+            point: {
+              x: 221.6,
+              y: 124.3,
+              extensions: { [extensionIri]: { point: [1, 2] } },
+            },
+            incomingHandle: {
+              x: -20.2,
+              y: 10.7,
+              extensions: { [extensionIri]: "incoming" },
+            },
+            outgoingHandle: {
+              x: 20.2,
+              y: -10.7,
+              extensions: { [extensionIri]: "outgoing" },
+            },
+          }],
+        },
+      },
+    });
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
+      routeMode: "curve",
+      curve: {
+        sourceHandle: {
+          x: 42,
+          y: 14,
+          extensions: { [extensionIri]: { source: true } },
+        },
+        knots: [{
+          point: {
+            x: 222,
+            y: 124,
+            extensions: { [extensionIri]: { point: [1, 2] } },
+          },
+          incomingHandle: {
+            x: -20,
+            y: 11,
+            extensions: { [extensionIri]: "incoming" },
+          },
+          outgoingHandle: {
+            x: 20,
+            y: -11,
+            extensions: { [extensionIri]: "outgoing" },
+          },
+        }],
+      },
+    });
+    exposedHistoryApi(wrapper).undo();
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({ routeMode: "curve" });
+  });
+
+  it("curve knot/handleをJSON保存reload後もSceneとCanvasへ復元する", async () => {
+    wrapper = await mountEditor();
+    let canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    exposedSelectionApi(wrapper).selectElement(edge.elementId);
+    await nextTick();
+    await openAppearanceInspector(wrapper);
+    await wrapper.get<HTMLSelectElement>('select[aria-label="線の形式"]').setValue("curve");
+    await settle();
+    const extensionIri = "https://example.test/reloaded-curve-point";
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: {
+        curve: {
+          sourceHandle: {
+            x: 40,
+            y: 20,
+            extensions: { [extensionIri]: { preserved: true } },
+          },
+          targetHandle: { x: -35, y: 18 },
+          knots: [{
+            point: {
+              x: 230,
+              y: 118,
+              extensions: { [extensionIri]: ["saved", "reloaded"] },
+            },
+          }],
+        },
+      },
+    });
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+    const saved = JSON.parse(JSON.stringify(latestDocument(wrapper))) as IriographDocument;
+
+    wrapper.unmount();
+    document.body.innerHTML = "";
+    wrapper = await mountEditor({ modelValue: saved });
+    canvas = wrapper.getComponent(DiagramCanvas);
+    const reloaded = canvas.props("scene").edges.find((candidate) => candidate.semanticRef === edge.semanticRef)!;
+    expect(reloaded.routeMode).toBe("curve");
+    expect(reloaded.curve).toEqual({
+      sourceHandle: {
+        x: 40,
+        y: 20,
+        extensions: { [extensionIri]: { preserved: true } },
+      },
+      targetHandle: { x: -35, y: 18 },
+      knots: [{
+        point: {
+          x: 230,
+          y: 118,
+          extensions: { [extensionIri]: ["saved", "reloaded"] },
+        },
+      }],
+    });
+    exposedSelectionApi(wrapper).selectElement(reloaded.elementId);
+    await nextTick();
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toMatch(/^M .* C /u);
+    expect(wrapper.findAll(".iriograph-curve-knot")).toHaveLength(1);
+    expect(wrapper.findAll(".iriograph-curve-handle")).toHaveLength(4);
+    expect(saved.semantic.source).toBe(initialSource);
+  });
+
+  it("catalog既定curveへの初回control編集だけschema必須routeModeを明示保存する", async () => {
+    const catalog = structuredClone(standardRdfRdfsCatalog);
+    catalog.templates[catalog.defaults!.edgeTemplateRef]!.routeMode = "curve";
+    wrapper = await mountEditor({ catalog });
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const edge = canvas.props("scene").edges[0]!;
+    expect(edge.routeMode).toBe("curve");
+    expect(documentFixture().views[0]!.overlay).toEqual({});
+
+    emitCanvas(canvas, "gestureStart");
+    emitCanvas(canvas, "routingUpdate", {
+      elementId: edge.elementId,
+      routing: { curve: { sourceHandle: { x: 36, y: 14 } } },
+    });
+    emitCanvas(canvas, "gestureEnd");
+    await settle();
+
+    expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing).toEqual({
+      routeMode: "curve",
+      curve: { sourceHandle: { x: 36, y: 14 } },
+    });
+    expect(validateIriographDocumentV1(latestDocument(wrapper)).valid).toBe(true);
   });
 
   it("線の形式をrouting overlayへ保存し接点編集後も維持してresetする", async () => {
@@ -1111,13 +1309,15 @@ describe("IriographEditor transaction regression", () => {
       { iri: `${NS}bad`, kind: "property", label: "不適合", objectKinds: ["iri"] },
     ];
     wrapper = await mountEditor({ modelValue: fixture, authoringContext: context }, 8);
-    const nodes = wrapper.getComponent(DiagramCanvas).props("scene").nodes;
-    exposedSelectionApi(wrapper).selectElements([
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const nodes = canvas.props("scene").nodes;
+    exposedSelectionApi(wrapper).selectElement(
       nodes.find((node) => node.semanticRef === `${NS}a`)!.elementId,
-      nodes.find((node) => node.semanticRef === `${NS}b`)!.elementId,
-    ]);
+    );
     await nextTick();
     await buttonWithText(wrapper, "関係を追加").trigger("click");
+    emitCanvas(canvas, "semanticResourceRequest", `${NS}b`);
+    await nextTick();
     const cards = wrapper.get(".iriograph-predicate-cards").text();
     expect(cards).toContain("適合する");
     expect(cards).not.toContain("不適合");
@@ -1390,18 +1590,66 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.getComponent(DiagramCanvas).props("semanticPositionPicking")).toBe(false);
   });
 
-  it("関係作成はCanvasのbaseと複数partnerを一transactionへまとめる", async () => {
+  it("関係作成は通常クリックで始点から終点へ進み自己関係を暗黙作成せずgeometryを保つ", async () => {
     const fixture = threeNodeDocumentFixture();
-    wrapper = await mountEditor({ modelValue: fixture, authoringContext: testAuthoringContext(fixture) }, 3);
-    const nodes = wrapper.getComponent(DiagramCanvas).props("scene").nodes;
-    exposedSelectionApi(wrapper).selectElements(nodes.map((node) => node.elementId));
+    const modes: string[] = [];
+    const standard = new StandardLightweightLayoutAdapter(
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      "LR",
+    );
+    const adapter: LayoutAdapter = {
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      async layout(request) {
+        modes.push(request.mode ?? "incremental");
+        return standard.layout(request);
+      },
+    };
+    const context = testAuthoringContext(fixture);
+    context.runtime = createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], new LayoutAdapterRegistry([adapter]));
+    wrapper = await mountEditor({ modelValue: fixture, authoringContext: context }, 3);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const nodes = canvas.props("scene").nodes;
+    const source = nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    const target = nodes.find((node) => node.semanticRef === `${NS}c`)!;
+    const geometryBefore = Object.fromEntries(nodes.map((node) => [node.elementId, {
+      geometry: node.geometry,
+      pinned: node.pinned,
+      placement: node.placement,
+    }]));
+    exposedSelectionApi(wrapper).selectElement(source.elementId);
     await nextTick();
+    modes.length = 0;
     await buttonWithText(wrapper, "関係を追加").trigger("click");
+    expect(canvas.props("semanticResourcePicking")).toBe(true);
+
+    emitCanvas(canvas, "semanticResourceRequest", source.semanticRef);
+    await nextTick();
+    expect(wrapper.text()).toContain("始点とは別の要素");
+    expect(wrapper.text()).toContain("終点未選択");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    emitCanvas(canvas, "semanticResourceRequest", target.semanticRef);
+    await nextTick();
+    expect(canvas.props("semanticResourcePicking")).toBe(false);
+    expect(wrapper.text()).toContain("終点C");
     await wrapper.get<HTMLInputElement>('.iriograph-predicate-cards input[type="radio"]').setValue(true);
     await buttonWithText(wrapper, "関係を作成").trigger("click");
     await waitUntil(() => Boolean(wrapper!.emitted("update:modelValue")?.length));
+    await settle();
     expect(latestDocument(wrapper).semantic.source.match(/:rel/g)?.length).toBeGreaterThanOrEqual(2);
     expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
+    expect(modes).toEqual(["incremental", "route-only"]);
+    const geometryAfter = Object.fromEntries(canvas.props("scene").nodes.map((node) => [node.elementId, {
+      geometry: node.geometry,
+      pinned: node.pinned,
+      placement: node.placement,
+    }]));
+    expect(geometryAfter).toEqual(geometryBefore);
   });
 
   it("見た目だけ領域内のresourceをCanvas警告し所属変更intentから明示追加する", async () => {
@@ -1791,6 +2039,25 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.find(".iriograph-diagnostics .error").exists()).toBe(false);
   });
 
+  it("選択resourceのexact membership一覧から関連要素をfocusして表示する", async () => {
+    const fixture = containedDocumentFixture();
+    wrapper = await mountEditor({ modelValue: fixture }, 1);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const member = canvas.props("scene").nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    const lane = canvas.props("scene").containers.find((container) => container.semanticRef === `${NS}lane`)!;
+
+    exposedSelectionApi(wrapper).selectElement(member.elementId);
+    await nextTick();
+    const overview = wrapper.get('[aria-label="選択要素の包含一覧"]');
+    expect(overview.get('[aria-label="属する領域"]').text()).toContain("Lane");
+    expect(overview.get('[aria-label="含む要素"]').text()).toContain("含む要素はありません");
+    await overview.get("button").trigger("click");
+    await settle();
+
+    expect(wrapper.getComponent(DiagramCanvas).props("selectedElementId")).toBe(lane.elementId);
+    expect(wrapper.get('[aria-label="選択要素の包含一覧"]').text()).toContain("A");
+  });
+
   it("uncontrolled active viewを切替え、selection・zoom・temporary hideをview別sessionへ戻す", async () => {
     const fixture = multiViewDocumentFixture();
     wrapper = await mountEditor({ modelValue: fixture });
@@ -1922,6 +2189,124 @@ describe("IriographEditor transaction regression", () => {
         ?.views[0]?.locale === "en-US"
     ));
     expect(latestDocument(wrapper).views[0]!.viewId).toBe("main");
+  });
+
+  it("view方向を日本語selectで切替えundo/redo・reloadしてもview別に保つ", async () => {
+    const fixture = multiViewDocumentFixture();
+    fixture.views[0]!.overlay = {
+      selected: {
+        semanticRef: `${NS}a`,
+        geometry: { x: 120, y: 96, width: 140, height: 64 },
+        pinned: true,
+        placement: "user",
+        appearance: { styleToken: "accent" },
+      },
+    };
+    const turtle = fixture.semantic.source;
+    const userOverlay = structuredClone(fixture.views[0]!.overlay.selected);
+    const reviewJson = JSON.stringify(fixture.views[1]);
+    wrapper = await mountEditor({ modelValue: fixture });
+
+    await buttonWithText(wrapper, "設定").trigger("click");
+    const direction = wrapper.get<HTMLSelectElement>('select[aria-label="配置方向"]');
+    expect(direction.element.value).toBe("LR");
+    expect(direction.findAll("option").map((option) => option.text())).toEqual([
+      "横方向（左→右）",
+      "縦方向（上→下）",
+    ]);
+    expect(wrapper.find('.iriograph-view-dialog input[list="iriograph-layout-options"]').exists()).toBe(false);
+    await direction.setValue("TB");
+    await wrapper.get<HTMLButtonElement>('.iriograph-view-dialog button[type="submit"]').trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views[0]!.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalTb);
+
+    const vertical = latestDocument(wrapper);
+    expect(vertical.semantic.source).toBe(turtle);
+    expect(vertical.views[0]!.overlay.selected).toEqual(userOverlay);
+    expect(JSON.stringify(vertical.views[1])).toBe(reviewJson);
+
+    exposedHistoryApi(wrapper).undo();
+    await waitUntil(() => latestDocument(wrapper!).views[0]!.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalLr);
+    exposedHistoryApi(wrapper).redo();
+    await waitUntil(() => latestDocument(wrapper!).views[0]!.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalTb);
+    const reloaded = structuredClone(latestDocument(wrapper));
+
+    wrapper.unmount();
+    wrapper = await mountEditor({ modelValue: reloaded });
+    const reloadedScene = wrapper.getComponent(DiagramCanvas).props("scene");
+    const a = reloadedScene.nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    const b = reloadedScene.nodes.find((node) => node.semanticRef === `${NS}b`)!;
+    expect(a).toMatchObject({ geometry: userOverlay!.geometry, pinned: true, placement: "user" });
+    expect(b.geometry.y).toBeGreaterThan(a.geometry.y);
+  });
+
+  it("新規viewはStandard横方向を既定にし未知layoutは技術情報のままfail-closedにする", async () => {
+    wrapper = await mountEditor();
+    await buttonWithText(wrapper, "追加").trigger("click");
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="配置方向"]').element.value).toBe("LR");
+    await wrapper.get<HTMLButtonElement>('.iriograph-view-dialog button[type="submit"]').trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views.length === 2);
+    expect(latestDocument(wrapper).views[1]!.layoutRef).toBe(STANDARD_LAYOUT_REFS.hierarchicalLr);
+    wrapper.unmount();
+
+    const unknownLayoutRef = "urn:test:layout:private";
+    const unknownFixture = documentFixture();
+    unknownFixture.views[0]!.layoutRef = unknownLayoutRef;
+    const runtime = createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], new LayoutAdapterRegistry([
+      new StandardLightweightLayoutAdapter(unknownLayoutRef, "LR"),
+    ]));
+    wrapper = await mountEditor({
+      modelValue: unknownFixture,
+      runtimeContext: runtime,
+      catalog: undefined,
+    });
+    await buttonWithText(wrapper, "設定").trigger("click");
+    const unknownDirection = wrapper.get<HTMLSelectElement>('select[aria-label="配置方向"]');
+    expect(unknownDirection.attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".iriograph-view-dialog").text()).toContain("方向変更に対応していません");
+    expect(wrapper.get(".iriograph-view-dialog").text()).toContain(unknownLayoutRef);
+    await wrapper.get<HTMLInputElement>('.iriograph-view-dialog input[placeholder="ja"]').setValue("en-US");
+    await wrapper.get<HTMLButtonElement>('.iriograph-view-dialog button[type="submit"]').trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views[0]!.locale === "en-US");
+    expect(latestDocument(wrapper).views[0]!.layoutRef).toBe(unknownLayoutRef);
+  });
+
+  it("ELK viewの方向切替はELK adapter family内に留める", async () => {
+    const elkLr = "urn:iriograph:layout:elk-layered-lr:1";
+    const elkTb = "urn:iriograph:layout:elk-layered-tb:1";
+    const fixture = documentFixture();
+    fixture.views[0]!.layoutRef = elkLr;
+    const runtime = createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], new LayoutAdapterRegistry([
+      new StandardLightweightLayoutAdapter(elkLr, "LR"),
+      new StandardLightweightLayoutAdapter(elkTb, "TB"),
+    ]));
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      runtimeContext: runtime,
+      catalog: undefined,
+    });
+
+    await buttonWithText(wrapper, "設定").trigger("click");
+    const direction = wrapper.get<HTMLSelectElement>('select[aria-label="配置方向"]');
+    expect(direction.element.value).toBe("LR");
+    await direction.setValue("TB");
+    await wrapper.get<HTMLButtonElement>('.iriograph-view-dialog button[type="submit"]').trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views[0]!.layoutRef === elkTb);
+
+    expect(latestDocument(wrapper).views[0]!.layoutRef).toBe(elkTb);
+    const scene = wrapper.getComponent(DiagramCanvas).props("scene");
+    const a = scene.nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    const b = scene.nodes.find((node) => node.semanticRef === `${NS}b`)!;
+    expect(b.geometry.y).toBeGreaterThan(a.geometry.y);
   });
 
   it("view dialogへinitial focusを移しEscape後にopenerへ戻す", async () => {

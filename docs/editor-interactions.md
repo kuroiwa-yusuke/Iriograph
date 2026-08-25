@@ -20,6 +20,14 @@
 
 Resourceを選択したときは`要素の詳細を編集`と`所属・並び順を編集`、direct edgeを選択したときは`関係の意味を編集`だけを追加表示します。Action選択後にだけ必要なfieldを段階表示し、一つの画面に全fieldを先出ししません。前段で選んだclass、predicate、resource、Scene provenanceにより次段の候補を絞ります。通常UIにIRI、`rdf:_1`、内部command名、capability patchを入力させません。完全IRIとexact statementは`Advanced`のread-only参照情報であり、standard editorにIRI override入力を設けません。
 
+Resource、region、container、Seqを一つ選択した初期概要には、`属する領域`と`含む要素`を
+件数付きのlabel-first一覧で示します。一覧はSceneのexact membershipとprovenanceだけから作り、
+見た目の内外、重なり、`parentElementId`互換情報から所属を推測しません。通常membership、
+region、nested membership、Seq membershipを区別し、Seqは一始まりのordinalを表示します。
+同じ要素が複数領域へ属する場合は各membershipを失わず別行で示します。一覧の行を選ぶと対象を
+Canvasでfocus/revealしますが、一覧の展開や選択はsession操作でありdocumentやoverlayへ複製しません。
+追加・解除・再採番は既存の`所属・並び順を編集`によるsemantic transactionだけが行います。
+
 InspectorはCanvasを圧迫しないcompactな密度を標準とし、対象概要、2つの追加入口、選択後の主要actionだけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳めます。
 
 `要素を追加`はlabel一項目だけを入力して確定します。Opaque IRIはhost allocatorが生成し、初期semantic statementはそのIRIの`rdfs:label`だけです。種類、説明、分類、所属、関係、位置を作成formへ混ぜず、作成後の対象別編集と`ビュー`で追加します。`関係を追加`はCanvasで選んだ始点・終点とlabel-firstの関係候補を使います。必要なauthoring context、provenance、書込権限が不足するactionは推測で実行せず、無効理由と次に必要な操作を日本語で示します。
@@ -58,7 +66,9 @@ Dialogは表示時に見出しまたは最初のfieldへfocusし、focusをdialo
 
 ## Edgeの作成と接続点
 
-Edge作成はsource、predicate、targetを明示するsemantic authoringです。Canvas gestureを使う場合も、最初のresourceと次のresourceをdraftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補から選び、standard editorのAdvancedはread-onlyで候補外IRIの入力欄を持ちません。空欄をgeneric predicateで補完することはありません。
+Edge作成はsource、predicate、targetを明示するsemantic authoringです。`関係を追加`を開いた時点でresourceを一つだけ選択していればそれを始点にし、続くCanvasの通常clickを終点として受け取ります。事前のCtrl/Cmd複数選択は要求しません。始点を終点pickerへ自動転記せず、同じnodeの通常clickは次段階へ進めません。自己関係は専用の「始点自身へ接続」actionを利用者が明示した場合だけcandidateにし、profile/domain validationを通ったときだけ確定します。始点変更後は古い終点を破棄し、blank、region、container、Escapeは未接続のsemantic stateを保存しません。
+
+Canvas gestureを使う場合も、最初のresourceと次のresourceをsession draftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補から選び、standard editorのAdvancedはread-onlyで候補外IRIの入力欄を持ちません。空欄をgeneric predicateで補完することはありません。
 
 Predicate pickerは「分類」「参照」「依存」「由来」等のcategoryごとに候補をまとめ、候補名を`A（predicate label）B`、補足説明をsubjectが`A`、objectが`B`の短い日本語例文として表示します。たとえばPROV-Oの派生関係は「A（派生元）B」と「AはBから派生した」を併記します。A/Bは基準要素と相手要素の役割を比較するためだけの仮記号で、確定後のedge表示には実際の要素名とpredicate labelだけを使います。語順、助詞を含む文型、comment、category、利用例は解決済みcatalog/vocabulary metadataから得て、IRI local nameや英語labelの機械分割から生成しません。Metadataが不足する候補は`A（通常predicate label）B`という決定的fallbackを使い、意味を推測しません。
 
@@ -70,9 +80,9 @@ Predicateから導出するedge labelは関係種別の意味表示です。個�
 
 `ビュー`tabで選択edgeの始点と終点haloをdragすると、接続nodeの周囲だけを移動できます。Anchorは外周上の正規化値としてoverlayへ保存しますが、通常Inspectorへ数値入力を露出しません。Haloのdrag中はrouteを一時previewし、pointerupで一つのpresentation historyへ確定します。右InspectorはCanvas操作の案内とautomaticへのresetだけを提供します。
 
-Anchor、waypoint、label offsetはsparse routing overlayであり、edgeのsource、predicate、targetという意味は変更しません。`意味`tabでwritableなdirect edgeを選ぶと、始点または終点haloを別の有効nodeへdropした時点で、元statement削除、新statement追加、個別statement commentの移送を一つのsemantic transactionとして検証・確定します。空白、region、containerへのdropは変更を作らず、元の接続を維持します。途中の未接続状態はgraphにもoverlayにも保存しません。`ビュー`tabの同じ端点操作はnode周囲の接続位置だけを変更します。
+Anchor、waypoint、Bezier curve control、label offsetはsparse routing overlayであり、edgeのsource、predicate、targetという意味は変更しません。`意味`tabでwritableなdirect edgeを選ぶと、始点または終点haloを別の有効nodeへdropした時点で、元statement削除、新statement追加、個別statement commentの移送を一つのsemantic transactionとして検証・確定します。空白、region、containerへのdropは変更を作らず、元の接続を維持します。途中の未接続状態はgraphにもoverlayにも保存しません。`ビュー`tabの同じ端点操作はnode周囲の接続位置だけを変更します。
 
-Edgeを選択して`ビュー`の`線の表示`を開くと、最初に経路形式と端子形状だけを示します。経路modeは`auto`、waypointを持たない`straight`、自動直交の`orthogonal`、waypointを持たない`curve`、利用者制御点を持つ`manual`を区別します。ラベル・補足と接続位置は折り畳み段階へ分け、projection ruleやsource/target anchorの内部数値は通常UIへ出しません。選択中のanchorとmanual waypoint handleだけはnodeより前面のtransient interaction layerへ表示し、背後の要素と重なっても操作可能にします。通常edge線とterminal markerはedge層に留めます。
+Edgeを選択して`ビュー`の`線の表示`を開くと、最初に経路形式と端子形状だけを示します。経路modeは`auto`、waypointを持たない`straight`、自動直交の`orthogonal`、Bezier knot/handleを持てる`curve`、利用者経路点を持つ`manual`を区別します。ラベル・補足と接続位置は折り畳み段階へ分け、projection rule、source/target anchor、Bezier controlの内部座標は通常UIへ出しません。Curve pathのdouble clickまたはInspectorでon-curve knotを追加し、Canvas上のknot/handle dragで角度と曲率を変更します。Curve controlは個別のtab stopを増やさずCanvasを一つのcomposite widgetとして扱い、`[`/`]`で対象を循環、Ctrl/Cmd+Arrowで移動、`W`/Insertでknot追加、Ctrl/Cmd+Deleteでknotまたはmanual handle削除を行います。一回のkey repeatは一つのundo履歴へまとめます。Inspectorの`自動曲線へ戻す`はsparse curve control全体を除きます。選択中のanchor、manual waypoint、curve knot/handleだけはnodeより前面のtransient interaction layerへ表示し、背後の要素と重なっても操作可能にします。通常edge線とterminal markerはedge層に留め、curveはstraight/polylineを重ねず単一のcubic SVG pathとして描きます。Fitと個別edgeのrevealはいずれも、保存済みcontrolだけでなくautomatic controlの外接範囲も含めます。
 
 ## Appearance editor
 
@@ -87,6 +97,8 @@ Edgeは線、色、太さ、経路modeに加え、source/targetそれぞれのte
 Region labelは固定した上下左右のselectだけでなく、外周上のanchorをdragして移動できます。Label directionは`右向き水平`（horizontal-right）または`下向き垂直`（vertical-down）を選び、anchor、offset、directionをsparse overlayとして保存します。Region同士の前後関係はview内のregion z-orderとして編集できますが、node、edge interaction handle、focus indicatorをregion背景より背面へ隠しません。
 
 Nodeの`ビュー`ではラベルとアイコンの相対位置に加えて、ラベルを横書きまたは縦書きへ切り替えられます。既定の横書きは保存せず、縦書きだけを`appearance.nodeLabelWritingDirection`へsparseに保存します。文字方向を変えてもTurtle、ラベル文字列、node geometryは変更せず、位置調整・resize・undo/redoと同じpresentation historyで扱います。
+
+Diamond nodeはnode box全体を回転せず、geometryと同じ未回転の座標系へbackground/border用のdiamond surfaceだけを描画します。Label、icon、drag hit area、8 resize handleはaxis-alignedのままとし、横書きは横長、縦書きは縦長の内接content boundsへ収めます。これにより長い日本語labelは内接範囲で折返し・clipされ、一文字幅への縮退やcounter-rotateによる方向反転を起こしません。Label本文はTurtle、文字方向とlabel/icon offsetはsparse appearanceという正本境界を維持し、layoutとendpoint計算はtemplateの実geometryだけを参照します。
 
 Canvasの`ビュー`tabは、薄いgridの表示/非表示toggleを持ちます。Grid間隔はsnapのsession設定と同じcanvas unitを使い、既定は8です。Zoomとscroll/panでは画面へ固定せずCanvas座標へ追従し、node、edge、region、空白Canvasのpointer/keyboard hit testを阻害しない非interactiveな背景layerに描画します。Toggleとgrid sizeはeditor session stateであり、Turtle、view overlay、portable document、presentation history、dirty stateへ保存しません。`readOnly`でも閲覧用toggleは利用できます。
 

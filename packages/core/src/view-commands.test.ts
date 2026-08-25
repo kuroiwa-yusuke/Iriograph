@@ -6,7 +6,7 @@ import {
   STANDARD_LAYOUT_REFS,
 } from "./layout";
 import type { IriographDocumentV1, ProjectionCatalogV1 } from "./model";
-import type { ProjectionRuntimeContext } from "./scene";
+import { buildIriographView, type ProjectionRuntimeContext } from "./scene";
 import { standardRdfRdfsCatalog } from "./standard-catalog";
 import { applyViewCommand } from "./view-commands";
 
@@ -81,6 +81,49 @@ describe("atomic ViewCommand", () => {
     expect(result.accepted).toBe(true);
     expect(result.document.views[0]!.layoutRef).toBe(STANDARD_LAYOUT_REFS.hierarchicalTb);
     expect(JSON.stringify(result.document.views[1])).toBe(siblingJson);
+  });
+
+  it("switches layout direction for one view while preserving semantic and user overlay", async () => {
+    const source = documentFor();
+    source.views.push({
+      ...structuredClone(source.views[0]!),
+      viewId: "review",
+      locale: "en",
+    });
+    const semanticSource = source.semantic.source;
+    const userOverlay = structuredClone(source.views[0]!.overlay.a);
+    const manualRouting = structuredClone(source.views[0]!.overlay.edge);
+    const siblingJson = JSON.stringify(source.views[1]);
+    const context = runtimeContext();
+    const before = await buildIriographView(source, "main", context);
+
+    const result = await applyViewCommand(source, {
+      command: "configure",
+      viewId: "main",
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalTb,
+    }, context);
+
+    expect(result.accepted).toBe(true);
+    expect(result.document.semantic.source).toBe(semanticSource);
+    expect(result.document.views[0]!.layoutRef).toBe(STANDARD_LAYOUT_REFS.hierarchicalTb);
+    expect(result.document.views[0]!.overlay.a).toEqual(userOverlay);
+    expect(result.document.views[0]!.overlay.edge).toEqual(manualRouting);
+    expect(JSON.stringify(result.document.views[1])).toBe(siblingJson);
+
+    const reloaded = JSON.parse(JSON.stringify(result.document)) as IriographDocumentV1;
+    const after = await buildIriographView(reloaded, "main", context);
+    const beforeGenerated = before.nodes.find((node) => node.semanticRef === "urn:test:view:b")!;
+    const afterGenerated = after.nodes.find((node) => node.semanticRef === "urn:test:view:b")!;
+    expect(afterGenerated.geometry).not.toEqual(beforeGenerated.geometry);
+    expect(afterGenerated.placement).toBe("generated");
+    expect(after.nodes.find((node) => node.semanticRef === "urn:test:view:a")).toMatchObject({
+      geometry: userOverlay!.geometry,
+      pinned: true,
+      placement: "user",
+    });
+    expect(afterGenerated.geometry.y).toBeGreaterThan(
+      after.nodes.find((node) => node.semanticRef === "urn:test:view:a")!.geometry.y,
+    );
   });
 
   it("reconciles a profile change against the old primitive instead of the changed target", async () => {

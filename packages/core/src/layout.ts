@@ -19,7 +19,7 @@ export const STANDARD_LAYOUT_REFS = {
 } as const;
 
 export type LayoutDirection = "LR" | "TB";
-export type LayoutMode = "incremental" | "full";
+export type LayoutMode = "incremental" | "full" | "route-only";
 
 export type LayoutExternalReservation = {
   placement: "bottom-center";
@@ -91,6 +91,11 @@ export type LayoutRequest = {
   scene: LayoutProjectedScene;
   mode?: LayoutMode;
   spacing?: Partial<LayoutSpacing>;
+  /**
+   * Transaction-local renderer routes that must be reused exactly. This is
+   * only valid for route-only execution and is never a portable overlay.
+   */
+  fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>;
 };
 
 export type LayoutDiagnostic = {
@@ -111,6 +116,30 @@ export type LayoutResult = {
   height: number;
   diagnostics: LayoutDiagnostic[];
 };
+
+export type StandardLayoutPerformanceSample = {
+  layoutRef: string;
+  mode: LayoutMode;
+  elements: number;
+  edges: number;
+  placementMs: number;
+  initialRouteMs: number;
+  refinementMs: number;
+  compactionMs: number;
+  boundsMs: number;
+  totalMs: number;
+  visibilitySearches: number;
+  compactedEdges: number;
+  compactionCandidates: number;
+  /** Edges for which this invocation generated an initial route. */
+  routedEdges: number;
+  /** Previous derived routes reused without entering the routing pipeline. */
+  fixedDerivedRoutes: number;
+};
+
+export type StandardLayoutPerformanceObserver = (
+  sample: Readonly<StandardLayoutPerformanceSample>,
+) => void;
 
 export interface LayoutAdapter {
   readonly layoutRef: string;
@@ -172,11 +201,18 @@ export async function layoutProjectedScene(
   request: LayoutRequest,
   registry: LayoutAdapterRegistry,
 ): Promise<LayoutResult> {
+  const requestDiagnostics = validateFixedDerivedRouteRequest(request);
+  if (requestDiagnostics.length > 0) {
+    return emptyResult(request.layoutRef, requestDiagnostics);
+  }
   const resolution = registry.resolve(request.layoutRef);
   if (!resolution.resolved) return emptyResult(request.layoutRef, resolution.diagnostics);
   try {
     const result = await resolution.adapter.layout(request);
-    const completed = completeRegionLayout(request, result);
+    const completed = restoreFixedDerivedRoutes(
+      request,
+      completeRegionLayout(request, result),
+    );
     const invalid = validateAdapterResult(request, completed);
     return invalid.length > 0
       ? emptyResult(request.layoutRef, [...completed.diagnostics, ...invalid])
@@ -189,6 +225,39 @@ export async function layoutProjectedScene(
       layoutRef: request.layoutRef,
     }]);
   }
+}
+
+/**
+ * Third-party adapters may ignore the optional fixed-route optimization. The
+ * common completion layer still preserves the renderer contract; the standard
+ * adapter additionally skips these edges during routing, so this is not its
+ * only preservation mechanism.
+ */
+function restoreFixedDerivedRoutes(
+  request: LayoutRequest,
+  candidate: LayoutResult,
+): LayoutResult {
+  const fixed = request.fixedDerivedRoutes;
+  if (!fixed || Object.keys(fixed).length === 0) return candidate;
+  const routes = Object.fromEntries(Object.entries(candidate.routes).map(([id, points]) => [
+    id,
+    points.map(copyPoint),
+  ]));
+  for (const [edgeId, points] of Object.entries(fixed)) {
+    routes[edgeId] = points.map(copyPoint);
+  }
+  const spacing = { ...DEFAULT_SPACING, ...request.spacing };
+  const bounds = sceneBounds(
+    Object.values(candidate.geometries),
+    Object.values(routes).flat(),
+    spacing.margin,
+  );
+  return {
+    ...candidate,
+    routes,
+    width: bounds.width,
+    height: bounds.height,
+  };
 }
 
 /**
@@ -588,6 +657,7 @@ function adjustRegionRouteEndpoints(
     points.map(copyPoint),
   ]));
   for (const edge of request.scene.edges) {
+    if (request.fixedDerivedRoutes?.[edge.elementId]) continue;
     const points = result[edge.elementId];
     if (!points || points.length < 2) continue;
     const source = geometries[edge.sourceElementId];
@@ -653,7 +723,52 @@ function validateAdapterResult(request: LayoutRequest, result: LayoutResult): La
       });
     }
   }
+  for (const [edgeId, fixed] of Object.entries(request.fixedDerivedRoutes ?? {})) {
+    const actual = result.routes[edgeId];
+    if (!actual || !sameRouteValue(actual, fixed)) {
+      diagnostics.push({
+        ...invalidResult(request, `fixed derived route changed: ${edgeId}`),
+        edgeId,
+      });
+    }
+  }
   return diagnostics;
+}
+
+function validateFixedDerivedRouteRequest(request: LayoutRequest): LayoutDiagnostic[] {
+  const fixed = request.fixedDerivedRoutes;
+  if (!fixed || Object.keys(fixed).length === 0) return [];
+  const diagnostics: LayoutDiagnostic[] = [];
+  if (request.mode !== "route-only") {
+    diagnostics.push(invalidResult(
+      request,
+      "fixedDerivedRoutes is only valid in route-only mode",
+    ));
+  }
+  const expectedEdgeIds = new Set(request.scene.edges.map((edge) => edge.elementId));
+  for (const [edgeId, points] of Object.entries(fixed).sort(([left], [right]) => (
+    compareText(left, right)
+  ))) {
+    if (!expectedEdgeIds.has(edgeId)) {
+      diagnostics.push({
+        ...invalidResult(request, `fixed derived route refers to an unknown edge: ${edgeId}`),
+        edgeId,
+      });
+    } else if (
+      points.length < 2
+      || points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))
+    ) {
+      diagnostics.push({
+        ...invalidResult(request, `fixed derived route is invalid: ${edgeId}`),
+        edgeId,
+      });
+    }
+  }
+  return diagnostics;
+}
+
+function sameRouteValue(left: readonly Point[], right: readonly Point[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function invalidResult(
@@ -694,6 +809,7 @@ export class StandardLightweightLayoutAdapter implements LayoutAdapter {
   constructor(
     readonly layoutRef: string,
     readonly direction: LayoutDirection,
+    readonly performanceObserver?: StandardLayoutPerformanceObserver,
   ) {}
 
   async layout(request: LayoutRequest): Promise<LayoutResult> {
@@ -705,9 +821,22 @@ export class StandardLightweightLayoutAdapter implements LayoutAdapter {
         layoutRef: request.layoutRef,
       }]);
     }
-    return runStandardLayout(request, this.direction);
+    return runStandardLayout(request, this.direction, this.performanceObserver);
   }
 }
+
+type StandardLayoutPerformanceAccumulator = {
+  placementMs: number;
+  initialRouteMs: number;
+  refinementMs: number;
+  compactionMs: number;
+  boundsMs: number;
+  visibilitySearches: number;
+  compactedEdges: number;
+  compactionCandidates: number;
+  routedEdges: number;
+  fixedDerivedRoutes: number;
+};
 
 type LayoutState = {
   request: LayoutRequest;
@@ -720,9 +849,38 @@ type LayoutState = {
   measured: Map<string, { width: number; height: number }>;
   geometries: Record<string, ElementGeometry>;
   diagnostics: LayoutDiagnostic[];
+  routeObstaclesByEndpointPair: Map<string, RouteObstacle[]>;
+  fixedDerivedRoutes: Map<string, readonly Point[]>;
+  sharedEndpointGeometriesByEdgePair: Map<string, ElementGeometry[]>;
 };
 
-function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): LayoutResult {
+type RouteObstacle = ElementGeometry & {
+  /** Body traversal must lose to a renderer-only reservation conflict. */
+  kind: "body" | "reservation";
+};
+
+function runStandardLayout(
+  request: LayoutRequest,
+  direction: LayoutDirection,
+  performanceObserver?: StandardLayoutPerformanceObserver,
+): LayoutResult {
+  const requestDiagnostics = validateFixedDerivedRouteRequest(request);
+  if (requestDiagnostics.length > 0) return emptyResult(request.layoutRef, requestDiagnostics);
+  const totalStartedAt = performanceObserver ? monotonicMilliseconds() : 0;
+  const performanceSample: StandardLayoutPerformanceAccumulator | undefined = performanceObserver
+    ? {
+        placementMs: 0,
+        initialRouteMs: 0,
+        refinementMs: 0,
+        compactionMs: 0,
+        boundsMs: 0,
+        visibilitySearches: 0,
+        compactedEdges: 0,
+        compactionCandidates: 0,
+        routedEdges: 0,
+        fixedDerivedRoutes: Object.keys(request.fixedDerivedRoutes ?? {}).length,
+      }
+    : undefined;
   const diagnostics: LayoutDiagnostic[] = [];
   const elements = indexElements(request.scene.elements, request.layoutRef, diagnostics);
   if (diagnostics.some((item) => item.severity === "error")) {
@@ -741,8 +899,15 @@ function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): 
     measured: new Map(),
     geometries: {},
     diagnostics,
+    routeObstaclesByEndpointPair: new Map(),
+    fixedDerivedRoutes: new Map(Object.entries(request.fixedDerivedRoutes ?? {}).map(([id, points]) => [
+      id,
+      points.map(copyPoint),
+    ])),
+    sharedEndpointGeometriesByEdgePair: new Map(),
   };
 
+  const placementStartedAt = performanceSample ? monotonicMilliseconds() : 0;
   for (const id of state.children.get(ROOT_GROUP) ?? []) measureElement(id, state);
   placeGroup(ROOT_GROUP, { x: state.spacing.margin, y: state.spacing.margin }, state);
   // Regions are derived membership geometry. Complete them before routing so
@@ -756,14 +921,21 @@ function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): 
     height: 0,
     diagnostics: [],
   }).geometries;
-  const routes = routeEdges(state);
+  if (performanceSample) {
+    performanceSample.placementMs = monotonicMilliseconds() - placementStartedAt;
+  }
+  const routes = routeEdges(state, performanceSample);
+  const boundsStartedAt = performanceSample ? monotonicMilliseconds() : 0;
   const bounds = sceneBounds(
     layoutBounds(state),
     Object.values(routes).flat(),
     state.spacing.margin,
   );
+  if (performanceSample) {
+    performanceSample.boundsMs = monotonicMilliseconds() - boundsStartedAt;
+  }
 
-  return {
+  const result: LayoutResult = {
     layoutRef: request.layoutRef,
     geometries: state.geometries,
     routes,
@@ -771,6 +943,21 @@ function runStandardLayout(request: LayoutRequest, direction: LayoutDirection): 
     height: bounds.height,
     diagnostics,
   };
+  if (performanceObserver && performanceSample) {
+    try {
+      performanceObserver(Object.freeze({
+        layoutRef: request.layoutRef,
+        mode: request.mode ?? "incremental",
+        elements: state.elements.size,
+        edges: state.edges.length,
+        ...performanceSample,
+        totalMs: monotonicMilliseconds() - totalStartedAt,
+      }));
+    } catch {
+      // Instrumentation is observational and cannot fail layout.
+    }
+  }
+  return result;
 }
 
 function indexElements(
@@ -1544,8 +1731,19 @@ const ROUTE_GRID_EDGE_LIMIT = 512;
 const ROUTE_REFINEMENT_PASSES = 2;
 const ROUTE_ENDPOINT_STUB = ROUTE_OBSTACLE_PADDING + 2;
 
-function routeEdges(state: LayoutState): Record<string, Point[]> {
-  const routes: Record<string, Point[]> = {};
+function routeEdges(
+  state: LayoutState,
+  performanceSample?: StandardLayoutPerformanceAccumulator,
+): Record<string, Point[]> {
+  const startedAt = performanceSample ? monotonicMilliseconds() : 0;
+  const routes: Record<string, Point[]> = Object.fromEntries(
+    [...state.fixedDerivedRoutes.entries()]
+      .sort(([left], [right]) => compareText(left, right))
+      .map(([edgeId, points]) => [edgeId, points.map(copyPoint)]),
+  );
+  if (performanceSample) {
+    performanceSample.routedEdges = state.edges.length - state.fixedDerivedRoutes.size;
+  }
   const bundles = edgeBundles(state.edges);
   for (const edges of bundles.values()) {
     const first = edges[0]!;
@@ -1567,6 +1765,7 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
       state.direction,
     );
     edges.forEach((edge, index) => {
+      if (isFixedDerivedRoute(edge, state)) return;
       const source = state.geometries[edge.sourceElementId];
       const target = state.geometries[edge.targetElementId];
       if (!source || !target) {
@@ -1612,7 +1811,10 @@ function routeEdges(state: LayoutState): Record<string, Point[]> {
       );
     });
   }
-  return improveDerivedRoutes(routes, state);
+  if (performanceSample) {
+    performanceSample.initialRouteMs = monotonicMilliseconds() - startedAt;
+  }
+  return improveDerivedRoutes(routes, state, performanceSample);
 }
 
 function directRoute(
@@ -1648,11 +1850,20 @@ function directRoute(
 type RoutedEdge = {
   edge: LayoutEdge;
   points: Point[];
+  bounds: ElementGeometry;
+  sharedEndpointGeometries: ElementGeometry[];
+};
+
+type RoutedEdgeState = {
+  edge: LayoutEdge;
+  points: Point[];
+  bounds: ElementGeometry;
 };
 
 type RouteCost = readonly [
-  obstacleIntersections: number,
+  bodyIntersections: number,
   crossings: number,
+  reservationIntersections: number,
   overlapLength: number,
   length: number,
   bends: number,
@@ -1682,6 +1893,7 @@ type GridSearchEntry = {
 function improveDerivedRoutes(
   input: Record<string, Point[]>,
   state: LayoutState,
+  performanceSample?: StandardLayoutPerformanceAccumulator,
 ): Record<string, Point[]> {
   const routes = Object.fromEntries(Object.entries(input).map(([id, points]) => [
     id,
@@ -1690,9 +1902,18 @@ function improveDerivedRoutes(
   if (
     state.elements.size > ROUTE_GRID_ELEMENT_LIMIT
     || state.edges.length > ROUTE_GRID_EDGE_LIMIT
-  ) return compactLargeDerivedRoutes(routes, state);
+  ) {
+    const startedAt = performanceSample ? monotonicMilliseconds() : 0;
+    const result = compactLargeDerivedRoutes(routes, state);
+    if (performanceSample) {
+      performanceSample.compactionMs = monotonicMilliseconds() - startedAt;
+      performanceSample.compactedEdges = state.edges.length - state.fixedDerivedRoutes.size;
+    }
+    return result;
+  }
 
   const sorted = [...state.edges].sort(compareEdge);
+  const affected = sorted.filter((edge) => !isFixedDerivedRoute(edge, state));
   const bundled = new Set(
     [...edgeBundles(sorted).values()]
       .filter((edges) => edges.length > 1)
@@ -1712,7 +1933,9 @@ function improveDerivedRoutes(
       edgeId: edge.elementId,
     });
   }
-  const orders = [sorted, [...sorted].reverse()];
+  const routeStates = indexRoutedEdgeStates(sorted, routes);
+  const orders = [affected, [...affected].reverse()];
+  const refinementStartedAt = performanceSample ? monotonicMilliseconds() : 0;
   for (let pass = 0; pass < ROUTE_REFINEMENT_PASSES; pass += 1) {
     for (const edge of orders[pass % orders.length]!) {
       const base = routes[edge.elementId];
@@ -1728,20 +1951,67 @@ function improveDerivedRoutes(
       // just routes visited earlier in this pass. This makes each accepted
       // replacement a monotonic graph-global improvement while the fixed
       // forward/reverse passes keep runtime and tie-breaking deterministic.
-      const others = sorted.flatMap((other): RoutedEdge[] => {
-        if (other.elementId === edge.elementId) return [];
-        const points = routes[other.elementId];
-        return points ? [{ edge: other, points }] : [];
-      });
+      const others = routedOthers(sorted, routeStates, edge, state);
       const obstacles = routeObstacles(edge, state);
-      const baseCost = routeCost(base, edge, obstacles, others, state);
-      if (
-        bundled.has(edge.elementId)
-        && baseCost[0] === 0
-        && baseCost[1] === 0
-        && baseCost[2] === 0
-      ) continue;
+      const baseCost = routeCost(base, edge, obstacles, others);
+      // The persisted renderer contract exposes at most one pivot. Crossing
+      // and overlap alternatives are therefore scored once in the compaction
+      // pass below. A visibility-grid search is only needed to discover a
+      // corridor around an actual node/comment obstacle; running it for every
+      // unavoidable dense-graph crossing duplicates the same global scoring.
+      if (baseCost[0] === 0) continue;
+      const localCandidates = compactRouteCandidates(
+        edge,
+        base,
+        obstacles,
+        others,
+        state,
+        bundled.has(edge.elementId),
+      );
+      const distinctLocalCandidates = bundled.has(edge.elementId)
+        ? localCandidates.filter((candidate) => !duplicatesBundlePeer(candidate, edge, others))
+        : localCandidates;
+      const localBest = bestRouteCandidate(
+        distinctLocalCandidates,
+        edge,
+        obstacles,
+        others,
+      );
+      const expandedLocalCandidates = localBest?.cost[0] === 0
+        ? undefined
+        : compactRouteCandidates(
+            edge,
+            base,
+            obstacles,
+            others,
+            state,
+            bundled.has(edge.elementId),
+            true,
+          );
+      const expandedLocalBest = expandedLocalCandidates
+        ? bestRouteCandidate(
+            bundled.has(edge.elementId)
+              ? expandedLocalCandidates.filter((candidate) => !duplicatesBundlePeer(candidate, edge, others))
+              : expandedLocalCandidates,
+            edge,
+            obstacles,
+            others,
+          )
+        : undefined;
+      const obstacleFreeLocalBest = expandedLocalBest?.cost[0] === 0 ? expandedLocalBest : localBest;
+      if (obstacleFreeLocalBest?.cost[0] === 0) {
+        if (compareRouteCandidate(
+          obstacleFreeLocalBest.cost,
+          obstacleFreeLocalBest.candidate,
+          baseCost,
+          base,
+        ) < 0) {
+          setRoutedEdgeRoute(routes, routeStates, edge, obstacleFreeLocalBest.candidate);
+        }
+        continue;
+      }
       const frame = autoRouteFrame(base);
+      if (performanceSample) performanceSample.visibilitySearches += 1;
       const middle = routeThroughGates(
         frame.gates,
         base,
@@ -1752,15 +2022,23 @@ function improveDerivedRoutes(
       );
       if (!middle) continue;
       const candidate = frameRoute(frame, middle);
-      const candidateCost = routeCost(candidate, edge, obstacles, others, state);
+      const candidateCost = routeCost(candidate, edge, obstacles, others);
       if (
         (baseCost[0] === 0 || candidateCost[0] === 0)
         && (!bundled.has(edge.elementId) || !duplicatesBundlePeer(candidate, edge, others))
         && compareRouteCandidate(candidateCost, candidate, baseCost, base) < 0
-      ) routes[edge.elementId] = candidate;
+      ) setRoutedEdgeRoute(routes, routeStates, edge, candidate);
     }
   }
-  return compactDerivedRoutes(routes, state);
+  if (performanceSample) {
+    performanceSample.refinementMs = monotonicMilliseconds() - refinementStartedAt;
+  }
+  const compactionStartedAt = performanceSample ? monotonicMilliseconds() : 0;
+  const result = compactDerivedRoutes(routes, state, performanceSample, routeStates);
+  if (performanceSample) {
+    performanceSample.compactionMs = monotonicMilliseconds() - compactionStartedAt;
+  }
+  return result;
 }
 
 /** Linear-time cardinality completion used beyond the bounded quality grid. */
@@ -1771,7 +2049,13 @@ function compactLargeDerivedRoutes(
   const edges = new Map(state.edges.map((edge) => [edge.elementId, edge]));
   return Object.fromEntries(Object.entries(input).map(([edgeId, points]) => {
     const edge = edges.get(edgeId);
-    if (!edge || isImmutableRoute(edge) || edge.routeMode === "straight" || points.length <= 3) {
+    if (
+      !edge
+      || isFixedDerivedRoute(edge, state)
+      || isImmutableRoute(edge)
+      || edge.routeMode === "straight"
+      || points.length <= 3
+    ) {
       return [edgeId, points.map(copyPoint)];
     }
     const start = points[0]!;
@@ -1796,6 +2080,8 @@ function compactLargeDerivedRoutes(
 function compactDerivedRoutes(
   input: Record<string, Point[]>,
   state: LayoutState,
+  performanceSample?: StandardLayoutPerformanceAccumulator,
+  routeStates: Map<string, RoutedEdgeState> = indexRoutedEdgeStates(state.edges, input),
 ): Record<string, Point[]> {
   const routes = Object.fromEntries(Object.entries(input).map(([id, points]) => [
     id,
@@ -1807,19 +2093,24 @@ function compactDerivedRoutes(
       .filter((edges) => edges.length > 1)
       .flatMap((edges) => edges.map((edge) => edge.elementId)),
   );
-  const orders = [sorted, [...sorted].reverse()];
+  const affected = sorted.filter((edge) => !isFixedDerivedRoute(edge, state));
+  const orders = [affected, [...affected].reverse()];
   for (const order of orders) {
     for (const edge of order) {
       const base = routes[edge.elementId];
       if (!base || base.length < 2 || isImmutableRoute(edge) || edge.routeMode === "straight") {
         continue;
       }
-      const others = sorted.flatMap((other): RoutedEdge[] => {
-        if (other.elementId === edge.elementId) return [];
-        const points = routes[other.elementId];
-        return points ? [{ edge: other, points }] : [];
-      });
+      const others = routedOthers(sorted, routeStates, edge, state);
       const obstacles = routeObstacles(edge, state);
+      const baseCost = routeCost(base, edge, obstacles, others);
+      if (
+        base.length <= 3
+        && baseCost[0] === 0
+        && baseCost[1] === 0
+        && baseCost[2] === 0
+        && baseCost[3] === 0
+      ) continue;
       const candidates = compactRouteCandidates(
         edge,
         base,
@@ -1828,29 +2119,94 @@ function compactDerivedRoutes(
         state,
         bundled.has(edge.elementId),
       );
+      if (performanceSample) {
+        performanceSample.compactedEdges += 1;
+        performanceSample.compactionCandidates += candidates.length;
+      }
       const distinctCandidates = bundled.has(edge.elementId)
         ? candidates.filter((candidate) => !duplicatesBundlePeer(candidate, edge, others))
         : candidates;
       if (distinctCandidates.length === 0) continue;
-      distinctCandidates.sort((left, right) => compareRouteCandidate(
-        routeCost(left, edge, obstacles, others, state),
-        left,
-        routeCost(right, edge, obstacles, others, state),
-        right,
-      ));
-      routes[edge.elementId] = distinctCandidates[0]!.map(copyPoint);
+      const best = bestRouteCandidate(
+        distinctCandidates,
+        edge,
+        obstacles,
+        others,
+      );
+      const expandedCandidates = best?.cost[0] === 0
+        ? undefined
+        : compactRouteCandidates(
+            edge,
+            base,
+            obstacles,
+            others,
+            state,
+            bundled.has(edge.elementId),
+            true,
+          );
+      if (performanceSample && expandedCandidates) {
+        performanceSample.compactionCandidates += expandedCandidates.length;
+      }
+      const expandedBest = expandedCandidates
+        ? bestRouteCandidate(
+            bundled.has(edge.elementId)
+              ? expandedCandidates.filter((candidate) => !duplicatesBundlePeer(candidate, edge, others))
+              : expandedCandidates,
+            edge,
+            obstacles,
+            others,
+          )
+        : undefined;
+      const selected = expandedBest ?? best;
+      if (selected) setRoutedEdgeRoute(routes, routeStates, edge, selected.candidate);
     }
   }
   return routes;
 }
 
+function bestRouteCandidate(
+  candidates: readonly Point[][],
+  edge: LayoutEdge,
+  obstacles: readonly RouteObstacle[],
+  others: readonly RoutedEdge[],
+): { candidate: Point[]; cost: RouteCost } | undefined {
+  const obstacleCosts = candidates.map((candidate) => {
+    const bounds = pointBounds(candidate);
+    return {
+      candidate,
+      bounds,
+      obstacleCost: routeObstacleCost(candidate, bounds, obstacles),
+    };
+  });
+  const minimumBodyIntersections = Math.min(
+    ...obstacleCosts.map((item) => item.obstacleCost.bodyIntersections),
+  );
+  let best: { candidate: Point[]; cost: RouteCost } | undefined;
+  for (const item of obstacleCosts) {
+    if (item.obstacleCost.bodyIntersections !== minimumBodyIntersections) continue;
+    const cost = routeCostWithObstacleIntersections(
+      item.candidate,
+      item.bounds,
+      item.obstacleCost,
+      edge,
+      others,
+    );
+    if (
+      !best
+      || compareRouteCandidate(cost, item.candidate, best.cost, best.candidate) < 0
+    ) best = { candidate: item.candidate, cost };
+  }
+  return best;
+}
+
 function compactRouteCandidates(
   edge: LayoutEdge,
   base: readonly Point[],
-  obstacles: readonly ElementGeometry[],
+  obstacles: readonly RouteObstacle[],
   others: readonly RoutedEdge[],
   state: LayoutState,
   preserveLane: boolean,
+  includeClearanceGrid = false,
 ): Point[][] {
   const source = state.geometries[edge.sourceElementId];
   const target = state.geometries[edge.targetElementId];
@@ -1871,10 +2227,13 @@ function compactRouteCandidates(
 
   const sourceCenter = centerOf(source);
   const targetCenter = centerOf(target);
-  // Keep a one-pivot route local. If 240 units cannot clear every competing
-  // edge, compactness wins over a scene-wide detour; node intersections still
-  // remain the first quality component within this bounded candidate set.
-  const maximumDetour = 240;
+  // Keep ordinary crossing/overlap alternatives local. Only the obstacle
+  // fallback may widen to the scene span: node traversal is the first cost
+  // component, while an unavoidable route-route crossing must not cause a
+  // scene-wide detour.
+  const maximumDetour = includeClearanceGrid
+    ? obstacleFallbackDetour(base, source, target, obstacles)
+    : 240;
   const pivotBounds = {
     x: Math.min(source.x, target.x) - maximumDetour,
     y: Math.min(source.y, target.y) - maximumDetour,
@@ -1891,6 +2250,12 @@ function compactRouteCandidates(
     { x: (sourceCenter.x + targetCenter.x) / 2, y: targetCenter.y },
     { x: sourceCenter.x, y: (sourceCenter.y + targetCenter.y) / 2 },
     { x: targetCenter.x, y: (sourceCenter.y + targetCenter.y) / 2 },
+    { x: sourceCenter.x, y: pivotBounds.y },
+    { x: (sourceCenter.x + targetCenter.x) / 2, y: pivotBounds.y },
+    { x: targetCenter.x, y: pivotBounds.y },
+    { x: sourceCenter.x, y: pivotBounds.y + pivotBounds.height },
+    { x: (sourceCenter.x + targetCenter.x) / 2, y: pivotBounds.y + pivotBounds.height },
+    { x: targetCenter.x, y: pivotBounds.y + pivotBounds.height },
   ];
   for (const obstacle of obstacles) {
     pivots.push(...[
@@ -1919,8 +2284,47 @@ function compactRouteCandidates(
         { x: Math.min(pivotBounds.x + pivotBounds.width, right + clearance), y: middleY },
       );
     }
+    for (const obstacle of nearbyObstacles) {
+      for (const x of [obstacle.x, obstacle.x + obstacle.width]) {
+        if (x < pivotBounds.x || x > pivotBounds.x + pivotBounds.width) continue;
+        pivots.push(
+          { x, y: pivotBounds.y },
+          { x, y: pivotBounds.y + pivotBounds.height },
+        );
+      }
+      for (const y of [obstacle.y, obstacle.y + obstacle.height]) {
+        if (y < pivotBounds.y || y > pivotBounds.y + pivotBounds.height) continue;
+        pivots.push(
+          { x: pivotBounds.x, y },
+          { x: pivotBounds.x + pivotBounds.width, y },
+        );
+      }
+    }
+    if (includeClearanceGrid) {
+      const xValues = [...new Set(nearbyObstacles.flatMap((obstacle) => [
+        obstacle.x,
+        obstacle.x + obstacle.width,
+      ]))];
+      const yValues = [...new Set(nearbyObstacles.flatMap((obstacle) => [
+        obstacle.y,
+        obstacle.y + obstacle.height,
+      ]))];
+      for (const x of xValues) {
+        if (x < pivotBounds.x || x > pivotBounds.x + pivotBounds.width) continue;
+        for (const y of yValues) {
+          if (y < pivotBounds.y || y > pivotBounds.y + pivotBounds.height) continue;
+          pivots.push({ x, y });
+        }
+      }
+      for (const x of boundedClearanceAxis(pivotBounds.x, pivotBounds.x + pivotBounds.width)) {
+        for (const y of boundedClearanceAxis(pivotBounds.y, pivotBounds.y + pivotBounds.height)) {
+          pivots.push({ x, y });
+        }
+      }
+    }
   }
   for (const other of preserveLane ? [] : others) {
+    if (!geometriesOverlapOrTouch(other.bounds, pivotBounds)) continue;
     for (let index = 0; index < other.points.length - 1; index += 1) {
       const start = other.points[index]!;
       const end = other.points[index + 1]!;
@@ -1978,6 +2382,100 @@ function compactRouteCandidates(
     add([copyPoint(base[0]!), copyPoint(pivot), copyPoint(base.at(-1)!)]);
   }
   return [...candidates.values()];
+}
+
+function obstacleFallbackDetour(
+  base: readonly Point[],
+  source: ElementGeometry,
+  target: ElementGeometry,
+  obstacles: readonly RouteObstacle[],
+): number {
+  const blockers = obstacles.filter((obstacle) => (
+    obstacle.kind === "body" && polylineIntersectsAnyGeometry(base, [obstacle])
+  ));
+  if (blockers.length === 0) return 720;
+  const endpointLeft = Math.min(source.x, target.x);
+  const endpointTop = Math.min(source.y, target.y);
+  const endpointRight = Math.max(source.x + source.width, target.x + target.width);
+  const endpointBottom = Math.max(source.y + source.height, target.y + target.height);
+  const clearance = 96;
+  return Math.max(
+    720,
+    ...blockers.flatMap((obstacle) => [
+      endpointLeft - obstacle.x + clearance,
+      obstacle.x + obstacle.width - endpointRight + clearance,
+      endpointTop - obstacle.y + clearance,
+      obstacle.y + obstacle.height - endpointBottom + clearance,
+      ...onePivotObstacleDetours(source, target, obstacle, clearance),
+    ]),
+  );
+}
+
+function onePivotObstacleDetours(
+  source: ElementGeometry,
+  target: ElementGeometry,
+  obstacle: ElementGeometry,
+  clearance: number,
+): number[] {
+  const sourceCenter = centerOf(source);
+  const targetCenter = centerOf(target);
+  const pivotX = (sourceCenter.x + targetCenter.x) / 2;
+  const pivotY = (sourceCenter.y + targetCenter.y) / 2;
+  const verticalBounds: number[] = [];
+  const horizontalBounds: number[] = [];
+  for (const endpoint of [sourceCenter, targetCenter]) {
+    const xBoundary = endpoint.x < obstacle.x && pivotX > obstacle.x
+      ? obstacle.x
+      : endpoint.x > obstacle.x + obstacle.width && pivotX < obstacle.x + obstacle.width
+        ? obstacle.x + obstacle.width
+        : undefined;
+    if (xBoundary !== undefined && pivotX !== endpoint.x) {
+      const ratio = (xBoundary - endpoint.x) / (pivotX - endpoint.x);
+      if (ratio > 0 && ratio <= 1) {
+        verticalBounds.push(
+          endpoint.y + (obstacle.y - clearance - endpoint.y) / ratio,
+          endpoint.y + (obstacle.y + obstacle.height + clearance - endpoint.y) / ratio,
+        );
+      }
+    }
+    const yBoundary = endpoint.y < obstacle.y && pivotY > obstacle.y
+      ? obstacle.y
+      : endpoint.y > obstacle.y + obstacle.height && pivotY < obstacle.y + obstacle.height
+        ? obstacle.y + obstacle.height
+        : undefined;
+    if (yBoundary !== undefined && pivotY !== endpoint.y) {
+      const ratio = (yBoundary - endpoint.y) / (pivotY - endpoint.y);
+      if (ratio > 0 && ratio <= 1) {
+        horizontalBounds.push(
+          endpoint.x + (obstacle.x - clearance - endpoint.x) / ratio,
+          endpoint.x + (obstacle.x + obstacle.width + clearance - endpoint.x) / ratio,
+        );
+      }
+    }
+  }
+  return [
+    ...verticalBounds.map((value) => Math.max(
+      Math.abs(value - sourceCenter.y),
+      Math.abs(value - targetCenter.y),
+    )),
+    ...horizontalBounds.map((value) => Math.max(
+      Math.abs(value - sourceCenter.x),
+      Math.abs(value - targetCenter.x),
+    )),
+  ];
+}
+
+/** Keeps fallback search cardinality bounded even for very large user nodes. */
+function boundedClearanceAxis(start: number, end: number): number[] {
+  const minimumStep = 20;
+  const maximumIntervals = 40;
+  const intervals = Math.max(1, Math.min(
+    maximumIntervals,
+    Math.ceil((end - start) / minimumStep),
+  ));
+  return Array.from({ length: intervals + 1 }, (_, index) => (
+    start + (end - start) * index / intervals
+  ));
 }
 
 /** Parallel and reciprocal statements must remain individually selectable. */
@@ -2049,20 +2547,89 @@ function isImmutableRoute(edge: LayoutEdge): boolean {
   return edge.routingPlacement === "user" || edge.routeMode === "manual";
 }
 
-function routeObstacles(edge: LayoutEdge, state: LayoutState): ElementGeometry[] {
-  const result: ElementGeometry[] = [];
+function isFixedDerivedRoute(edge: LayoutEdge, state: LayoutState): boolean {
+  return state.fixedDerivedRoutes.has(edge.elementId);
+}
+
+function routeObstacles(edge: LayoutEdge, state: LayoutState): RouteObstacle[] {
+  const endpointPair = canonicalEndpointPair(edge).join("\n");
+  const cached = state.routeObstaclesByEndpointPair.get(endpointPair);
+  if (cached) return cached;
+  const result: RouteObstacle[] = [];
   for (const element of [...state.elements.values()].sort(compareElement)) {
     if (element.structuralKind !== "node" && element.structuralKind !== "annotation") continue;
     const geometry = state.geometries[element.elementId];
     if (!geometry) continue;
     if (element.elementId !== edge.sourceElementId && element.elementId !== edge.targetElementId) {
-      result.push(expandGeometry(geometry, ROUTE_OBSTACLE_PADDING));
+      result.push({ ...copyGeometry(geometry), kind: "body" });
     }
     for (const reservation of layoutExternalReservationGeometries(element, geometry)) {
-      result.push(expandGeometry(reservation, ROUTE_OBSTACLE_PADDING));
+      result.push({ ...copyGeometry(reservation), kind: "reservation" });
     }
   }
+  state.routeObstaclesByEndpointPair.set(endpointPair, result);
   return result;
+}
+
+function routedOthers(
+  sorted: readonly LayoutEdge[],
+  routeStates: ReadonlyMap<string, RoutedEdgeState>,
+  currentEdge: LayoutEdge,
+  state: LayoutState,
+): RoutedEdge[] {
+  const result: RoutedEdge[] = [];
+  for (const edge of sorted) {
+    if (edge.elementId === currentEdge.elementId) continue;
+    const routed = routeStates.get(edge.elementId);
+    if (!routed) continue;
+    const pairKey = compareText(currentEdge.elementId, edge.elementId) <= 0
+      ? `${currentEdge.elementId}\n${edge.elementId}`
+      : `${edge.elementId}\n${currentEdge.elementId}`;
+    let sharedEndpointGeometries = state.sharedEndpointGeometriesByEdgePair.get(pairKey);
+    if (!sharedEndpointGeometries) {
+      sharedEndpointGeometries = sharedEndpointIds(currentEdge, edge).flatMap((id) => {
+        const geometry = state.geometries[id];
+        return geometry ? [expandGeometry(geometry, ROUTE_ENDPOINT_STUB + 1)] : [];
+      });
+      state.sharedEndpointGeometriesByEdgePair.set(pairKey, sharedEndpointGeometries);
+    }
+    result.push({
+      edge: routed.edge,
+      points: routed.points,
+      bounds: routed.bounds,
+      sharedEndpointGeometries,
+    });
+  }
+  return result;
+}
+
+function indexRoutedEdgeStates(
+  edges: readonly LayoutEdge[],
+  routes: Readonly<Record<string, Point[]>>,
+): Map<string, RoutedEdgeState> {
+  return new Map(edges.flatMap((edge) => {
+    const points = routes[edge.elementId];
+    return points ? [[edge.elementId, {
+      edge,
+      points,
+      bounds: pointBounds(points),
+    }] as const] : [];
+  }));
+}
+
+function setRoutedEdgeRoute(
+  routes: Record<string, Point[]>,
+  routeStates: Map<string, RoutedEdgeState>,
+  edge: LayoutEdge,
+  input: readonly Point[],
+): void {
+  const points = input.map(copyPoint);
+  routes[edge.elementId] = points;
+  routeStates.set(edge.elementId, {
+    edge,
+    points,
+    bounds: pointBounds(points),
+  });
 }
 
 function endpointRoutingObstacles(edge: LayoutEdge, state: LayoutState): ElementGeometry[] {
@@ -2348,28 +2915,61 @@ class MinRouteQueue {
 function routeCost(
   route: readonly Point[],
   edge: LayoutEdge,
-  obstacles: readonly ElementGeometry[],
+  obstacles: readonly RouteObstacle[],
   committed: readonly RoutedEdge[],
-  state: LayoutState,
 ): RouteCost {
-  let obstacleIntersections = 0;
-  let overlapLength = 0;
-  let crossings = 0;
+  const bounds = pointBounds(route);
+  const obstacleCost = routeObstacleCost(route, bounds, obstacles);
+  return routeCostWithObstacleIntersections(
+    route,
+    bounds,
+    obstacleCost,
+    edge,
+    committed,
+  );
+}
+
+function routeObstacleCost(
+  route: readonly Point[],
+  bounds: ElementGeometry,
+  obstacles: readonly RouteObstacle[],
+): { bodyIntersections: number; reservationIntersections: number } {
+  let bodyIntersections = 0;
+  let reservationIntersections = 0;
   for (let index = 0; index < route.length - 1; index += 1) {
     const start = route[index]!;
     const end = route[index + 1]!;
-    obstacleIntersections += obstacles.filter((obstacle) => (
-      segmentIntersectsGeometry(start, end, obstacle)
-    )).length;
+    for (const obstacle of obstacles) {
+      if (
+        geometriesOverlapOrTouch(bounds, obstacle)
+        && segmentIntersectsGeometry(start, end, obstacle)
+      ) {
+        if (obstacle.kind === "body") bodyIntersections += 1;
+        else reservationIntersections += 1;
+      }
+    }
   }
+  return { bodyIntersections, reservationIntersections };
+}
+
+function routeCostWithObstacleIntersections(
+  route: readonly Point[],
+  bounds: ElementGeometry,
+  obstacleCost: { bodyIntersections: number; reservationIntersections: number },
+  edge: LayoutEdge,
+  committed: readonly RoutedEdge[],
+): RouteCost {
+  let overlapLength = 0;
+  let crossings = 0;
   for (const routed of committed) {
-    const interaction = polylineInteraction(route, edge, routed, state);
+    const interaction = polylineInteraction(route, bounds, routed);
     overlapLength += interaction.overlapLength;
     crossings += interaction.crossings;
   }
   return [
-    obstacleIntersections,
+    obstacleCost.bodyIntersections,
     crossings,
+    obstacleCost.reservationIntersections,
     overlapLength,
     routeLength(route),
     routeBends(route),
@@ -2378,14 +2978,13 @@ function routeCost(
 
 function polylineInteraction(
   points: readonly Point[],
-  edge: LayoutEdge,
+  bounds: ElementGeometry,
   routed: RoutedEdge,
-  state: LayoutState,
 ): { overlapLength: number; crossings: number } {
-  const sharedEndpointGeometries = sharedEndpointIds(edge, routed.edge).flatMap((id) => {
-    const geometry = state.geometries[id];
-    return geometry ? [expandGeometry(geometry, ROUTE_ENDPOINT_STUB + 1)] : [];
-  });
+  if (!geometriesOverlapOrTouch(bounds, routed.bounds)) {
+    return { overlapLength: 0, crossings: 0 };
+  }
+  const sharedEndpointGeometries = routed.sharedEndpointGeometries;
   let overlapLength = 0;
   const crossingPoints = new Set<string>();
   for (let leftIndex = 0; leftIndex < points.length - 1; leftIndex += 1) {
@@ -2425,13 +3024,17 @@ function segmentInteraction(
   state: LayoutState,
   includeCandidateEndpoints = false,
 ): { overlapLength: number; crossings: number } {
+  const bounds = pointBounds([start, end]);
   let overlapLength = 0;
   let crossings = 0;
   for (const routed of committed) {
-    const sharedEndpointGeometries = sharedEndpointIds(edge, routed.edge).flatMap((id) => {
-      const geometry = state.geometries[id];
-      return geometry ? [expandGeometry(geometry, ROUTE_ENDPOINT_STUB + 1)] : [];
-    });
+    if (!geometriesOverlapOrTouch(bounds, routed.bounds)) continue;
+    const sharedEndpointGeometries = routed.sharedEndpointGeometries.length > 0
+      ? routed.sharedEndpointGeometries
+      : sharedEndpointIds(edge, routed.edge).flatMap((id) => {
+          const geometry = state.geometries[id];
+          return geometry ? [expandGeometry(geometry, ROUTE_ENDPOINT_STUB + 1)] : [];
+        });
     for (let index = 0; index < routed.points.length - 1; index += 1) {
       const otherStart = routed.points[index]!;
       const otherEnd = routed.points[index + 1]!;
@@ -2884,6 +3487,7 @@ function routeSelfLoopBundle(
     return;
   }
   edges.forEach((edge, index) => {
+    if (isFixedDerivedRoute(edge, state)) return;
     if (edge.routeMode === "straight") {
       const centerY = geometry.y + geometry.height / 2;
       const inset = Math.max(4, Math.min(12, geometry.height / 4));
@@ -3230,6 +3834,10 @@ function pointDistance(left: Point, right: Point): number {
 
 function samePoint(left: Point, right: Point): boolean {
   return left.x === right.x && left.y === right.y;
+}
+
+function monotonicMilliseconds(): number {
+  return globalThis.performance?.now() ?? Date.now();
 }
 
 function compareElement(left: LayoutElement, right: LayoutElement): number {

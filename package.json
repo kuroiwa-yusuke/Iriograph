@@ -22,6 +22,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "verify": "npm run verify:package-versions && npm run test && npm run typecheck && npm run build && npm run verify:package-consumer",
     "verify:e2e": "playwright test",
+    "verify:browser-performance": "playwright test --config playwright.browser-performance.config.ts",
     "verify:performance": "playwright test --config playwright.performance.config.ts",
     "verify:package-consumer": "npm run build:packages && node scripts/verify-package-consumer.mjs",
     "verify:package-versions": "node scripts/verify-package-versions.mjs && node --test scripts/publish-packages.test.mjs",

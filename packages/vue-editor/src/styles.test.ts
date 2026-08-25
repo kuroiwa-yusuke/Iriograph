@@ -32,4 +32,15 @@ describe("package style isolation", () => {
     expect(css).toMatch(/\.iriograph-intent-panel \.iriograph-intent-group-card\s*\{[^}]*border:\s*1px solid/su);
     wrapper.unmount();
   });
+
+  it("Diamond nodeはroot/contentを回転せずsurfaceと方向別内接boundsだけを持つ", () => {
+    const css = readFileSync("src/styles.css", "utf8");
+    const rootRule = css.match(/\.iriograph-scene-node\.shape-diamond\s*\{(?<body>[^}]*)\}/su)
+      ?.groups?.body ?? "";
+    expect(rootRule).not.toContain("transform:");
+    expect(css).not.toMatch(/\.shape-diamond\s+\.iriograph-node-content[^}]*rotate\(/su);
+    expect(css).toMatch(/\.iriograph-node-diamond-surface\s*\{[^}]*position:\s*absolute;[^}]*pointer-events:\s*none;/su);
+    expect(css).toMatch(/\.content-horizontal\s*\{[^}]*width:\s*64%;[^}]*height:\s*24%;/su);
+    expect(css).toMatch(/\.content-vertical\s*\{[^}]*width:\s*24%;[^}]*height:\s*64%;[^}]*flex-direction:\s*column;/su);
+  });
 });
