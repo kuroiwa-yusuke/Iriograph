@@ -16,6 +16,12 @@
       "url": "/workspace/models/pizza-order-delivery.iriograph"
     },
     {
+      "kind": "iriograph-document",
+      "path": "models/pizza-order-delivery-llm-overlay.iriograph",
+      "mediaType": "application/vnd.iriograph+json",
+      "url": "/workspace/models/pizza-order-delivery-llm-overlay.iriograph"
+    },
+    {
       "kind": "asset",
       "path": "assets/icons/user-task.svg",
       "mediaType": "image/svg+xml",

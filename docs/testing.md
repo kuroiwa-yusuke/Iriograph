@@ -92,6 +92,14 @@ Canvasのhost埋込み回帰は通常幅と800px狭幅、左右sidebar折り畳�
 
 Macro比率、相対配置、branch row、edge corridorと交差の改善は、特定seedのIRIやlabelへ分岐しない汎用layoutの責務です。BPMN shape、icon、色、線種はcatalog/profileとrendererの視覚文法で解き、標準layoutへ業務固有styleを埋め込みません。個別documentを参照図へ最終調整する座標・size・route・styleはoverlayの責務ですが、初期seedは空overlayという検証条件を維持し、手動overlayで自動layoutの画像一致点を水増ししません。
 
+#### LLM overlay派生比較
+
+比較用の`pizza-order-delivery-llm-overlay.iriograph`は、正本seedの`semantic.source`とbyte-identicalなTurtleを維持し、参照画像を見ながら生成・調整したoverlayだけを持ちます。Overlay差分は62件で、30 elementのgeometryと32 edgeのroute/styleです。Chromiumで3回、LLMによる候補作成と人手によるbrowser目視・修正指示を反復し、各回のconsole/page errorは0件でした。したがって、この結果はvision modelの一回実行や無人自動変換の精度ではなく、人手を含むLLM-assisted WYSIWYG作業の到達例です。
+
+同じ画像rubricによる派生比較は84±5/100で、内訳はMacro 17、relative placement 17、branch rows 15、cross-lane alignment 15、connector geometry 11、BPMN visual language 9です。Empty-overlay正本の36/100は自動projection/layoutの基準値として変更せず、派生84±5を汎用layout baseline、release gate、CI閾値へ使いません。派生fileはoverlayでどこまで参照図へ寄せられるかを比較するartifactであり、そのgeometryやrouteをseed、catalog、Core layout ruleへ逆輸入しません。
+
+残差のうち、封筒・timerの専用icon、色付き縦lane header、semantic predicate由来edge labelのview単位hideは、現行catalog/template・renderer契約だけでは参照図どおりに指定できません。これらを座標調整で偽装せず、catalog/profile/rendererの表現上限としてBPMN visual languageとconnector geometryから減点しています。P2-09の完了条件である3種類以上の参照図を各3回評価する検証は未達であり、この1図3反復の結果だけでbacklogを完了扱いにしません。
+
 ## Test追加規則
 
 - CoreにDOMやbrowser mockを持ち込まない

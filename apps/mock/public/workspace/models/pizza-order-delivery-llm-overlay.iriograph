@@ -1,0 +1,1625 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.document",
+  "documentId": "pizza-order-delivery-llm-overlay",
+  "semantic": {
+    "format": "text/turtle",
+    "baseIri": "urn:iriograph:sample:pizza:",
+    "authoringProfileRef": "urn:iriograph:authoring-profile:workflow-mock@1",
+    "source": "@prefix pizza: <urn:iriograph:sample:pizza:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\npizza:next a rdf:Property ;\n  rdfs:label \"次の工程\"@ja ;\n  rdfs:comment \"同じ業務の制御が次の工程へ進む関係\"@ja .\n\npizza:branchesTo a rdf:Property ;\n  rdfs:subPropertyOf pizza:next ;\n  rdfs:label \"分岐する\"@ja ;\n  rdfs:comment \"gatewayから複数の候補へ制御を分ける関係\"@ja .\n\npizza:mergesInto a rdf:Property ;\n  rdfs:subPropertyOf pizza:next ;\n  rdfs:label \"合流する\"@ja ;\n  rdfs:comment \"分かれた制御をgatewayへ合流させる関係\"@ja .\n\npizza:sends a rdf:Property ;\n  rdfs:label \"送信する\"@ja ;\n  rdfs:comment \"業務主体が意味resourceを送信する関係\"@ja .\n\npizza:receivedBy a rdf:Property ;\n  rdfs:label \"受信される\"@ja ;\n  rdfs:comment \"送信された意味resourceを受け取る主体との関係\"@ja .\n\npizza:about a rdf:Property ;\n  rdfs:label \"対象とする\"@ja ;\n  rdfs:comment \"message resourceが扱う対象との関係\"@ja .\n\npizza:shop a rdf:Bag ;\n  rdfs:label \"ピザ店\"@ja ;\n  rdfs:comment \"店員、調理担当、配達担当を含む事業者領域\"@ja ;\n  rdfs:member pizza:lane-staff, pizza:lane-kitchen, pizza:lane-delivery .\n\npizza:lane-customer a rdf:Bag ;\n  rdfs:label \"顧客\"@ja ;\n  rdfs:member pizza:lane1-c01, pizza:lane1-c02, pizza:lane1-c03, pizza:lane1-c04, pizza:lane1-c05, pizza:lane1-c06, pizza:lane1-c07, pizza:lane1-c09, pizza:lane1-c10, pizza:lane1-c11 .\n\npizza:lane-staff a rdf:Bag ;\n  rdfs:label \"店員\"@ja ;\n  rdfs:member pizza:lane2-s01, pizza:lane2-s02, pizza:lane2-s03, pizza:lane2-s04, pizza:lane2-s05, pizza:lane2-s06 .\n\npizza:lane-kitchen a rdf:Bag ;\n  rdfs:label \"調理担当\"@ja ;\n  rdfs:member pizza:lane3-k01 .\n\npizza:lane-delivery a rdf:Bag ;\n  rdfs:label \"配達担当\"@ja ;\n  rdfs:member pizza:lane4-d01, pizza:lane4-d02, pizza:lane4-d03 .\n\npizza:lane1-c01 rdfs:label \"おなかがすいた\"@ja ;\n  pizza:next pizza:lane1-c02 .\n\npizza:lane1-c02 rdfs:label \"ピザを選ぶ\"@ja ;\n  pizza:next pizza:lane1-c03 .\n\npizza:lane1-c03 rdfs:label \"ピザを注文する\"@ja ;\n  pizza:next pizza:lane1-c04 ;\n  pizza:sends pizza:order .\n\npizza:lane1-c04 rdfs:label \"注文後イベント\"@ja ;\n  rdfs:comment \"ピザの到着と60分タイマーのどちらかを待つevent gateway\"@ja ;\n  pizza:branchesTo pizza:lane1-c05, pizza:lane1-c06 .\n\npizza:lane1-c05 rdfs:label \"ピザを受け取る\"@ja ;\n  pizza:next pizza:lane1-c09 .\n\npizza:lane1-c06 rdfs:label \"60分待つ\"@ja ;\n  rdfs:comment \"注文から60分が経過したことを表すtimer event\"@ja ;\n  pizza:next pizza:lane1-c07 .\n\npizza:lane1-c07 rdfs:label \"問い合わせる\"@ja ;\n  rdfs:comment \"問い合わせを送信した後は注文後イベントへ戻って待機を続ける\"@ja ;\n  pizza:sends pizza:inquiry ;\n  pizza:next pizza:lane1-c04 .\n\npizza:lane1-c09 rdfs:label \"代金を払う\"@ja ;\n  pizza:sends pizza:fee ;\n  pizza:next pizza:lane1-c10 .\n\npizza:lane1-c10 rdfs:label \"ピザを食べる\"@ja ;\n  pizza:next pizza:lane1-c11 .\n\npizza:lane1-c11 rdfs:label \"空腹が満たされた\"@ja .\n\npizza:lane2-s01 rdfs:label \"注文を受ける\"@ja ;\n  pizza:next pizza:lane2-s02 .\n\npizza:lane2-s02 rdfs:label \"注文後処理を並行分岐\"@ja ;\n  rdfs:comment \"調理、問い合わせ受付、顧客クレーム対応を並行開始するparallel gateway\"@ja ;\n  pizza:branchesTo pizza:lane2-s03, pizza:lane2-s04, pizza:lane3-k01 .\n\npizza:lane2-s03 rdfs:label \"問い合わせ受付\"@ja ;\n  pizza:mergesInto pizza:lane2-s05 .\n\npizza:lane2-s04 rdfs:label \"顧客クレーム対応\"@ja ;\n  pizza:mergesInto pizza:lane2-s05 .\n\npizza:lane2-s05 rdfs:label \"問い合わせに回答する\"@ja ;\n  pizza:next pizza:lane2-s06 .\n\npizza:lane2-s06 rdfs:label \"問い合わせ対応完了\"@ja ;\n  rdfs:comment \"問い合わせまたはクレームへの回答を終え、次の連絡まで待機する\"@ja .\n\npizza:lane3-k01 rdfs:label \"ピザを焼く\"@ja ;\n  pizza:next pizza:lane4-d01 .\n\npizza:lane4-d01 rdfs:label \"ピザを配達する\"@ja ;\n  pizza:sends pizza:pizza ;\n  pizza:next pizza:lane4-d02 .\n\npizza:lane4-d02 rdfs:label \"代金を受け取る\"@ja ;\n  pizza:sends pizza:receipt ;\n  pizza:next pizza:lane4-d03 .\n\npizza:lane4-d03 rdfs:label \"注文完了\"@ja, \"Order completed\"@en .\n\npizza:order rdfs:label \"注文\"@ja ;\n  rdfs:comment \"顧客が選択したピザと配送依頼を表す注文resource\"@ja ;\n  pizza:about pizza:pizza ;\n  pizza:receivedBy pizza:lane2-s01 .\n\npizza:pizza rdfs:label \"ピザ\"@ja ;\n  rdfs:comment \"調理され顧客へ配送される商品resource\"@ja ;\n  pizza:receivedBy pizza:lane1-c05 .\n\npizza:fee rdfs:label \"料金\"@ja ;\n  rdfs:comment \"顧客が支払う代金resource\"@ja ;\n  pizza:receivedBy pizza:lane4-d02 .\n\npizza:receipt rdfs:label \"領収書\"@ja ;\n  rdfs:comment \"代金受領後に顧客へ渡す証憑resource\"@ja ;\n  pizza:receivedBy pizza:lane1-c09 .\n\npizza:inquiry rdfs:label \"問い合わせ内容\"@ja ;\n  rdfs:comment \"60分経過後に顧客が送る問い合わせresource\"@ja ;\n  pizza:about pizza:order ;\n  pizza:receivedBy pizza:lane2-s03 .\n"
+  },
+  "imports": [
+    {
+      "catalogRef": "urn:iriograph:catalog:rdf-rdfs-classification-region@1"
+    },
+    {
+      "catalogRef": "urn:iriograph:catalog:workflow-mock-classification-region@1"
+    }
+  ],
+  "views": [
+    {
+      "viewId": "main",
+      "kind": "region",
+      "profileRef": "urn:iriograph:profile:rdf-rdfs:classification-region:1",
+      "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+      "locale": "ja",
+      "overlay": {
+        "region-lane-customer": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane-customer",
+          "geometry": {
+            "x": 40,
+            "y": 40,
+            "width": 2560,
+            "height": 400
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "style": {
+              "fill": "#f8fafc",
+              "stroke": "#ff6178",
+              "text": "#d52f50",
+              "fillOpacity": 0.72,
+              "strokeWidth": 2
+            },
+            "labelPlacement": "left",
+            "regionLabelAnchor": 0.9662162162162162,
+            "regionLabelWritingDirection": "vertical-down",
+            "regionZOrder": 0
+          }
+        },
+        "region-shop": {
+          "semanticRef": "urn:iriograph:sample:pizza:shop",
+          "geometry": {
+            "x": 40,
+            "y": 500,
+            "width": 2560,
+            "height": 970
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "style": {
+              "fill": "#fff7e6",
+              "stroke": "#ffab1f",
+              "text": "#bf6a00",
+              "fillOpacity": 0.4,
+              "strokeWidth": 2
+            },
+            "labelPlacement": "left",
+            "regionLabelAnchor": 0.9313031161473088,
+            "regionLabelWritingDirection": "vertical-down",
+            "regionZOrder": 0
+          }
+        },
+        "region-lane-staff": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane-staff",
+          "geometry": {
+            "x": 160,
+            "y": 520,
+            "width": 2420,
+            "height": 300
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "style": {
+              "fill": "#f3f4f6",
+              "stroke": "#71aee8",
+              "text": "#1876c5",
+              "fillOpacity": 0.65,
+              "strokeWidth": 1.5
+            },
+            "labelPlacement": "left",
+            "regionLabelAnchor": 0.9724264705882353,
+            "regionLabelWritingDirection": "vertical-down",
+            "regionZOrder": 1
+          }
+        },
+        "region-lane-kitchen": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane-kitchen",
+          "geometry": {
+            "x": 160,
+            "y": 820,
+            "width": 2420,
+            "height": 310
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "style": {
+              "fill": "#f3f4f6",
+              "stroke": "#71aee8",
+              "text": "#1876c5",
+              "fillOpacity": 0.65,
+              "strokeWidth": 1.5
+            },
+            "labelPlacement": "left",
+            "regionLabelAnchor": 0.9716117216117216,
+            "regionLabelWritingDirection": "vertical-down",
+            "regionZOrder": 1
+          }
+        },
+        "region-lane-delivery": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane-delivery",
+          "geometry": {
+            "x": 160,
+            "y": 1130,
+            "width": 2420,
+            "height": 320
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "style": {
+              "fill": "#f3f4f6",
+              "stroke": "#71aee8",
+              "text": "#1876c5",
+              "fillOpacity": 0.65,
+              "strokeWidth": 1.5
+            },
+            "labelPlacement": "left",
+            "regionLabelAnchor": 0.9708029197080292,
+            "regionLabelWritingDirection": "vertical-down",
+            "regionZOrder": 1
+          }
+        },
+        "node-lane1-c01": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c01",
+          "geometry": {
+            "x": 180,
+            "y": 120,
+            "width": 70,
+            "height": 70
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:start-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 3
+            },
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 30
+            }
+          }
+        },
+        "node-lane1-c02": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c02",
+          "geometry": {
+            "x": 390,
+            "y": 115,
+            "width": 290,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane1-c03": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c03",
+          "geometry": {
+            "x": 390,
+            "y": 270,
+            "width": 290,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane1-c04": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c04",
+          "geometry": {
+            "x": 800,
+            "y": 115,
+            "width": 80,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:gateway:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#70afe9",
+              "text": "transparent",
+              "accent": "#70afe9",
+              "strokeWidth": 2
+            },
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 42
+            }
+          }
+        },
+        "node-lane1-c05": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c05",
+          "geometry": {
+            "x": 1460,
+            "y": 115,
+            "width": 80,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:start-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 3
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 38
+            }
+          }
+        },
+        "node-lane1-c06": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c06",
+          "geometry": {
+            "x": 1010,
+            "y": 270,
+            "width": 80,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:start-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 3
+            },
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 38
+            }
+          }
+        },
+        "node-lane1-c07": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c07",
+          "geometry": {
+            "x": 1210,
+            "y": 270,
+            "width": 270,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane1-c09": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c09",
+          "geometry": {
+            "x": 1790,
+            "y": 115,
+            "width": 290,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane1-c10": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c10",
+          "geometry": {
+            "x": 2130,
+            "y": 115,
+            "width": 270,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane1-c11": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane1-c11",
+          "geometry": {
+            "x": 2229,
+            "y": 280,
+            "width": 72,
+            "height": 72
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:end-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 5
+            },
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 34
+            }
+          }
+        },
+        "node-lane2-s01": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane2-s01",
+          "geometry": {
+            "x": 498,
+            "y": 570,
+            "width": 74,
+            "height": 74
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:start-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 3
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 36
+            }
+          }
+        },
+        "node-lane2-s02": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane2-s02",
+          "geometry": {
+            "x": 720,
+            "y": 570,
+            "width": 80,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:gateway:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#70afe9",
+              "text": "transparent",
+              "accent": "#70afe9",
+              "strokeWidth": 2
+            },
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 42
+            }
+          }
+        },
+        "node-lane2-s03": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane2-s03",
+          "geometry": {
+            "x": 1308,
+            "y": 570,
+            "width": 74,
+            "height": 74
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:start-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 3
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 36
+            }
+          }
+        },
+        "node-lane2-s04": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane2-s04",
+          "geometry": {
+            "x": 1050,
+            "y": 710,
+            "width": 260,
+            "height": 70
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane2-s05": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane2-s05",
+          "geometry": {
+            "x": 1510,
+            "y": 570,
+            "width": 260,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane2-s06": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane2-s06",
+          "geometry": {
+            "x": 2110,
+            "y": 570,
+            "width": 260,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane3-k01": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane3-k01",
+          "geometry": {
+            "x": 820,
+            "y": 940,
+            "width": 300,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane4-d01": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane4-d01",
+          "geometry": {
+            "x": 1350,
+            "y": 1260,
+            "width": 300,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane4-d02": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane4-d02",
+          "geometry": {
+            "x": 1800,
+            "y": 1260,
+            "width": 300,
+            "height": 80
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:node:class:1",
+            "style": {
+              "fill": "#7db5f1",
+              "stroke": "#5a9cde",
+              "text": "#153f68",
+              "accent": "#5a9cde",
+              "strokeWidth": 1.5
+            }
+          }
+        },
+        "node-lane4-d03": {
+          "semanticRef": "urn:iriograph:sample:pizza:lane4-d03",
+          "geometry": {
+            "x": 2290,
+            "y": 1264,
+            "width": 72,
+            "height": 72
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:end-event:1",
+            "style": {
+              "fill": "#ffffff",
+              "stroke": "#6eb0ed",
+              "text": "#243b53",
+              "accent": "#6eb0ed",
+              "strokeWidth": 5
+            },
+            "labelPlacement": "bottom",
+            "nodeLabelOffset": {
+              "x": 0,
+              "y": 34
+            }
+          }
+        },
+        "node-order": {
+          "semanticRef": "urn:iriograph:sample:pizza:order",
+          "geometry": {
+            "x": 485,
+            "y": 455,
+            "width": 100,
+            "height": 50
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:reference:1",
+            "style": {
+              "fill": "transparent",
+              "stroke": "transparent",
+              "text": "#334155",
+              "accent": "#879697",
+              "strokeWidth": 1
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "right"
+          }
+        },
+        "node-inquiry": {
+          "semanticRef": "urn:iriograph:sample:pizza:inquiry",
+          "geometry": {
+            "x": 1295,
+            "y": 455,
+            "width": 100,
+            "height": 50
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:reference:1",
+            "style": {
+              "fill": "transparent",
+              "stroke": "transparent",
+              "text": "#334155",
+              "accent": "#879697",
+              "strokeWidth": 1
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "right"
+          }
+        },
+        "node-pizza": {
+          "semanticRef": "urn:iriograph:sample:pizza:pizza",
+          "geometry": {
+            "x": 1450,
+            "y": 940,
+            "width": 100,
+            "height": 50
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:reference:1",
+            "style": {
+              "fill": "transparent",
+              "stroke": "transparent",
+              "text": "#334155",
+              "accent": "#879697",
+              "strokeWidth": 1
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "right"
+          }
+        },
+        "node-fee": {
+          "semanticRef": "urn:iriograph:sample:pizza:fee",
+          "geometry": {
+            "x": 1885,
+            "y": 940,
+            "width": 100,
+            "height": 50
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:reference:1",
+            "style": {
+              "fill": "transparent",
+              "stroke": "transparent",
+              "text": "#334155",
+              "accent": "#879697",
+              "strokeWidth": 1
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "right"
+          }
+        },
+        "node-receipt": {
+          "semanticRef": "urn:iriograph:sample:pizza:receipt",
+          "geometry": {
+            "x": 1885,
+            "y": 1040,
+            "width": 100,
+            "height": 50
+          },
+          "pinned": true,
+          "placement": "user",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:reference:1",
+            "style": {
+              "fill": "transparent",
+              "stroke": "transparent",
+              "text": "#334155",
+              "accent": "#879697",
+              "strokeWidth": 1
+            },
+            "iconRef": "urn:iriograph:icon:reference:1",
+            "labelPlacement": "right"
+          }
+        },
+        "edge-c01-c02": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c01%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c02%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c02-c03": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c02%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c03%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c03-c04": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c03%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c04%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 740,
+                "y": 310
+              },
+              {
+                "x": 740,
+                "y": 155
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c03-order": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c03%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Asends%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Aorder%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c04-c05": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c04%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AbranchesTo%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c05%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c04-c06": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c04%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AbranchesTo%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c06%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 840,
+                "y": 310
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c05-c09": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c05%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c09%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c06-c07": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c06%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c07%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c07-inquiry": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c07%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Asends%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Ainquiry%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c07-c04": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c07%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c04%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 1510,
+                "y": 310
+              },
+              {
+                "x": 1510,
+                "y": 85
+              },
+              {
+                "x": 840,
+                "y": 85
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c09-fee": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c09%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Asends%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Afee%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c09-c10": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c09%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c10%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-c10-c11": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c10%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c11%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s01-s02": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s01%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s02%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s02-s03": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s02%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AbranchesTo%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s03%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s02-s04": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s02%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AbranchesTo%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s04%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 760,
+                "y": 745
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s02-k01": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s02%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AbranchesTo%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane3-k01%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 760,
+                "y": 980
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s03-s05": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s03%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AmergesInto%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s05%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s04-s05": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s04%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AmergesInto%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s05%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 1420,
+                "y": 745
+              },
+              {
+                "x": 1420,
+                "y": 610
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-s05-s06": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s05%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s06%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-k01-d01": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane3-k01%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d01%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "manual",
+            "waypoints": [
+              {
+                "x": 970,
+                "y": 1300
+              }
+            ],
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-d01-pizza": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d01%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Asends%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Apizza%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0
+            },
+            "targetAnchor": {
+              "position": 0.5
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-d01-d02": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d01%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d02%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-d02-receipt": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d02%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Asends%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Areceipt%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0
+            },
+            "targetAnchor": {
+              "position": 0.5
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-d02-d03": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d02%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Anext%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d03%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#2f2f2f",
+              "text": "#64748b",
+              "strokeWidth": 1.7
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.25
+            },
+            "targetAnchor": {
+              "position": 0.75
+            },
+            "targetMarker": "arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-order-pizza": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Aorder%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Aabout%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Apizza%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:reference:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#cbd5e1",
+              "text": "#cbd5e1",
+              "strokeWidth": 1,
+              "dash": "2 6"
+            }
+          },
+          "routing": {
+            "routeMode": "curve",
+            "sourceMarker": "none",
+            "targetMarker": "none",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-order-s01": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Aorder%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AreceivedBy%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s01%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-pizza-c05": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Apizza%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AreceivedBy%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c05%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0
+            },
+            "targetAnchor": {
+              "position": 0.5
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-fee-d02": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Afee%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AreceivedBy%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane4-d02%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-receipt-c09": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Areceipt%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AreceivedBy%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane1-c09%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0
+            },
+            "targetAnchor": {
+              "position": 0.5
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-inquiry-order": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Ainquiry%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Aabout%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Aorder%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:reference:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#cbd5e1",
+              "text": "#cbd5e1",
+              "strokeWidth": 1,
+              "dash": "2 6"
+            }
+          },
+          "routing": {
+            "routeMode": "curve",
+            "sourceMarker": "none",
+            "targetMarker": "none",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        },
+        "edge-inquiry-s03": {
+          "semanticRef": "urn:iriograph:semantic-ref:v1:statement:%5B%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Ainquiry%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3AreceivedBy%22%5D%2C%5B%22NamedNode%22%2C%22urn%3Airiograph%3Asample%3Apizza%3Alane2-s03%22%5D%5D",
+          "appearance": {
+            "templateRef": "urn:iriograph:template:edge:generic:1",
+            "style": {
+              "fill": "none",
+              "stroke": "#334155",
+              "text": "#64748b",
+              "strokeWidth": 1.5,
+              "dash": "2 4"
+            }
+          },
+          "routing": {
+            "routeMode": "straight",
+            "sourceAnchor": {
+              "position": 0.5
+            },
+            "targetAnchor": {
+              "position": 0
+            },
+            "targetMarker": "open-arrow",
+            "labelOffset": {
+              "x": 0,
+              "y": -14
+            }
+          }
+        }
+      }
+    }
+  ]
+}
