@@ -149,9 +149,9 @@ Fixtureとsample数を変更する場合はbudgetを暗黙に維持せず、同�
 
 ## 6. P1-46 小規模初期表示と関係transaction
 
-標準adapterは任意のobserverで`placement`、初期route、refinement、compaction、bounds、合計時間、visibility探索回数、候補数、実際に初期routeを生成したedge数、固定再利用したderived route数を計測できます。Observerは観測専用で、throwしてもlayoutを失敗させません。Route obstacleはendpoint pairでcacheし、route state Mapは他routeのboundsを初期化時と採用時だけ計算します。共有endpoint geometryもedge pair単位でcacheし、候補の辞書順第一成分であるnode本体交差の最小値が確定した候補だけにedge相互作用を計算します。この枝刈りは候補集合、同点時のroute signature、stable ID順を変更しません。
+標準adapterは任意のobserverで`placement`、初期route、refinement、compaction、bounds、合計時間、visibility探索回数、候補数、実際に初期routeを生成したedge数、固定再利用したderived route数を計測できます。Observerは観測専用で、throwしてもlayoutを失敗させません。Route obstacleはendpoint pairでcacheし、route state Mapは他routeのboundsを初期化時と採用時だけ計算します。共有endpoint geometryもedge pair単位でcacheし、候補の辞書順第一成分であるnode本体交差をedge相互作用より先に計算します。本体交差0のrouteはpeer集合を構築せずrefinement対象外とし、交差ありの場合だけ従来どおり全peerを含む正逆passへ進みます。候補boundsとsignatureは各候補一回だけ求め、障害物bounds判定もsegmentごとに反復しません。この枝刈りは候補集合、正逆pass、同点時のroute signature、stable ID順を変更しません。
 
-Core CI gateはpizza、24 node/23 edgeの疎small、24 node/120 edgeの密smallを一回warmup後5回測り、projectionからsettled Sceneまでのp95を300 ms未満とします。2026-08-26の固定Docker実測はpizza 31.9 ms、疎small 6.1 ms、密small 209.2 msです。全fixtureで非endpoint node交差0、endpoint内部進入0、edge overlap 0、生成route最大3点を要求し、crossing上限はpizza 9、疎small 0、密small 398です。現結果は順に5、0、338で、最適化前の固定上限を悪化させません。
+Core CI gateはpizza、24 node/23 edgeの疎small、24 node/120 edgeの密smallを一回warmup後5回測り、projectionからsettled Sceneまでのp95を300 ms未満とします。2026-08-26の固定Docker実測はpizza 29.5 ms、疎small 5.9 ms、密small 140.7 msです。全fixtureで非endpoint node交差0、endpoint内部進入0、edge overlap 0、生成route最大3点を要求し、crossing上限はpizza 9、疎small 0、密small 398です。現結果は順に5、0、338で、最適化前の固定上限を悪化させません。
 
 Label置換、code-point順を保つopaque IRI写像、60 nodeを2つの`rdf:Bag`へ分けた非pizza包含fixtureでも同じ品質を検証します。Core layoutはTurtle、label、predicate、pizza namespaceを入力に取らず、Projection後のgeometry・membership・endpointだけで処理します。
 

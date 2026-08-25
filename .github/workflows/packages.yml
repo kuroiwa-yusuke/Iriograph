@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+# A package version is immutable once published. Serialize ref-based retries
+# so two valid release triggers cannot race while checking and publishing it.
+concurrency:
+  group: iriograph-packages
+  cancel-in-progress: false
+
 env:
   AWS_REGION: ap-northeast-1
   AWS_ROLE_TO_ASSUME: arn:aws:iam::571179238578:role/KuroxiomPackagesPublishRole

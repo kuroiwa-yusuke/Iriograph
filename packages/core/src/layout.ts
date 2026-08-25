@@ -1947,19 +1947,26 @@ function improveDerivedRoutes(
         || edge.sourceElementId === edge.targetElementId
       ) continue;
 
-      // Every refinement compares against the complete current route set, not
-      // just routes visited earlier in this pass. This makes each accepted
-      // replacement a monotonic graph-global improvement while the fixed
-      // forward/reverse passes keep runtime and tie-breaking deterministic.
-      const others = routedOthers(sorted, routeStates, edge, state);
       const obstacles = routeObstacles(edge, state);
-      const baseCost = routeCost(base, edge, obstacles, others);
+      const baseBounds = pointBounds(base);
+      const baseObstacleCost = routeObstacleCost(base, baseBounds, obstacles);
       // The persisted renderer contract exposes at most one pivot. Crossing
       // and overlap alternatives are therefore scored once in the compaction
       // pass below. A visibility-grid search is only needed to discover a
       // corridor around an actual node/comment obstacle; running it for every
       // unavoidable dense-graph crossing duplicates the same global scoring.
-      if (baseCost[0] === 0) continue;
+      if (baseObstacleCost.bodyIntersections === 0) continue;
+      // Only body-intersecting routes enter refinement. Build the complete
+      // peer view after that exact leading-cost gate; candidate selection and
+      // its forward/reverse deterministic passes remain unchanged.
+      const others = routedOthers(sorted, routeStates, edge, state);
+      const baseCost = routeCostWithObstacleIntersections(
+        base,
+        baseBounds,
+        baseObstacleCost,
+        edge,
+        others,
+      );
       const localCandidates = compactRouteCandidates(
         edge,
         base,
@@ -2175,13 +2182,14 @@ function bestRouteCandidate(
     return {
       candidate,
       bounds,
+      signature: routeSignature(candidate),
       obstacleCost: routeObstacleCost(candidate, bounds, obstacles),
     };
   });
   const minimumBodyIntersections = Math.min(
     ...obstacleCosts.map((item) => item.obstacleCost.bodyIntersections),
   );
-  let best: { candidate: Point[]; cost: RouteCost } | undefined;
+  let best: { candidate: Point[]; cost: RouteCost; signature: string } | undefined;
   for (const item of obstacleCosts) {
     if (item.obstacleCost.bodyIntersections !== minimumBodyIntersections) continue;
     const cost = routeCostWithObstacleIntersections(
@@ -2193,10 +2201,12 @@ function bestRouteCandidate(
     );
     if (
       !best
-      || compareRouteCandidate(cost, item.candidate, best.cost, best.candidate) < 0
-    ) best = { candidate: item.candidate, cost };
+      || compareNumberTuples(cost, best.cost) < 0
+      || (compareNumberTuples(cost, best.cost) === 0
+        && compareText(item.signature, best.signature) < 0)
+    ) best = { candidate: item.candidate, cost, signature: item.signature };
   }
-  return best;
+  return best ? { candidate: best.candidate, cost: best.cost } : undefined;
 }
 
 function compactRouteCandidates(
@@ -2936,13 +2946,11 @@ function routeObstacleCost(
 ): { bodyIntersections: number; reservationIntersections: number } {
   let bodyIntersections = 0;
   let reservationIntersections = 0;
-  for (let index = 0; index < route.length - 1; index += 1) {
-    const start = route[index]!;
-    const end = route[index + 1]!;
-    for (const obstacle of obstacles) {
+  for (const obstacle of obstacles) {
+    if (!geometriesOverlapOrTouch(bounds, obstacle)) continue;
+    for (let index = 0; index < route.length - 1; index += 1) {
       if (
-        geometriesOverlapOrTouch(bounds, obstacle)
-        && segmentIntersectsGeometry(start, end, obstacle)
+        segmentIntersectsGeometry(route[index]!, route[index + 1]!, obstacle)
       ) {
         if (obstacle.kind === "body") bodyIntersections += 1;
         else reservationIntersections += 1;
@@ -2986,7 +2994,7 @@ function polylineInteraction(
   }
   const sharedEndpointGeometries = routed.sharedEndpointGeometries;
   let overlapLength = 0;
-  const crossingPoints = new Set<string>();
+  const crossingPoints: Point[] = [];
   for (let leftIndex = 0; leftIndex < points.length - 1; leftIndex += 1) {
     const leftStart = points[leftIndex]!;
     const leftEnd = points[leftIndex + 1]!;
@@ -3010,10 +3018,11 @@ function polylineInteraction(
       if (
         intersection
         && !sharedEndpointGeometries.some((geometry) => pointInsideOrOnGeometry(intersection, geometry))
-      ) crossingPoints.add(pointSignature(intersection));
+        && !crossingPoints.some((point) => samePoint(point, intersection))
+      ) crossingPoints.push(intersection);
     }
   }
-  return { overlapLength, crossings: crossingPoints.size };
+  return { overlapLength, crossings: crossingPoints.length };
 }
 
 function segmentInteraction(
@@ -3375,15 +3384,21 @@ function layoutBounds(state: LayoutState): ElementGeometry[] {
 }
 
 function pointBounds(points: readonly Point[]): ElementGeometry {
-  const xs = points.map((point) => point.x);
-  const ys = points.map((point) => point.y);
-  const left = Math.min(...xs);
-  const top = Math.min(...ys);
+  let left = Number.POSITIVE_INFINITY;
+  let top = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  let bottom = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    left = Math.min(left, point.x);
+    top = Math.min(top, point.y);
+    right = Math.max(right, point.x);
+    bottom = Math.max(bottom, point.y);
+  }
   return {
     x: left,
     y: top,
-    width: Math.max(...xs) - left,
-    height: Math.max(...ys) - top,
+    width: right - left,
+    height: bottom - top,
   };
 }
 
