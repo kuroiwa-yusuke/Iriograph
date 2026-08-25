@@ -5,6 +5,8 @@ set -euo pipefail
 : "${PACKAGE_VERSION:?PACKAGE_VERSION is required}"
 : "${VERIFY_RESULT:?VERIFY_RESULT is required}"
 : "${PUBLISH_RESULT:?PUBLISH_RESULT is required}"
+: "${VERIFY_FAILED_STAGE:?VERIFY_FAILED_STAGE is required}"
+: "${PUBLISH_FAILED_STAGE:?PUBLISH_FAILED_STAGE is required}"
 
 if [[ ! "${TARGET_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Invalid target commit" >&2
@@ -24,12 +26,51 @@ for job_result in "${VERIFY_RESULT}" "${PUBLISH_RESULT}"; do
   esac
 done
 
+case "${VERIFY_FAILED_STAGE}" in
+  none|install|version-check|workspace-verify) ;;
+  *)
+    echo "Invalid verify failed stage" >&2
+    exit 1
+    ;;
+esac
+case "${PUBLISH_FAILED_STAGE}" in
+  none|install|version-check|aws-auth|codeartifact-login|scope-config|publish) ;;
+  *)
+    echo "Invalid publish failed stage" >&2
+    exit 1
+    ;;
+esac
+if [[ "${VERIFY_FAILED_STAGE}" != "none" && "${VERIFY_RESULT}" != "failure" && "${VERIFY_RESULT}" != "cancelled" ]]; then
+  echo "Verify failed stage is inconsistent with job result" >&2
+  exit 1
+fi
+if [[ "${PUBLISH_FAILED_STAGE}" != "none" && "${PUBLISH_RESULT}" != "failure" && "${PUBLISH_RESULT}" != "cancelled" ]]; then
+  echo "Publish failed stage is inconsistent with job result" >&2
+  exit 1
+fi
+
 if [[ "${VERIFY_RESULT}" == "success" && "${PUBLISH_RESULT}" == "success" ]]; then
   OUTCOME="success"
   OPPOSITE="failure"
+  FAILED_STAGE="none"
 else
   OUTCOME="failure"
   OPPOSITE="success"
+  if [[ "${VERIFY_FAILED_STAGE}" != "none" ]]; then
+    FAILED_STAGE="verify.${VERIFY_FAILED_STAGE}"
+  elif [[ "${VERIFY_RESULT}" != "success" ]]; then
+    if [[ "${VERIFY_RESULT}" == "skipped" ]]; then
+      FAILED_STAGE="verify.skipped"
+    else
+      FAILED_STAGE="verify.unknown"
+    fi
+  elif [[ "${PUBLISH_FAILED_STAGE}" != "none" ]]; then
+    FAILED_STAGE="publish.${PUBLISH_FAILED_STAGE}"
+  elif [[ "${PUBLISH_RESULT}" == "skipped" ]]; then
+    FAILED_STAGE="publish.skipped"
+  else
+    FAILED_STAGE="publish.unknown"
+  fi
 fi
 
 RESULT_TAG="packages-publish-${OUTCOME}-${TARGET_COMMIT}"
@@ -37,8 +78,8 @@ OPPOSITE_TAG="packages-publish-${OPPOSITE}-${TARGET_COMMIT}"
 DIAGNOSTIC_TAG="packages-publish-diagnostic-${TARGET_COMMIT}"
 PUBLISHED_TAG="packages-published-v${PACKAGE_VERSION}"
 DIAGNOSTIC_MESSAGE="$(printf \
-  '{"schema":"iriograph-package-publish-diagnostic/v1","commit":"%s","version":"%s","outcome":"%s","jobs":{"verify":"%s","publish":"%s"}}' \
-  "${TARGET_COMMIT}" "${PACKAGE_VERSION}" "${OUTCOME}" "${VERIFY_RESULT}" "${PUBLISH_RESULT}")"
+  '{"schema":"iriograph-package-publish-diagnostic/v1","commit":"%s","version":"%s","outcome":"%s","failedStage":"%s","jobs":{"verify":"%s","publish":"%s"}}' \
+  "${TARGET_COMMIT}" "${PACKAGE_VERSION}" "${OUTCOME}" "${FAILED_STAGE}" "${VERIFY_RESULT}" "${PUBLISH_RESULT}")"
 
 remote_tag_commit() {
   local tag_name="$1"

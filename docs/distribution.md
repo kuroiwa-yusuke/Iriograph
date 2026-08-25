@@ -66,7 +66,13 @@ git ls-remote --refs origin refs/tags/packages-published-v0.1.0
 成功済みとして何も変更せず、別commitを指していればpublish jobを失敗させます。tagのforce更新や付け替えは
 行いません。各実行はさらに`packages-publish-success-<commit>`または
 `packages-publish-failure-<commit>`と、verify/publish jobの結果だけを持つannotated
-`packages-publish-diagnostic-<commit>`を残します。失敗時は次で段階を切り分けられます。
+`packages-publish-diagnostic-<commit>`を残します。Diagnostic JSONの`failedStage`は固定語彙で、verifyでは
+`verify.install`、`verify.version-check`、`verify.workspace-verify`、publishでは`publish.install`、
+`publish.version-check`、`publish.aws-auth`、`publish.codeartifact-login`、`publish.scope-config`、
+`publish.publish`のいずれかです。成功時は`none`、jobがstep outcomeを残せなかった場合だけ
+`verify.unknown`または`publish.unknown`、実行条件でskipされた場合は`verify.skipped`または
+`publish.skipped`になります。いずれもcredential、registry token、失敗messageを含みません。失敗時は次で
+段階を切り分けられます。
 
 ```sh
 git ls-remote --refs origin "refs/tags/packages-publish-*-<commit>"

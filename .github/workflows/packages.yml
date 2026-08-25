@@ -33,14 +33,21 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      failedStage: ${{ steps.failure_summary.outputs.failedStage }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - id: verify_checkout
+        uses: actions/checkout@v4
+      - id: verify_setup
+        uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
+      - name: Install workspace dependencies
+        id: verify_install
+        run: npm ci
       - name: Verify requested package version
+        id: verify_version
         if: github.event_name == 'push'
         shell: bash
         run: |
@@ -57,7 +64,33 @@ jobs:
             exit 1
           fi
           EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
-      - run: npm run verify
+      - name: Verify workspaces
+        id: verify_workspaces
+        run: npm run verify
+      - name: Summarize failed stage
+        id: failure_summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.verify_checkout.outcome }}
+          SETUP_OUTCOME: ${{ steps.verify_setup.outcome }}
+          INSTALL_OUTCOME: ${{ steps.verify_install.outcome }}
+          VERSION_OUTCOME: ${{ steps.verify_version.outcome }}
+          WORKSPACE_OUTCOME: ${{ steps.verify_workspaces.outcome }}
+        run: |
+          set -euo pipefail
+          failed_stage="none"
+          record_failure() {
+            if [[ "${failed_stage}" == "none" && ( "$2" == "failure" || "$2" == "cancelled" ) ]]; then
+              failed_stage="$1"
+            fi
+          }
+          record_failure "install" "${CHECKOUT_OUTCOME}"
+          record_failure "install" "${SETUP_OUTCOME}"
+          record_failure "install" "${INSTALL_OUTCOME}"
+          record_failure "version-check" "${VERSION_OUTCOME}"
+          record_failure "workspace-verify" "${WORKSPACE_OUTCOME}"
+          echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
 
   publish:
     needs: verify
@@ -66,17 +99,24 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.publish == 'true')
     runs-on: ubuntu-latest
+    outputs:
+      failedStage: ${{ steps.failure_summary.outputs.failedStage }}
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - id: publish_checkout
+        uses: actions/checkout@v4
+      - id: publish_setup
+        uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-      - run: npm ci
+      - name: Install workspace dependencies
+        id: publish_install
+        run: npm ci
       - name: Verify requested package version
+        id: publish_version
         if: github.event_name == 'push'
         shell: bash
         run: |
@@ -93,11 +133,13 @@ jobs:
             exit 1
           fi
           EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
-      - uses: aws-actions/configure-aws-credentials@v4
+      - id: publish_aws_auth
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Login to CodeArtifact
+        id: publish_codeartifact_login
         run: >-
           aws codeartifact login
           --tool npm
@@ -106,6 +148,7 @@ jobs:
           --repository "${CODEARTIFACT_REPOSITORY}"
           --region "${AWS_REGION}"
       - name: Configure @iriograph scope registry
+        id: publish_scope_config
         shell: bash
         run: |
           codeartifact_registry="$(npm config get registry)"
@@ -117,7 +160,39 @@ jobs:
               ;;
           esac
           npm config set "@iriograph:registry" "${codeartifact_registry}"
-      - run: npm run publish:packages
+      - name: Publish packages
+        id: publish_packages
+        run: npm run publish:packages
+      - name: Summarize failed stage
+        id: failure_summary
+        if: ${{ always() }}
+        shell: bash
+        env:
+          CHECKOUT_OUTCOME: ${{ steps.publish_checkout.outcome }}
+          SETUP_OUTCOME: ${{ steps.publish_setup.outcome }}
+          INSTALL_OUTCOME: ${{ steps.publish_install.outcome }}
+          VERSION_OUTCOME: ${{ steps.publish_version.outcome }}
+          AWS_AUTH_OUTCOME: ${{ steps.publish_aws_auth.outcome }}
+          CODEARTIFACT_LOGIN_OUTCOME: ${{ steps.publish_codeartifact_login.outcome }}
+          SCOPE_CONFIG_OUTCOME: ${{ steps.publish_scope_config.outcome }}
+          PUBLISH_OUTCOME: ${{ steps.publish_packages.outcome }}
+        run: |
+          set -euo pipefail
+          failed_stage="none"
+          record_failure() {
+            if [[ "${failed_stage}" == "none" && ( "$2" == "failure" || "$2" == "cancelled" ) ]]; then
+              failed_stage="$1"
+            fi
+          }
+          record_failure "install" "${CHECKOUT_OUTCOME}"
+          record_failure "install" "${SETUP_OUTCOME}"
+          record_failure "install" "${INSTALL_OUTCOME}"
+          record_failure "version-check" "${VERSION_OUTCOME}"
+          record_failure "aws-auth" "${AWS_AUTH_OUTCOME}"
+          record_failure "codeartifact-login" "${CODEARTIFACT_LOGIN_OUTCOME}"
+          record_failure "scope-config" "${SCOPE_CONFIG_OUTCOME}"
+          record_failure "publish" "${PUBLISH_OUTCOME}"
+          echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
 
   audit:
     needs: [verify, publish]
@@ -132,6 +207,8 @@ jobs:
         env:
           VERIFY_RESULT: ${{ needs.verify.result }}
           PUBLISH_RESULT: ${{ needs.publish.result }}
+          VERIFY_FAILED_STAGE: ${{ needs.verify.outputs.failedStage || 'none' }}
+          PUBLISH_FAILED_STAGE: ${{ needs.publish.outputs.failedStage || 'none' }}
         run: |
           set -euo pipefail
           package_version="$(node --input-type=module -e "import { readFileSync } from 'node:fs'; console.log(JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version)")"
@@ -139,4 +216,6 @@ jobs:
           PACKAGE_VERSION="${package_version}" \
           VERIFY_RESULT="${VERIFY_RESULT}" \
           PUBLISH_RESULT="${PUBLISH_RESULT}" \
+          VERIFY_FAILED_STAGE="${VERIFY_FAILED_STAGE}" \
+          PUBLISH_FAILED_STAGE="${PUBLISH_FAILED_STAGE}" \
           bash scripts/write-package-publish-audit.sh

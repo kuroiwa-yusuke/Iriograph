@@ -52,6 +52,7 @@ CodeArtifact上のexact versionを確認し、既公開packageを変更せず未
 `git ls-remote --refs origin refs/tags/packages-published-v0.1.0`で公開成功と対象commitを確認できます。
 同じversionのtagが別commitへ移動されることはありません。
 失敗時は`packages-publish-failure-<commit>`と`packages-publish-diagnostic-<commit>`から、
-credentialを含めずverify/publishのどちらで停止したか確認できます。
+credentialを含めずverify/publishのどちらで停止したかに加え、`failedStage`からinstall、version check、
+workspace verify、AWS認証、CodeArtifact login、scope設定、publishのどの段階だったかを確認できます。
 
 詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[Semantic Authoring Profile仕様](./docs/authoring-profile.md)、[layout最適化方針](./docs/layout-optimization.md)、[バックログ](./docs/backlog.md)を参照してください。
