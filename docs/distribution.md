@@ -37,8 +37,10 @@ Core tarballは`assets/icons/*.svg`と`THIRD_PARTY_NOTICES.md`を含み、
 resolverを使い、package予約namespaceを上書きしません。
 
 Private releaseはAWS CodeArtifactの`kuroxiom/kuroxiom-packages`へ`@iriograph` scopeで公開します。
-`packages-v<version>` tagまたは明示workflow dispatchをtriggerとし、利用hostは公開確認後にexact versionで
-依存します。Hostへpackage sourceを複製しません。
+`packages-v<version>` tag、明示workflow dispatch、またはmain上の
+`.github/package-release-version`だけを変更するrelease marker pushをtriggerとします。Markerの内容は
+4 packageのlockstep versionと一致しなければpublish前に拒否し、通常のmain pushやdocs変更ではpublishしません。
+利用hostはregistry上の公開確認後にexact versionで依存します。Hostへpackage sourceを複製しません。
 
 ## SemVer 0.x
 
