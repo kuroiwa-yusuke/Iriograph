@@ -2,8 +2,12 @@ name: Iriograph Packages
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "packages-v*"
+    paths:
+      - ".github/package-release-version"
   workflow_dispatch:
     inputs:
       publish:
@@ -35,15 +39,30 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Verify tag and package version
-        if: startsWith(github.ref, 'refs/tags/packages-v')
-        run: EXPECTED_PACKAGE_VERSION="${GITHUB_REF_NAME#packages-v}" npm run verify:package-versions
+      - name: Verify requested package version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/packages-v* ]]; then
+            expected_version="${GITHUB_REF_NAME#packages-v}"
+          elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            expected_version="$(<.github/package-release-version)"
+          else
+            echo "Unsupported package release ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          if [[ ! "${expected_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid package release version: ${expected_version}" >&2
+            exit 1
+          fi
+          EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
       - run: npm run verify
 
   publish:
     needs: verify
     if: >-
       startsWith(github.ref, 'refs/tags/packages-v') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.publish == 'true')
     runs-on: ubuntu-latest
     permissions:
@@ -56,9 +75,23 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
-      - name: Verify tag and package version
-        if: startsWith(github.ref, 'refs/tags/packages-v')
-        run: EXPECTED_PACKAGE_VERSION="${GITHUB_REF_NAME#packages-v}" npm run verify:package-versions
+      - name: Verify requested package version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/packages-v* ]]; then
+            expected_version="${GITHUB_REF_NAME#packages-v}"
+          elif [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            expected_version="$(<.github/package-release-version)"
+          else
+            echo "Unsupported package release ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          if [[ ! "${expected_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid package release version: ${expected_version}" >&2
+            exit 1
+          fi
+          EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
