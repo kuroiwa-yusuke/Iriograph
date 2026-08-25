@@ -53,7 +53,8 @@ CodeArtifact上のexact versionを確認し、既公開packageを変更せず未
 同じversionのtagが別commitへ移動されることはありません。
 失敗時は`packages-publish-failure-<commit>`と`packages-publish-diagnostic-<commit>`から、
 credentialを含めずverify/publishのどちらで停止したかに加え、`failedStage`からinstall、version check、
-workspace verify、AWS認証、CodeArtifact login、scope設定、publishのどの段階だったかを確認できます。
-Workspace verify失敗時だけは、redact・上限付きの`verifyLogTailBase64`から失敗testの末尾も確認できます。
+各workspace test、typecheck、build、tarball consumer、AWS認証、CodeArtifact login、scope設定、publishの
+どの段階だったかを確認できます。Verify失敗時だけは、redact・上限付きの`verifyLogTailBase64`から
+失敗段階の末尾も確認できます。
 
 詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[Semantic Authoring Profile仕様](./docs/authoring-profile.md)、[layout最適化方針](./docs/layout-optimization.md)、[バックログ](./docs/backlog.md)を参照してください。

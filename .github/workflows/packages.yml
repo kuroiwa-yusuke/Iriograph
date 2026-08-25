@@ -65,12 +65,60 @@ jobs:
             exit 1
           fi
           EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
-      - name: Verify workspaces
-        id: verify_workspaces
+      - name: Build packages for workspace tests
+        id: verify_test_build
         shell: bash
         run: |
           set -o pipefail
-          npm run verify 2>&1 | tee /tmp/iriograph-workspace-verify.log
+          npm run build:packages 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Test mock workspace
+        id: verify_test_mock
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test --workspace @iriograph/mock 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Test core workspace
+        id: verify_test_core
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test --workspace @iriograph/core 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Test ELK workspace
+        id: verify_test_layout_elk
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test --workspace @iriograph/layout-elk 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Test semantic access workspace
+        id: verify_test_semantic_access
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test --workspace @iriograph/semantic-access 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Test Vue editor workspace
+        id: verify_test_vue_editor
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run test --workspace @iriograph/vue-editor 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Typecheck workspaces
+        id: verify_typecheck
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Build workspaces
+        id: verify_build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee /tmp/iriograph-workspace-verify.log
+      - name: Verify packed package consumer
+        id: verify_package_consumer
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify:package-consumer 2>&1 | tee /tmp/iriograph-workspace-verify.log
       - name: Summarize failed stage
         id: failure_summary
         if: ${{ always() }}
@@ -80,7 +128,15 @@ jobs:
           SETUP_OUTCOME: ${{ steps.verify_setup.outcome }}
           INSTALL_OUTCOME: ${{ steps.verify_install.outcome }}
           VERSION_OUTCOME: ${{ steps.verify_version.outcome }}
-          WORKSPACE_OUTCOME: ${{ steps.verify_workspaces.outcome }}
+          TEST_BUILD_OUTCOME: ${{ steps.verify_test_build.outcome }}
+          TEST_MOCK_OUTCOME: ${{ steps.verify_test_mock.outcome }}
+          TEST_CORE_OUTCOME: ${{ steps.verify_test_core.outcome }}
+          TEST_LAYOUT_ELK_OUTCOME: ${{ steps.verify_test_layout_elk.outcome }}
+          TEST_SEMANTIC_ACCESS_OUTCOME: ${{ steps.verify_test_semantic_access.outcome }}
+          TEST_VUE_EDITOR_OUTCOME: ${{ steps.verify_test_vue_editor.outcome }}
+          TYPECHECK_OUTCOME: ${{ steps.verify_typecheck.outcome }}
+          BUILD_OUTCOME: ${{ steps.verify_build.outcome }}
+          PACKAGE_CONSUMER_OUTCOME: ${{ steps.verify_package_consumer.outcome }}
         run: |
           set -euo pipefail
           failed_stage="none"
@@ -93,10 +149,18 @@ jobs:
           record_failure "install" "${SETUP_OUTCOME}"
           record_failure "install" "${INSTALL_OUTCOME}"
           record_failure "version-check" "${VERSION_OUTCOME}"
-          record_failure "workspace-verify" "${WORKSPACE_OUTCOME}"
+          record_failure "test-build" "${TEST_BUILD_OUTCOME}"
+          record_failure "test-mock" "${TEST_MOCK_OUTCOME}"
+          record_failure "test-core" "${TEST_CORE_OUTCOME}"
+          record_failure "test-layout-elk" "${TEST_LAYOUT_ELK_OUTCOME}"
+          record_failure "test-semantic-access" "${TEST_SEMANTIC_ACCESS_OUTCOME}"
+          record_failure "test-vue-editor" "${TEST_VUE_EDITOR_OUTCOME}"
+          record_failure "typecheck" "${TYPECHECK_OUTCOME}"
+          record_failure "build" "${BUILD_OUTCOME}"
+          record_failure "package-consumer" "${PACKAGE_CONSUMER_OUTCOME}"
           echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
           failure_tail_base64=""
-          if [[ "${failed_stage}" == "workspace-verify" && -f /tmp/iriograph-workspace-verify.log ]]; then
+          if [[ "${failed_stage}" != "none" && -f /tmp/iriograph-workspace-verify.log ]]; then
             failure_tail_base64="$(tail -c 1200 /tmp/iriograph-workspace-verify.log \
               | sed -E $'s/\\x1b\\[[0-?]*[ -\\/]*[@-~]//g' \
               | sed -E '/token|password|secret|credential|authorization|_authToken|private[_-]?key/I c\[REDACTED-SENSITIVE-LINE]' \

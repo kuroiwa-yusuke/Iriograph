@@ -28,7 +28,7 @@ for job_result in "${VERIFY_RESULT}" "${PUBLISH_RESULT}"; do
 done
 
 case "${VERIFY_FAILED_STAGE}" in
-  none|install|version-check|workspace-verify) ;;
+  none|install|version-check|test-build|test-mock|test-core|test-layout-elk|test-semantic-access|test-vue-editor|typecheck|build|package-consumer) ;;
   *)
     echo "Invalid verify failed stage" >&2
     exit 1

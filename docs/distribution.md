@@ -67,7 +67,8 @@ git ls-remote --refs origin refs/tags/packages-published-v0.1.0
 行いません。各実行はさらに`packages-publish-success-<commit>`または
 `packages-publish-failure-<commit>`と、verify/publish jobの結果だけを持つannotated
 `packages-publish-diagnostic-<commit>`を残します。Diagnostic JSONの`failedStage`は固定語彙で、verifyでは
-`verify.install`、`verify.version-check`、`verify.workspace-verify`、publishでは`publish.install`、
+`verify.install`、`verify.version-check`、`verify.test-build`、各workspaceを示す`verify.test-*`、
+`verify.typecheck`、`verify.build`、`verify.package-consumer`、publishでは`publish.install`、
 `publish.version-check`、`publish.aws-auth`、`publish.codeartifact-login`、`publish.scope-config`、
 `publish.publish`のいずれかです。成功時は`none`、jobがstep outcomeを残せなかった場合だけ
 `verify.unknown`または`publish.unknown`、実行条件でskipされた場合は`verify.skipped`または
@@ -80,7 +81,7 @@ git fetch --no-tags origin "refs/tags/packages-publish-diagnostic-<commit>:refs/
 git cat-file tag "refs/tags/packages-publish-diagnostic-<commit>"
 ```
 
-`verify.workspace-verify`のときだけ、同じJSONの`verifyLogTailBase64`へANSI escapeを除去し、credential関連語を
+verify内の各段階が失敗したときだけ、同じJSONの`verifyLogTailBase64`へANSI escapeを除去し、credential関連語を
 含む行をredactした失敗出力末尾を最大1,200 bytesで記録します。`base64 -d`で復号してtest名やbudget値を
 切り分けられます。他stage、成功時、logがない場合は空文字です。完全logや無加工出力はtagへ保存しません。
 
