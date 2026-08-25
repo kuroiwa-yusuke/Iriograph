@@ -38,8 +38,9 @@ resolverを使い、package予約namespaceを上書きしません。
 
 Private releaseはAWS CodeArtifactの`kuroxiom/kuroxiom-packages`へ`@iriograph` scopeで公開します。
 `packages-v<version>` tag、明示workflow dispatch、またはmain上の
-`.github/package-release-version`だけを変更するrelease marker pushをtriggerとします。Markerの内容は
-4 packageのlockstep versionと一致しなければpublish前に拒否し、通常のmain pushやdocs変更ではpublishしません。
+`.github/package-release-version` release marker pushをtriggerとします。公開workflow自身の変更も、main用OIDC境界のまま
+同じexact versionを冪等に再検証するためtriggerに含めます。Markerの内容は4 packageのlockstep versionと一致しなければ
+publish前に拒否し、その他の通常のmain pushやdocs変更ではpublishしません。
 利用hostはregistry上の公開確認後にexact versionで依存します。Hostへpackage sourceを複製しません。
 
 Publish jobはCodeArtifact login後に、そのrepositoryを`@iriograph` scopeのregistryとして明示設定します。

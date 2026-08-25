@@ -8,6 +8,7 @@ on:
       - "packages-v*"
     paths:
       - ".github/package-release-version"
+      - ".github/workflows/packages.yml"
   workflow_dispatch:
     inputs:
       publish:
