@@ -71,7 +71,26 @@ Canvasのhost埋込み回帰は通常幅と800px狭幅、左右sidebar折り畳�
 
 0.6.0の標準layout基準値は92.1/100です。内訳はLane 15、containment 15、LR flow 15、branch/loop 12、cross-lane message 10.1、overlap 12、routing 4、compact/readability 9です。25 node、5 region、32 edgeに対してnode overlap 0、route-node交差1、edge交差9、generated中間点最大1、message列spread最大139/平均78.8、fit 57%、content aspect 2.99、最小実表示font 9.12pxでした。残るroute-node交差は`注文`から`ピザ`への対象関係が`顧客クレーム対応`を横切る1件です。
 
-この92.1点は構造・geometryの一致度であり、参照画像とのpixel一致度ではありません。実screenshotの目視では、レーン階層・幅・順序と主フローは対応しますが、参照図のBPMN event/gateway/message icon、色付き縦header、顧客lane内のbranch別rowは再現していません。前二者はoverlay/catalog差、branch rowは今後の汎用layout品質差として点数と分けて記録します。
+この92.1点は構造・geometryの一致度であり、参照画像とのpixel一致度ではありません。実screenshotの目視では、レーン階層・幅・順序と主フローは対応しますが、参照図のBPMN event/gateway/message icon、色付き縦header、顧客lane内のbranch別rowは再現していません。Shape/icon/headerはcatalog/profileとrendererの視覚文法差、branch rowは汎用layout品質差として点数と分けて記録します。
+
+### 画像一致評価
+
+上記の構造評価とは別に、利用者が参照画像へ期待する「図としての似方」を100点で目視評価します。Raw pixel similarity、SSIM、画像全体の差分率は、参照画像が図だけを切り出している一方、実browser screenshotにはtoolbar、sidebar、minimap、grid、異なる解像度・font rasterizationが含まれるため指標にしません。Canvas内の図だけをcropし、外接矩形を0〜1へ正規化して、同じlabelを持つanchorとlane境界を対応付けます。Font family、antialiasing、editor chromeは採点対象外ですが、BPMNとしてのshape、icon、色分け、線種は意図した視覚文法なので採点します。
+
+| 項目 | 点 | 参照図との比較方法 |
+|---|---:|---|
+| Macro lane proportions | 20 | 図全体のaspect ratio 5点、顧客/ピザ店の高さ比5点、店員/調理担当/配達担当の高さ比5点、lane間gap・左header・外周余白の平均誤差5点。各5点枠は比率誤差10%以内を5/5、20%以内を4/5、30%以内を3/5、40%以内を2/5、50%以内を1/5、50%超を0点とする |
+| Relative placement | 20 | 構造評価で列挙したprocess nodeの正規化中心をlabelで対応付け、主flowのX順と間隔8点、lane内Y位置と上下関係8点、開始/終了・resourceの外周余白4点で比較する。順序一致だけで満点にせず、参照位置からのずれも判定する |
+| Branch rows | 15 | `ピザを選ぶ/ピザを注文する`の上下stack、注文後eventに対する受取側と`60分待つ/問い合わせる`の別row・return loop、店員laneのparallel branchと問い合わせ/クレーム/回答rowを各5点で判定する |
+| Cross-lane alignment | 15 | 構造評価と同じ5組のproducer/resource/consumerについて、3者の中心X spreadが図幅の2.5%以内なら各3点、5%以内2点、8%以内1点、それ以上0点とする。Semantic接続が正しくても縦列になっていなければ減点する |
+| Connector geometry | 15 | 主control flowの短い直線・直交性4点、branch/merge/loopの矩形corridor4点、cross-lane messageの垂直性と参照図に対応する線種4点、交差・長い斜線・edge label clutterの少なさ3点で判定する |
+| BPMN visual language | 15 | 開始/終了eventとgatewayのshape 4点、taskの矩形・塗り分け3点、message/timer icon 3点、laneの色付きheader/band 3点、message/control flowのdash・marker・label階層2点。Icon artworkや色値の完全一致ではなく役割の見分けやすさを判定する |
+
+画像一致点は、参照bboxの手動markingと目視による対応付けを含む主観値です。評価者、対象screenshot、内訳と差分理由をartifactへ残し、5点程度の揺れを許容します。自動CI gateや構造評価92.1点の代用にはせず、構造点と画像一致点を必ず併記します。
+
+0.6.0の`.tmp/pizza-layout.png`を会話添付の参照図へ照らした画像一致基準値は36/100です。内訳はMacro 8（aspect 0、top lane比5、子lane比2、header/gap/余白1）、relative placement 10（X順・間隔6、lane内Y 2、端部余白2）、branch rows 2（顧客stack 0、timer/loop row 0、店員branch 2）、cross-lane alignment 11（注文2、問い合わせ1、ピザ2、料金3、領収書3）、connector geometry 5（主flow 3、branch corridor 0、message 2、clutter 0）、BPMN visual language 0です。現状はlane階層、左から右の概略順序、料金・領収書を中心とする縦列が対応します。一方、図のaspect ratioは約2.99で参照図の約1.68より大幅に横長で、顧客の選択/注文とtimer/inquiryが同じrowへ潰れ、branch/loopとmessage線が長い斜線になっています。全nodeが白い汎用角丸矩形で、event circle、gateway diamond、message/timer icon、色付きlane header、message dashを再現していないため、構造点が高くても画像一致は低く評価します。
+
+Macro比率、相対配置、branch row、edge corridorと交差の改善は、特定seedのIRIやlabelへ分岐しない汎用layoutの責務です。BPMN shape、icon、色、線種はcatalog/profileとrendererの視覚文法で解き、標準layoutへ業務固有styleを埋め込みません。個別documentを参照図へ最終調整する座標・size・route・styleはoverlayの責務ですが、初期seedは空overlayという検証条件を維持し、手動overlayで自動layoutの画像一致点を水増ししません。
 
 ## Test追加規則
 
