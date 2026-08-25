@@ -22,6 +22,8 @@ import "@iriograph/vue-editor/styles.css";
   :authoring-context="resolvedAuthoringContext"
   :semantic-validation-context="resolvedSemanticValidationContext"
   :resource-iri-allocator="resourceIriAllocator"
+  :asset-access="assetAccess"
+  :asset-options="workspaceAssetOptions"
   @pending-drafts-changed="hasPendingDrafts = $event"
   @save="saveToHost"
 />
@@ -40,6 +42,11 @@ opaque IRIと`rdfs:label`を一つのsemantic transactionへ確定します。�
 保存前にTurtle draftを確定する場合はcomponent refの`flushPendingEdits()`を`await`してください。
 未確認のstructured draftは自動適用されず、flushは`false`を返します。Workspace、HTTP、認証、
 永続化はhostの責務です。
+
+`assetOptions`は`{ assetRef, label?, path?, mediaType? }[]`です。Hostはworkspace treeにある画像の
+安定asset IRIと利用者が認識できるpathを対応付け、Editorはpath候補を`assetRef`へ変換してoverlayだけへ
+保存します。IRIの直接入力欄は出しません。Package同梱iconはhost resolverなしでも表示でき、workspace/
+外部assetに対するhostのpolicyは緩和しません。
 
 `pendingDraftsChanged(pending)`は、未適用のTurtle draftまたはstructured authoring draftが
 生じた時点で`true`、適用・破棄・外部`modelValue`への置換で解消した時点で`false`を通知します。
@@ -93,6 +100,8 @@ Canvas右clickは別menuを出さず、対象を選択して右Inspectorの`ビ�
 template/icon、geometry、region label/z-order、edge route/terminal/caption/anchorを段階表示し、
 一gestureまたは確定操作を一つのpresentation history itemとして保存します。Region上へのplain dragから
 membershipは生成しません。
+Nodeのビュー編集ではlabel/iconをCanvas内で個別dragでき、`nodeLabelOffset`/`nodeIconOffset`だけを
+sparse appearanceへ保存します。Resetとundo/redoを提供し、Turtleやnode geometryは変更しません。
 利用者操作とhostの注入責務は[Editor interaction guide](../../docs/editor-interactions.md)を参照してください。
 
 ## Keyboard and accessibility

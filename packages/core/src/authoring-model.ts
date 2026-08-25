@@ -29,6 +29,8 @@ export type ResolvedAuthoringTerm = {
   description?: string;
   category?: string;
   examples?: readonly string[];
+  /** UI-only subject/object sentence template. It uses literal A and B placeholders. */
+  sentencePattern?: string;
   objectKinds?: readonly AuthoringObjectKind[];
   datatypes?: readonly string[];
   languages?: readonly string[];

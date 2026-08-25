@@ -199,6 +199,8 @@ function projectLegacyIriographDocument(
       structuralKind,
       label,
       labelPlacement: overlay?.appearance?.labelPlacement ?? template.labelPlacement,
+      nodeLabelOffset: overlay?.appearance?.nodeLabelOffset,
+      nodeIconOffset: overlay?.appearance?.nodeIconOffset,
       templateRef,
       shape: template.shape ?? "rounded-rectangle",
       iconRef,

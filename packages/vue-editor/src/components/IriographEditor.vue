@@ -11,6 +11,9 @@ import {
   createStandardLayoutRegistry,
   diagnosticTargetsSceneElement,
   generatedElementId,
+  packageDefaultIconAssets,
+  packageDefaultIconDataUrl,
+  packageDefaultIcons,
   parseSemanticGraph,
   projectSemanticView,
   previewAuthoringCommands,
@@ -19,11 +22,12 @@ import {
   validateSemanticDocument,
   validateIriographDocumentV1,
   validateProjectionCatalogV1,
+  withPackageDefaultIconAccess,
   type AuthoringPreview,
   type AuthoringCommand,
   type AuthoringTripleChange,
   type AssetAccess,
-  type AssetMediaType,
+  type AssetDefinition,
   type DiagramScene,
   type EdgeRouteMode,
   type EdgeTerminalMarker,
@@ -48,6 +52,7 @@ import {
   type SceneRegion,
   type ViewElementOverlay,
   type VisualStyle,
+  type VisualTemplate,
   type ViewCommand,
 } from "@iriograph/core";
 
@@ -55,6 +60,7 @@ import SemanticIntentPanel, {
   type IntentEdgeDetails,
   type IntentElementDetails,
   type IntentMembershipOption,
+  type IntentRelationOverview,
   type IntentSequenceOption,
   type IntentTextValue,
   type SemanticIntent,
@@ -129,6 +135,7 @@ import {
   membershipRegionClassIrisAtPoint,
 } from "../region-membership-constraints";
 import { reconcilePresentationScene } from "../presentation-scene";
+import type { EditorAssetOption } from "../editor-assets";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
@@ -156,6 +163,8 @@ const props = withDefaults(defineProps<{
   /** Fit the first completed Scene for each document/view; later edits preserve the user's viewport. */
   fitOnInitialLoad?: boolean;
   assetAccess?: AssetAccess;
+  /** Host-owned workspace path/assetRef mapping used by the icon combobox. */
+  assetOptions?: readonly EditorAssetOption[];
   pickAsset?: AssetPicker;
   snapSettings?: DiagramSnapSettingsInput;
   authoringContext?: ResolvedAuthoringContext;
@@ -172,6 +181,7 @@ const props = withDefaults(defineProps<{
   hideHeader: false,
   fitOnInitialLoad: false,
   assetAccess: undefined,
+  assetOptions: () => [],
   pickAsset: undefined,
   layoutRegistry: undefined,
   snapSettings: undefined,
@@ -204,6 +214,7 @@ const selectedElementIds = ref<string[]>([]);
 const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
 const zoom = ref(1);
 const diagramCanvas = ref<DiagramCanvasNavigationApi>();
+const semanticIntentPanel = ref<{ focusPendingIntent(): void }>();
 const turtleTextarea = ref<HTMLTextAreaElement>();
 const history = ref<IriographDocument[]>([]);
 const future = ref<IriographDocument[]>([]);
@@ -230,11 +241,15 @@ const viewDialogInitialFocus = ref<HTMLInputElement>();
 const viewDialogTitleId = `${useId()}-view-dialog-title`;
 const leftSidebarId = `${useId()}-left-sidebar`;
 const rightSidebarId = `${useId()}-right-sidebar`;
+const assetSuggestionsListId = `${useId()}-asset-suggestions`;
+const iconPathInputId = `${useId()}-icon-path`;
 const leftSidebarCollapsed = ref(false);
 const rightSidebarCollapsed = ref(false);
 const displayInspectorAction = ref<DisplayInspectorAction>();
 const inspectorMode = ref<InspectorMode>("semantic");
 const activeSemanticIntent = ref<SemanticIntent>();
+const semanticIntentDraftPending = ref(false);
+const pendingAuthoringGuidance = ref("");
 const detailsDialogElementId = ref("");
 const creationPalette = ref<{
   kind: "node" | "region";
@@ -404,7 +419,9 @@ const errorCount = computed(() => diagnostics.value.filter((item) => item.severi
 const warningCount = computed(() => diagnostics.value.filter((item) => item.severity === "warning").length);
 const turtlePending = computed(() => turtleDraft.value !== draft.value.semantic.source);
 const structuredAuthoringPending = computed(() => (
-  authoringDraftHasInput(authoringDraft.value) || Boolean(authoringPreview.value)
+  semanticIntentDraftPending.value
+  || authoringDraftHasInput(authoringDraft.value)
+  || Boolean(authoringPreview.value)
 ));
 const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
   if (!props.authoringContext) return undefined;
@@ -440,6 +457,7 @@ const authoringClassChoices = computed<AuthoringChoice[]>(() => {
       description: term.description,
       category: term.category,
       example: term.examples?.[0],
+      sentencePattern: term.sentencePattern,
     });
   }
   const graph = parseSemanticGraph(draft.value);
@@ -464,12 +482,13 @@ const authoringClassChoices = computed<AuthoringChoice[]>(() => {
 });
 const authoringPropertyChoices = computed<AuthoringChoice[]>(() => authoringContext.value?.terms
   .filter((term) => term.kind === "property" && !term.structural)
-  .map(({ iri, label, description, category, examples }) => ({
+  .map(({ iri, label, description, category, examples, sentencePattern }) => ({
     iri,
     label,
     description,
     category,
     example: examples?.[0],
+    sentencePattern,
   })) ?? []);
 const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
   const terms = authoringContext.value?.terms.filter((term) => (
@@ -539,6 +558,7 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
       example: term.examples?.[0] ?? (exampleQuad?.subject.termType === "NamedNode" && exampleQuad.object.termType === "NamedNode"
         ? `${labelFor(exampleQuad.subject.value)} → ${labelFor(exampleQuad.object.value)}`
         : undefined),
+      sentencePattern: term.sentencePattern,
       priority,
     }];
   }).sort((left, right) => (
@@ -675,6 +695,48 @@ const intentEdgeDetails = computed<IntentEdgeDetails | undefined>(() => {
     capability: removable,
     derivedReason,
   };
+});
+const intentIncidentRelations = computed<IntentRelationOverview[]>(() => {
+  const selectedIris = new Set(selectedAuthoringResources.value.map((resource) => resource.iri));
+  if (selectedIris.size === 0) return [];
+  return scene.value.edges.flatMap((edge): IntentRelationOverview[] => {
+    const source = geometryElement(edge.sourceElementId);
+    const target = geometryElement(edge.targetElementId);
+    if (!source || !target) return [];
+    const sourceSelected = selectedIris.has(source.semanticRef);
+    const targetSelected = selectedIris.has(target.semanticRef);
+    if (!sourceSelected && !targetSelected) return [];
+    const capability = edge.provenance?.editCapability;
+    const provenance = edge.labelProvenance;
+    const predicateIri = capability?.command === "remove-statement"
+      ? capability.predicate
+      : provenance?.kind === "predicate"
+        ? provenance.labelSemanticRef
+        : edge.semanticRef;
+    const predicateLabel = authoringEdgeChoices.value.find((choice) => choice.iri === predicateIri)?.label
+      ?? edge.label;
+    let derivedReason: string | undefined;
+    if (provenance?.kind === "derived-structure") {
+      derivedReason = provenance.role === "sequence-transition"
+        ? "並び順から自動生成された表示です。"
+        : "分岐構造から自動生成された表示です。";
+    }
+    return [{
+      edgeElementId: edge.elementId,
+      sourceIri: source.semanticRef,
+      sourceLabel: source.label,
+      predicateIri,
+      predicateLabel,
+      targetIri: target.semanticRef,
+      targetLabel: target.label,
+      direction: sourceSelected && targetSelected ? "both" : sourceSelected ? "outgoing" : "incoming",
+      derivedReason,
+    }];
+  }).sort((left, right) => (
+    left.sourceLabel.localeCompare(right.sourceLabel, "ja")
+    || left.predicateLabel.localeCompare(right.predicateLabel, "ja")
+    || left.targetLabel.localeCompare(right.targetLabel, "ja")
+  ));
 });
 const intentMembershipOptions = computed<IntentMembershipOption[]>(() => {
   const result: IntentMembershipOption[] = [];
@@ -1076,12 +1138,49 @@ const heading = computed(() => props.title || props.filePath || draft.value.docu
 const stateLabel = computed(() => {
   if (props.saving) return "保存中";
   if (props.saveMessage) return props.saveMessage;
-  return props.dirty || turtlePending.value || structuredAuthoringPending.value ? "未保存" : "保存済み";
+  if (structuredAuthoringPending.value) return "意味を入力中";
+  if (turtlePending.value) return "Turtleを入力中";
+  return props.dirty ? "未保存" : "保存済み";
 });
-const nodeTemplateRefs = computed(() => Object.values(activeCatalog.value?.templates ?? {})
+const templateChoices = computed(() => Object.values(activeCatalog.value?.templates ?? {})
   .filter((template) => template.structuralKind === selectedElement.value?.structuralKind)
-  .map((template) => template.templateRef));
-const assetRefs = computed(() => Object.keys(activeCatalog.value?.assets ?? {}));
+  .sort((left, right) => templateDisplayLabel(left).localeCompare(templateDisplayLabel(right), "ja")));
+const assetOptions = computed<EditorAssetOption[]>(() => {
+  const options = new Map<string, EditorAssetOption>();
+  const packageRefs = new Set(packageDefaultIcons.map((icon) => icon.assetRef));
+  for (const icon of packageDefaultIcons) options.set(icon.assetRef, {
+    assetRef: icon.assetRef,
+    label: icon.label,
+    path: `@iriograph/core/icons/${icon.name}.svg`,
+    mediaType: icon.mediaType,
+  });
+  for (const [assetRef, definition] of Object.entries(activeCatalog.value?.assets ?? {})) {
+    if (packageRefs.has(assetRef)) continue;
+    options.set(assetRef, {
+      assetRef,
+      label: assetDefinitionLabel(definition.extensions) ?? compactRef(assetRef),
+      mediaType: definition.mediaType,
+    });
+  }
+  for (const option of props.assetOptions) {
+    if (!packageRefs.has(option.assetRef)) options.set(option.assetRef, { ...options.get(option.assetRef), ...option });
+  }
+  return [...options.values()].sort((left, right) => (
+    (left.label ?? left.path ?? left.assetRef).localeCompare(right.label ?? right.path ?? right.assetRef, "ja")
+  ));
+});
+const iconInputValue = computed(() => {
+  const element = selectedElement.value;
+  if (element?.structuralKind !== "node" || !element.iconRef) return "";
+  const option = assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef);
+  return option?.path ?? "";
+});
+const selectedIconLabel = computed(() => {
+  const element = selectedElement.value;
+  if (element?.structuralKind !== "node" || !element.iconRef) return "アイコンなし";
+  return assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef)?.label
+    ?? "カタログで設定されたアイコン";
+});
 const appearancePresetStyles = computed(() => activeCatalog.value?.styles ?? {});
 const appearancePrimaryElement = computed(() => {
   const ids = new Set(appearanceTargetIds.value);
@@ -1261,6 +1360,9 @@ watch(
   (pending) => emit("pendingDraftsChanged", pending),
   { immediate: true },
 );
+watch(structuredAuthoringPending, (pending) => {
+  if (!pending) pendingAuthoringGuidance.value = "";
+});
 
 void refreshScene();
 
@@ -1282,7 +1384,7 @@ async function refreshScene(): Promise<void> {
   const document = clone(draft.value);
   const runtime = projectionRuntimeContext.value;
   const catalog = activeCatalog.value;
-  const assetAccess = props.assetAccess;
+  const assetAccess = withPackageDefaultIconAccess(props.assetAccess);
   const validationContext = semanticValidationContext.value;
   const viewId = resolveActiveViewId(document, currentActiveViewId.value);
   sceneLoading.value = true;
@@ -1323,9 +1425,12 @@ async function refreshScene(): Promise<void> {
         })
       : { diagnostics: [] };
     if (requestToken !== sceneRequestToken) return;
-    const result = assetAccess
-      ? await assetSceneSession.enrich(assetRequest, projected, catalog.assets, assetAccess)
-      : assetSceneSession.commitWithoutAssets(assetRequest, projected);
+    const result = await assetSceneSession.enrich(
+      assetRequest,
+      projected,
+      availableAssetDefinitions(catalog),
+      assetAccess,
+    );
     if (requestToken !== sceneRequestToken || !result.accepted) return;
     rawScene.value = {
       ...result.scene,
@@ -1388,9 +1493,12 @@ async function refreshPresentationScene(): Promise<void> {
     );
     if (requestToken !== sceneRequestToken) return;
     const reconciled = reconcilePresentationScene(rawScene.value, projected);
-    const result = props.assetAccess
-      ? await assetSceneSession.enrich(assetRequest, reconciled, profile.catalog.assets, props.assetAccess)
-      : assetSceneSession.commitWithoutAssets(assetRequest, reconciled);
+    const result = await assetSceneSession.enrich(
+      assetRequest,
+      reconciled,
+      availableAssetDefinitions(profile.catalog),
+      withPackageDefaultIconAccess(props.assetAccess),
+    );
     if (requestToken !== sceneRequestToken || !result.accepted) return;
     rawScene.value = result.scene;
     clearMissingSelection(scene.value);
@@ -1743,6 +1851,39 @@ function changeRouting(
   }, recordHistory);
 }
 
+function changeNodeContentOffset(
+  payload: { elementId: string; target: "label" | "icon"; offset?: Point },
+  recordHistory = false,
+): void {
+  const node = scene.value.nodes.find((candidate) => candidate.elementId === payload.elementId);
+  if (!node || props.readOnly) return;
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[node.elementId] ?? { semanticRef: node.semanticRef };
+    const appearance = { ...current.appearance };
+    const field = payload.target === "label" ? "nodeLabelOffset" : "nodeIconOffset";
+    const offset = payload.offset && Number.isFinite(payload.offset.x) && Number.isFinite(payload.offset.y)
+      ? roundPoint(payload.offset)
+      : undefined;
+    if (offset && (offset.x !== 0 || offset.y !== 0)) appearance[field] = offset;
+    else delete appearance[field];
+    if (Object.keys(appearance).length) current.appearance = appearance;
+    else delete current.appearance;
+    if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) {
+      delete view.overlay[node.elementId];
+    } else {
+      view.overlay[node.elementId] = current;
+    }
+  }, recordHistory);
+}
+
+function resetSelectedNodeContentOffset(target: "label" | "icon"): void {
+  const node = selectedElement.value;
+  if (node?.structuralKind !== "node") return;
+  changeNodeContentOffset({ elementId: node.elementId, target }, true);
+}
+
 function addSelectedWaypoint(): void {
   const edge = selectedEdge.value;
   if (!edge || !selectedWaypointEditingAvailable.value) return;
@@ -1779,6 +1920,20 @@ function resetEndpointAnchor(endpoint: "source" | "target"): void {
   }, true);
 }
 
+function resetSelectedEndpointAnchors(): void {
+  const edge = selectedEdge.value;
+  if (!edge) return;
+  changeRouting({
+    elementId: edge.elementId,
+    routing: {
+      waypoints: edge.waypoints,
+      labelOffset: edge.labelOffset,
+      sourceMarker: edge.sourceMarker,
+      targetMarker: edge.targetMarker,
+    },
+  }, true);
+}
+
 function resetSelectedRouting(): void {
   const edge = selectedEdge.value;
   if (!edge) return;
@@ -1802,8 +1957,7 @@ function setSelectedRouteMode(mode: EdgeRouteMode): void {
     if (!view) return;
     const current = view.overlay[edge.elementId] ?? { semanticRef: edge.semanticRef };
     const routing = clone(current.routing) ?? {};
-    if (mode === "auto") delete routing.routeMode;
-    else routing.routeMode = mode;
+    routing.routeMode = mode;
     if (mode !== "manual") delete routing.waypoints;
     const hasRouting = Boolean(
       routing.routeMode
@@ -1991,24 +2145,25 @@ function updateGeometryField(field: keyof ElementGeometry, event: Event): void {
   if (change) changeGeometryBatch([change], true);
 }
 
-function updateTemplate(event: Event): void {
-  const value = (event.target as HTMLSelectElement).value;
-  updateAppearance("templateRef", value || undefined);
+function updateTemplate(templateRef: string): void {
+  updateAppearance("templateRef", templateRef || undefined);
 }
 
 function updateIcon(event: Event): void {
   const element = selectedElement.value;
-  const value = (event.target as HTMLInputElement).value;
-  if (!value.trim()) {
+  const input = event.target as HTMLInputElement;
+  const value = input.value.trim();
+  if (!value) {
     updateAppearance("iconRef", undefined);
     return;
   }
-  const assetRef = normalizePickedAssetRef(value);
+  const option = assetOptions.value.find((candidate) => (
+    candidate.assetRef === value || candidate.path === value
+  ));
+  const assetRef = option?.path === value ? option.assetRef : undefined;
   if (!assetRef) {
-    (event.target as HTMLInputElement).value = element?.structuralKind === "node"
-      ? element.iconRef ?? ""
-      : "";
-    rejectInvalidAssetRef("入力されたicon refがabsolute IRIではありません。");
+    input.value = element?.structuralKind === "node" ? iconInputValue.value : "";
+    rejectInvalidAssetRef("候補にある画像pathを選択してください。");
     return;
   }
   updateAppearance("iconRef", assetRef);
@@ -2028,8 +2183,7 @@ async function chooseAssetIcon(): Promise<void> {
     const result = await picker({
       currentAssetRef: element.iconRef,
       semanticRef: element.semanticRef,
-      allowedMediaTypes: props.assetAccess?.policy.allowedMediaTypes
-        ?? (["image/svg+xml", "image/png", "image/webp"] satisfies AssetMediaType[]),
+      allowedMediaTypes: withPackageDefaultIconAccess(props.assetAccess).policy.allowedMediaTypes,
       signal: controller.signal,
     });
     if (
@@ -2421,10 +2575,10 @@ function seedSemanticEdgeEndpoint(payload: {
 }): void {
   if (
     inspectorMode.value !== "semantic"
-    || activeSemanticIntent.value !== "edit-relation"
     || selectedEdge.value?.elementId !== payload.edgeElementId
     || intentEdgeDetails.value?.derivedReason
   ) return;
+  activeSemanticIntent.value = "edit-relation";
   const field = payload.endpoint === "source" ? "sourceIri" : "targetIri";
   beginIntentResourcePicking(field);
   seedDraftResource(payload.targetSemanticRef);
@@ -2842,9 +2996,16 @@ function formatAuthoringGraphTerm(term: AuthoringTripleChange["object"]): string
   }`;
 }
 
+function layoutPurposeLabel(layoutRef: string | undefined): string {
+  if (layoutRef?.includes("hierarchical-lr")) return "左から右へ自動配置";
+  if (layoutRef?.includes("hierarchical-tb")) return "上から下へ自動配置";
+  return layoutRef ? "自動配置" : "配置方法なし";
+}
+
 async function applyTurtleDraft(): Promise<boolean> {
   if (props.readOnly) return false;
   if (structuredAuthoringPending.value) {
+    pendingAuthoringGuidance.value = "意味の変更が入力中です。変更内容を確認して明示的に適用するか、キャンセルしてください。";
     applyDiagnostics.value = [{
       severity: "error",
       code: "pending-structured-authoring",
@@ -2974,11 +3135,16 @@ async function requestSave(): Promise<void> {
 
 async function flushPendingEdits(): Promise<boolean> {
   if (structuredAuthoringPending.value) {
+    pendingAuthoringGuidance.value = "意味の変更が入力中です。変更内容を確認して明示的に適用するか、キャンセルしてください。";
     applyDiagnostics.value = [{
       severity: "error",
       code: "pending-structured-authoring",
-      message: "Preview/Applyされていないsemantic draftがあります。明示的に適用するかCancelしてください。",
+      message: "意味の変更が入力中です。右の意味編集で変更内容を確認して明示的に適用するか、キャンセルしてください。",
     }];
+    inspectorMode.value = "semantic";
+    rightSidebarCollapsed.value = false;
+    await nextTick();
+    semanticIntentPanel.value?.focusPendingIntent();
     return false;
   }
   if (turtlePending.value) return applyTurtleDraft();
@@ -3459,6 +3625,54 @@ function compactRef(value: string): string {
     : last;
 }
 
+function templateDisplayLabel(template: VisualTemplate): string {
+  const token = compactRef(template.templateRef);
+  const labels: Record<string, string> = {
+    generic: "汎用",
+    choice: "判断",
+    class: "概念",
+    property: "関係定義",
+    "start-event": "開始",
+    "user-task": "人の作業",
+    "service-task": "自動処理",
+    gateway: "分岐",
+    "end-event": "終了",
+    reference: "参照",
+    lane: "領域",
+    region: "領域",
+    sequence: "順序グループ",
+  };
+  return labels[token] ?? token.replaceAll("-", " ");
+}
+
+function templateShapeLabel(template: VisualTemplate): string {
+  if (template.structuralKind === "container") return "枠でまとめる";
+  if (template.structuralKind === "region") return "重なり領域";
+  return {
+    rectangle: "四角",
+    "rounded-rectangle": "角丸",
+    circle: "円",
+    diamond: "ひし形",
+  }[template.shape ?? "rounded-rectangle"];
+}
+
+function templatePreviewIconUrl(template: VisualTemplate): string | undefined {
+  return template.iconRef ? packageDefaultIconDataUrl(template.iconRef) : undefined;
+}
+
+function assetDefinitionLabel(extensions: Record<string, unknown> | undefined): string | undefined {
+  const value = Object.entries(extensions ?? {}).find(([key]) => key.endsWith("#label"))?.[1];
+  return typeof value === "string" ? value : undefined;
+}
+
+function packageIconPreviewUrl(assetRef: string): string | undefined {
+  return packageDefaultIconDataUrl(assetRef);
+}
+
+function availableAssetDefinitions(catalog: ProjectionCatalogV1): Record<string, AssetDefinition> {
+  return { ...catalog.assets, ...packageDefaultIconAssets };
+}
+
 function isTextInput(target: EventTarget | null): boolean {
   return target instanceof Element && Boolean(target.closest([
     "input",
@@ -3540,7 +3754,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </div>
       <div class="iriograph-editor-header-status">
         <span :class="['iriograph-validation-pill', { error: errorCount > 0 }]">
-          {{ errorCount > 0 ? `${errorCount} errors` : "Turtle valid" }}
+          {{ errorCount > 0 ? `問題 ${errorCount}件` : "検証済み" }}
         </span>
         <button type="button" :disabled="!canSave || saving || applyingTurtle || authoringBusy" @click="requestSave">
           {{ saving ? "保存中…" : "保存" }}
@@ -3565,7 +3779,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       >{{ leftSidebarCollapsed ? '›' : '‹' }}</button>
       <aside v-show="!leftSidebarCollapsed" :id="leftSidebarId" class="iriograph-elements-panel">
         <section class="iriograph-view-summary">
-          <small>ACTIVE VIEW</small>
+          <small>表示中のビュー</small>
           <select
             :value="activeView?.viewId ?? ''"
             :disabled="viewCommandBusy"
@@ -3576,7 +3790,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               {{ view.viewId }}
             </option>
           </select>
-          <code>{{ activeView?.profileRef }}</code>
+          <details class="iriograph-technical-details"><summary>技術情報</summary><code>{{ activeView?.profileRef }}</code></details>
           <div class="iriograph-view-actions" aria-label="Named view actions">
             <button type="button" :disabled="readOnly || viewCommandBusy" @click="openAddViewDialog">追加</button>
             <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="duplicateActiveView">複製</button>
@@ -3587,17 +3801,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               @click="deleteActiveView"
             >削除</button>
             <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="resetActiveViewOverlay">
-              Overlay reset
+              ビュー調整をリセット
             </button>
           </div>
           <div>
-            <span><b>{{ scene.nodes.length }}</b> nodes</span>
-            <span><b>{{ scene.edges.length }}</b> edges</span>
-            <span><b>{{ scene.containers.length + (scene.regions?.length ?? 0) }}</b> areas</span>
+            <span><b>{{ scene.nodes.length }}</b> 要素</span>
+            <span><b>{{ scene.edges.length }}</b> 関係</span>
+            <span><b>{{ scene.containers.length + (scene.regions?.length ?? 0) }}</b> 領域</span>
           </div>
         </section>
         <nav class="iriograph-element-list" aria-label="Scene elements">
-          <small>SCENE ELEMENTS <span>derived</span></small>
+          <small>図の要素</small>
           <button
             v-for="container in scene.containers"
             :key="container.elementId"
@@ -3605,7 +3819,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :class="{ active: selectedElementIdsSet.has(container.elementId) }"
             @click="selectAndReveal(container.elementId, $event)"
           >
-            <i>▣</i><span><b>{{ container.label }}</b><small>container</small></span>
+            <i>▣</i><span><b>{{ container.label }}</b><small>領域</small></span>
           </button>
           <button
             v-for="node in scene.nodes"
@@ -3614,13 +3828,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :class="{ active: selectedElementIdsSet.has(node.elementId) }"
             @click="selectAndReveal(node.elementId, $event)"
           >
-            <i>●</i><span><b>{{ node.label }}</b><small>{{ compactRef(node.templateRef) }}</small></span>
+            <i>●</i><span><b>{{ node.label }}</b><small>要素</small></span>
           </button>
         </nav>
-        <section class="iriograph-fallback-note">
-          <b>Fallback enabled</b>
-          <p>catalog未登録のIRI-object tripleは通常矢印になります。</p>
-        </section>
+        <details class="iriograph-fallback-note"><summary>技術情報</summary><p>表示規則に未登録の関係は通常矢印で表示します。</p></details>
       </aside>
 
       <main class="iriograph-main-surface">
@@ -3637,7 +3848,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <button type="button" :disabled="!canUndo || readOnly" title="Undo (Ctrl/Cmd+Z)" @click="undo">↶</button>
               <button type="button" :disabled="!canRedo || readOnly" title="Redo (Ctrl/Cmd+Y)" @click="redo">↷</button>
               <span />
-              <small>{{ activeView?.layoutRef }}</small>
+              <small>{{ layoutPurposeLabel(activeView?.layoutRef) }}</small>
+              <details v-if="activeView?.layoutRef" class="iriograph-toolbar-technical"><summary>技術情報</summary><code>{{ activeView.layoutRef }}</code></details>
             </div>
             <div class="iriograph-navigation-actions">
               <button
@@ -3689,7 +3901,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 aria-label="グリッドsnap"
                 :aria-pressed="snapSettings.grid.enabled"
                 @click="setSnapSettings({ grid: { ...snapSettings.grid, enabled: !snapSettings.grid.enabled } })"
-              >Grid</button>
+              >グリッド</button>
               <input
                 type="number"
                 min="1"
@@ -3703,7 +3915,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 aria-label="要素snap"
                 :aria-pressed="snapSettings.targets.enabled"
                 @click="setSnapSettings({ targets: { ...snapSettings.targets, enabled: !snapSettings.targets.enabled } })"
-              >Target</button>
+              >要素</button>
             </div>
           </div>
           <div
@@ -3734,7 +3946,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :show-all-comments="showAllComments"
             :show-grid="showCanvasGrid"
             :edge-route-modes="edgeRouteModes"
-            :semantic-endpoint-reconnect="inspectorMode === 'semantic' && activeSemanticIntent === 'edit-relation' && Boolean(intentEdgeDetails && !intentEdgeDetails.derivedReason)"
+            :node-content-editing="inspectorMode === 'appearance' && displayInspectorAction === 'appearance' && selectedElement?.structuralKind === 'node'"
+            :semantic-endpoint-reconnect="inspectorMode === 'semantic' && Boolean(intentEdgeDetails && !intentEdgeDetails.derivedReason)"
             :deletion-preview-resource-refs="authoringDeletionPreview?.resourceSemanticRefs"
             :deletion-preview-statement-refs="authoringDeletionPreview?.statementRefs"
             @zoom-change="setZoomState"
@@ -3745,6 +3958,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @resize-change="changeGeometry"
             @geometry-batch-change="changeGeometryBatch"
             @routing-update="changeRouting"
+            @node-content-offset-update="changeNodeContentOffset"
             @region-label-update="updateRegionLabelAnchor"
             @semantic-position-request="seedDraftPosition"
             @semantic-resource-request="seedDraftResource"
@@ -3763,7 +3977,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <strong v-else>Projection catalog</strong>
             </div>
             <span v-if="panel === 'turtle'">LLM-visible boundary</span>
-            <span v-else-if="panel === 'document'">Turtle + sparse overlay</span>
+            <span v-else-if="panel === 'document'">意味とビュー設定</span>
             <span v-else>declarative source</span>
           </header>
           <template v-if="panel === 'turtle'">
@@ -3791,8 +4005,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <li v-for="(diagnostic, index) in diagnostics" :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`" :class="diagnostic.severity">
                   <span><b>{{ diagnosticGuidance(diagnostic).title }}</b> {{ diagnosticGuidance(diagnostic).action }}<details><summary>技術的な詳細</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic).detail }}</details></span>
                 <span class="iriograph-diagnostic-actions">
-                  <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Source</button>
-                  <button v-if="sceneElementForDiagnostic(diagnostic)" type="button" @click="navigateDiagnosticToScene(diagnostic)">Scene</button>
+                  <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">ソースで確認</button>
+                  <button v-if="sceneElementForDiagnostic(diagnostic)" type="button" @click="navigateDiagnosticToScene(diagnostic)">図で確認</button>
                 </span>
               </li>
             </ul>
@@ -3807,9 +4021,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <button type="button" :class="{ selected: inspectorMode === 'appearance' }" :aria-pressed="inspectorMode === 'appearance'" @click="inspectorMode = 'appearance'">ビュー</button>
         </nav>
         <SemanticIntentPanel
+          ref="semanticIntentPanel"
           v-show="inspectorMode === 'semantic'"
           :enabled="authoringEnabled"
           :blocked-reason="authoringBlockedReason"
+          :guidance="pendingAuthoringGuidance"
           :busy="authoringBusy"
           :resources="authoringResourceChoices"
           :selected-resources="selectedAuthoringResources"
@@ -3819,6 +4035,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           :predicates="authoringEdgeChoices"
           :memberships="intentMembershipOptions"
           :sequences="intentSequenceOptions"
+          :incident-relations="intentIncidentRelations"
+          :requested-intent="activeSemanticIntent"
           :picked-source-iri="authoringDraft.sourceIri"
           :picked-target-iri="authoringDraft.targetIri"
           :preview="authoringPreviewView"
@@ -3827,7 +4045,9 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           @apply="applyStructuredAuthoring"
           @cancel="cancelAuthoringDraft"
           @pick-resource="beginIntentResourcePicking"
+          @focus-element="focusElement"
           @intent-change="activeSemanticIntent = $event"
+          @draft-state-change="semanticIntentDraftPending = $event"
         />
         <div v-show="inspectorMode === 'appearance'" class="iriograph-display-inspector">
         <section class="iriograph-grid-visibility">
@@ -3835,7 +4055,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <small>Snap間隔 {{ snapSettings.grid.size }}。表示設定はファイルへ保存しません。</small>
         </section>
         <header>
-          <div><small>VIEW</small><strong>{{ selectedElement?.label ?? "選択なし" }}</strong></div>
+          <div><small>ビュー</small><strong>{{ selectedElement?.label ?? "選択なし" }}</strong></div>
           <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択` : selectedElement.structuralKind === 'edge' ? '関係' : selectedElement.structuralKind === 'node' ? '要素' : '領域' }}</span>
         </header>
         <template v-if="selectedElement">
@@ -3869,7 +4089,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             >線の表示</button>
           </nav>
           <section v-if="selectedElementDiagnostics.length" class="iriograph-element-diagnostics">
-            <label>Diagnostics</label>
+            <label>問題</label>
             <article
               v-for="(diagnostic, index) in selectedElementDiagnostics"
               :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`"
@@ -3878,7 +4098,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <b>{{ diagnosticGuidance(diagnostic).title }}</b>
               <span>{{ diagnosticGuidance(diagnostic).action }}</span>
               <details><summary>技術的な詳細</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic).detail }}</details>
-              <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">Sourceへ移動</button>
+              <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">ソースで確認</button>
             </article>
           </section>
           <section v-if="displayInspectorAction === 'appearance'">
@@ -3896,27 +4116,54 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               @apply="applyAppearance"
               @close="closeAppearanceEditor"
             />
-            <label>Template</label>
-            <select
-              v-if="selectedElement.structuralKind !== 'edge'"
-              :value="selectedElement.templateRef"
-              :disabled="readOnly"
-              @change="updateTemplate"
-            >
-              <option v-for="templateRef in nodeTemplateRefs" :key="templateRef" :value="templateRef">{{ compactRef(templateRef) }}</option>
-            </select>
-            <code v-else>{{ selectedElement.templateRef }}</code>
+            <template v-if="selectedElement.structuralKind !== 'edge'">
+              <label>形</label>
+              <div class="iriograph-template-choices" role="radiogroup" aria-label="要素の形">
+                <button
+                  v-for="template in templateChoices"
+                  :key="template.templateRef"
+                  type="button"
+                  :aria-pressed="selectedElement.templateRef === template.templateRef"
+                  :disabled="readOnly"
+                  @click="updateTemplate(template.templateRef)"
+                >
+                  <span
+                    class="iriograph-template-preview"
+                    :class="[`shape-${template.shape ?? (template.structuralKind === 'node' ? 'rounded-rectangle' : 'rectangle')}`, `kind-${template.structuralKind}`]"
+                    :style="{ background: template.style.fill, borderColor: template.style.stroke, color: template.style.text }"
+                  ><img v-if="templatePreviewIconUrl(template)" :src="templatePreviewIconUrl(template)" alt="" /></span>
+                  <span><b>{{ templateDisplayLabel(template) }}</b><small>{{ templateShapeLabel(template) }}</small></span>
+                </button>
+              </div>
+            </template>
           </section>
           <section v-if="displayInspectorAction === 'appearance' && selectedElement.structuralKind === 'node'">
             <label>アイコン</label>
-            <select
-              :value="selectedElement.iconRef ?? ''"
+            <div class="iriograph-package-icon-choices" role="radiogroup" aria-label="同梱アイコン">
+              <button type="button" :aria-pressed="!selectedElement.iconRef" :disabled="readOnly" @click="updateAppearance('iconRef', undefined)"><span>なし</span></button>
+              <button
+                v-for="icon in packageDefaultIcons"
+                :key="icon.assetRef"
+                type="button"
+                :aria-pressed="selectedElement.iconRef === icon.assetRef"
+                :disabled="readOnly"
+                @click="updateAppearance('iconRef', icon.assetRef)"
+              ><img :src="packageIconPreviewUrl(icon.assetRef)" alt="" /><span>{{ icon.label }}</span></button>
+            </div>
+            <label :for="iconPathInputId">Workspace画像のパス</label>
+            <input
+              :id="iconPathInputId"
+              :list="assetSuggestionsListId"
+              :value="iconInputValue"
               :disabled="readOnly"
               @change="updateIcon"
-            >
-              <option value="">アイコンなし</option>
-              <option v-for="assetRef in assetRefs" :key="assetRef" :value="assetRef">{{ compactRef(assetRef) }}</option>
-            </select>
+              placeholder="例: assets/approval-policy.svg"
+              autocomplete="off"
+            />
+            <datalist :id="assetSuggestionsListId">
+              <option v-for="option in assetOptions.filter((candidate) => candidate.path)" :key="option.assetRef" :value="option.path">{{ option.label ?? option.path }}</option>
+            </datalist>
+            <small>現在: {{ selectedIconLabel }}。候補からpathを選択できます。ファイルには画像そのものではなく参照だけを保存します。</small>
             <button
               v-if="pickAsset"
               type="button"
@@ -3924,8 +4171,24 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || pickingAsset"
               @click="chooseAssetIcon"
             >
-              {{ pickingAsset ? "assetを選択中…" : "Workspace assetを選択" }}
+              {{ pickingAsset ? "画像を選択中…" : "Workspace画像を選択" }}
             </button>
+            <div class="iriograph-node-content-placement">
+              <label>要素内の配置</label>
+              <small class="iriograph-node-content-guidance">Canvas上のラベルやアイコンをドラッグして、この要素の中で位置を調整できます。</small>
+              <div class="iriograph-node-content-reset-actions">
+                <button
+                  type="button"
+                  :disabled="readOnly || !selectedElement.nodeLabelOffset"
+                  @click="resetSelectedNodeContentOffset('label')"
+                >ラベル位置を戻す</button>
+                <button
+                  type="button"
+                  :disabled="readOnly || !selectedElement.nodeIconOffset"
+                  @click="resetSelectedNodeContentOffset('icon')"
+                >アイコン位置を戻す</button>
+              </div>
+            </div>
           </section>
           <section v-if="displayInspectorAction === 'region-label' && selectedElement.structuralKind === 'region'">
             <p>Canvas上のラベルをドラッグすると、領域の枠線に沿って自由に移動できます。</p>
@@ -3942,8 +4205,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           </section>
           <section v-if="displayInspectorAction === 'geometry' && 'geometry' in selectedElement">
             <div class="iriograph-section-heading">
-              <label>Geometry overlay</label>
-              <span :class="selectedElement.placement">{{ selectedElement.placement }}</span>
+              <label>位置とサイズ</label>
+              <span :class="selectedElement.placement">{{ selectedElement.placement === 'user' ? 'ユーザー配置' : '自動配置' }}</span>
             </div>
             <div class="iriograph-geometry-grid">
               <label v-for="field in (['x', 'y', 'width', 'height'] as const)" :key="field">
@@ -3969,8 +4232,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 class="iriograph-wide-button"
                 :disabled="readOnly"
                 @click="addSelectedWaypoint"
-              >Waypointを追加</button>
-              <small>{{ selectedManualWaypoints.length }}個の点。Canvas上の点をドラッグして調整します。</small>
+              >経路点を追加</button>
+              <small>{{ selectedManualWaypoints.length }}個の経路点。Canvas上の点をドラッグして調整します。</small>
             </template>
             <label>端子の形</label>
             <div class="iriograph-endpoint-marker-fields">
@@ -4010,12 +4273,12 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </details>
             <details class="iriograph-view-disclosure">
               <summary>接続位置を調整</summary>
-              <p>Canvas上の始点・終点ハンドルをnodeの周囲へドラッグします。数値入力は必要ありません。</p>
+              <p>Canvas上の始点・終点ハンドルを要素の周囲へドラッグします。数値入力は必要ありません。</p>
               <button
                 type="button"
                 class="iriograph-wide-button"
                 :disabled="readOnly || (!selectedElement.sourceAnchor && !selectedElement.targetAnchor)"
-                @click="resetEndpointAnchor('source'); resetEndpointAnchor('target')"
+                @click="resetSelectedEndpointAnchors"
               >接続位置を自動に戻す</button>
             </details>
             <button

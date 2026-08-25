@@ -19,6 +19,8 @@ import {
   standardRdfRdfsCatalog,
   statementIdentityForNamedStatement,
   validateIriographDocumentV1,
+  packageDefaultIcons,
+  withPackageDefaultIconAccess,
 } from "@iriograph/core";
 
 const validation = validateIriographDocumentV1(document);
@@ -65,6 +67,12 @@ if (preview.valid) {
   if (!update.accepted) throw new Error(update.diagnostics[0]?.message);
 }
 ```
+
+`packageDefaultIcons`は日本語label付きの小さな業務/cloud向けSVG catalogです。安定refは
+`urn:iriograph:icon:lucide:<name>:1`で、同じSVGを`@iriograph/core/icons/<name>.svg`にも配布します。
+`withPackageDefaultIconAccess(assetAccess)`は同梱refをpackage内から解決しますが、hostから渡された
+policyを変更しません。Workspaceや外部iconは従来どおりhost resolver/policyの対象です。出典とlicenseは
+package内の`THIRD_PARTY_NOTICES.md`を参照してください。
 
 Structured authoringは必ずpreviewと明示confirmationを経由します。Apply時にはcommand、
 document/context revision、exact graph patchを再計算し、staleまたは改変されたpreviewを拒否します。

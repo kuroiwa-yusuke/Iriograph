@@ -16,6 +16,7 @@ describe("standardPredicateVocabularyJa", () => {
     });
     expect(requires?.description).not.toContain(requires!.iri);
     expect(requires?.examples?.[0]).toContain("承認処理");
+    expect(requires?.sentencePattern).toBe("AはBを必要とする");
   });
 
   it("profileが公開するcategoryだけを複製して選べる", () => {
@@ -40,6 +41,8 @@ describe("standardPredicateVocabularyJa", () => {
       && Boolean(term.description?.trim())
       && Boolean(term.category?.trim())
       && term.examples?.every((example) => Boolean(example.trim()))
+      && term.sentencePattern?.includes("A")
+      && term.sentencePattern?.includes("B")
     ))).toBe(true);
     expect(standardPredicateVocabularyJa.find((term) => term.iri.endsWith("#wasAssociatedWith")))
       .toMatchObject({ label: "担当者・組織" });

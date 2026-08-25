@@ -59,7 +59,7 @@ overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
 - `pinned`と`placement`: 自動配置かユーザー固定か
-- `appearance`: template、icon、catalog style preset、sparse styleの明示override、`regionLabelAnchor`、`regionLabelWritingDirection`、`regionZOrder`、edgeごとの`edgeCaption`
+- `appearance`: template、icon、catalog style preset、sparse styleの明示override、node内の`nodeLabelOffset`/`nodeIconOffset`、`regionLabelAnchor`、`regionLabelWritingDirection`、`regionZOrder`、edgeごとの`edgeCaption`
 - `routing`: edgeの`routeMode`、manual waypoint、label offset、source/target anchor、terminal override、curveのsparse curvature
 
 `routing.waypoints`はsource/target attachmentを含まない、ユーザーが確定したmanual中間点だけです。
@@ -73,13 +73,19 @@ curvatureから導出します。`orthogonal`等の自動modeが生成した障�
 
 Region labelの`regionLabelAnchor`は外周上の0以上1未満の正規化位置、
 `regionLabelWritingDirection`は`horizontal-right`または`vertical-down`の
-閉じた値です。Region z-orderは同じviewのregion背景間だけを並べ、node、edge interaction layer、
-focus indicatorを隠しません。Edgeの`appearance.edgeCaption`はview overlayだけに保存し、predicate label、
+閉じた値です。Region z-orderは同じviewのregion背景間だけを並べます。Semantic object本体の描画層は
+通常時と選択時の双方で`region/sequence group < edge < node`を固定し、同種内のselection frontや
+z-orderが別層を越えません。Edgeの`appearance.edgeCaption`はview overlayだけに保存し、predicate label、
 semantic search、LLM contextへ昇格しません。
 
 `appearance.iconRef`はassetの安定したIRIだけを保持します。workspace path、取得URL、
 認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
 導出する既定値、overlayの`iconRef`はユーザーが個別に選択したoverrideです。
+
+`appearance.nodeLabelOffset`と`appearance.nodeIconOffset`はnode中心を基準にしたCanvas unitの
+有限な相対位置です。どちらもschema v1へ後方互換な任意fieldとして追加し、未指定は`{x:0,y:0}`と
+同じ表示にします。Renderer/Editorはnode内から完全に失われない範囲へclampし、0へ戻したfieldは
+overlayから省略します。これらはlabel/iconの意味、Turtle、layout geometryを変更しません。
 
 `appearance.styleRef`はcatalogの`styles`にある安定IRIを参照し、`appearance.style`は利用者が
 個別に変更した`fill`、`stroke`、`text`、`accent`、`fillOpacity`、`strokeWidth`、`dash`だけを
@@ -192,6 +198,14 @@ interface AssetResolver {
 
 Resolved resultはabsolute URL、実media type、実byte lengthとidempotentな`release()`を持つleaseです。Coreはcatalog宣言とのmedia type一致、byte上限、許可scheme・originを検証します。未解決、移動、削除、取得失敗、policy違反はwarningとしてiconなし表示へfallbackし、semantic transactionをrollbackしません。返されるScene batchの`release()`は採用しなかったstale result、Scene交換、editor破棄時に呼びます。Blob URLの生成・cache・revokeとworkspace revisionの更新はhost責務です。
 
+Coreが同梱する既定SVGは`urn:iriograph:icon:lucide:<name>:1`を予約namespaceとして使います。
+`packageDefaultIcons`/`packageDefaultIconAssets`は選択肢と定義を、`packageDefaultIconDataUrl`と
+`createPackageDefaultIconResolver`は配布物内の同じSVGを解決します。このnamespaceはpackageが
+管理し、catalog/host定義で上書きしません。同梱refだけは検査済みpackage bytesから直接解決する
+trusted pathであり、hostの`AssetPolicy`を拡張・緩和しません。それ以外のassetは従来どおりhost
+resolverと元のpolicyを必ず通ります。`withPackageDefaultIconAccess(hostAccess)`もhost policy objectを
+そのまま維持します。
+
 ## Semantic transaction
 
 `applySemanticSource(document, source, context)`は、authoring policyを伴わない互換用semantic source APIです。Controlled writeは`applyAuthoringSource(document, source, resolvedAuthoringContext, { actor, signal })`を使い、Turtleをparseしてactor policy、RDF/RDFS構造、全viewの非同期layoutを検証した`Promise<SemanticSourceUpdate>`を返します。`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Human structured authoringにも、hostが解決済み語彙・policy・元revisionを束ねた`ResolvedAuthoringContext`を注入します。Profile URIからこのcontextを取得するresolverはP2-01の責務です。
@@ -258,7 +272,7 @@ Coreの一般`create-resource.initialStatements` contractはhost/LLM adapter向�
 
 右Inspectorの初期状態は`新しい要素を作る`、`関係を作る`、`要素を変更する`、`関係を変更する`の4 actionだけを意味編集入口とし、選択後に必要な対象と値を段階表示します。`新しい要素を作る`だけはlabel一項目でApplyまで進み、種類や関係を尋ねません。Details dialogは`要素を変更する`選択後の段階UIであり、第5の入口にしません。意味入力とビュー入力は同時表示せず、`意味`と`ビュー`のtabで片方だけを表示します。Tabを往復しても未適用の段階入力を黙って破棄しません。右クリック、Context Menu key、Shift+F10は別menuを表示せず、選択対象のビューtabと該当段階を直接開き、semantic commandを開始しません。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はlabel、説明、形のpreviewを主表示にし、完全IRIを内部option value、tooltip、read-only Advanced参照情報として保持します。Standard editorの通常UIとAdvancedにIRI入力欄を置かず、Coreへ渡す値はallocatorまたは選択肢が保持する完全IRIとします。同名labelをidentityとして使いません。順序・選択肢・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
 
-Relation pickerはsource/targetのprimary labelとcatalog/vocabularyの日本語文型metadataから`A（predicate）B`を生成します。候補はresolved profile内のRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の標準predicateを、source/targetの明示型、限定subclass closure、`rdfs:domain`/`rdfs:range`、object/literal kind、semantic capabilityで絞ります。型不明は後順位に残し、完全OWL推論やlabel推測を行わず、candidate validationを最終判定とします。同じpredicateを使う個別edge captionはview overlay annotationであり、semantic commandを生成しません。
+Relation pickerは候補名を`A（predicate label）B`、説明をcatalog/vocabularyの日本語文型metadataとしてcategory別に表示します。候補はresolved profile内のRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の標準predicateを、source/targetの明示型、限定subclass closure、`rdfs:domain`/`rdfs:range`、object/literal kind、semantic capabilityで絞ります。型不明は後順位に残し、完全OWL推論やlabel推測を行わず、candidate validationを最終判定とします。同じpredicateを使う個別edge captionはview overlay annotationであり、semantic commandを生成しません。
 
 主要なresource欄は明示的な「Canvasから選択」modeを持ちます。このmode中だけnode/container clickを対象fieldへseedし、通常のselection、drag、container内配置からsubject、predicate、membershipを推論しません。位置指定modeではblank canvas clickが位置だけをseedし、container背景clickは位置と、そのcontainerにexact matchするcatalog membershipをdraftへseedできます。いずれも即時commitせず、同じfieldのpicker再押下、Escape、Cancel、`readOnly`への切替、Scene交換で解除します。Picker中のnode/container clickは通常の選択・geometry gestureを開始しません。
 
@@ -302,6 +316,7 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
     :dirty="dirty"
     :saving="saving"
     :asset-access="assetAccess"
+    :asset-options="workspaceAssetOptions"
     :pick-asset="pickWorkspaceAsset"
     :authoring-context="resolvedAuthoringContext"
     :resource-iri-allocator="resourceIriAllocator"
@@ -319,6 +334,7 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `save`: packageは永続化せずhostへ保存要求を通知
 - `validationChanged`: semantic/project diagnostics
 - `assetAccess`: 非同期resolver、media/size/URL policy、host revision
+- `assetOptions`: `{ assetRef, label?, path?, mediaType? }[]`。workspace treeの画像を人向けlabelと正確なpath候補へ対応付けるhost注入値。Editorはpathを入力補完へだけ使い、保存時は`assetRef`へ変換する
 - `pickAsset(request)`: workspace pickerを開き、選択時はassetRefだけを返すhost callback
 - `authoringContext`: hostが解決した語彙・capability・policy・projection runtime
 - `semanticValidationContext`: hostが解決したdomain validation identity/revision/port。省略時は`authoringContext.semanticValidation`を利用可能
@@ -339,13 +355,20 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 `routingChange({ elementId, waypoints })`も併発しますが、標準Editorは`routingUpdate`だけを
 購読して二重適用を避けます。
 
+Node内配置を有効にするhostは公開Canvasへ`nodeContentEditing`を渡します。選択nodeのlabel/icon dragは
+`nodeContentOffsetUpdate({ elementId, target: "label" | "icon", offset? })`を発行し、pointer move中は
+Canvasだけをpreviewします。`offset`省略はresetです。標準Editorはこれをsparse appearance transactionへ
+変換し、`gestureStart`/`gestureEnd`の間を一つのundo itemにします。
+
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
 
 Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node drag中にpointerがviewport端へ近づいた場合は同じ方向へsession scrollを進め、geometry transactionとは分離します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
 
+埋込みEditor自身はhostの横幅を広げる固定最小幅を持ちません。三列layoutが狭い場合はEditor内部で横scrollでき、左右sidebarを折り畳めばCanvasが利用可能幅へ拡張します。Canvasのscroll viewportは`min-width: 0`を持ち、scene外周のlabelやresize handleはpaperでclipせずscroll padding内へ描画します。公開CanvasをEditor外で単独利用する場合もpaper色とgridのfallbackを持ちます。HostはEditorを置く領域に有限のblock-sizeを与えます。
+
 Multi-selectionはplain clickで置換、Ctrl/Cmd clickでtoggle、Shift clickで追加、blank clickまたはEscapeでclear、Ctrl/Cmd+Aで全選択します。選択中のnode/containerをdragすると全選択geometryを共通deltaでpreviewし、pointerup時に一つのbatch presentation transactionとして確定します。選択containerの子孫も同deltaで移動し、ancestorとdescendantを同時選択しても二重移動しません。異なるcontainerの要素を同時に動かす場合は、各要素の親container content boundsから許容deltaの共通部分を求め、membershipは変更しません。整列と等間隔も一commandを一transactionとし、Turtleを変更しません。
 
-Resize可能なnode、container、regionは選択時に四隅と四辺中央の8 handleをinteraction layerへ表示します。Handleはelementの塗りや他要素より前面でhit testし、keyboard操作にも同じ制約を適用します。Regionのmove/resizeは意味上のnode、container、region memberの全boundsとpaddingを包含し、複数region memberに必要なintersectionを壊さない範囲へclampします。Pointer/keyboard gesture、Inspector数値入力、align、distributeを含む全geometry保存入口で同じ制約を再検証し、制約を満たさない候補geometryはoverlayへcommitしません。
+Resize可能なnode、container、regionは選択時に四隅と四辺中央の8 handleをsemantic object層とは別のtransient interaction layerへ表示します。Waypoint、endpoint halo、resize handle、draft markerだけは操作性のためnodeより前面でhit testできますが、object本体、通常edge線、terminal markerをこの層へ複製しません。Region/Seq本体の一時前面化は構造層内だけです。Regionのmove/resizeは意味上のnode、container、region memberの全boundsとpaddingを包含し、複数region memberに必要なintersectionを壊さない範囲へclampします。Pointer/keyboard gesture、Inspector数値入力、align、distributeを含む全geometry保存入口で同じ制約を再検証し、制約を満たさない候補geometryはoverlayへcommitしません。
 
 標準snapは8 canvas unitのgridと、対象要素のleft/center/right、top/middle/bottom guideを使います。対象候補は距離、座標、element IDの順で決定的に解決し、target snapをgridより優先してからcontainer/Scene境界へclampします。Target toleranceの標準値は画面上6pxでzoom変換し、Altを押したdragでは一時的にsnapを無効化します。Snap設定とguide候補はsession stateで、documentやhistoryには保存しません。`readOnly`でもselectionとsnap設定の参照・変更は可能ですが、drag、keyboard move、resize、routing、整列、等間隔、undo/redoはdocumentを変更しません。
 

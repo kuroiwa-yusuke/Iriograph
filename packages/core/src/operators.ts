@@ -375,6 +375,8 @@ function projectResource(
     structuralKind,
     shape: template.shape ?? "rounded-rectangle",
     iconRef,
+    nodeLabelOffset: overlayEntry?.overlay.appearance?.nodeLabelOffset,
+    nodeIconOffset: overlayEntry?.overlay.appearance?.nodeIconOffset,
   };
 }
 
@@ -503,10 +505,7 @@ function projectDerivedEdges(
       const members = collectOrdinalMembers(graph, plan.semanticRef, operator.ordinalPredicatePrefix);
       for (const member of members) {
         if (!member.memberIri || member.ordinal === undefined) continue;
-        let targetIri = member.memberIri;
-        let label = "";
-        let labelSemanticRef: string | undefined;
-        let semanticText = collectSemanticText(
+        const semanticText = collectSemanticText(
           graph,
           plan.semanticRef,
           vocabulary.labelPredicate,
@@ -514,42 +513,20 @@ function projectDerivedEdges(
           view.locale,
         );
         const sourceStatements = [statementIdentityFromQuad(member.quad)];
-        const memberPlan = plans.get(member.memberIri);
-        const memberOperator = memberPlan?.resolved?.rule.project;
-        if (memberOperator?.operator === "ordinal-sequence") {
-          const first = collectOrdinalMembers(
-            graph,
-            member.memberIri,
-            memberOperator.ordinalPredicatePrefix,
-          )[0];
-          if (!first?.memberIri) continue;
-          targetIri = first.memberIri;
-          semanticText = collectSemanticText(
-            graph,
-            member.memberIri,
-            vocabulary.labelPredicate,
-            vocabulary.commentPredicate,
-            view.locale,
-          );
-          label = semanticText.primaryLabel?.value ?? compactIri(member.memberIri);
-          labelSemanticRef = member.memberIri;
-          sourceStatements.push(statementIdentityFromQuad(first.quad));
-        }
         const semanticRef = alternativeBranchIdentity(plan.semanticRef, member.ordinal);
         const edge = projectDerivedEdge(
           catalog,
           semanticRef,
-          label,
+          "",
           semanticText,
           {
             kind: "derived-structure",
             role: "alternative-branch",
             structureSemanticRef: plan.semanticRef,
-            ...(labelSemanticRef ? { labelSemanticRef } : {}),
-            sourceStatementRefs: semanticText.labels.map((value) => value.statementRef),
+            sourceStatementRefs: [],
           },
           plan.semanticRef,
-          targetIri,
+          member.memberIri,
           semanticToElement,
           overlays,
           {

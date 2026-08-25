@@ -118,7 +118,7 @@ Region viewは各Bagを独立した半透明領域として投影し、複数Bag
 - `rdf:_1`を既定選択肢として扱います。
 - `rdf:Alt` resourceは選択nodeとして表示します。
 - memberが通常resourceなら、選択nodeからそのresourceへbranch edgeを生成します。
-- memberが`rdf:Seq`なら、選択nodeからそのsequenceの先頭memberへbranch edgeを生成し、その後はsequence規則を適用します。このbranch edgeのlabelにはsequenceの`rdfs:label`を使えます。
+- memberが`rdf:Seq`なら、選択nodeからそのsequence group境界へ無名のbranch edgeを生成し、その後はsequence規則を適用します。Sequenceの`rdfs:label`はgroup headerだけへ表示し、先頭memberへの偽edgeやbranch edge labelへ転記しません。
 
 `rdf:Alt`の用途をBPMN gatewayだけに限定しません。選択という共通構造をcatalog templateでdiamond等へ表示し、domain固有の詳細は追加catalogで上書きします。
 

@@ -11,7 +11,11 @@ import {
   ElkLayeredLayoutAdapter,
 } from "@iriograph/layout-elk";
 import { SemanticAccessIndex } from "@iriograph/semantic-access";
-import { IriographEditor } from "@iriograph/vue-editor";
+import {
+  IriographEditor,
+  type EditorAssetOption,
+} from "@iriograph/vue-editor";
+import cloudIconUrl from "@iriograph/core/icons/cloud.svg";
 
 const catalog: ProjectionCatalogV1 = standardRdfRdfsCatalog;
 const elkLayoutAdapter = new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR");
@@ -45,6 +49,15 @@ const document = ref<IriographDocumentV1>({
 const semanticIndex = new SemanticAccessIndex(document.value, "packed-consumer-revision", {
   locales: ["en"],
 });
+const assetOptions: readonly EditorAssetOption[] = [{
+  assetRef: "urn:example:packed-consumer:asset:cloud",
+  label: "Cloud",
+  path: "/assets/cloud.svg",
+  mediaType: "image/svg+xml",
+}];
+if (!cloudIconUrl.endsWith(".svg")) {
+  throw new Error("packed core icon export contract is invalid");
+}
 if (semanticIndex.searchResources("Packed").length !== 1) {
   throw new Error("packed semantic access contract is invalid");
 }
@@ -52,7 +65,7 @@ if (semanticIndex.searchResources("Packed").length !== 1) {
 
 <template>
   <main>
-    <IriographEditor v-model="document" :catalog="catalog" title="Packed consumer" />
+    <IriographEditor v-model="document" :catalog="catalog" :asset-options="assetOptions" title="Packed consumer" />
   </main>
 </template>
 

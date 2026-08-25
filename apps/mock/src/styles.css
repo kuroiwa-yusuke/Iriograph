@@ -14,7 +14,7 @@ html,
 body,
 #app {
   width: 100%;
-  min-width: 1380px;
+  min-width: 0;
   height: 100%;
   margin: 0;
   overflow: hidden;
@@ -40,7 +40,7 @@ button {
   height: 70px;
   flex: 0 0 70px;
   display: grid;
-  grid-template-columns: 270px 1fr auto;
+  grid-template-columns: minmax(210px, 270px) minmax(0, 1fr) auto;
   align-items: center;
   gap: 26px;
   padding: 0 22px;
@@ -50,6 +50,7 @@ button {
   box-shadow: 0 3px 14px rgb(11 39 41 / 18%);
   position: relative;
   z-index: 10;
+  overflow-x: auto;
 }
 
 .brand-lockup,
@@ -197,7 +198,11 @@ button {
   min-height: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-columns: minmax(180px, 230px) minmax(0, 1fr);
+}
+
+.host-workbench > .iriograph-editor {
+  min-width: 0;
 }
 
 .workspace-panel {
@@ -210,6 +215,18 @@ button {
   border-radius: 5px 0 0 5px;
   background: #f7faf8;
   box-shadow: 0 7px 24px rgb(18 49 51 / 8%);
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    grid-template-columns: 190px minmax(140px, 1fr) auto;
+    gap: 14px;
+    padding-inline: 14px;
+  }
+
+  .host-workbench {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
 }
 
 .workspace-panel > header {

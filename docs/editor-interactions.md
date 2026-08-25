@@ -60,7 +60,9 @@ Dialogは表示時に見出しまたは最初のfieldへfocusし、focusをdialo
 
 Edge作成はsource、predicate、targetを明示するsemantic authoringです。Canvas gestureを使う場合も、最初のresourceと次のresourceをdraftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補から選び、standard editorのAdvancedはread-onlyで候補外IRIの入力欄を持ちません。空欄をgeneric predicateで補完することはありません。
 
-Predicate pickerは、選択済みsourceとtargetを使った日本語の文型`A（predicate）B`を主表示にします。たとえばsourceが「申請」、predicateの文型labelが「承認者は」、targetが「部長」なら、候補cardは「申請（承認者は）部長」として読み比べられます。語順、助詞を含むpredicateの文型label、comment、category、利用例は解決済みcatalog/vocabulary metadataから得て、IRI local nameや英語labelの機械分割から生成しません。Metadataが不足する候補は通常predicate labelを括弧内へ置く決定的fallbackを使い、意味を推測しません。
+Predicate pickerは「分類」「参照」「依存」「由来」等のcategoryごとに候補をまとめ、候補名を`A（predicate label）B`、補足説明をsubjectが`A`、objectが`B`の短い日本語例文として表示します。たとえばPROV-Oの派生関係は「A（派生元）B」と「AはBから派生した」を併記します。A/Bは基準要素と相手要素の役割を比較するためだけの仮記号で、確定後のedge表示には実際の要素名とpredicate labelだけを使います。語順、助詞を含む文型、comment、category、利用例は解決済みcatalog/vocabulary metadataから得て、IRI local nameや英語labelの機械分割から生成しません。Metadataが不足する候補は`A（通常predicate label）B`という決定的fallbackを使い、意味を推測しません。
+
+`要素を変更する`の「要素の種類」は`rdf:type`の編集です。選んだclassが現在のviewで概念領域にも投影される場合はその旨を併記しますが、同じtripleを独立した所属操作から二重編集しません。「所属する領域」は`rdfs:member`またはその下位predicateによる業務上の所属を編集する別sectionです。Nodeを選んだ意味編集には入出力関係、方向、相手要素を、direct edgeを選んだ意味編集には始点、関係、終点、個別説明をまとめて示します。重なってCanvasから直接押せないedgeもこの一覧から選択してrevealできます。
 
 候補集合はactive authoring profileが許可し、解決済み標準catalogが提供するRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の関係語彙を基準にします。Source/targetの明示型と限定`rdfs:subClassOf` closure、predicateの`rdfs:domain`/`rdfs:range`、object/literal kind、catalog capabilityを使って型適合するものへ絞ります。完全なOWL推論をpicker内で実行しません。型情報が不足する場合は適合を断定して除外せず「型未確認」として後順位に残し、候補graphはApply前の共通validationへ必ず通します。全predicateを平坦に並べず、検索とcategory絞り込みを提供します。近い既存predicateがない場合は、standard editor内でIRIを入力させずcatalog/vocabularyの整備を促します。表示名が同じ候補は説明とread-only Advanced IRIで識別します。
 
@@ -68,17 +70,17 @@ Predicateから導出するedge labelは関係種別の意味表示です。個�
 
 `ビュー`tabで選択edgeの始点と終点haloをdragすると、接続nodeの周囲だけを移動できます。Anchorは外周上の正規化値としてoverlayへ保存しますが、通常Inspectorへ数値入力を露出しません。Haloのdrag中はrouteを一時previewし、pointerupで一つのpresentation historyへ確定します。右InspectorはCanvas操作の案内とautomaticへのresetだけを提供します。
 
-Anchor、waypoint、label offsetはsparse routing overlayであり、edgeのsource、predicate、targetという意味は変更しません。`意味`tabの`関係を変更する`でdirect edgeを選んだ場合だけ、始点または終点haloを別のnodeへdropして接続先変更draftを作れます。空白、region、container、元のnodeへのdropは変更を作りません。成功時も即時commitせず、元statement削除と新statement追加をsemantic Previewで確認してからApplyします。
+Anchor、waypoint、label offsetはsparse routing overlayであり、edgeのsource、predicate、targetという意味は変更しません。`意味`tabでwritableなdirect edgeを選ぶと、4操作から`関係を変更する`をまだ開始していなくても、始点または終点haloの別nodeへのdropが同じintentと接続先変更draftを開始します。空白、region、container、元のnodeへのdropは変更を作りません。成功時も即時commitせず、元statement削除と新statement追加をsemantic Previewで確認してからApplyします。`ビュー`tabの同じ端点操作はnode周囲の接続位置だけを変更します。
 
-Edgeを選択して`ビュー`の`線の表示`を開くと、最初に経路形式と端子形状だけを示します。経路modeは`auto`、waypointを持たない`straight`、自動直交の`orthogonal`、waypointを持たない`curve`、利用者制御点を持つ`manual`を区別します。ラベル・補足と接続位置は折り畳み段階へ分け、projection ruleやsource/target anchorの内部数値は通常UIへ出しません。選択中のanchorとmanual waypoint handleはnodeより前面のinteraction layerへ表示し、背後の要素と重なっても操作可能にします。
+Edgeを選択して`ビュー`の`線の表示`を開くと、最初に経路形式と端子形状だけを示します。経路modeは`auto`、waypointを持たない`straight`、自動直交の`orthogonal`、waypointを持たない`curve`、利用者制御点を持つ`manual`を区別します。ラベル・補足と接続位置は折り畳み段階へ分け、projection ruleやsource/target anchorの内部数値は通常UIへ出しません。選択中のanchorとmanual waypoint handleだけはnodeより前面のtransient interaction layerへ表示し、背後の要素と重なっても操作可能にします。通常edge線とterminal markerはedge層に留めます。
 
 ## Appearance editor
 
 Template、icon、style、geometry等のdisplay項目は、右Inspectorの`ビュー`内で選択中の要素へlive previewできます。Canvas外のpopoverは使いません。入力中は一時Sceneへだけ反映し、確定時に変更前後を一つのpresentation history itemとして保存します。EscapeまたはCancelではpreviewを破棄し、Turtleとoverlayの両方を元のままにします。同じpointer gestureや連続入力をkey repeatごとに複数のundo itemへ分割しません。
 
-Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Workspace assetはhost pickerがabsolute asset IRIだけを返し、URL、認証情報、画像bytesはdocumentへ保存しません。
+Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Template/shapeはIRI文字列のselectでなく、実shape・style・iconの小previewから選びます。Workspace assetはhost pickerがabsolute asset IRIだけを返すか、hostが`assetRef`と正確なworkspace pathの候補を注入します。利用者は候補pathを選び、Editorは対応するasset IRIだけを保存します。URL、認証情報、画像bytes、手入力されたIRIはdocumentへ保存しません。
 
-Nodeの`ビュー`は少なくとも色、透明度、線、template、host asset pickerから選ぶicon、位置、sizeを扱います。Resize可能なnode、container、regionは四隅と四辺中央の8 handleをinteraction layerへ表示し、背面要素と重なっても操作できます。Regionのresize制約は後述のmembershipを優先します。
+Nodeの`ビュー`は少なくとも色、透明度、線、template、package同梱またはhost workspaceから選ぶicon、位置、sizeを扱います。選択中はCanvas上のlabelとiconを個別にdragでき、node中心からの相対offsetだけをsparse appearanceへ保存します。Drag中はCanvasでpreviewし、node外へ完全に失われない範囲へclampします。右Inspectorからlabel/icon位置を別々にresetでき、一gestureを一つのundo itemにし、Turtleとnode geometryは変更しません。Resize可能なnode、container、regionは四隅と四辺中央の8 handleだけをtransient interaction layerへ表示し、背面要素と重なっても操作できます。選択中のobject本体は元のsemantic層を越えません。Regionのresize制約は後述のmembershipを優先します。
 
 Edgeは線、色、太さ、経路modeに加え、source/targetそれぞれのterminal shapeを閉じた候補から選べます。候補は`none`、arrow、open arrow、triangle、diamond、circle等をpreview付きで示し、catalog既定へ戻せます。Terminalとrouteはpresentation情報であり、predicate identityやRDFS/OWL上の型を変更しません。Exact edgeの意味説明はこの`ビュー`段階へ混ぜず、`意味`tabの関係変更から編集します。
 
@@ -106,7 +108,7 @@ Classification-constrained viewでは、複数regionに属する要素の全boun
 
 Regionの移動と8-handle resizeも、意味上のmember全boundsと必要paddingを包含することをhard constraintにします。複数regionのresize後にmember用intersectionが空またはmemberより小さくなる候補はcommitせず、制約位置でhandleを止めて理由を表示します。Region geometryを変更してもmembershipは増減せず、membershipを変更したい場合は`関係を変更する`のsemantic Previewへ移ります。外周labelとoffsetはlayoutの占有boxに含めます。
 
-選択中のregionは、保存された前後関係を変更せず一時interaction layerだけを最前面にします。これにより重なった別regionに遮られず、枠上labelと8個のresize handleを操作できます。選択解除時は元の`regionZOrder`による描画順へ戻し、選択による前面化をView overlay、history、dirty stateへ記録しません。
+選択中のregionまたはSeq group本体は、保存された前後関係を変更せず構造layer内だけで一時前面にします。これにより重なった別region/Seqの枠に遮られず、edgeとnodeの上には出ません。8個のresize handleだけは独立したtransient interaction layerへ描画し、nodeと重なる場合も操作できます。選択解除時は元の描画順へ戻し、選択による前面化をView overlay、history、dirty stateへ記録しません。
 
 ## Comment表示
 
@@ -114,7 +116,7 @@ Regionの移動と8-handle resizeも、意味上のmember全boundsと必要paddi
 
 ## 順序と分岐
 
-`rdf:Seq`は薄い外枠の順序付きgroupと各memberの番号badgeで表示し、通常の関係線とは区別します。`関係を変更する`の初期状態では順序・包含候補を展開せず、Seq groupまたはそのmemberをCanvasで選択した後だけ、label付きcardの追加・上下移動・除外を表示します。利用者に`rdf:_1`等のpredicateやIRI改行textareaを表示せず、確定時は標準`rdf:Seq`/`rdf:_n`を`set-sequence`で一括再構成します。`rdf:Alt`は選択肢cardと既定値の選択として編集し、branch edgeの選択肢名はderived display labelに留めます。
+`rdf:Seq`は薄い外枠の順序付きgroupと各memberの番号badgeで表示し、通常の関係線とは区別します。`rdfs:label`はgroup headerへ一度だけ表示し、member間のedgeやAlt branch edgeのlabelへ転記しません。`関係を変更する`の初期状態では順序・包含候補を展開せず、Seq groupまたはそのmemberをCanvasで選択した後だけ、label付きcardの追加・上下移動・除外を表示します。利用者に`rdf:_1`等のpredicateやIRI改行textareaを表示せず、確定時は標準`rdf:Seq`/`rdf:_n`を`set-sequence`で一括再構成します。`rdf:Alt`がSeqを選択肢にする場合は、選択nodeからSeq group境界への無名branchとして表示します。
 
 ## 削除などの破壊操作
 

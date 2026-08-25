@@ -73,6 +73,10 @@ export type ViewElementOverlay = {
     styleToken?: string;
     /** Sparse, view-local label placement. The semantic label remains in RDF. */
     labelPlacement?: LabelPlacement;
+    /** Node-local presentation offset from the template's label position. */
+    nodeLabelOffset?: Point;
+    /** Node-local presentation offset from the template's icon position. */
+    nodeIconOffset?: Point;
     /** Normalized clockwise position on a region perimeter: 0 is top-left. */
     regionLabelAnchor?: number;
     /** Region label glyph flow, independent of its perimeter position. */
@@ -440,6 +444,8 @@ export type ProjectedNode = {
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  nodeLabelOffset?: Point;
+  nodeIconOffset?: Point;
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
   iconRef?: string;
@@ -543,6 +549,8 @@ export type SceneNode = {
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  nodeLabelOffset?: Point;
+  nodeIconOffset?: Point;
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
   iconRef?: string;

@@ -22,6 +22,10 @@ const invalidStructureSource = readFileSync(
   new URL("./fixtures/rdf-rdfs.invalid-structure.ttl", import.meta.url),
   "utf8",
 );
+const approvalSequenceSource = readFileSync(
+  new URL("./fixtures/rdf-seq.approval.ttl", import.meta.url),
+  "utf8",
+);
 
 describe("RDF/RDFS standard projection", () => {
   it("Bag、Seq、Alt、direct edge、suppress、fallbackを汎用operatorで投影する", () => {
@@ -195,7 +199,14 @@ describe("RDF/RDFS standard projection", () => {
 
   it("Altはderived edge、Seqはordinal membershipとして由来を公開する", () => {
     const scene = projectSemanticView(documentFor(workflowSource), standardRdfRdfsCatalog);
-    const branch = scene.edges.find((edge) => edge.label === "承認")!;
+    const approvedPath = scene.containers.find((container) => (
+      container.semanticRef === "urn:test:workflow:approvedPath"
+    ))!;
+    const branch = scene.edges.find((edge) => (
+      edge.labelProvenance?.kind === "derived-structure"
+      && edge.labelProvenance.role === "alternative-branch"
+      && edge.targetElementId === approvedPath.elementId
+    ))!;
     const firstMember = scene.memberships?.find((membership) => (
       membership.role === "sequence-member" && membership.ordinal === 1
     ))!;
@@ -204,8 +215,10 @@ describe("RDF/RDFS standard projection", () => {
       kind: "derived-structure",
       role: "alternative-branch",
       structureSemanticRef: "urn:test:workflow:decision",
-      labelSemanticRef: "urn:test:workflow:approvedPath",
+      sourceStatementRefs: [],
     });
+    expect(branch.label).toBe("");
+    expect(branch.provenance.sourceStatementRefs).toHaveLength(1);
     expect(firstMember).toMatchObject({
       role: "sequence-member",
       ordinal: 1,
@@ -214,6 +227,34 @@ describe("RDF/RDFS standard projection", () => {
         editCapability: { command: "set-sequence" },
       },
     });
+  });
+
+  it("cloud承認Seqをlabel付きgroupとordinalだけへ投影し偽edgeを生成しない", () => {
+    const scene = projectSemanticView(
+      documentFor(approvalSequenceSource),
+      standardRdfRdfsCatalog,
+    );
+    const sequence = scene.containers.find((container) => (
+      container.semanticRef === "urn:test:cloud-seed:approvedPath"
+    ));
+    const memberships = scene.memberships?.filter((membership) => (
+      membership.containerElementId === sequence?.elementId
+    ));
+
+    expect(scene.diagnostics).toEqual([]);
+    expect(sequence).toMatchObject({
+      label: "承認",
+      groupRole: "sequence",
+      provenance: { operator: "ordinal-sequence" },
+    });
+    expect(memberships?.map((membership) => ({
+      role: membership.role,
+      ordinal: membership.ordinal,
+    }))).toEqual([
+      { role: "sequence-member", ordinal: 1 },
+      { role: "sequence-member", ordinal: 2 },
+    ]);
+    expect(scene.edges).toEqual([]);
   });
 
   it("appearanceをtemplate、catalog styleRef、view overrideの順に安全にmergeする", () => {

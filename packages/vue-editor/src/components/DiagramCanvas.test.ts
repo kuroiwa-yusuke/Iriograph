@@ -223,7 +223,11 @@ describe("DiagramCanvas pointer gestures", () => {
       props: { scene: sceneFixture(), selectedElementId: "node-a" },
     });
 
-    expect(wrapper.findAll(".iriograph-resize-handle")).toHaveLength(8);
+    expect(wrapper.findAll(".iriograph-transient-resize-layer .iriograph-resize-handle"))
+      .toHaveLength(8);
+    expect(wrapper.find(".iriograph-scene-node .iriograph-resize-handle").exists()).toBe(false);
+    expect(wrapper.get('.iriograph-resize-handle[data-handle="se"]').attributes("style"))
+      .toContain("left: 140px; top: 100px");
     await wrapper.get('.iriograph-resize-handle[data-handle="se"]').trigger("pointerdown", {
       button: 0,
       clientX: 200,
@@ -280,6 +284,8 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     const handles = wrapper.findAll(".iriograph-endpoint-anchors circle");
     expect(handles).toHaveLength(2);
+    expect(wrapper.find(".iriograph-edge-interaction-layer .iriograph-edge-arrow-overlay").exists())
+      .toBe(false);
     expect(handles[0]!.classes()).toContain("source");
     expect(handles[1]!.classes()).toContain("target");
 
@@ -315,6 +321,84 @@ describe("DiagramCanvas pointer gestures", () => {
     const paths = wrapper.findAll(".iriograph-edge-path");
     expect(paths[0]!.attributes("d")).toBe("M 140 70 L 140 90 L 300 190");
     expect(paths[1]!.attributes("d")).toContain(" C ");
+  });
+
+  it("route modeを排他的に再描画し直線・直角・曲線・自動を混在させない", async () => {
+    const scene = generatedRouteScene();
+    const edgeId = scene.edges[0]!.elementId;
+    wrapper = mount(DiagramCanvas, { props: { scene, edgeRouteModes: { [edgeId]: "auto" } } });
+
+    expect(wrapper.get(".iriograph-edge-path").attributes("d"))
+      .toBe("M 140 70 L 220 70 L 220 190 L 300 190");
+
+    await wrapper.setProps({ edgeRouteModes: { [edgeId]: "straight" } });
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe("M 140 70 L 300 190");
+
+    scene.edges[0]!.route = [{ x: 140, y: 70 }, { x: 205, y: 125 }, { x: 300, y: 190 }];
+    await wrapper.setProps({ scene: structuredClone(scene), edgeRouteModes: { [edgeId]: "orthogonal" } });
+    expect(wrapper.get(".iriograph-edge-path").attributes("d"))
+      .toBe("M 140 70 L 205 70 L 205 125 L 300 125 L 300 190");
+
+    scene.edges[0]!.route = [{ x: 140, y: 70 }, { x: 300, y: 70 }];
+    await wrapper.setProps({ scene: structuredClone(scene), edgeRouteModes: { [edgeId]: "curve" } });
+    const curve = wrapper.get(".iriograph-edge-path").attributes("d");
+    expect(curve).toContain(" Q ");
+    expect(curve).not.toBe("M 140 70 L 300 70");
+
+    await wrapper.setProps({ edgeRouteModes: { [edgeId]: "auto" } });
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe("M 140 70 L 300 70");
+  });
+
+  it("選択node内のlabel/iconをzoom考慮でdragしpreview後にoffsetだけを確定する", async () => {
+    const scene = sceneFixture();
+    scene.nodes[0]!.iconUrl = "data:image/svg+xml,%3Csvg/%3E";
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "node-a",
+        selectedElementIds: ["node-a"],
+        nodeContentEditing: true,
+        zoom: 2,
+      },
+    });
+
+    wrapper.get('.iriograph-scene-node[data-element-id="node-a"] .iriograph-node-text').element
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 100, clientY: 80 }));
+    await wrapper.vm.$nextTick();
+    dispatchPointer("pointermove", 130, 90);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"] .iriograph-node-text')
+      .attributes("style")).toContain("translate(15px, 5px)");
+    dispatchPointer("pointerup", 130, 90);
+    expect(lastPayload(wrapper, "nodeContentOffsetUpdate")).toEqual({
+      elementId: "node-a",
+      target: "label",
+      offset: { x: 15, y: 5 },
+    });
+
+    wrapper.get('.iriograph-scene-node[data-element-id="node-a"] .iriograph-node-icon').element
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 100, clientY: 80 }));
+    await wrapper.vm.$nextTick();
+    dispatchPointer("pointermove", 300, 300);
+    dispatchPointer("pointerup", 300, 300);
+    expect(lastPayload(wrapper, "nodeContentOffsetUpdate")).toEqual({
+      elementId: "node-a",
+      target: "icon",
+      offset: { x: 50, y: 20 },
+    });
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureStart")).toHaveLength(2);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(2);
+
+    await wrapper.setProps({ readOnly: true });
+    wrapper.get('.iriograph-scene-node[data-element-id="node-a"] .iriograph-node-text').element
+      .dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, clientX: 10, clientY: 10 }));
+    await wrapper.vm.$nextTick();
+    dispatchPointer("pointermove", 40, 40);
+    dispatchPointer("pointerup", 40, 40);
+    expect(wrapper.emitted("nodeContentOffsetUpdate")).toHaveLength(2);
   });
 
   it("path double-clickでderived bendをseedしnearest segmentへwaypointを追加する", async () => {
@@ -1235,7 +1319,8 @@ describe("DiagramCanvas pointer gestures", () => {
 
     const regionA = wrapper.get('[data-element-id="region-a"]');
     expect(regionA.classes()).toContain("interaction-front");
-    expect(regionA.findAll(".iriograph-resize-handle")).toHaveLength(8);
+    expect(wrapper.findAll(".iriograph-transient-resize-layer .iriograph-resize-handle"))
+      .toHaveLength(8);
     expect(wrapper.findAll(".iriograph-scene-region").map((item) => item.attributes("data-element-id")))
       .toEqual(["region-a", "region-b"]);
     expect(scene.regions[0]!.regionZOrder).toBe(1);
@@ -1333,8 +1418,19 @@ describe("DiagramCanvas pointer gestures", () => {
         sourceStatementRefs: ["urn:test:seq-1"],
       },
     }];
-    wrapper = mount(DiagramCanvas, { props: { scene } });
-    expect(wrapper.get(".iriograph-scene-container").classes()).toContain("sequence-group");
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene,
+        selectedElementId: "sequence-a",
+        selectedElementIds: ["sequence-a"],
+      },
+    });
+    expect(wrapper.get(".iriograph-scene-container").classes()).toEqual(expect.arrayContaining([
+      "sequence-group",
+      "interaction-front",
+    ]));
+    expect(wrapper.findAll(".iriograph-container-header").map((header) => header.text()))
+      .toEqual(["審査手順"]);
     expect(wrapper.get('.iriograph-scene-node .iriograph-sequence-badges').text()).toBe("1");
     expect(wrapper.find(".iriograph-edge-group").exists()).toBe(false);
   });

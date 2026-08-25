@@ -6,7 +6,7 @@
   width: 100%;
   position: relative;
   height: 100%;
-  min-width: 980px;
+  min-width: 0;
   min-height: 580px;
   display: flex;
   flex-direction: column;
@@ -131,7 +131,9 @@
   position: relative;
   flex: 1;
   display: grid;
-  grid-template-columns: var(--iriograph-left-sidebar-width) minmax(520px, 1fr) var(--iriograph-right-sidebar-width);
+  grid-template-columns: var(--iriograph-left-sidebar-width) minmax(320px, 1fr) var(--iriograph-right-sidebar-width);
+  overflow-x: auto;
+  overflow-y: hidden;
   transition: grid-template-columns 160ms ease;
 }
 
@@ -224,6 +226,33 @@
   gap: 12px;
 }
 
+.iriograph-intent-guidance {
+  margin: 0;
+  padding: 8px;
+  border-left: 3px solid #c18d23;
+  border-radius: 4px;
+  color: #5e491a;
+  background: #fff8df;
+  font-size: 9px;
+}
+
+.iriograph-toolbar-technical {
+  max-width: 190px;
+  color: #738585;
+  font-size: 8px;
+}
+
+.iriograph-toolbar-technical summary {
+  cursor: pointer;
+}
+
+.iriograph-toolbar-technical code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .iriograph-intent-panel > header {
   display: flex;
   align-items: center;
@@ -268,6 +297,30 @@
 .iriograph-intent-fields {
   display: grid;
   gap: 10px;
+}
+
+/* Isolate semantic forms from host-wide fieldset/legend rules. */
+.iriograph-intent-panel fieldset {
+  min-inline-size: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.iriograph-intent-panel fieldset > legend {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 0;
+}
+
+.iriograph-intent-panel .iriograph-intent-group-card {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid #c8d5d1;
+  border-radius: 7px;
+  background: #f8fbfa;
 }
 
 .iriograph-intent-fields > label,
@@ -319,14 +372,23 @@
 }
 
 .iriograph-predicate-cards {
+  display: grid;
+  gap: 8px;
   max-height: 280px;
   overflow: auto;
-  padding: 7px;
-  border: 1px solid #c8d5d1;
-  border-radius: 6px;
 }
 
-.iriograph-predicate-cards > label {
+.iriograph-predicate-cards > header {
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-predicate-cards > header small {
+  color: #667a77;
+  font-size: 8px;
+}
+
+.iriograph-predicate-group > label {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 3px 6px;
@@ -337,14 +399,54 @@
   background: #fff;
 }
 
-.iriograph-predicate-cards > label.selected {
+.iriograph-predicate-group > label.selected {
   border-color: #4b8582;
   background: #eef8f5;
 }
 
-.iriograph-predicate-cards > label span,
-.iriograph-predicate-cards > label small {
+.iriograph-predicate-group > label span,
+.iriograph-predicate-group > label small {
   grid-column: 2;
+  color: #667a77;
+  font-size: 8px;
+}
+
+.iriograph-predicate-group > legend {
+  color: #315957;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.iriograph-predicate-sentence {
+  color: #294f4d !important;
+  font-weight: 650;
+}
+
+.iriograph-current-memberships,
+.iriograph-relation-overview {
+  display: grid;
+  gap: 7px;
+}
+
+.iriograph-current-memberships ul,
+.iriograph-relation-overview ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-relation-overview li {
+  display: grid;
+  gap: 3px;
+  padding: 7px;
+  border-radius: 5px;
+  background: #edf3f0;
+}
+
+.iriograph-relation-overview small,
+.iriograph-current-memberships small {
   color: #667a77;
   font-size: 8px;
 }
@@ -436,13 +538,24 @@
   background: #fff;
 }
 
-.iriograph-view-summary > code {
+.iriograph-view-summary > code,
+.iriograph-technical-details code {
   display: block;
   overflow: hidden;
   color: #738585;
   font-size: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.iriograph-technical-details {
+  margin-top: 5px;
+  color: #738585;
+  font-size: 8px;
+}
+
+.iriograph-technical-details summary {
+  cursor: pointer;
 }
 
 .iriograph-view-summary > div {
@@ -1160,8 +1273,10 @@
   background: #fffdf5;
 }
 
-.iriograph-fallback-note b {
+.iriograph-fallback-note summary {
+  cursor: pointer;
   font-size: 9px;
+  font-weight: 700;
 }
 
 .iriograph-fallback-note p {
@@ -1347,7 +1462,15 @@
 }
 
 .iriograph-canvas-shell {
+  --iriograph-canvas-grid-layer: 0;
+  --iriograph-canvas-structure-layer: 10;
+  --iriograph-canvas-structure-front-layer: 19;
+  --iriograph-canvas-edge-layer: 30;
+  --iriograph-canvas-node-layer: 50;
+  --iriograph-canvas-transient-interaction-layer: 80;
+  width: 100%;
   position: relative;
+  min-width: 0;
   min-height: 0;
   flex: 1;
   display: flex;
@@ -1355,7 +1478,9 @@
 }
 
 .iriograph-canvas-scroll {
+  width: 100%;
   min-height: 0;
+  min-width: 0;
   flex: 1;
   overflow: auto;
   padding: 20px;
@@ -1392,16 +1517,17 @@
 
 .iriograph-canvas-stage {
   position: relative;
+  flex: 0 0 auto;
 }
 
 .iriograph-diagram-canvas {
   position: absolute;
   left: 0;
   top: 0;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #c2ceca;
   border-radius: 3px;
-  background: var(--iriograph-paper);
+  background: var(--iriograph-paper, #fffefb);
   box-shadow: 0 8px 24px rgb(41 69 68 / 9%);
   transform-origin: top left;
   user-select: none;
@@ -1410,6 +1536,7 @@
 .iriograph-canvas-grid {
   position: absolute;
   inset: 0;
+  z-index: var(--iriograph-canvas-grid-layer);
   opacity: .28;
   background-image:
     linear-gradient(to right, #9fb3ad 1px, transparent 1px),
@@ -1428,7 +1555,7 @@
   width: 18px;
   height: 18px;
   position: absolute;
-  z-index: 7;
+  z-index: var(--iriograph-canvas-transient-interaction-layer);
   border: 2px solid #b47a13;
   border-radius: 50%;
   background: rgb(255 242 190 / 62%);
@@ -1440,7 +1567,7 @@
 .iriograph-region-constraint-warning {
   max-width: 420px;
   position: absolute;
-  z-index: 12;
+  z-index: calc(var(--iriograph-canvas-transient-interaction-layer) + 1);
   left: 50%;
   top: 14px;
   margin: 0;
@@ -1531,7 +1658,7 @@
 
 .iriograph-scene-container {
   position: absolute;
-  z-index: 1;
+  z-index: var(--iriograph-canvas-structure-layer);
   padding: 0;
   overflow: visible;
   border: 1px solid;
@@ -1582,7 +1709,7 @@
 
 .iriograph-scene-region {
   position: absolute;
-  z-index: 0;
+  z-index: var(--iriograph-canvas-structure-layer);
   overflow: visible;
   border: 1px solid;
   border-radius: 12px;
@@ -1595,12 +1722,13 @@
 }
 
 /*
- * Selection is an ephemeral interaction layer. It must make an overlapped
- * region and its eight handles reachable without rewriting regionZOrder in
- * the portable appearance overlay.
+ * Selection is an ephemeral front within the structural band only. It makes
+ * overlapping region/Seq handles reachable without crossing edges or nodes
+ * and without rewriting portable z-order.
  */
-.iriograph-scene-region.interaction-front {
-  z-index: 7;
+.iriograph-scene-region.interaction-front,
+.iriograph-scene-container.sequence-group.interaction-front {
+  z-index: var(--iriograph-canvas-structure-front-layer);
 }
 
 .iriograph-region-fill {
@@ -1750,7 +1878,7 @@
 .iriograph-edge-layer {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: var(--iriograph-canvas-edge-layer);
   overflow: visible;
   pointer-events: none;
 }
@@ -1815,7 +1943,7 @@
   font-size: 10px;
   font-weight: 600;
   paint-order: stroke;
-  stroke: var(--iriograph-paper);
+  stroke: var(--iriograph-paper, #fffefb);
   stroke-linejoin: round;
   stroke-width: 5px;
 }
@@ -1890,20 +2018,10 @@
 
 .iriograph-edge-interaction-layer {
   position: absolute;
-  z-index: 6;
+  z-index: var(--iriograph-canvas-transient-interaction-layer);
   inset: 0;
   overflow: visible;
   pointer-events: none;
-}
-
-.iriograph-edge-arrow-overlay {
-  fill: none;
-  vector-effect: non-scaling-stroke;
-  pointer-events: none;
-}
-
-.iriograph-edge-arrow-overlay.deletion-preview {
-  stroke: #c73535 !important;
 }
 
 .iriograph-edge-interaction-layer .iriograph-endpoint-anchors {
@@ -1943,7 +2061,7 @@
 
 .iriograph-scene-node {
   position: absolute;
-  z-index: 3;
+  z-index: var(--iriograph-canvas-node-layer);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1994,6 +2112,25 @@
   align-items: center;
   justify-content: center;
   gap: 9px;
+}
+
+.iriograph-node-content.editable {
+  pointer-events: auto;
+}
+
+.iriograph-node-icon.editable,
+.iriograph-node-text.editable {
+  border-radius: 4px;
+  outline: 1px dashed rgb(193 141 35 / 72%);
+  outline-offset: 3px;
+  cursor: move;
+  touch-action: none;
+}
+
+.iriograph-node-icon.editable:hover,
+.iriograph-node-text.editable:hover {
+  outline-color: #0b5cab;
+  background: rgb(217 234 255 / 28%);
 }
 
 .iriograph-node-text {
@@ -2116,6 +2253,20 @@
 .iriograph-resize-handle[data-handle="s"] { left: 50%; bottom: -8px; cursor: ns-resize; transform: translateX(-50%) !important; }
 .iriograph-resize-handle[data-handle="sw"] { left: -8px; bottom: -8px; cursor: nesw-resize; }
 .iriograph-resize-handle[data-handle="w"] { left: -8px; top: 50%; cursor: ew-resize; transform: translateY(-50%) !important; }
+
+.iriograph-transient-resize-layer {
+  position: absolute;
+  z-index: var(--iriograph-canvas-transient-interaction-layer);
+  inset: 0;
+  pointer-events: none;
+}
+
+.iriograph-transient-resize-layer .iriograph-resize-handle {
+  right: auto;
+  bottom: auto;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) !important;
+}
 
 .iriograph-source-panel {
   padding: 16px;
@@ -2513,6 +2664,124 @@
   margin: 3px 0 0;
 }
 
+.iriograph-template-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.iriograph-template-choices > button {
+  min-width: 0;
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 6px;
+  border: 1px solid #cad6d2;
+  border-radius: 6px;
+  color: #315957;
+  background: #fff;
+  text-align: left;
+}
+
+.iriograph-template-choices > button[aria-pressed="true"] {
+  border-color: #a87316;
+  background: #fff3d5;
+  box-shadow: inset 0 0 0 1px #d6ad61;
+}
+
+.iriograph-template-choices > button > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-template-choices b,
+.iriograph-template-choices small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-template-choices b { font-size: 9px; }
+.iriograph-template-choices small { color: #748683; font-size: 7px; }
+
+.iriograph-template-preview {
+  width: 38px;
+  height: 30px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 2px solid;
+  border-radius: 3px;
+}
+
+.iriograph-template-preview.shape-rounded-rectangle { border-radius: 9px; }
+.iriograph-template-preview.shape-circle { width: 32px; height: 32px; border-radius: 50%; }
+.iriograph-template-preview.shape-diamond { width: 27px; height: 27px; margin: 2px 5px; transform: rotate(45deg); }
+.iriograph-template-preview.kind-container { border-style: dashed; }
+.iriograph-template-preview.kind-region { border-radius: 8px; opacity: .68; }
+.iriograph-template-preview img { width: 16px; height: 16px; object-fit: contain; }
+.iriograph-template-preview.shape-diamond img { transform: rotate(-45deg); }
+
+.iriograph-package-icon-choices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin-bottom: 9px;
+  max-height: 176px;
+  overflow: auto;
+}
+
+.iriograph-package-icon-choices > button {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  padding: 5px 2px;
+  border: 1px solid #cad6d2;
+  border-radius: 5px;
+  color: #405f5d;
+  background: #fff;
+  font-size: 7px;
+}
+
+.iriograph-package-icon-choices > button[aria-pressed="true"] {
+  border-color: #a87316;
+  background: #fff3d5;
+}
+
+.iriograph-package-icon-choices img { width: 22px; height: 22px; }
+.iriograph-package-icon-choices span { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+
+.iriograph-node-content-guidance {
+  display: block;
+  margin-bottom: 8px !important;
+}
+
+.iriograph-node-content-placement {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.iriograph-node-content-reset-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.iriograph-node-content-reset-actions button {
+  min-height: 29px;
+  border: 1px solid #c7d2ce;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 8px;
+}
+
 .iriograph-overlay-preview pre {
   max-height: 230px;
   margin: 7px 0 0;
@@ -2843,7 +3112,7 @@
   .iriograph-editor-layout {
     --iriograph-left-sidebar-width: 190px;
     --iriograph-right-sidebar-width: 330px;
-    grid-template-columns: var(--iriograph-left-sidebar-width) minmax(500px, 1fr) var(--iriograph-right-sidebar-width);
+    grid-template-columns: var(--iriograph-left-sidebar-width) minmax(320px, 1fr) var(--iriograph-right-sidebar-width);
   }
 
   .iriograph-editor-layout.left-sidebar-collapsed { --iriograph-left-sidebar-width: 0px; }

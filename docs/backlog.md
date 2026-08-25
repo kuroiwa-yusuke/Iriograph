@@ -6,9 +6,13 @@
 
 Document/catalogのruntime schema、RDF/RDFS標準catalogと汎用operator、限定RDFS closure、決定的rule・catalog解決、stable identityとcompact serializer、非同期layout adapter、全named viewのdisplay reconciliation、workspace assetの非同期picker/resolverと安全policyまでがcoreからVue editorとlocal mockへ接続されています。標準catalogは既存互換のfullに加え、語彙定義を抑止する`instance-flow`とclass membershipだけを領域表示する`classification-region`を同じbase rule/templateから提供し、view profileで意味正本を変えず投影目的を選べます。Host注入のengine-independent semantic validation portは全semantic write入口で共有され、domain diagnosticのScene/source対応、candidate rollback、warning確認、abort/stale抑止を備えます。Named viewは統一ViewCommandで追加・複製・設定・削除・overlay resetでき、active viewとselection/viewport/temporary hideはview別sessionとしてdocumentから分離されています。
 
-Vue editorはlabel-firstのdetails、semantic Preview/Apply、Canvasからのresource選択、分類/包含batch、Seq/Alt編集を共通authoring transactionへ接続しています。Seqは通常edgeでなく薄い順序付きgroup、ordinal badge、選択後だけの追加・並べ替え・除外として表示し、正本は標準`rdf:Seq`/`rdf:_n`のまま維持します。複数・複数行のlabel/commentを保持し、commentはhoverまたは全表示でき、非表示時もlayoutが表示領域を予約します。通常操作でTurtleやIRIを入力させず、意味編集は右Inspectorの4 actionから段階入力し、新規要素はlabel一項目とhost allocatorのopaque IRIだけで作成します。`意味`/`ビュー`は排他tabとし、右clickは`ビュー`だけを開きます。Direct edgeの意味端点は`関係を変更する`中に別nodeへdropした場合だけdraftへ反映し、未接続状態を保存しません。
+Vue editorはlabel-firstのdetails、semantic Preview/Apply、Canvasからのresource選択、分類/包含batch、Seq/Alt編集を共通authoring transactionへ接続しています。Seqは通常edgeでなく薄い順序付きgroup、headerに一度だけ出す名称、memberのordinal badgeとして表示し、`rdf:_n`由来の偽edgeを生成しません。AltからSeqへのbranchも先頭memberでなくgroup境界へ無名で接続し、正本は標準`rdf:Seq`/`rdf:_n`のまま維持します。複数・複数行のlabel/commentを保持し、commentはhoverまたは全表示でき、非表示時もlayoutが表示領域を予約します。
 
-色、透明度、線、style presetは安全なsparse appearance overlayとして保持でき、edge接点はnode外側のhaloとstubから周囲を連続的に調整できます。Waypointを0件に保つstraight/curve、terminal、caption、node icon、region label/z-order、8-handle resizeを一貫したappearance UIから編集できます。薄い8-unit gridはsnapと同じCanvas座標へ追従するsession-only表示で、document、history、dirty stateへ入りません。標準layoutとoptional ELK adapter、route refinementは分離し、共通のcompletion・品質検査と明示fallback policyを通します。
+通常操作でTurtleやIRIを入力させず、意味編集は右Inspectorの4 actionから段階入力し、新規要素はlabel一項目とhost allocatorのopaque IRIだけで作成します。`意味`/`ビュー`は排他tabとし、右clickは`ビュー`だけを開きます。関係候補は日本語category別に`A（predicate label）B`という候補名と自然なA/B例文を併記し、確定edgeへA/Bを保存しません。要素の種類と業務上の領域所属は別sectionとし、選択nodeの入出力関係、選択edgeの始点・関係・終点を近傍一覧で確認できます。Writableなdirect edgeを選択して別nodeへ端点をdropすると、事前のintent選択がなくても`関係を変更する`draftを開始します。Previewと明示適用までTurtleは変更せず、未接続状態は保存しません。未適用draftは「意味を入力中」と表示し、host未保存の「未保存」と区別して保存時に確認箇所へfocusします。
+
+色、透明度、線、style presetは安全なsparse appearance overlayとして保持でき、edge接点はnode外側のhaloとstubから周囲を連続的に調整できます。`auto`、中間点なしの`straight`/`curve`、直交`orthogonal`、手動経路点を排他的に切り替え、terminal、caption、region label/z-order、8-handle resizeを同じビューInspectorから編集できます。Templateは実shape/style/iconのpreviewから選び、package同梱のlicense明示済みSVGまたはhost注入workspace pathを安定asset IRIへ変換してiconに使えます。Node内のlabel/iconは個別dragでき、相対offsetだけをsparse overlayへ保持します。
+
+Semantic object本体は選択中も`region/Seq < edge < node`の固定層を越えず、waypoint、endpoint halo、resize handle等の操作部品だけを独立した最前面transient層へ描画します。薄い8-unit gridはsnapと同じCanvas座標へ追従するsession-only表示で、document、history、dirty stateへ入りません。Editorはhost幅を押し広げる固定最小幅を持たず、内部scroll、左右sidebar折り畳み、pan、auto-pan、minimapで狭幅でも全要素へ到達できます。標準layoutとoptional ELK adapter、route refinementは分離し、共通のcompletion・品質検査と明示fallback policyを通します。通常UIの技術識別子と英語状態名は日本語の目的表示または「技術情報」へ整理されています。
 
 単一parentのnode-linkと、多対多membershipを交差する半透明領域として示すregion viewは別の空間文法として実装済みです。Domain membership predicateは限定RDFSの`subPropertyOf rdfs:member`で包含へ投影しつつ、元statement/predicateを逆編集用provenanceに保持します。`rdfs:Class`と`rdf:type`はregion profileで独立概念領域と多対多membershipへ投影し、交差cellを新しいsemantic resourceにせず導出します。Region/memberの全bounds containment、resize/drag、label、z-orderは共通制約を通し、複数regionのmemberをintersection外へ出すgeometry変更をcommitしません。
 
@@ -16,7 +20,7 @@ Vue editorはlabel-firstのdetails、semantic Preview/Apply、Canvasからのres
 
 Predicate全体の説明と個別edgeの説明は分離されています。個別説明はexact S/P/Oに対するRDF標準reificationと`rdfs:comment`としてTurtleへ保存し、Scene、関係編集、semantic-accessの検索・subgraphへ伝播します。ビュー専用captionは`ビュー上の補足`としてoverlayだけに保持します。
 
-Core/editorは0.4.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。現行P1のinteraction usability gateを満たしていますが、APIはまだ安定版としません。
+Core/editorは0.5.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。現行P1のinteraction usability gateを満たしていますが、APIはまだ安定版としません。
 
 kuroxiom-cloudのhost adapterは実装・deploy済みです。workspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続しています。
 
@@ -31,7 +35,11 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認�
 
 ## P1 — Editor interaction refinement
 
-未実装項目はありません。新しいP1要求は完了条件を定義してから追加します。
+| ID | 項目 | 依存 | 完了条件 |
+|---|---|---|---|
+| P1-25 | host埋込み時のresponsive Canvas・grid・pan | Vue editor、host integration | mockとkuroxiom-cloudの通常幅・狭幅で薄いgridがCanvas全域に表示される。Editor自身の固定最小幅でhostを切らず、左右sidebarを含む編集領域を縮小・折り畳み・scrollできる。scene端へdragした場合のauto-panとminimap/scrollbarで全要素へ到達でき、初期fit後にregion labelやresize handleが見切れない |
+| P1-29 | 型と所属の分離・host CSS隔離 | SemanticIntentPanel、region membership | 要素のRDF typeは「要素の種類」、region membershipは「所属する領域」として別step/sectionへ分け、実region名を種類checkboxへ混在させない。package CSSがhostのglobal `fieldset`/form styleをresetし、意図したcard/groupだけを専用classで囲う。mockとcloudで同じ外観になる |
+| P1-32 | mock/cloud横断の探索的usability audit | P1-20〜P1-31 | Chromiumでmockとkuroxiom-cloud埋込みを通常幅・狭幅・sidebar折り畳み状態で操作し、4つの意味intent、全route、重なり、Seq、icon/template、drag、resize、scroll/pan、keyboard/focus、error guidanceを確認する。console/page/request errorを0件にし、発見した再現可能な使いにくさを本表へ完了条件付きで追加してから修正・E2E化する |
 
 ## P2 — Cloud・LLM・運用
 
@@ -56,4 +64,4 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認�
 
 ## MVP判定
 
-P0と現在のP1を満たした状態を最初の実用MVPとします。現時点で未実装P1はありません。P2はcloud導入のrelease gateであり、core/editorのMVP判定とは分けます。新しいP1項目が完了したら表へ完了行を残さず、基準点と規範文書へ結果を統合します。
+P0と現在のP1を満たした状態を最初の実用MVPとします。残るP1は公開packageを使うkuroxiom-cloudでの埋込み確認だけです。P2はcloud導入のrelease gateとしてcore/editorのMVP判定と分けます。P1項目が完了したら表へ完了行を残さず、基準点と規範文書へ結果を統合します。

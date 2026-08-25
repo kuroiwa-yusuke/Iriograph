@@ -33,6 +33,8 @@ export function reconcilePresentationScene(
     return {
       ...node,
       geometry: copyGeometry(node.geometry ?? previous?.geometry ?? defaultGeometry(node.defaultSize)),
+      nodeLabelOffset: copyPoint(node.nodeLabelOffset),
+      nodeIconOffset: copyPoint(node.nodeIconOffset),
       iconUrl: previous?.structuralKind === "node" && previous.iconRef === node.iconRef
         ? previous.iconUrl
         : node.iconUrl,
@@ -119,7 +121,11 @@ function reconcileEdge(
   const previousTarget = currentElements.get(next.targetElementId) ?? target;
   const geometryChanged = !sameGeometry(previousSource.geometry, source.geometry)
     || !sameGeometry(previousTarget.geometry, target.geometry);
-  const routingChanged = !current || !sameRouting(current, next);
+  const endpointChanged = Boolean(current && (
+    current.sourceElementId !== next.sourceElementId
+    || current.targetElementId !== next.targetElementId
+  ));
+  const routingChanged = !current || endpointChanged || !sameRouting(current, next);
   let route = current?.route?.map(copyRequiredPoint) ?? [];
   if (current && geometryChanged) {
     route = previewEdgeRoute(
@@ -135,9 +141,15 @@ function reconcileEdge(
         ...next.waypoints.map(copyRequiredPoint),
         automaticEndpoint(target, next.targetAnchor, next.waypoints.at(-1)!),
       ];
-    } else if (next.routeMode === "straight") {
+    } else if (
+      next.sourceElementId === next.targetElementId
+      && current?.route
+      && current.route.length > 2
+    ) {
+      route = current.route.map(copyRequiredPoint);
+    } else if (endpointChanged && next.routeMode === "straight") {
       route = directRoute(source, target, next.sourceAnchor, next.targetAnchor);
-    } else if (!current || current.waypoints?.length) {
+    } else if (endpointChanged || route.length < 2) {
       route = orthogonalRoute(source, target, next.sourceAnchor, next.targetAnchor);
     }
   }

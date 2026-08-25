@@ -95,6 +95,7 @@ export type AuthoringChoice = {
   description?: string;
   category?: string;
   example?: string;
+  sentencePattern?: string;
   priority?: number;
 };
 

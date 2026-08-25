@@ -55,6 +55,20 @@ describe("Iriograph document v1 schema", () => {
     expect(validateIriographDocumentV1(source).valid).toBe(false);
   });
 
+  it("accepts backward-compatible optional node-local label/icon offsets", () => {
+    const source = structuredClone(fixture("document.valid.json")) as {
+      views: Array<{ overlay: Record<string, unknown> }>;
+    };
+    source.views[0]!.overlay.node = {
+      semanticRef: "urn:test:node",
+      appearance: {
+        nodeLabelOffset: { x: 12, y: -7 },
+        nodeIconOffset: { x: -9, y: 5 },
+      },
+    };
+    expect(validateIriographDocumentV1(source).valid).toBe(true);
+  });
+
   it.each(["straight", "curve"])(
     "%s routingではportable waypoints propertyを拒否する",
     (routeMode) => {

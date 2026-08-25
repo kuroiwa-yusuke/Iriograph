@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Framework-independent semantic graph projection and validation for Iriograph.",
   "type": "module",
   "license": "UNLICENSED",
@@ -26,7 +26,9 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "README.md"
+    "assets",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -40,7 +42,9 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./icons/*": "./assets/icons/*",
+    "./THIRD_PARTY_NOTICES.md": "./THIRD_PARTY_NOTICES.md"
   },
   "publishConfig": {
     "access": "public"

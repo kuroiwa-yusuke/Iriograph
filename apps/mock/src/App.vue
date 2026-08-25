@@ -13,6 +13,7 @@ import {
   IriographEditor,
   type AssetPicker,
   type AssetPickResult,
+  type EditorAssetOption,
 } from "@iriograph/vue-editor";
 
 import { mockClassificationRegionProjectionCatalog } from "./mock/catalog";
@@ -72,12 +73,28 @@ const dirty = computed(() => workspaceReady.value
 const errorCount = computed(() => diagnostics.value
   .filter((item) => item.severity === "error").length);
 const workspaceRows = computed(() => buildWorkspaceTreeRows(workspace.value?.entries ?? []));
+const workspaceAssetOptions = computed<EditorAssetOption[]>(() => (
+  workspace.value?.entries.flatMap((entry): EditorAssetOption[] => (
+    entry.kind === "asset" && entry.assetRef && isAssetMediaType(entry.mediaType)
+      ? [{
+          assetRef: entry.assetRef,
+          label: entry.path.split("/").at(-1) ?? entry.path,
+          path: entry.path,
+          mediaType: entry.mediaType,
+        }]
+      : []
+  )) ?? []
+));
 const activeAsset = computed(() => workspace.value?.entries.find(
   (entry) => entry.kind === "asset" && entry.assetRef === selectedAssetRef.value,
 ));
 const documentTitle = computed(() => activeFilePath.value.split("/").at(-1)
   ?.replace(/\.iriograph$/, "") ?? document.value.documentId);
 const authoringContext = computed(() => createMockAuthoringContext(document.value));
+
+function isAssetMediaType(value: string): value is AssetMediaType {
+  return ["image/svg+xml", "image/png", "image/jpeg", "image/webp"].includes(value);
+}
 
 onMounted(() => {
   window.addEventListener("keydown", handleGlobalKeydown, true);
@@ -426,6 +443,7 @@ function emptyDocument(): IriographDocumentV1 {
           fit-on-initial-load
           :save-message="saveMessage"
           :asset-access="assetAccess"
+          :asset-options="workspaceAssetOptions"
           :pick-asset="pickWorkspaceAsset"
           :authoring-context="authoringContext"
           :semantic-validation-context="mockSemanticValidationContext"

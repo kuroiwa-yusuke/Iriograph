@@ -127,7 +127,23 @@ async function verifyInstalledContract(consumer) {
   if (typeof cssExport !== "string") {
     throw new Error("@iriograph/vue-editor/styles.css export is missing");
   }
+  const iconExport = corePackage.exports?.["./icons/*"];
+  if (iconExport !== "./assets/icons/*") {
+    throw new Error("@iriograph/core bundled icon export is missing");
+  }
+  const noticeExport = corePackage.exports?.["./THIRD_PARTY_NOTICES.md"];
+  if (noticeExport !== "./THIRD_PARTY_NOTICES.md") {
+    throw new Error("@iriograph/core third-party notice export is missing");
+  }
   await readFile(join(editorDirectory, cssExport), "utf8");
+  const bundledCloudIcon = await readFile(join(coreDirectory, "assets", "icons", "cloud.svg"), "utf8");
+  if (!bundledCloudIcon.includes("<svg")) {
+    throw new Error("@iriograph/core bundled cloud icon is invalid");
+  }
+  const notices = await readFile(join(coreDirectory, noticeExport), "utf8");
+  if (!notices.includes("Lucide") || !notices.includes("ISC License")) {
+    throw new Error("@iriograph/core bundled icon notices are incomplete");
+  }
   await readFile(join(coreDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(semanticAccessDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(layoutElkDirectory, "dist", "index.d.ts"), "utf8");

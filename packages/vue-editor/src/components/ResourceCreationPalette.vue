@@ -112,7 +112,7 @@ function handleKeydown(event: KeyboardEvent): void {
 <template>
   <div class="iriograph-modal-backdrop" role="presentation" @click.self="emit('close')">
     <section ref="dialog" class="iriograph-resource-palette" role="dialog" aria-modal="true" aria-labelledby="iriograph-palette-title" @keydown="handleKeydown">
-      <header><div><small>NEW {{ kind === 'node' ? 'ELEMENT' : 'REGION' }}</small><strong id="iriograph-palette-title">見た目から選んで追加</strong></div><button type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
+      <header><div><small>{{ kind === 'node' ? '新しい要素' : '新しい領域' }}</small><strong id="iriograph-palette-title">ビューから選んで追加</strong></div><button type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
       <label><span>名前</span><input v-model="label" aria-label="新しい要素の名前" /></label>
       <div class="iriograph-palette-cards" role="radiogroup" aria-label="表示テンプレート">
         <button v-for="card in availableCards" :key="`${card.templateRef}:${card.classIri}`" type="button" role="radio" :aria-checked="selectedCard === card" :class="{ selected: selectedCard === card }" @click="choose(card)">

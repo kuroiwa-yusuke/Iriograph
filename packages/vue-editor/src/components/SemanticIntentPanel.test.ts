@@ -41,11 +41,18 @@ describe("SemanticIntentPanel", () => {
         { iri: "urn:test:b", label: "審査" },
         { iri: "urn:test:c", label: "承認" },
       ],
-      predicates: [{ iri: "urn:test:precedes", label: "先行する", description: "前後関係" }],
+      predicates: [{
+        iri: "urn:test:precedes",
+        label: "先行する",
+        description: "前後関係",
+        category: "依存・順序",
+        sentencePattern: "AはBに先行する",
+      }],
     } });
     await click(wrapper, "関係を作る");
-    expect(wrapper.text()).toContain("申請（先行する）審査");
-    expect(wrapper.text()).toContain("申請（先行する）承認");
+    expect(wrapper.text()).toContain("依存・順序");
+    expect(wrapper.text()).toContain("A（先行する）B");
+    expect(wrapper.text()).toContain("AはBに先行する");
     await wrapper.get<HTMLInputElement>('input[type="radio"]').setValue(true);
     await click(wrapper, "変更内容を確認");
     expect(wrapper.emitted("previewDraft")?.[0]?.[0]).toMatchObject({
@@ -92,6 +99,8 @@ describe("SemanticIntentPanel", () => {
       },
     } });
     expect(wrapper.get<HTMLSelectElement>("select").element.value).toBe("urn:test:rel");
+    expect(wrapper.get("optgroup").attributes("label")).toBe("その他の関係");
+    expect(wrapper.get("option").text()).toBe("A（関連する）B — A（関連する）B");
     expect(wrapper.text()).toContain("A");
     expect(wrapper.text()).toContain("B");
   });
@@ -216,6 +225,83 @@ describe("SemanticIntentPanel", () => {
       resourceIri: "urn:test:a",
       cascade: true,
     })]);
+  });
+
+  it("要素の種類と業務上の所属を分け、概念領域のtypeを二重編集しない", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      elementDetails: {
+        iri: "urn:test:a", label: "申請", classIris: ["urn:test:Application"],
+        labelValues: [{ value: "申請", language: "ja" }], commentValues: [],
+      },
+      classes: [
+        { iri: "urn:test:Application", label: "申請の種類" },
+        { iri: "urn:test:Task", label: "業務要素" },
+      ],
+      memberships: [
+        {
+          containerIri: "urn:test:Application", label: "申請の概念領域",
+          containerTypeIri: "http://www.w3.org/2000/01/rdf-schema#Class",
+          predicateIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+          containerPosition: "object", memberIris: ["urn:test:a"],
+        },
+        {
+          containerIri: "urn:test:Lane", label: "審査担当領域",
+          containerTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+          predicateIri: "http://www.w3.org/2000/01/rdf-schema#member",
+          containerPosition: "subject", memberIris: ["urn:test:a"],
+        },
+      ],
+      selectedResources: [{ iri: "urn:test:a", label: "申請" }],
+    } });
+    await click(wrapper, "要素を変更する");
+    expect(wrapper.get(".iriograph-semantic-type-editor").text()).toContain("申請の種類");
+    expect(wrapper.get(".iriograph-semantic-type-editor").text()).toContain("概念領域にも反映");
+    expect(wrapper.get(".iriograph-current-memberships").text()).toContain("概念領域（上の「要素の種類」と同じ設定）");
+    expect(wrapper.get(".iriograph-current-memberships").text()).toContain("審査担当領域");
+    await wrapper.get('button[aria-label="4つの操作へ戻る"]').trigger("click");
+    await click(wrapper, "関係を変更する");
+    expect(wrapper.get(".iriograph-membership-editor").text()).toContain("審査担当領域");
+    expect(wrapper.get(".iriograph-membership-editor").text()).not.toContain("申請の概念領域");
+  });
+
+  it("nodeの入出力関係と相手を一覧表示し重なりedgeへfocusできる", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      elementDetails: {
+        iri: "urn:test:a", label: "申請", classIris: [],
+        labelValues: [{ value: "申請" }], commentValues: [],
+      },
+      selectedResources: [{ iri: "urn:test:a", label: "申請" }],
+      incidentRelations: [{
+        edgeElementId: "edge:approval", sourceIri: "urn:test:a", sourceLabel: "申請",
+        predicateIri: "urn:test:requires", predicateLabel: "必要とする",
+        targetIri: "urn:test:b", targetLabel: "本人確認", direction: "outgoing",
+      }],
+    } });
+    await click(wrapper, "要素を変更する");
+    const overview = wrapper.get('[aria-label="接続している関係"]');
+    expect(overview.text()).toContain("申請（必要とする）本人確認");
+    expect(overview.text()).toContain("この要素から出る関係");
+    await click(wrapper, "Canvasで確認");
+    expect(wrapper.emitted("focusElement")?.[0]).toEqual(["edge:approval"]);
+  });
+
+  it("外部gestureから関係変更intentを開始してもPreviewまでは意味変更をemitしない", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      requestedIntent: undefined,
+      predicates: [{ iri: "urn:test:rel", label: "関連する" }],
+      selectedEdge: {
+        label: "申請（関連する）審査", sourceIri: "urn:test:a", sourceLabel: "申請",
+        predicateIri: "urn:test:rel", targetIri: "urn:test:b", targetLabel: "審査",
+        capability: {
+          command: "remove-statement", statementRef: "statement:1",
+          subject: "urn:test:a", predicate: "urn:test:rel", object: "urn:test:b",
+        },
+      },
+    } });
+    await wrapper.setProps({ requestedIntent: "edit-relation" });
+    expect(wrapper.text()).toContain("接続している要素");
+    expect(wrapper.text()).toContain("始点申請");
+    expect(wrapper.emitted("previewCommands")).toBeUndefined();
   });
 
   it("Previewではraw tripleより先に人が読める関係を表示する", () => {

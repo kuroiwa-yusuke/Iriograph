@@ -47,6 +47,8 @@ Sceneの非同期更新はCanvasの`aria-busy`で通知する。Focus、selectio
 
 Canvas focusとactive itemは色だけに依存しない3pxのringを持つ。Edge hit area、waypoint、resize handleはpointerで扱えるtargetを拡張する。Catalog由来の任意色はIriographが一律にcontrast保証できないため、catalog authorはnode/label/backgroundのWCAG contrastを検証しなければならない。標準editor chromeとfocus indicatorはWCAG AA相当のcontrastを維持する。
 
+Semantic object本体の視覚層は選択時にも`region/sequence group < edge < node`を越えません。選択したregion/Seq本体をnodeの上へ出す方法でtargetを確保せず、waypoint、endpoint halo、8方向resize handleだけを独立したtransient interaction layerへ描画します。このhandleはpointer targetを最上位で確保しますが追加tab stopにはせず、同じ操作を上表のkeyboard commandからも利用できます。狭幅hostでもCanvas内部scroll、sidebar折り畳み、fit、minimapによって全Scene itemと外周handleへ到達可能にします。
+
 ## Host responsibilities
 
 HostはCanvas shortcutを横取りする場合、処理済みeventの`defaultPrevented`を尊重する。Editor外のdialog、toast、asset pickerを注入する場合もinitial focus、Escape、focus return、live statusを同じ契約で実装する。Asset imageは装飾iconなら空`alt`を保ち、意味をiconだけに依存させない。

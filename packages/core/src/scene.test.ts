@@ -114,6 +114,27 @@ describe("ProjectedScene conversion", () => {
     });
   });
 
+  it("node内label/icon offsetを意味グラフと独立したappearanceとしてSceneへ渡す", async () => {
+    const document = documentFor({
+      a: {
+        semanticRef: "urn:test:scene:a",
+        appearance: {
+          nodeLabelOffset: { x: 14, y: -6 },
+          nodeIconOffset: { x: -12, y: 8 },
+        },
+      },
+    });
+    const scene = await layoutProjectedDiagramScene(
+      projectSemanticView(document, standardRdfRdfsCatalog),
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    expect(scene.nodes.find((node) => node.semanticRef === "urn:test:scene:a")).toMatchObject({
+      nodeLabelOffset: { x: 14, y: -6 },
+      nodeIconOffset: { x: -12, y: 8 },
+    });
+  });
+
   it("profileとlayoutRefをruntime contextからview単位で解決する", async () => {
     const context: ProjectionRuntimeContext = {
       catalogsByProfile: new Map([[

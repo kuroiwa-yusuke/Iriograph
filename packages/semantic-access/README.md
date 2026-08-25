@@ -9,7 +9,7 @@ Labelは発見と説明に使いますが、identityには使いません。検�
 ## Install
 
 ```sh
-npm install @iriograph/core@0.4.0 @iriograph/semantic-access@0.4.0
+npm install @iriograph/core@0.5.0 @iriograph/semantic-access@0.5.0
 ```
 
 ## Read

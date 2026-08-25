@@ -275,6 +275,16 @@ function compatibleAppearance(
     });
     delete result.iconRef;
   }
+  if (next.structuralKind !== "node" && (result.nodeLabelOffset || result.nodeIconOffset)) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}と互換性のないnode内配置overrideを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.nodeLabelOffset;
+    delete result.nodeIconOffset;
+  }
   if (!result.styleRef && result.styleToken && catalog.styles?.[result.styleToken]) {
     result.styleRef = result.styleToken;
     delete result.styleToken;

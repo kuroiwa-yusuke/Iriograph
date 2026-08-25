@@ -122,6 +122,7 @@ export function validateResolvedAuthoringContext(
       ["label", term.label],
       ["description", term.description],
       ["category", term.category],
+      ["sentencePattern", term.sentencePattern],
     ] as const) {
       if (value !== undefined && (typeof value !== "string" || value.trim().length === 0)) {
         diagnostics.push(error(
@@ -129,6 +130,15 @@ export function validateResolvedAuthoringContext(
           `${field} must be a non-empty string for ${term.iri}.`,
         ));
       }
+    }
+    if (
+      term.sentencePattern !== undefined
+      && (!term.sentencePattern.includes("A") || !term.sentencePattern.includes("B"))
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `sentencePattern must contain A and B placeholders for ${term.iri}.`,
+      ));
     }
     if (
       term.examples !== undefined

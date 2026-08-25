@@ -30,6 +30,12 @@ production buildを検証します。Workspace symlinkや`development` condition
 Node.jsからbundlerなしでも直接importできることを検証し、配布JavaScript内の相対specifierは
 `.js`拡張子を含めます。
 
+Core tarballは`assets/icons/*.svg`と`THIRD_PARTY_NOTICES.md`を含み、
+`@iriograph/core/icons/<name>.svg`から同梱SVGを参照できます。既定icon catalogのref、埋込みsource、
+配布SVGはbyte-equivalent testで固定します。同梱Lucide iconはsource commit、個別icon名、ISC/MIT noticeを
+配布物へ記録し、brand iconや再配布条件が不明なassetは同梱しません。追加iconはhost/catalogのasset IRIと
+resolverを使い、package予約namespaceを上書きしません。
+
 Private releaseはAWS CodeArtifactの`kuroxiom/kuroxiom-packages`へ`@iriograph` scopeで公開します。
 `packages-v<version>` tagまたは明示workflow dispatchをtriggerとし、利用hostは公開確認後にexact versionで
 依存します。Hostへpackage sourceを複製しません。

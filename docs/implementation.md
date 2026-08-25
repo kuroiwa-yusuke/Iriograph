@@ -127,6 +127,8 @@ P1では同じTurtleに複数のnamed viewを持ち、ユーザーがviewを選�
 
 ViewportもVue editorのsession stateです。`DiagramCanvas`がscroll metrics、mouse/keyboard pan、fit計算、minimapとelement boundsへのrevealを所有し、`IriographEditor`はtoolbarとhost向けnavigation methodを接続します。Navigationはdocument clone、overlay、undo historyを経由せず、Scene再投影後もそのsession内のviewportを維持します。Primary pointerはblank canvasだけをpanに使い、Scene elementと編集handleは既存gestureへ渡します。Middle pointerはread-onlyを含めてpan専用です。Keyboard panはfocusされたscroll viewport自身でeventを停止し、node focusからbubbleするArrow keyはEditorのpresentation editへ渡します。
 
+Rendererのsemantic object本体は固定したz bandへ分け、選択中も`region/sequence group < edge < node`をDOM順やclassで越えないようにします。Region/Seqのselection frontと`regionZOrder`は構造band内だけで解決します。一方、waypoint、endpoint halo、resize handle、draft markerはobjectではないtransient interaction layerへ分離し、nodeと重なっても操作可能にします。通常edge線とterminal markerは複製せずedge bandへ留めます。Editor rootはhost幅を押し広げる固定最小幅を持たず、狭幅時は三列layoutの横scrollとsidebar折り畳みを組み合わせます。Canvas paperは外周handleをclipせず、scroll paddingとminimap/panからscene全域へ到達可能にします。
+
 ## 性能基準
 
 500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集再投影を100ms未満、実Chromiumのpan/drag frame間隔p95を33.3ms以下、stress規模では初回projectionと標準軽量layoutを合計2秒未満とする固定benchmarkをCIで監視します。測定環境、fixture scale、warm-up回数を固定し、絶対budgetを動的倍率なしで判定します。Vue Canvasはviewport変更とScene要素変更を別のmemo境界で扱い、pan時の静的Scene全体のDOM patchとdrag時の無関係要素更新を避けます。

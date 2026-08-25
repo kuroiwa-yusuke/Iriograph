@@ -20,6 +20,7 @@ export * from "./scene.js";
 export * from "./reconciliation.js";
 export * from "./serializer.js";
 export * from "./assets.js";
+export * from "./default-icons.js";
 export * from "./appearance.js";
 export * from "./authoring-model.js";
 export * from "./authoring-validation.js";

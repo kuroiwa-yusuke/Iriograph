@@ -1380,6 +1380,7 @@ ex:b rdfs:label "B" .
         description: " ",
         category: 42,
         examples: ["valid", ""],
+        sentencePattern: "subject only",
       }],
     } as unknown as ResolvedAuthoringContext;
     const metadataResult = await previewAuthoringCommands(document, [{
@@ -1393,6 +1394,7 @@ ex:b rdfs:label "B" .
       expect.stringContaining("description must be a non-empty string"),
       expect.stringContaining("category must be a non-empty string"),
       expect.stringContaining("examples must contain non-empty strings"),
+      expect.stringContaining("sentencePattern must contain A and B placeholders"),
     ]));
 
     const invalidCapability: ResolvedAuthoringContext = {

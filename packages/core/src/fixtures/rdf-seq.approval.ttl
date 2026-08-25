@@ -1,0 +1,11 @@
+@prefix : <urn:test:cloud-seed:> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+:approvedPath a rdf:Seq ;
+  rdfs:label "承認"@ja ;
+  rdf:_1 :approve ;
+  rdf:_2 :complete .
+
+:approve rdfs:label "承認結果を登録"@ja .
+:complete rdfs:label "完了"@ja .

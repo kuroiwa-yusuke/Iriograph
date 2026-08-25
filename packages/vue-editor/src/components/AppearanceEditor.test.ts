@@ -33,7 +33,7 @@ describe("AppearanceEditor", () => {
         presets: {},
       },
     });
-    expect(wrapper.find('input[aria-label="fill color"]').exists()).toBe(false);
+    expect(wrapper.find('input[aria-label="塗り色"]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain("領域の透明度");
   });
 });

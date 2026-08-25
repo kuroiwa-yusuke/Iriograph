@@ -1,4 +1,5 @@
 import { sortDiagnostics } from "./diagnostics.js";
+import { packageDefaultIconDataUrl } from "./default-icons.js";
 import type {
   AssetDefinition,
   AssetMediaType,
@@ -76,11 +77,15 @@ export async function resolveDiagramSceneAssets(
   signal: AbortSignal,
 ): Promise<SceneAssetBatch> {
   const output = cloneScene(scene);
-  for (const node of output.nodes) delete node.iconUrl;
+  for (const node of output.nodes) {
+    const trustedPackageUrl = node.iconRef ? packageDefaultIconDataUrl(node.iconRef) : undefined;
+    if (trustedPackageUrl) node.iconUrl = trustedPackageUrl;
+    else delete node.iconUrl;
+  }
 
   const semanticRefsByAsset = new Map<string, string[]>();
   for (const node of output.nodes) {
-    if (!node.iconRef) continue;
+    if (!node.iconRef || node.iconUrl) continue;
     const semanticRefs = semanticRefsByAsset.get(node.iconRef) ?? [];
     semanticRefs.push(node.semanticRef);
     semanticRefsByAsset.set(node.iconRef, semanticRefs);
@@ -103,7 +108,7 @@ export async function resolveDiagramSceneAssets(
     leases.set(resolution.assetRef, resolution.lease);
   }
   for (const node of output.nodes) {
-    if (!node.iconRef) continue;
+    if (!node.iconRef || node.iconUrl) continue;
     node.iconUrl = leases.get(node.iconRef)?.url;
   }
 
