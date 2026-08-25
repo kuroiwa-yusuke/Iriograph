@@ -47,4 +47,9 @@ CodeArtifact上のexact versionを確認し、既公開packageを変更せず未
 部分成功後も同じworkflowを安全に再実行できます。Trigger、version検証、配布物検証を含む方針は
 [Package配布とversion方針](./docs/distribution.md)を参照してください。
 
+全packageの公開確認が成功すると、そのcommitへ不変のlightweight tag
+`packages-published-v<version>`が作られます。GitHub Actionsの閲覧権限に依存せず、例えば
+`git ls-remote --refs origin refs/tags/packages-published-v0.1.0`で公開成功と対象commitを確認できます。
+同じversionのtagが別commitへ移動されることはありません。
+
 詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[Semantic Authoring Profile仕様](./docs/authoring-profile.md)、[layout最適化方針](./docs/layout-optimization.md)、[バックログ](./docs/backlog.md)を参照してください。

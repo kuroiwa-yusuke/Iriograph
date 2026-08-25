@@ -53,6 +53,19 @@ Publish直前の別jobとの競合などでpublishが失敗した場合も、同
 変更せず未公開packageだけを依存順に補完できます。Repositoryやscriptは認証tokenを保持・出力せず、認証情報は
 CodeArtifact loginが生成するnpm設定だけに委ねます。
 
+4 packageすべてのexact versionがCodeArtifactで確認できた後、publish jobは対象commitへ
+`packages-published-v<version>` lightweight tagを作ります。このtagは公開完了の不変な監査標識であり、
+GitHub Actionsの実行履歴を閲覧できない環境からも、repositoryのread権限があれば次のように確認できます。
+
+```sh
+git ls-remote --refs origin refs/tags/packages-published-v0.1.0
+```
+
+表示されたcommit IDがrelease対象commitと一致することを確認します。再実行時にtagが同じcommitを指していれば
+成功済みとして何も変更せず、別commitを指していればpublish jobを失敗させます。tagのforce更新や付け替えは
+行いません。Repository全体の既定権限は`contents: read`のまま保ち、公開後にtagを作るpublish jobだけへ
+`contents: write`を付与します。GitHub tokenやAWS・CodeArtifact credentialをscript引数、tag、logへ出力しません。
+
 ## SemVer 0.x
 
 - 公開TypeScript API、runtime挙動、保存・読込境界、CSS contractのbreaking changeはminorを上げます。
