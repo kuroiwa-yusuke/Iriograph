@@ -22,7 +22,7 @@ Predicate全体の説明と個別edgeの説明は分離されています。個�
 
 Core/editorは0.5.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、multi-selection、整列、snap、manual routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gateも独立package/CI jobとして用意されています。現行P1のinteraction usability gateを満たしていますが、APIはまだ安定版としません。
 
-kuroxiom-cloudのhost adapterは実装・deploy済みです。workspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続しています。
+kuroxiom-cloudのhost adapterは0.5.0 packageで実装・deploy済みです。workspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続しています。Workspace画像はpath、basename、stable asset IRI、MIMEだけをeditor候補へ渡し、byteと解決URLは認証付きAssetAccess内に留めます。800px幅を含む実Chromium監査でgrid、内部scroll、treeと左右sidebarの折り畳み、asset path候補とicon表示を確認し、document overflowとbrowser/network errorがない状態をproductionで固定しています。
 
 Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認例です。意味を名前へ埋め込まないopaque寄りIRI、label/comment付きpredicate、Bag、Seq、Alt、seeAlso、標準包含を特殊化したdomain predicate、二領域に属する共有memberを含み、通常のnode/edgeと重なり領域を一つのregion viewで表示します。Node-link viewは既存documentと明示追加の互換機能として維持します。Workspace treeの画像asset IRIをicon overlayから参照する例も維持します。Domain catalogは標準構造を置き換えず、標準catalogと決定的に結合します。
 
@@ -35,11 +35,7 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認�
 
 ## P1 — Editor interaction refinement
 
-| ID | 項目 | 依存 | 完了条件 |
-|---|---|---|---|
-| P1-25 | host埋込み時のresponsive Canvas・grid・pan | Vue editor、host integration | mockとkuroxiom-cloudの通常幅・狭幅で薄いgridがCanvas全域に表示される。Editor自身の固定最小幅でhostを切らず、左右sidebarを含む編集領域を縮小・折り畳み・scrollできる。scene端へdragした場合のauto-panとminimap/scrollbarで全要素へ到達でき、初期fit後にregion labelやresize handleが見切れない |
-| P1-29 | 型と所属の分離・host CSS隔離 | SemanticIntentPanel、region membership | 要素のRDF typeは「要素の種類」、region membershipは「所属する領域」として別step/sectionへ分け、実region名を種類checkboxへ混在させない。package CSSがhostのglobal `fieldset`/form styleをresetし、意図したcard/groupだけを専用classで囲う。mockとcloudで同じ外観になる |
-| P1-32 | mock/cloud横断の探索的usability audit | P1-20〜P1-31 | Chromiumでmockとkuroxiom-cloud埋込みを通常幅・狭幅・sidebar折り畳み状態で操作し、4つの意味intent、全route、重なり、Seq、icon/template、drag、resize、scroll/pan、keyboard/focus、error guidanceを確認する。console/page/request errorを0件にし、発見した再現可能な使いにくさを本表へ完了条件付きで追加してから修正・E2E化する |
+未実装項目はありません。新しいP1要求は完了条件を定義してから追加します。
 
 ## P2 — Cloud・LLM・運用
 
@@ -64,4 +60,4 @@ Local mockは[rdf-rdfs-profile.md](./rdf-rdfs-profile.md)に従う購入承認�
 
 ## MVP判定
 
-P0と現在のP1を満たした状態を最初の実用MVPとします。残るP1は公開packageを使うkuroxiom-cloudでの埋込み確認だけです。P2はcloud導入のrelease gateとしてcore/editorのMVP判定と分けます。P1項目が完了したら表へ完了行を残さず、基準点と規範文書へ結果を統合します。
+P0と現在のP1を満たした状態を最初の実用MVPとします。現時点で未実装P1はありません。P2はcloud/LLM/運用の次段階としてcore/editorのMVP判定と分けます。P1項目が完了したら表へ完了行を残さず、基準点と規範文書へ結果を統合します。
