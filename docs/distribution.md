@@ -42,6 +42,17 @@ Private releaseはAWS CodeArtifactの`kuroxiom/kuroxiom-packages`へ`@iriograph`
 4 packageのlockstep versionと一致しなければpublish前に拒否し、通常のmain pushやdocs変更ではpublishしません。
 利用hostはregistry上の公開確認後にexact versionで依存します。Hostへpackage sourceを複製しません。
 
+Publish jobはCodeArtifact login後に、そのrepositoryを`@iriograph` scopeのregistryとして明示設定します。
+公開scriptはlockstep versionとexactなcore依存を最初に検証したうえで、core、semantic access、ELK adapter、
+Vue editorの順に、各`name@version`を同じscope registryへ問い合わせます。Exact versionが既に存在すればskipし、
+404で存在しない場合だけpublishします。認証失敗、network error、不正なregistry応答は未公開とはみなさず、
+上書きや別registryへのfallbackを行わずに停止します。
+
+Publish直前の別jobとの競合などでpublishが失敗した場合も、同じregistryでexact versionが確認できた場合だけ
+既公開として後続packageへ進みます。このため4 packageの途中まで公開されたjobを再実行しても、既公開versionを
+変更せず未公開packageだけを依存順に補完できます。Repositoryやscriptは認証tokenを保持・出力せず、認証情報は
+CodeArtifact loginが生成するnpm設定だけに委ねます。
+
 ## SemVer 0.x
 
 - 公開TypeScript API、runtime挙動、保存・読込境界、CSS contractのbreaking changeはminorを上げます。

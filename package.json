@@ -24,8 +24,8 @@
     "verify:e2e": "playwright test",
     "verify:performance": "playwright test --config playwright.performance.config.ts",
     "verify:package-consumer": "npm run build:packages && node scripts/verify-package-consumer.mjs",
-    "verify:package-versions": "node scripts/verify-package-versions.mjs",
-    "publish:packages": "npm publish --workspace @iriograph/core && npm publish --workspace @iriograph/semantic-access && npm publish --workspace @iriograph/layout-elk && npm publish --workspace @iriograph/vue-editor"
+    "verify:package-versions": "node scripts/verify-package-versions.mjs && node --test scripts/publish-packages.test.mjs",
+    "publish:packages": "node scripts/publish-packages.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

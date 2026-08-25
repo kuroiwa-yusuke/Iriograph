@@ -104,4 +104,16 @@ jobs:
           --domain-owner "${CODEARTIFACT_DOMAIN_OWNER}"
           --repository "${CODEARTIFACT_REPOSITORY}"
           --region "${AWS_REGION}"
+      - name: Configure @iriograph scope registry
+        shell: bash
+        run: |
+          codeartifact_registry="$(npm config get registry)"
+          case "${codeartifact_registry}" in
+            https://*.d.codeartifact.*.amazonaws.com/npm/*/) ;;
+            *)
+              echo "CodeArtifact npm registry was not configured" >&2
+              exit 1
+              ;;
+          esac
+          npm config set "@iriograph:registry" "${codeartifact_registry}"
       - run: npm run publish:packages

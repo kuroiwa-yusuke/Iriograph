@@ -39,4 +39,12 @@ npm run verify
 
 `@iriograph/vue-editor`はworkspace、HTTP、認証、永続化を知りません。hostは`v-model`でdocumentを受け取り、`save` eventを任意の保存APIへ接続します。
 
+## Package release
+
+4 packageはlockstep versionでAWS CodeArtifactへ公開します。公開処理は
+`@iriograph/core`、`@iriograph/semantic-access`、`@iriograph/layout-elk`、`@iriograph/vue-editor`の順に、
+CodeArtifact上のexact versionを確認し、既公開packageを変更せず未公開packageだけをpublishします。
+部分成功後も同じworkflowを安全に再実行できます。Trigger、version検証、配布物検証を含む方針は
+[Package配布とversion方針](./docs/distribution.md)を参照してください。
+
 詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[Semantic Authoring Profile仕様](./docs/authoring-profile.md)、[layout最適化方針](./docs/layout-optimization.md)、[バックログ](./docs/backlog.md)を参照してください。
