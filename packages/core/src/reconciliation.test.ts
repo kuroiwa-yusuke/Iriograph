@@ -187,6 +187,34 @@ describe("display reconciliation", () => {
     }
   });
 
+  it("edge-only変更は無関係な配置警告を引き継がず対象edgeの同一警告を一度だけ返す", async () => {
+    const previous = localizedDocumentFor(localizedOldSource);
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = localizedEndpointSource;
+    const layouts = new LayoutAdapterRegistry([
+      noisyLayoutAdapter(STANDARD_LAYOUT_REFS.hierarchicalLr, "LR"),
+      noisyLayoutAdapter(STANDARD_LAYOUT_REFS.hierarchicalTb, "TB"),
+    ]);
+
+    const result = await reconcileIriographDocumentViews(
+      previous,
+      candidate,
+      runtimeContext(layouts),
+      { mode: "edge-only" },
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.diagnostics.some((item) => item.code === "test-unrelated-placement"))
+      .toBe(false);
+    const affected = result.diagnostics.filter((item) => item.code === "test-affected-route");
+    expect(affected).toHaveLength(1);
+    expect(affected[0]?.semanticRef).toBeTruthy();
+    for (const scene of Object.values(result.scenes)) {
+      expect(scene.diagnostics.some((item) => item.code === "test-unrelated-placement")).toBe(false);
+      expect(scene.diagnostics.filter((item) => item.code === "test-affected-route")).toHaveLength(1);
+    }
+  });
+
   it("dense graphでもunaffected routeをexact維持しreroute数をobserverへ限定する", async () => {
     const previous = localizedDocumentFor(denseSource(false));
     const candidate = structuredClone(previous);
@@ -534,6 +562,44 @@ function runtimeContext(
       { catalog: standardRdfRdfsCatalog },
     ]]),
     layouts,
+  };
+}
+
+function noisyLayoutAdapter(
+  layoutRef: string,
+  direction: "LR" | "TB",
+): LayoutAdapter {
+  const standard = new StandardLightweightLayoutAdapter(layoutRef, direction);
+  return {
+    layoutRef,
+    async layout(request) {
+      const result = await standard.layout(request);
+      const unrelatedElement = request.scene.elements.find((element) => element.structuralKind === "node");
+      const affectedEdge = request.scene.edges.find((edge) => (
+        request.mode !== "route-only" || !request.fixedDerivedRoutes?.[edge.elementId]
+      ));
+      const affectedDiagnostic = affectedEdge ? {
+        severity: "warning" as const,
+        code: "test-affected-route",
+        message: "対象edgeの経路を確定できません。",
+        layoutRef,
+        edgeId: affectedEdge.elementId,
+      } : undefined;
+      return {
+        ...result,
+        diagnostics: [
+          ...result.diagnostics,
+          ...(unrelatedElement ? [{
+            severity: "warning" as const,
+            code: "test-unrelated-placement",
+            message: "既存nodeの配置警告です。",
+            layoutRef,
+            elementId: unrelatedElement.elementId,
+          }] : []),
+          ...(affectedDiagnostic ? [affectedDiagnostic, { ...affectedDiagnostic }] : []),
+        ],
+      };
+    },
   };
 }
 

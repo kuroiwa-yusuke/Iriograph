@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DiagramCatalog, IriographDocument } from "./model";
 import { applySemanticSource } from "./document";
-import { projectIriographDocument } from "./projection";
+import { parseIriographSemanticSource, projectIriographDocument } from "./projection";
 
 const NS = "urn:test:";
 
@@ -86,6 +86,30 @@ const document: IriographDocument = {
 };
 
 describe("projectIriographDocument", () => {
+  it("file locator/documentIdに依存せずbaseと外部prefixから同じexpanded IRIを得る", () => {
+    const source = `
+      @prefix local: <urn:portable:resource:> .
+      @prefix schema: <https://schema.org/> .
+      local:r1 schema:name "注文"@ja .
+      <relative> schema:isPartOf local:r1 .
+    `;
+    const first = {
+      ...document,
+      documentId: "before-rename",
+      semantic: { ...document.semantic, baseIri: "urn:portable:base:", source },
+    };
+    const renamed = { ...first, documentId: "after-rename" };
+
+    const expanded = (candidate: IriographDocument) => parseIriographSemanticSource(candidate)
+      .map((quad) => [quad.subject.value, quad.predicate.value, quad.object.value]);
+
+    expect(expanded(first)).toEqual(expanded(renamed));
+    expect(expanded(first)).toEqual([
+      ["urn:portable:resource:r1", "https://schema.org/name", "注文"],
+      ["urn:portable:base:relative", "https://schema.org/isPartOf", "urn:portable:resource:r1"],
+    ]);
+  });
+
   it("catalog relation、containment、未登録predicate fallbackを同じSceneへ投影する", () => {
     const scene = projectIriographDocument(document, catalog);
 

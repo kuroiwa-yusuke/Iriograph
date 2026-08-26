@@ -111,6 +111,23 @@ Macro比率、相対配置、branch row、edge corridorと交差の改善は、�
 
 同じ画像rubricによる派生比較は84±5/100で、内訳はMacro 17、relative placement 17、branch rows 15、cross-lane alignment 15、connector geometry 11、BPMN visual language 9です。Empty-overlay正本の37±5/100は自動projection/layoutの基準値として扱い、派生84±5を汎用layout baseline、release gate、CI閾値へ使いません。派生fileはoverlayでどこまで参照図へ寄せられるかを比較するartifactであり、そのgeometryやrouteをseed、catalog、Core layout ruleへ逆輸入しません。
 
+独立contextでの再実験`pizza-order-delivery-llm-overlay-r2.iriograph`は`gpt-5.6-terra`、reasoning
+effort `medium`へ、参照画像、空overlay seed、document/schema、採点rubricだけを与えました。初期指示は
+「前回overlayと前回screenshotを完了まで読まず、Turtleをbyte-identicalに保ち、登録済み
+geometry/routing/template/styleだけで別fileを作り、固定Chromiumで3回表示・調整し、scoreと計測値を
+記録する」という一回だけで、追加指示は0回です。29 model cycle、browser 3反復、task telemetry
+309.1秒、input 1,886,226 tokens（cached 1,789,184、non-cached 97,042）、output 13,884 tokens
+（reasoning 3,977を含む）、合計1,900,110 tokensでした。3 screenshotは同一hashでconsole/page error 0、
+TurtleのSHA-256はseedと同じ`e367fea3…7afc7bb`、overlayは41件（geometry 30、routing 11）です。
+
+同じrubricによる再実験は71±5/100で、Macro 16、relative placement 15、branch rows 12、cross-lane
+alignment 12、connector geometry 7、BPMN visual language 9です。Lane比、task/event/gatewayの役割、
+主要な上下rowは近づきましたが、長い斜線、predicate labelの密集、cross-lane messageの非直交、縦lane
+header・message dash・timer/envelope iconの表現上限が残りました。前回の人手修正指示を含む84±5より
+13点低いため、一つの成功artifactから中程度モデルの再現精度を一般化できません。一方で空overlayの
+37±5からは34点改善しており、閉じたoverlayだけで意味正本を変えず参照図へ寄せる実現性は再確認できました。
+この二結果はCore既定layoutへ逆輸入せず、モデル差・指示差・renderer capability差を分けるP2-09の証拠とします。
+
 残差のうち、封筒・timerの専用icon、色付き縦lane header、semantic predicate由来edge labelのview単位hideは、現行catalog/template・renderer契約だけでは参照図どおりに指定できません。これらを座標調整で偽装せず、catalog/profile/rendererの表現上限としてBPMN visual languageとconnector geometryから減点しています。P2-09の完了条件である3種類以上の参照図を各3回評価する検証は未達であり、この1図3反復の結果だけでbacklogを完了扱いにしません。
 
 ## Test追加規則

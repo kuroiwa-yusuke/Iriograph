@@ -24,15 +24,36 @@ Resource、region、container、Seqを一つ選択した初期概要には、`�
 件数付きのlabel-first一覧で示します。一覧はSceneのexact membershipとprovenanceだけから作り、
 見た目の内外、重なり、`parentElementId`互換情報から所属を推測しません。通常membership、
 region、nested membership、Seq membershipを区別し、Seqは一始まりのordinalを表示します。
-同じ要素が複数領域へ属する場合は各membershipを失わず別行で示します。一覧の行を選ぶと対象を
-Canvasでfocus/revealしますが、一覧の展開や選択はsession操作でありdocumentやoverlayへ複製しません。
-追加・解除・再採番は既存の`所属・並び順を編集`によるsemantic transactionだけが行います。
+同じ要素が複数領域へ属する場合は各membershipを失わず別行で示します。各通常membershipは
+一覧から対象をCanvasへfocusし、対象を選択した`所属・並び順を編集`へ移るか、exact predicateと
+container positionを保ったままそのmembershipだけを直接解除できます。解除は一つのatomic
+semantic transactionであり追加確認を挟みません。Seq/Alt membershipはこの個別解除へ流さず、
+ordinal/default slotを一括検証する専用の順序・選択editorへ委譲します。一覧の展開やfocusはsession
+操作でありdocumentやoverlayへ複製しません。
 
 InspectorはCanvasを圧迫しないcompactな密度を標準とし、対象概要、2つの追加入口、選択後の主要actionだけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳めます。
 
 `要素を追加`はlabel一項目だけを入力して確定します。Opaque IRIはhost allocatorが生成し、初期semantic statementはそのIRIの`rdfs:label`だけです。種類、説明、分類、所属、関係、位置を作成formへ混ぜず、作成後の対象別編集と`ビュー`で追加します。`関係を追加`はCanvasで選んだ始点・終点とlabel-firstの関係候補を使います。必要なauthoring context、provenance、書込権限が不足するactionは推測で実行せず、無効理由と次に必要な操作を日本語で示します。
 
 各段階はBackで戻れ、CancelまたはEscapeでdraftだけを破棄します。Validation errorはcodeだけでなく「どの選択を、なぜ、どう直すか」を該当fieldの近くに示します。実行前はdocument、portable overlay、historyを変更せず、実行時もvalidationとapplyを別historyへ分割しません。確認modalは後述する選択外への削除影響だけに限定します。
+
+## Document source編集
+
+`Document`タブは`意味（semantic.source）`、`View overlay`、`Document全体`を分離します。意味の
+正本は参照表示し、編集はTurtleタブのsemantic transactionへ移ります。`Document全体`は
+`documentId`、portable base、catalog import、全named viewを確認するread-only表示です。
+
+`View overlay`はactive named viewのsparse overlayだけをJSON sourceとして編集するAdvanced入口です。
+JSON整形、runtime schema、実Sceneの複数region containment、stale draftを適用前に検証し、失敗時は
+該当pathと修正行動を示して正本を変えません。成功時はTurtleをbyte単位で維持した一つのpresentation
+transactionとなり、dirty、undo/redo、保存前flushへ通常のCanvas操作と同じように接続します。
+未適用のTurtle、意味form、overlay sourceを同時確定せず、先にどのdraftを適用または破棄するか示します。
+日常的な位置、size、route、style調整はCanvasと右Inspectorを主入口とします。
+
+Sceneへ表示するdiagnosticは操作のscopeに合わせます。Edge端点変更では変更edgeと旧新endpointに
+関係するlayout diagnosticだけを返し、既存または別named viewの同じ警告を再掲しません。Semantic/profile
+diagnosticは全viewで保持し、同一identityの通知は一件へまとめます。Overlay-only変更は以前のlayout
+warningを次のSceneへ持ち越しません。
 
 ## 右クリックとビュー編集
 

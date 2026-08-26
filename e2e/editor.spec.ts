@@ -107,6 +107,42 @@ test("左右サイドバーを折りたたむとCanvasが空いた領域まで�
   await expect(page.getByLabel("右サイドバーを閉じる")).toBeVisible();
 });
 
+test("Documentタブでactive view overlayをTurtle不変の一履歴としてsource編集する", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await openPurchaseSample(page);
+  const turtleBefore = await readTurtle(page);
+  await page.getByRole("button", { name: /Document/u }).click();
+  const source = page.getByLabel("View overlay JSON");
+  const originalOverlay = JSON.parse(await source.inputValue()) as Record<string, {
+    geometry?: { x: number; y: number; width: number; height: number };
+  }>;
+  const geometryEntry = Object.entries(originalOverlay).find(([, entry]) => entry.geometry);
+  expect(geometryEntry).toBeTruthy();
+  const [elementId, entry] = geometryEntry!;
+  const changedOverlay = structuredClone(originalOverlay);
+  changedOverlay[elementId]!.geometry!.x += 8;
+  await source.fill(JSON.stringify(changedOverlay));
+  await page.getByRole("button", { name: "検証して適用", exact: true }).click();
+  await expect(source).toHaveValue(JSON.stringify(changedOverlay, null, 2));
+  expect(await readTurtle(page)).toBe(turtleBefore);
+
+  await page.getByRole("button", { name: /Document/u }).click();
+  await page.getByRole("tab", { name: "Document全体" }).click();
+  await expect(page.getByRole("tabpanel")).toContainText("purchase-approval");
+  await page.getByRole("button", { name: /Diagram/u }).click();
+  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.getByRole("button", { name: /Document/u }).click();
+  await page.getByRole("tab", { name: "View overlay" }).click();
+  await expect(source).toHaveValue(JSON.stringify(originalOverlay, null, 2));
+  expect(await readTurtle(page)).toBe(turtleBefore);
+  expect(consoleErrors).toEqual([]);
+});
+
 test("named view管理とtemporary hideをsemantic sourceから分離する", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
@@ -506,6 +542,7 @@ test("意味側のedge端子dropは接続先を直接atomic更新し、個別説
   );
   await expect.poll(() => readTurtle(page)).not.toBe(turtleBefore);
   await expect(inspector.locator(".iriograph-authoring-preview")).toHaveCount(0);
+  await expect(page.getByText("配置を完了できません", { exact: true })).toHaveCount(0);
   const reconnected = page.locator(".iriograph-edge-group").filter({ hasText: "関連する" });
   await reconnected.click();
   await inspector.getByRole("button", { name: "関係の意味を編集" }).click();
@@ -958,8 +995,9 @@ test("single-tab-stop navigatorで選択・geometry・routingをkeyboard完結�
   expect(consoleErrors).toEqual([]);
 });
 
-test("選択要素の包含一覧から所属先と包含要素をCanvasで確認する", async ({ page }) => {
+test("選択要素の包含一覧から所属先を確認し包含membershipを直接解除する", async ({ page }) => {
   await openPurchaseSample(page);
+  const turtleBefore = await readTurtle(page);
   const review = page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" });
   await review.click();
 
@@ -972,8 +1010,13 @@ test("選択要素の包含一覧から所属先と包含要素をCanvasで確�
     .getByRole("button", { name: "Canvasで確認" }).click();
   const operations = page.locator(".iriograph-scene-region").filter({ hasText: "業務オペレーション" });
   await expect(operations).toHaveClass(/selected/u);
-  await expect(page.getByLabel("選択要素の包含一覧").getByLabel("含む要素"))
-    .toContainText("内容を審査");
+  const contained = page.getByLabel("選択要素の包含一覧").getByLabel("含む要素");
+  const reviewItem = contained.locator("li").filter({ hasText: "内容を審査" });
+  await expect(reviewItem).toBeVisible();
+  await reviewItem.getByRole("button", { name: "包含から外す" }).click();
+  await expect.poll(() => readTurtle(page)).not.toBe(turtleBefore);
+  await expect(contained).not.toContainText("内容を審査");
+  await expect(page.locator('[role="dialog"]')).toHaveCount(0);
 });
 
 test("既存viewを縦方向へ切り替えてもTurtleとユーザー配置を保持する", async ({ page }) => {

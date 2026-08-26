@@ -581,6 +581,38 @@ function membershipRoleLabel(item: MembershipOverview["belongsTo"][number]): str
   return "所属";
 }
 
+function canRemoveMembership(item: MembershipOverview["belongsTo"][number]): boolean {
+  return item.provenance.editCapability?.command === "set-membership";
+}
+
+function removeMembership(item: MembershipOverview["belongsTo"][number]): void {
+  const capability = item.provenance.editCapability;
+  if (capability?.command !== "set-membership") return;
+  emit("executeCommands", [{
+    type: "set-membership",
+    commandId: "overview-remove-membership",
+    containerIri: capability.container,
+    memberIri: capability.member,
+    enabled: false,
+    containerTypeIri: capability.containerTypeIri,
+    predicateIri: capability.predicate,
+    containerPosition: capability.containerPosition,
+  }], `${item.label}との所属を解除`, [
+    { iri: capability.container, label: resourceLabel(capability.container), role: "領域" },
+    { iri: capability.member, label: resourceLabel(capability.member), role: "含まれる要素" },
+  ]);
+}
+
+function editMembership(
+  item: MembershipOverview["belongsTo"][number],
+  direction: "belongs-to" | "contains",
+): void {
+  // A container's child list first moves selection to that child. For a
+  // member's parent list the already-selected member remains the edit target.
+  if (direction === "contains") emit("focusElement", item.relatedElementId);
+  choose("edit-relation");
+}
+
 function cloneTextValues(values: readonly IntentTextValue[], fallback = ""): IntentTextValue[] {
   const result = values.map((item) => ({ ...item }));
   if (result.length === 0 && fallback) result.push({ value: fallback });
@@ -664,7 +696,11 @@ defineExpose({ focusPendingIntent, resetIntent: reset });
             <li v-for="item in membershipOverview.belongsTo" :key="`parent:${item.semanticRef}:${item.relatedElementId}:${item.ordinal ?? 0}`">
               <span>{{ item.label }}</span>
               <small>{{ membershipContainerKindLabel(item.containerKind) }}・{{ membershipRoleLabel(item) }}</small>
-              <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
+              <span class="iriograph-membership-overview-actions">
+                <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
+                <button type="button" :disabled="!enabled || busy" @click="editMembership(item, 'belongs-to')">この所属を編集</button>
+                <button v-if="canRemoveMembership(item)" type="button" :disabled="!enabled || busy" @click="removeMembership(item)">所属を解除</button>
+              </span>
             </li>
           </ul>
           <p v-else>属する領域はありません。</p>
@@ -675,7 +711,11 @@ defineExpose({ focusPendingIntent, resetIntent: reset });
             <li v-for="item in membershipOverview.contains" :key="`child:${item.semanticRef}:${item.relatedElementId}:${item.ordinal ?? 0}`">
               <span>{{ item.label }}</span>
               <small>{{ membershipContainerKindLabel(item.containerKind) }}・{{ membershipRoleLabel(item) }}</small>
-              <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
+              <span class="iriograph-membership-overview-actions">
+                <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
+                <button type="button" :disabled="!enabled || busy" @click="editMembership(item, 'contains')">この所属を編集</button>
+                <button v-if="canRemoveMembership(item)" type="button" :disabled="!enabled || busy" @click="removeMembership(item)">包含から外す</button>
+              </span>
             </li>
           </ul>
           <p v-else>含む要素はありません。</p>

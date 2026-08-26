@@ -84,8 +84,25 @@ export function reconcilePresentationScene(
       provenance: { ...membership.provenance },
     })),
     edges,
-    diagnostics: projected.diagnostics.length ? [...projected.diagnostics] : [...current.diagnostics],
+    // Presentation-only reconciliation deliberately does not run the layout
+    // adapter. Carry semantic/projection diagnostics forward, but drop layout
+    // results from the previous Scene instead of making an anchor/style edit
+    // appear to have generated a new whole-diagram placement warning.
+    diagnostics: uniqueDiagnostics([
+      ...current.diagnostics.filter((diagnostic) => diagnostic.category !== "layout"),
+      ...projected.diagnostics,
+    ]),
   };
+}
+
+function uniqueDiagnostics<T>(values: readonly T[]): T[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = JSON.stringify(value);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function reconcileEdge(

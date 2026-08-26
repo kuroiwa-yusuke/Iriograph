@@ -69,6 +69,97 @@ describe("IriographEditor transaction regression", () => {
     expect(buttons[1]?.attributes("aria-pressed")).toBe("true");
   });
 
+  it("Documentタブでactive view overlayだけをschema検証して適用しTurtle不変・undoを保つ", async () => {
+    wrapper = await mountEditor();
+    const original = documentFixture();
+    const node = (wrapper.getComponent(DiagramCanvas).props("scene") as DiagramScene).nodes
+      .find((candidate) => candidate.semanticRef === `${NS}a`)!;
+
+    await buttonWithText(wrapper, "Document").trigger("click");
+    const editor = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="View overlay JSON"]');
+    await editor.setValue(JSON.stringify({
+      [node.elementId]: {
+        semanticRef: node.semanticRef,
+        geometry: { x: 64, y: 72, width: 160, height: 80 },
+        pinned: true,
+        placement: "user",
+      },
+    }));
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await settle();
+
+    const applied = latestDocument(wrapper);
+    expect(applied.semantic.source).toBe(original.semantic.source);
+    expect(applied.views[0]!.overlay[node.elementId]).toMatchObject({
+      semanticRef: node.semanticRef,
+      geometry: { x: 64, y: 72, width: 160, height: 80 },
+      placement: "user",
+    });
+
+    exposedHistoryApi(wrapper).undo();
+    await settle();
+    expect(latestDocument(wrapper).semantic.source).toBe(original.semantic.source);
+    expect(latestDocument(wrapper).views[0]!.overlay).toEqual({});
+  });
+
+  it("Document overlay editorはJSON/schema errorを修正行動付きで表示し正本へ反映しない", async () => {
+    wrapper = await mountEditor();
+    await buttonWithText(wrapper, "Document").trigger("click");
+    const editor = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="View overlay JSON"]');
+    await editor.setValue('{"node":{"semanticRef":"urn:test:a","unknown":true}}');
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await settle();
+
+    const diagnostics = wrapper.get(".iriograph-overlay-diagnostics");
+    expect(diagnostics.text()).toContain("unknown");
+    expect(diagnostics.text()).toContain("削除するか、extensionsへ移してください");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await editor.setValue('{');
+    await buttonWithText(wrapper, "JSONを整形").trigger("click");
+    expect(wrapper.get(".iriograph-overlay-diagnostics").text()).toContain("JSONを解析できません");
+  });
+
+  it("Document全体でportable identityと全viewを参照できる", async () => {
+    wrapper = await mountEditor();
+    await buttonWithText(wrapper, "Document").trigger("click");
+    await buttonWithText(wrapper, "Document全体").trigger("click");
+
+    const documentPanel = wrapper.get(".iriograph-document-boundary");
+    expect(documentPanel.text()).toContain("editor-regression");
+    expect(documentPanel.text()).toContain("urn:test:editor:");
+    expect(documentPanel.text()).toContain('"viewId": "main"');
+  });
+
+  it("Document overlay editorは領域包含を破るgeometryを適用しない", async () => {
+    const original = regionDocumentFixture();
+    wrapper = await mountEditor({ modelValue: original }, 1);
+    const projected = wrapper.getComponent(DiagramCanvas).props("scene") as DiagramScene;
+    const region = projected.regions?.find((candidate) => candidate.semanticRef === `${NS}lane`)!;
+    const node = projected.nodes.find((candidate) => candidate.semanticRef === `${NS}a`)!;
+    await buttonWithText(wrapper, "Document").trigger("click");
+    const editor = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="View overlay JSON"]');
+    await editor.setValue(JSON.stringify({
+      [region.elementId]: {
+        semanticRef: region.semanticRef,
+        geometry: { x: 40, y: 40, width: 420, height: 240 },
+        pinned: true,
+        placement: "user",
+      },
+      [node.elementId]: {
+        semanticRef: node.semanticRef,
+        geometry: { x: 700, y: 700, width: 120, height: 64 },
+        pinned: true,
+        placement: "user",
+      },
+    }));
+    await buttonWithText(wrapper, "検証して適用").trigger("click");
+    await settle();
+
+    expect(wrapper.get(".iriograph-overlay-diagnostics").text()).toContain("共通部分へ収めてください");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
   it("一つのdrag gestureを一つのhistory itemとしてundo/redoする", async () => {
     wrapper = await mountEditor();
     const canvas = wrapper.getComponent(DiagramCanvas);
@@ -1947,6 +2038,28 @@ describe("IriographEditor transaction regression", () => {
     await buttonWithText(wrapper, "所属を更新").trigger("click");
     await waitUntil(() => Boolean(wrapper!.emitted("update:modelValue")?.length));
     expect(latestDocument(wrapper).semantic.source).not.toContain("rdfs:member :a");
+  });
+
+  it("包含領域の要素一覧からmembershipだけを直接解除する", async () => {
+    const fixture = containedDocumentFixture();
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      authoringContext: testAuthoringContext(fixture),
+    }, 1);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const lane = canvas.props("scene").containers.find((container) => (
+      container.semanticRef === `${NS}lane`
+    ))!;
+    exposedSelectionApi(wrapper).selectElement(lane.elementId);
+    await nextTick();
+
+    const overview = wrapper.get('[aria-label="選択要素の包含一覧"]');
+    expect(overview.text()).toContain("含む要素 1件");
+    await buttonWithText(wrapper, "包含から外す").trigger("click");
+    await waitUntil(() => Boolean(wrapper!.emitted("update:modelValue")?.length));
+
+    expect(latestDocument(wrapper).semantic.source).not.toContain("rdfs:member :a");
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
   });
 
   it("RDFS subclass Seqを選択可能な順序付きgroupとして編集する", async () => {

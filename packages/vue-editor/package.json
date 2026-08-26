@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/vue-editor",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Embeddable Vue editor for Iriograph semantic diagrams.",
   "type": "module",
   "license": "UNLICENSED",
@@ -54,7 +54,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "@iriograph/core": "0.7.0"
+    "@iriograph/core": "0.7.1"
   },
   "peerDependencies": {
     "vue": "^3.5.0"

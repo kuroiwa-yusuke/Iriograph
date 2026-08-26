@@ -79,8 +79,14 @@ export async function reconcileIriographDocumentViews(
     let previousScene: DiagramScene | undefined;
     if (previousView) {
       previousScene = await buildIriographView(previous, view.viewId, context, "incremental");
-      diagnostics.push(...previousScene.diagnostics);
-      if (hasBlockingDiagnostics(previousScene.diagnostics)) return rejected(previous, diagnostics);
+      // The previous scene is reconstructed only as reconciliation input. Its
+      // non-blocking layout warnings describe the old display and must not be
+      // reported as results of the candidate transaction (or accumulated on
+      // every endpoint-only edit).
+      if (hasBlockingDiagnostics(previousScene.diagnostics)) {
+        diagnostics.push(...previousScene.diagnostics);
+        return rejected(previous, diagnostics);
+      }
     }
 
     const rawDocument = clone(next);
@@ -144,17 +150,18 @@ export async function reconcileIriographDocumentViews(
       edgeOnly ? "route-only" : "incremental",
       routePlan?.fixedDerivedRoutes,
     );
-    diagnostics.push(...scene.diagnostics);
+    const sceneDiagnostics = relevantSceneDiagnostics(scene.diagnostics, edgeOnly, routePlan);
+    diagnostics.push(...sceneDiagnostics);
     if (hasBlockingDiagnostics(scene.diagnostics)) return rejected(previous, diagnostics);
     view.overlay = persistLayoutGeometry(view, scene);
-    scenes[view.viewId] = scene;
+    scenes[view.viewId] = { ...scene, diagnostics: sceneDiagnostics };
   }
 
   return {
     accepted: true,
     document: next,
     scenes,
-    diagnostics: sortDiagnostics(diagnostics),
+    diagnostics: uniqueSortedDiagnostics(diagnostics),
   };
 }
 
@@ -630,8 +637,40 @@ function rejected(
     accepted: false,
     document: clone(previous),
     scenes: {},
-    diagnostics: sortDiagnostics(diagnostics),
+    diagnostics: uniqueSortedDiagnostics(diagnostics),
   };
+}
+
+/**
+ * Route-only reconciliation cannot change region/container geometry. Report
+ * layout diagnostics for the rerouted edge set (and untargeted/global
+ * failures), but do not attribute unrelated pre-existing placement warnings to
+ * an endpoint edit.
+ */
+function relevantSceneDiagnostics(
+  diagnostics: readonly ProjectionDiagnostic[],
+  edgeOnly: boolean,
+  routePlan: EdgeOnlyRoutePlan | undefined,
+): ProjectionDiagnostic[] {
+  if (!edgeOnly || !routePlan) return uniqueSortedDiagnostics(diagnostics);
+  return uniqueSortedDiagnostics(diagnostics.filter((diagnostic) => (
+    diagnostic.category !== "layout"
+    || diagnostic.severity === "error"
+    || diagnostic.semanticRef === undefined
+    || routePlan.affectedEdgeIds.has(diagnostic.semanticRef)
+  )));
+}
+
+function uniqueSortedDiagnostics(
+  diagnostics: readonly ProjectionDiagnostic[],
+): ProjectionDiagnostic[] {
+  const seen = new Set<string>();
+  return sortDiagnostics(diagnostics.filter((diagnostic) => {
+    const key = JSON.stringify(diagnostic);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }));
 }
 
 function clone<T>(value: T): T {

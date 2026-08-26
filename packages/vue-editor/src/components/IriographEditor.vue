@@ -151,6 +151,7 @@ import { reconcilePresentationScene } from "../presentation-scene";
 import type { EditorAssetOption } from "../editor-assets";
 
 type Panel = "diagram" | "turtle" | "document" | "catalog";
+type DocumentSection = "semantic" | "overlay" | "document";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
 type DocumentRefreshKind = "semantic" | "presentation";
@@ -164,6 +165,11 @@ type DeletionImpact = {
 type PendingDeletion = {
   preview: AuthoringPreview;
   impacts: DeletionImpact[];
+};
+type OverlayEditorIssue = {
+  path: string;
+  message: string;
+  action: string;
 };
 
 const props = withDefaults(defineProps<{
@@ -231,6 +237,12 @@ const viewSessions = new Map<string, DiagramViewSession>();
 const viewSessionRevision = ref(0);
 const turtleDraft = ref(draft.value.semantic.source);
 const panel = ref<Panel>("diagram");
+const documentSection = ref<DocumentSection>("overlay");
+const overlayDrafts = ref<Record<string, string>>({});
+const overlayDraftBases = ref<Record<string, string>>({});
+const overlayDraftTouched = ref<Record<string, boolean>>({});
+const overlayEditorIssues = ref<OverlayEditorIssue[]>([]);
+const applyingOverlay = ref(false);
 const selectedElementId = ref("");
 const selectedElementIds = ref<string[]>([]);
 const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
@@ -310,6 +322,34 @@ let viewCommandAbortController: AbortController | undefined;
 const activeView = computed(() => draft.value.views.find((view) => (
   view.viewId === currentActiveViewId.value
 )) ?? draft.value.views[0]);
+const activeOverlayDraft = computed({
+  get: () => {
+    const view = activeView.value;
+    if (!view) return "{}";
+    return overlayDrafts.value[view.viewId] ?? JSON.stringify(view.overlay, null, 2);
+  },
+  set: (value: string) => {
+    const view = activeView.value;
+    if (!view) return;
+    if (!(view.viewId in overlayDraftBases.value)) {
+      overlayDraftBases.value = {
+        ...overlayDraftBases.value,
+        [view.viewId]: JSON.stringify(view.overlay),
+      };
+    }
+    overlayDrafts.value = { ...overlayDrafts.value, [view.viewId]: value };
+    overlayDraftTouched.value = { ...overlayDraftTouched.value, [view.viewId]: true };
+    overlayEditorIssues.value = [];
+  },
+});
+const overlayPendingViewIds = computed(() => draft.value.views.flatMap((view) => {
+  if (!overlayDraftTouched.value[view.viewId]) return [];
+  const candidate = overlayDrafts.value[view.viewId];
+  return candidate !== undefined && candidate !== JSON.stringify(view.overlay, null, 2)
+    ? [view.viewId]
+    : [];
+}));
+const overlayPending = computed(() => overlayPendingViewIds.value.length > 0);
 const scene = computed(() => {
   viewSessionRevision.value;
   return sceneWithTemporaryHiddenElements(
@@ -471,6 +511,7 @@ const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
 const authoringBlockedReason = computed(() => {
   if (props.readOnly) return "読み取り専用のため意味グラフを編集できません。";
   if (!authoringContext.value) return "Hostからauthoring contextが提供されていません。";
+  if (overlayPending.value) return "DocumentのView overlay draftを適用または破棄してください。";
   if (turtlePending.value) return "未適用のTurtle draftを適用または破棄してください。";
   return "";
 });
@@ -1069,15 +1110,16 @@ const selectedGeometryCount = computed(() => selectedGeometryElements(
 ).length);
 const canAlignSelection = computed(() => !props.readOnly && selectedGeometryCount.value >= 2);
 const canDistributeSelection = computed(() => !props.readOnly && selectedGeometryCount.value >= 3);
-const documentJson = computed(() => JSON.stringify(draft.value, null, 2));
 const catalogJson = computed(() => JSON.stringify(activeCatalog.value ?? {}, null, 2));
 const overlayJson = computed(() => JSON.stringify(activeView.value?.overlay ?? {}, null, 2));
+const documentJson = computed(() => JSON.stringify(draft.value, null, 2));
 const heading = computed(() => props.title || props.filePath || draft.value.documentId || "Untitled");
 const stateLabel = computed(() => {
   if (props.saving) return "保存中";
   if (props.saveMessage) return props.saveMessage;
   if (structuredAuthoringPending.value) return "意味を入力中";
   if (turtlePending.value) return "Turtleを入力中";
+  if (overlayPending.value) return "View overlayを入力中";
   return props.dirty ? "未保存" : "保存済み";
 });
 const templateChoices = computed(() => Object.values(activeCatalog.value?.templates ?? {})
@@ -1191,6 +1233,10 @@ watch(
       rawScene.value = emptyScene(nextViewId);
     }
     turtleDraft.value = value.semantic.source;
+    overlayDrafts.value = {};
+    overlayDraftBases.value = {};
+    overlayDraftTouched.value = {};
+    overlayEditorIssues.value = [];
     history.value = [];
     future.value = [];
     applyDiagnostics.value = [];
@@ -1202,6 +1248,20 @@ watch(
     }
   },
   { deep: true },
+);
+
+watch(
+  () => ({
+    viewId: activeView.value?.viewId ?? "",
+    overlay: JSON.stringify(activeView.value?.overlay ?? {}),
+  }),
+  ({ viewId, overlay }) => {
+    if (!viewId || overlayDraftTouched.value[viewId]) return;
+    const formatted = JSON.stringify(JSON.parse(overlay) as unknown, null, 2);
+    overlayDrafts.value = { ...overlayDrafts.value, [viewId]: formatted };
+    overlayDraftBases.value = { ...overlayDraftBases.value, [viewId]: overlay };
+  },
+  { immediate: true },
 );
 
 watch(
@@ -1294,7 +1354,7 @@ watch(
 );
 
 watch(
-  () => turtlePending.value || structuredAuthoringPending.value,
+  () => turtlePending.value || structuredAuthoringPending.value || overlayPending.value,
   (pending) => emit("pendingDraftsChanged", pending),
   { immediate: true },
 );
@@ -1487,7 +1547,13 @@ function preparedSceneFor(result: SemanticSourceUpdate): DiagramScene | undefine
   if (!prepared) return undefined;
   return {
     ...clone(prepared),
-    diagnostics: [...prepared.diagnostics, ...result.diagnostics].filter(uniqueDiagnostic()),
+    // `result.diagnostics` aggregates every named view. The prepared Scene
+    // already owns the active view's layout diagnostics, so only merge
+    // cross-view semantic/projection diagnostics here.
+    diagnostics: [
+      ...prepared.diagnostics,
+      ...result.diagnostics.filter((diagnostic) => diagnostic.category !== "layout"),
+    ].filter(uniqueDiagnostic()),
   };
 }
 
@@ -2548,7 +2614,7 @@ async function executeIntentCommands(
       || props.readOnly
       || JSON.stringify(draft.value) !== sourceJson
     ) return;
-    applyDiagnostics.value = clone(preview.diagnostics);
+    applyDiagnostics.value = userFacingTransactionDiagnostics(preview.diagnostics);
     if (!preview.valid) return;
     const result = await applyAuthoringPreview(sourceDocument, preview, context, {
       confirmationId: preview.confirmationId,
@@ -2560,7 +2626,7 @@ async function executeIntentCommands(
       || props.readOnly
       || JSON.stringify(draft.value) !== sourceJson
     ) return;
-    applyDiagnostics.value = clone(result.diagnostics);
+    applyDiagnostics.value = userFacingTransactionDiagnostics(result.diagnostics);
     if (!result.accepted) return;
     const committed = creationPresentation
       ? applyCreatedResourceTemplate(result.document, preview, creationPresentation)
@@ -3248,6 +3314,16 @@ function layoutPurposeLabel(layoutRef: string | undefined): string {
 
 async function applyTurtleDraft(): Promise<boolean> {
   if (props.readOnly) return false;
+  if (overlayPending.value) {
+    panel.value = "document";
+    documentSection.value = "overlay";
+    overlayEditorIssues.value = [{
+      path: "View overlay",
+      message: "未適用のView overlay draftがあります。",
+      action: "View overlayを適用するか元に戻してから、Turtleを適用してください。",
+    }];
+    return false;
+  }
   if (structuredAuthoringPending.value) {
     pendingAuthoringGuidance.value = pendingDeletion.value
       ? "削除の影響確認を完了するか、キャンセルしてください。"
@@ -3356,6 +3432,211 @@ function revertTurtleDraft(): void {
   schemaDiagnostics.value = schemaDiagnosticsFor(draft.value, projectionRuntimeContext.value);
 }
 
+function formatActiveOverlayDraft(): void {
+  const view = activeView.value;
+  if (!view) return;
+  const parsed = parseOverlayDraft(view.viewId, activeOverlayDraft.value);
+  if (!parsed) return;
+  overlayDrafts.value = {
+    ...overlayDrafts.value,
+    [view.viewId]: JSON.stringify(parsed, null, 2),
+  };
+  overlayDraftTouched.value = { ...overlayDraftTouched.value, [view.viewId]: true };
+  overlayEditorIssues.value = [];
+}
+
+function revertActiveOverlayDraft(): void {
+  const view = activeView.value;
+  if (!view) return;
+  const current = JSON.stringify(view.overlay, null, 2);
+  overlayDrafts.value = { ...overlayDrafts.value, [view.viewId]: current };
+  overlayDraftBases.value = {
+    ...overlayDraftBases.value,
+    [view.viewId]: JSON.stringify(view.overlay),
+  };
+  overlayDraftTouched.value = { ...overlayDraftTouched.value, [view.viewId]: false };
+  overlayEditorIssues.value = [];
+}
+
+async function applyOverlayDrafts(
+  requestedViewIds: readonly string[] = activeView.value ? [activeView.value.viewId] : [],
+): Promise<boolean> {
+  if (props.readOnly || applyingOverlay.value) return false;
+  const viewIds = [...new Set(requestedViewIds)].filter((viewId) => (
+    overlayDraftTouched.value[viewId]
+  ));
+  if (viewIds.length === 0) return true;
+  const previous = clone(draft.value);
+  const next = clone(previous);
+  const parsedByView = new Map<string, typeof next.views[number]["overlay"]>();
+  const issues: OverlayEditorIssue[] = [];
+
+  for (const viewId of viewIds) {
+    const previousView = previous.views.find((view) => view.viewId === viewId);
+    if (!previousView) {
+      issues.push({
+        path: `view:${viewId}`,
+        message: "編集対象のNamed viewがdocumentに存在しません。",
+        action: "現在存在するviewを選び直してdraftを破棄してください。",
+      });
+      continue;
+    }
+    const base = overlayDraftBases.value[viewId];
+    if (base !== undefined && base !== JSON.stringify(previousView.overlay)) {
+      issues.push({
+        path: `view:${viewId}`,
+        message: "draft作成後にCanvasまたは別操作からView overlayが変更されました。",
+        action: "現在値を保持するには元に戻してから編集し直してください。draftを優先する場合は一度JSONを退避して再入力してください。",
+      });
+      continue;
+    }
+    const parsed = parseOverlayDraft(viewId, overlayDrafts.value[viewId] ?? "{}");
+    if (parsed) parsedByView.set(viewId, parsed);
+    else issues.push(...overlayEditorIssues.value);
+  }
+  if (issues.length > 0) {
+    overlayEditorIssues.value = issues;
+    return false;
+  }
+
+  for (const view of next.views) {
+    const parsed = parsedByView.get(view.viewId);
+    if (parsed) view.overlay = parsed;
+  }
+  const validation = validateIriographDocumentV1(next);
+  if (!validation.valid) {
+    overlayEditorIssues.value = validation.issues.map(overlaySchemaIssue);
+    return false;
+  }
+  if (next.semantic.source !== previous.semantic.source) {
+    overlayEditorIssues.value = [{
+      path: "semantic.source",
+      message: "View overlay編集でTurtleが変更されました。",
+      action: "Turtleの変更はTurtleタブから別のsemantic transactionとして適用してください。",
+    }];
+    return false;
+  }
+
+  const runtime = projectionRuntimeContext.value;
+  if (!runtime) {
+    overlayEditorIssues.value = [{
+      path: "View overlay",
+      message: "表示規則を解決できないため、配置の安全性を検証できません。",
+      action: "HostからProjectionRuntimeContextを提供してから再度適用してください。",
+    }];
+    return false;
+  }
+  applyingOverlay.value = true;
+  overlayEditorIssues.value = [];
+  try {
+    try {
+      for (const viewId of viewIds) {
+        const candidateScene = await buildIriographView(next, viewId, runtime, "incremental");
+        const containmentIssues = candidateScene.diagnostics
+          .filter(isBlockingOverlayContainmentDiagnostic)
+          .map((diagnostic) => ({
+            path: diagnostic.semanticRef ?? diagnostic.code,
+            message: diagnostic.message,
+            action: "含まれる要素の全体を、所属するすべての領域の共通部分へ収めてください。",
+          }));
+        if (containmentIssues.length > 0) issues.push(...containmentIssues);
+      }
+    } catch (cause) {
+      overlayEditorIssues.value = [{
+        path: "View overlay",
+        message: `配置を検証できません: ${cause instanceof Error ? cause.message : String(cause)}`,
+        action: "表示規則と入力内容を確認してから再度適用してください。",
+      }];
+      return false;
+    }
+    if (issues.length > 0) {
+      overlayEditorIssues.value = issues;
+      return false;
+    }
+
+    for (const viewId of viewIds) {
+      const overlay = next.views.find((view) => view.viewId === viewId)?.overlay ?? {};
+      overlayDrafts.value = {
+        ...overlayDrafts.value,
+        [viewId]: JSON.stringify(overlay, null, 2),
+      };
+      overlayDraftBases.value = {
+        ...overlayDraftBases.value,
+        [viewId]: JSON.stringify(overlay),
+      };
+      overlayDraftTouched.value = { ...overlayDraftTouched.value, [viewId]: false };
+    }
+    if (JSON.stringify(next) !== JSON.stringify(previous)) {
+      await publish(next, true, "presentation");
+    }
+    return true;
+  } finally {
+    applyingOverlay.value = false;
+  }
+}
+
+function parseOverlayDraft(
+  viewId: string,
+  source: string,
+): IriographDocument["views"][number]["overlay"] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source) as unknown;
+  } catch (cause) {
+    overlayEditorIssues.value = [jsonParseIssue(cause, source)];
+    return undefined;
+  }
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    overlayEditorIssues.value = [{
+      path: `view:${viewId}.overlay`,
+      message: "View overlayの最上位はJSON objectである必要があります。",
+      action: "要素IDをkey、overlay設定をvalueにした { ... } 形式へ直してください。",
+    }];
+    return undefined;
+  }
+  return parsed as IriographDocument["views"][number]["overlay"];
+}
+
+function jsonParseIssue(cause: unknown, source: string): OverlayEditorIssue {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const match = /position\s+(\d+)/iu.exec(detail);
+  let path = "JSON";
+  if (match) {
+    const offset = Number(match[1]);
+    const before = source.slice(0, offset);
+    const line = before.split("\n").length;
+    const column = offset - before.lastIndexOf("\n");
+    path = `${line}行 ${column}列`;
+  }
+  return {
+    path,
+    message: `JSONを解析できません: ${detail}`,
+    action: "引用符、カンマ、波括弧の対応を確認してから再度適用してください。",
+  };
+}
+
+function overlaySchemaIssue(issue: RuntimeValidationIssue): OverlayEditorIssue {
+  const path = issue.instancePath || "/";
+  const action = issue.keyword === "required"
+    ? `必須項目 ${String(issue.params.missingProperty ?? "")} を追加してください。`
+    : issue.keyword === "additionalProperties"
+      ? `未対応項目 ${String(issue.params.additionalProperty ?? "")} を削除するか、extensionsへ移してください。`
+      : issue.keyword === "format"
+        ? "IRIには絶対IRIを指定してください。"
+        : issue.keyword === "type"
+          ? `値の型を ${String(issue.params.type ?? "schema指定の型")} に直してください。`
+          : issue.keyword === "enum"
+            ? "schemaで許可された候補のいずれかへ変更してください。"
+            : "schemaの範囲・構造に合う値へ修正してください。";
+  return { path, message: issue.message, action };
+}
+
+function isBlockingOverlayContainmentDiagnostic(diagnostic: ProjectionDiagnostic): boolean {
+  return diagnostic.code === "region-membership-intersection-empty"
+    || diagnostic.code === "region-member-outside-intersection"
+    || diagnostic.code === "region-member-outside";
+}
+
 function undo(): void {
   if (props.readOnly) return;
   const previous = history.value.at(-1);
@@ -3393,6 +3674,11 @@ async function flushPendingEdits(): Promise<boolean> {
     rightSidebarCollapsed.value = false;
     await nextTick();
     semanticIntentPanel.value?.focusPendingIntent();
+    return false;
+  }
+  if (overlayPending.value && !await applyOverlayDrafts(overlayPendingViewIds.value)) {
+    panel.value = "document";
+    documentSection.value = "overlay";
     return false;
   }
   if (turtlePending.value) return applyTurtleDraft();
@@ -3578,12 +3864,12 @@ async function resetActiveViewOverlay(): Promise<void> {
 
 async function executeViewCommand(command: ViewCommand): Promise<boolean> {
   if (props.readOnly || viewCommandBusy.value) return false;
-  if (turtlePending.value || structuredAuthoringPending.value) {
+  if (turtlePending.value || structuredAuthoringPending.value || overlayPending.value) {
     applyDiagnostics.value = [{
       severity: "error",
       category: "projection",
       code: "view-command-semantic-draft-pending",
-      message: "未適用のsemantic draftを適用または破棄してからviewを変更してください。",
+      message: "未適用のsemanticまたはView overlay draftを適用または破棄してからviewを変更してください。",
     }];
     return false;
   }
@@ -4002,6 +4288,17 @@ function uniqueDiagnostic(): (diagnostic: ProjectionDiagnostic) => boolean {
   };
 }
 
+function userFacingTransactionDiagnostics(
+  diagnostics: readonly ProjectionDiagnostic[],
+): ProjectionDiagnostic[] {
+  // A successful route-only fallback is operational telemetry, not a failed
+  // placement that the user must repair. Keep it in Core results/observers,
+  // but do not render it with the generic layout-warning guidance.
+  return clone(diagnostics.filter((diagnostic) => !(
+    diagnostic.category === "layout" && diagnostic.severity === "info"
+  )));
+}
+
 function clone<T>(value: T): T {
   // v-modelから受け取る値はVue Proxyになり得ます。documentはJSON contractなので、
   // cloneと同時にplain dataへ戻してeditor内部へProxyを持ち込みません。
@@ -4042,7 +4339,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         <span :class="['iriograph-validation-pill', { error: errorCount > 0 }]">
           {{ errorCount > 0 ? `問題 ${errorCount}件` : "検証済み" }}
         </span>
-        <button type="button" :disabled="!canSave || saving || applyingTurtle || authoringBusy" @click="requestSave">
+        <button type="button" :disabled="!canSave || saving || applyingTurtle || applyingOverlay || authoringBusy" @click="requestSave">
           {{ saving ? "保存中…" : "保存" }}
         </button>
       </div>
@@ -4298,7 +4595,74 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               </li>
             </ul>
           </template>
-          <pre v-else><code>{{ panel === "document" ? documentJson : catalogJson }}</code></pre>
+          <template v-else-if="panel === 'document'">
+            <nav class="iriograph-document-sections" aria-label="Documentの意味とView overlay" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="documentSection === 'semantic'"
+                :class="{ active: documentSection === 'semantic' }"
+                @click="documentSection = 'semantic'"
+              >意味（semantic.source）</button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="documentSection === 'overlay'"
+                :class="{ active: documentSection === 'overlay' }"
+                @click="documentSection = 'overlay'"
+              >View overlay</button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="documentSection === 'document'"
+                :class="{ active: documentSection === 'document' }"
+                @click="documentSection = 'document'"
+              >Document全体</button>
+            </nav>
+            <section v-if="documentSection === 'semantic'" class="iriograph-document-boundary" role="tabpanel">
+              <p>意味の正本です。ここでは参照のみ行い、変更はTurtleタブからsemantic transactionとして適用します。</p>
+              <pre><code>{{ draft.semantic.source }}</code></pre>
+              <button type="button" @click="panel = 'turtle'">Turtleタブで編集</button>
+            </section>
+            <section v-else-if="documentSection === 'overlay'" class="iriograph-overlay-source" role="tabpanel">
+              <div class="iriograph-overlay-editor-note">
+                <span><b>{{ activeView?.viewId }}</b> の表示差分だけを編集します。</span>
+                <span>Turtleは変更されず、適用後はUndoできます。通常の調整にはCanvasを利用してください。</span>
+              </div>
+              <textarea
+                v-model="activeOverlayDraft"
+                :readonly="readOnly || applyingOverlay || structuredAuthoringPending"
+                spellcheck="false"
+                aria-label="View overlay JSON"
+              />
+              <footer class="iriograph-source-actions">
+                <div>
+                  <span v-if="overlayEditorIssues.length" class="error">{{ overlayEditorIssues.length }} error</span>
+                  <span v-if="overlayPending">未適用のView overlay draft</span>
+                </div>
+                <div>
+                  <button type="button" :disabled="readOnly || applyingOverlay" @click="formatActiveOverlayDraft">JSONを整形</button>
+                  <button type="button" :disabled="!overlayDraftTouched[activeView?.viewId ?? ''] || applyingOverlay" @click="revertActiveOverlayDraft">元に戻す</button>
+                  <button
+                    type="button"
+                    class="primary"
+                    :disabled="!overlayDraftTouched[activeView?.viewId ?? ''] || readOnly || applyingOverlay || structuredAuthoringPending"
+                    @click="applyOverlayDrafts()"
+                  >{{ applyingOverlay ? "適用中…" : "検証して適用" }}</button>
+                </div>
+              </footer>
+              <ul v-if="overlayEditorIssues.length" class="iriograph-diagnostics iriograph-overlay-diagnostics" role="alert">
+                <li v-for="(issue, index) in overlayEditorIssues" :key="`${issue.path}:${index}`" class="error">
+                  <span><b>{{ issue.path }}</b> {{ issue.message }}<small>{{ issue.action }}</small></span>
+                </li>
+              </ul>
+            </section>
+            <section v-else class="iriograph-document-boundary" role="tabpanel">
+              <p>ファイル名とは独立したdocumentId、portable base、catalog import、全Named viewを含む文書全体です。参照のみ行います。</p>
+              <pre><code>{{ documentJson }}</code></pre>
+            </section>
+          </template>
+          <pre v-else><code>{{ catalogJson }}</code></pre>
         </section>
       </main>
 

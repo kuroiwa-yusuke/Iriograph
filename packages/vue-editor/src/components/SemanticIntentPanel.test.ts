@@ -61,8 +61,85 @@ describe("SemanticIntentPanel", () => {
     expect(overview.text()).toContain("審査");
     expect(overview.text()).toContain("並び順・順番 3");
 
-    await overview.findAll("button")[1]!.trigger("click");
+    await overview.findAll("button").filter((item) => item.text() === "Canvasで確認")[1]!.trigger("click");
     expect(wrapper.emitted("focusElement")?.at(-1)?.[0]).toBe("step");
+  });
+
+  it("包含一覧からexact membershipを確認なしで解除する", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      resources: [
+        { iri: "urn:test:lane", label: "調理担当" },
+        { iri: "urn:test:bake", label: "ピザを焼く" },
+      ],
+      selectedResources: [{ iri: "urn:test:lane", label: "調理担当" }],
+      membershipOverview: {
+        belongsTo: [],
+        contains: [{
+          semanticRef: "urn:test:membership:lane-bake",
+          relatedElementId: "bake",
+          relatedSemanticRef: "urn:test:bake",
+          label: "ピザを焼く",
+          relatedStructuralKind: "node" as const,
+          containerKind: "region" as const,
+          role: "membership" as const,
+          provenance: {
+            sourceStatementRefs: ["urn:test:statement:lane-bake"],
+            operator: "membership-region" as const,
+            derivation: "derived" as const,
+            editCapability: {
+              command: "set-membership" as const,
+              container: "urn:test:lane",
+              member: "urn:test:bake",
+              containerTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+              predicate: "http://www.w3.org/2000/01/rdf-schema#member",
+              containerPosition: "subject" as const,
+            },
+          },
+        }],
+      },
+    } });
+
+    await click(wrapper, "包含から外す");
+
+    expect(wrapper.emitted("executeCommands")?.[0]?.[0]).toEqual([{
+      type: "set-membership",
+      commandId: "overview-remove-membership",
+      containerIri: "urn:test:lane",
+      memberIri: "urn:test:bake",
+      enabled: false,
+      containerTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+      predicateIri: "http://www.w3.org/2000/01/rdf-schema#member",
+      containerPosition: "subject",
+    }]);
+  });
+
+  it("containerの包含一覧から対象要素を選択して所属編集へ進む", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      selectedResources: [{ iri: "urn:test:lane", label: "調理担当" }],
+      membershipOverview: {
+        belongsTo: [],
+        contains: [{
+          semanticRef: "urn:test:membership:lane-bake",
+          relatedElementId: "bake",
+          relatedSemanticRef: "urn:test:bake",
+          label: "ピザを焼く",
+          relatedStructuralKind: "node" as const,
+          containerKind: "region" as const,
+          role: "membership" as const,
+          provenance: {
+            sourceStatementRefs: ["urn:test:statement:lane-bake"],
+            operator: "membership-region" as const,
+            derivation: "derived" as const,
+          },
+        }],
+      },
+    } });
+
+    await click(wrapper, "この所属を編集");
+
+    expect(wrapper.emitted("focusElement")?.at(-1)).toEqual(["bake"]);
+    expect(wrapper.emitted("intentChange")?.at(-1)).toEqual(["edit-relation"]);
+    expect(wrapper.text()).toContain("所属・並び順を編集");
   });
 
   it("新規要素は名前だけをallocator向けdraftへ渡す", async () => {

@@ -12,6 +12,12 @@ Domain resource IRIは、業務上の対象や出来事を識別します。た�
 
 Resource IRIのlocal nameに人間が読める意味語を入れることは必須ではありません。IRIはrenameに耐える安定identityであり、人間とLLMが理解する名前・説明は`rdfs:label`と`rdfs:comment`を主に使います。Labelが欠落する場合の最終fallbackとしてcompact IRIを表示しますが、IRIの綴りをclass、relation、構造として推論しません。
 
+このrename耐性には`.iriograph`のファイル名とworkspace pathも含みます。ファイル名、path、
+`documentId`からresource IRIやTurtle baseを推測しません。`semantic.baseIri`はportable documentに明示した
+fallback、Turtleの`@base`はsource内の標準directive、`@prefix`は単なるIRI aliasです。いずれも
+外部namespaceの利用を制限しません。外部語彙はabsolute IRIまたは`@prefix`で参照でき、参照した
+ontologyをCoreが暗黙fetchすることとは分けます。
+
 Domain vocabulary IRIは、graphを解釈する語彙です。主に次の位置に現れます。
 
 - predicate

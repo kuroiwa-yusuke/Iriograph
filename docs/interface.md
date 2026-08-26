@@ -33,6 +33,37 @@ portable documentの最小形は次です。独自拡張子は`.iriograph`を使
 
 `semantic.source`は意味の正本です。`views[].overlay`のkeyはview内element ID、各entryの`semanticRef`はIRIまたはstatement identityです。
 
+### Document locatorとIRI解決
+
+`.iriograph`のファイル名とworkspace pathはhostがdocumentを開くためのlocatorにすぎず、RDF
+resourceのnamespaceには使いません。`documentId`もportable document自身のidentityであり、
+RDF resource IRIの接頭辞ではありません。したがって、ファイルをrenameまたは別directoryへ移動しても、
+`semantic.source`をparseして得るexpanded IRIは変わりません。
+
+`semantic.baseIri`は、document URLを持たないfile upload、local working copy、database保存でもrelative
+IRIを決定的に解決するためのportableなfallback baseです。絶対IRIであり、ファイル名から導出しません。
+Turtle source内に`@base`がある場合はTurtle標準どおりそのlexical scopeで優先され、`@prefix`は
+任意の外部namespaceへaliasを定義できます。たとえば次のsourceは、ファイル名に関係なく
+domain resourceを`urn:example:order:`、外部語彙termをSchema.orgのIRIとして解決します。
+
+```turtle
+@base <urn:example:order:> .
+@prefix : <urn:example:order:> .
+@prefix schema: <https://schema.org/> .
+
+:r1 schema:name "注文"@ja .
+```
+
+外部語彙のIRIをtripleで使うだけなら、ontology fileのdownloadやimportは必要ありません。外部ontologyの
+定義triple自体を推論・validationへ加えたい場合は、当該定義を`semantic.source`へ同梱する必要があります。
+Turtle中の`owl:imports`はsemantic tripleとして保持・表示できますが、Coreはnetworkから参照先graphを
+暗黙取得しません。単一portable fileの意味datasetが、network状態によって変わることを避けるためです。
+
+Top-levelの`imports`はTurtle/RDF graph importではなく、表示規則を持つversioned projection catalogの
+参照だけです。`semantic.authoringProfileRef`、`imports[].catalogRef`、catalog/overlayのasset IRIは、
+それぞれhost注入のprofile、catalog、asset resolverが取得先へ解決します。IRIとURL、workspace path、
+取得bytesは別責務であり、絶対`https:` IRIであってもCoreが直接fetchすることはありません。
+
 `semantic.authoringProfileRef`はv1の必須値で、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。P1のhostは解決済み`ResolvedAuthoringContext`を注入し、この参照からprofile/vocabularyを取得・検証するresolverはP2-01で追加します。
 
 `views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
