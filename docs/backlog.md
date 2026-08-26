@@ -45,6 +45,25 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 - P2: kuroxiom-cloud・LLM連携と運用に必要
 - P3: 利用領域を広げる拡張
 
+## P1 — Editor・layoutの実用性
+
+| ID | 項目 | 依存 | 完了条件 |
+|---|---|---|---|
+| P1-53 | 文書複製とlocal IRI rebase | document identity、semantic parser、overlay reconciliation | 同一文書のcopyは`documentId`、base、expanded IRIを維持し、「新しい図として複製」は新しいUUID `documentId`とbaseを発行する。後者は文字列置換でなくparsed RDF termとして旧local namespaceに属するS/P/O、class、membership、Seq参照とoverlayのsemantic referenceだけを一括mappingし、標準・外部語彙、asset/catalog IRI、literalは変更しない。衝突検査、preview、atomic commitを通し、元文書を変更しない |
+| P1-54 | 領域分離を含むlayout制約の強化 | standard layout、region projection、route quality gate | LR/TB双方の初期・意味変更後の生成layoutでは、祖先・子孫でなく共通memberを持たないregion同士を重ねず、共通memberがある場合だけ交差を許容する。membershipを一つも持たないnodeは全region内部の外へ置く。既存の多重membership intersection、pinned/user geometry、container containment、非endpoint node交差、edge交差、overlap、最大生成waypoint 1、incremental layout性能をhard/lexicographic gateとして維持する。固定geometryのため解けない場合は動かさず修正行動付きwarningを返し、pizza固有IRI・label・座標へ分岐しない。Overlay-only変更では自動layoutを起動しない |
+| P1-55 | 自動routeの優先順位と安全なcurve smoothing | P1-54、route refinement | 明示指定した`straight`、`curve`、`orthogonal`、`manual`は変えず、`auto`だけで衝突・包含・交差品質を満たす候補から、`straight`、内角90度以上相当の緩い一曲線、最大1 waypointの折れ線の順に安定して選ぶ。採用種別はderived Scene情報としoverlayへ固定しない。Curveは障害物を避けるcorridorを先に求め、その範囲内だけBezier smoothingし、flattenした実曲線で衝突を評価する。曲線化でnode/comment侵入、接続先の遠い側への回り込み、parallel edge識別性低下、edge交差・重複増加が起きる場合は採用せず、自動選択理由とfallback理由をdiagnosticで観測できる |
+| P1-56 | Label typography overlay | sparse appearance overlay、text measurement | Node、region、Seq、edge caption/commentごとにcatalog既定を基準とするboundedなfont sizeをビューInspectorから変更できる。Region labelは既定でも判読可能な大きさとし、文字方向・anchor・offsetとは独立させる。保存するのは既定との差分だけで、text boundsを衝突・包含検査へ反映し、表示変更だけで全体layoutを再実行しない |
+| P1-57 | 所属一覧の直接編集と発見性 | exact membership provenance、P2-11 | 要素詳細の「属する領域」とregion/Seq詳細の「含む要素」から、通常membershipを個別・複数解除し、対象をCanvasへfocusし、所属editorへ移れる。既存のexact provenanceとatomic解除を再利用し、Seq/Altだけはordinal/default slotを壊さない専用editorへ送る。MockとCloudの双方で同じ操作が選択直後に見つかる |
+| P1-58 | Named view管理のprogressive disclosure | ViewCommand、view session | 複数viewのデータモデルとoverview/detail/classification等の再利用能力は維持するが、左sidebarへ追加・複製・設定・削除を常設しない。通常はcompactなview selectorだけを出し、単一viewでは管理UIを最小化し、`…`の「ビュー管理」dialogから既存ViewCommandを実行する。削除の影響確認規則とview別selection/viewportを維持する |
+| P1-59 | Source tab再編と全文Document editor | semantic/overlay transaction、runtime schema、all-view validation | Document内のread-only Turtle全文を廃止してTurtle tabへの導線と意味要約に置き換える。Overlay sourceは通常の安全な編集面として残し、portable document全体はAdvanced opt-inのeditable JSONとしてcopy/pasteできる。全文適用はparse、schema、Turtle/semantic/profile、全named view projection・空間制約、stale draftを検証する一つのatomic replace transactionとし、partial commitせず、一回のundo/dirty/save flushとJSON Pointer付き日本語errorを返す |
+| P1-60 | Canvas keyboard eventのhost非依存化 | accessibility command、P2-11 | Canvasまたは選択objectにfocusがあるときのArrow操作がbrowser/page scrollbarへ漏れない。通常ArrowはCanvas pan、Ctrl/Meta+Arrowは選択要素のnudgeとし、object間のkeyboard navigationはScene一覧から提供する。入力欄、contenteditable、IMEには介入せず、Mock/Cloudの実browserでscroll、pan、nudge、focusを固定する |
+| P1-61 | `rdf:Seq`の利用範囲とUI隔離 | structured authoring、Seq group projection | 通常工程の「次へ」はpredicate edge、単なる表示順はoverlay/layoutとし、`rdf:Seq`は順序自体を検索・検証・再利用するordered membershipにだけ使う。UI名称を「順序付きグループ」とし、新規作成は通常の関係作成から外したAdvanced操作へ置く。Import済みSeqは薄い枠、header、ordinal badgeのまま完全に閲覧・編集でき、`rdf:_n`をedgeとして描かない |
+| P1-62 | 大型画像を含むicon/image sizing | AssetAccess、appearance overlay、spatial constraints | 画像のnatural aspect ratioとmetadata寸法を取得し、初期表示はnode/templateの安全な既定枠へcontainする。Overlayでscaleまたは幅・高さ、contain/cover、位置を編集し、Canvas上のhandleで拡縮できる。Iconがnode boundsへ達した場合はnodeも同じgesture/historyで拡大できるoptionを設け、多重region intersectionやcontainer制約を破る場合は許容範囲でclampして修正行動を示す。帳票・画面画像を扱える上限、lazy decode、巨大画像のmemory policyをtestする |
+| P1-63 | 相対asset pathの段階補完 | host workspace locator、AssetAccess | Documentのworkspace file pathを基準に、path segmentごとの候補、breadcrumb/tree、`./`・`../`、workspace-root相対、絶対workspace pathを同じassetへ解決できる。入力中は認証済みmetadataだけを候補にし、workspace外escapeと曖昧な自動選択を拒否する。保存値はpathでなくstable asset IRIのため、文書・asset rename後も解決可能にする |
+| P1-64 | View Inspectorの情報設計簡素化 | appearance editor | 「ビューを編集」ボタンを挟まず、選択直後から対象別の小さいsectionを表示する。Nodeは形・style／icon・内容／位置・size、region/Seqは枠style／名称・層／位置・size、edgeは線形式／接続点・terminal／label・補足／線styleへ分け、各sectionを折り畳める。利用不能field、source/target数値、重複する補助表示を出さず、変更は既存の即時一履歴規則を維持する |
+| P1-65 | 対象別context menu | P1-57、P1-64、accessibility | 右click、ContextMenu key、Shift+F10から同じ対象別menuを開き、nodeは詳細・ビュー・icon・関係作成・所属・削除、edgeは関係詳細・線・再接続・route reset・削除、region/Seqはmember/順序・枠・fit・許可層内z-order・削除、空白は要素追加とpasteを入口として提示する。Menu選択自体では変更せず該当Inspector/actionへfocusし、raw IRIや一段で意味を変える危険操作を置かない。既存の削除確認条件、keyboard focus return、disabled理由を維持する |
+| P1-66 | 言語tagを隠すlocale UX | label/comment editor、authoring profile | 標準UIでは`@ja`等のTurtle構文を入力させず、profile/default localeから日本語を自動設定してlabel/commentを表示・編集する。Canonical RDFではlanguage tagを保持し、外部資料や将来の多言語labelをlosslessに扱う。Advanced sourceでだけtagを直接編集できる |
+
 ## P2 — Cloud・LLM・運用
 
 | ID | 項目 | 依存 | 完了条件 |
@@ -57,6 +76,8 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 | P2-07 | import/export adapter | P0-01、P1-04 | plain Turtle、JSON-LD、必要な外部図形式との変換でloss reportを返す |
 | P2-08 | LLM tool transport adapter | semantic-access、P2-01、P2-02 | search、describe、subgraph、membership、alias-based writeをMCP等から提供し、認証主体、authoring profile、revision conflict、監査情報をhost境界で接続する |
 | P2-09 | LLM reference-image overlay実験 | P1-43、P1-48、P2-03、P2-06、host image input policy | Reference image、read-only Scene、利用可能template/icon/style/routing capabilityをLLMまたはvision modelへ与え、geometry、size、route、template/icon/styleの閉じたpresentation patchだけを候補生成するhost実験を行う。画像bytesと取得URLはsession入力に留め、portable documentへは検証済みsparse overlayだけを保存し、Turtle、membership、predicate、catalogを変更しない。任意CSS/URL、未登録assetRef、NaN/範囲外geometry、包含違反をrejectし、candidate screenshot、overlay diff、構造score、画像一致score、token/時間を記録する。再実験は長大な開発履歴を渡さない独立contextで、モデル/effort、初期指示、追加指示数、model cycle、browser反復、cached/non-cached input、output、wall timeを記録し、通常UIで再現可能なoverlay fieldとの差も分類する。Pizzaを含む3種類以上の参照図で各3回実行し、構造制約を低下させず画像一致score中央値を自動layout比10点以上改善できるか評価する。未達も測定結果と失敗分類を残せば実験完了とし、seed固有promptや生成overlayをcore/layout既定規則へ昇格しない |
+| P2-10 | Compact LLM overlay authoring toolとtoken budget | P2-08、P2-09 | LLMへrepository履歴や全文schemaを毎回渡さず、revision-boundなScene索引、対象subgraph、利用可能presentation capabilityの短いsummary、sparse overlay patchのvalidate/apply、render/screenshot、diff/scoreをtoolとして提供する。各call/cycleのcached・non-cached input、output、latency、patch件数を記録し、同じ参照図・model・score条件で汎用agent方式よりnon-cached input中央値と反復数を削減できることを比較する。Token上限超過時は意味正本を変えず候補を破棄する |
+| P2-11 | Mock・Cloud editor parity contract | package tarball consumer、host adapter、production E2E | 同じpackage version、共通fixture、共通presentation catalogでgrid DOM/computed style、汎用templateとshape preview、membership解除、source tab、Inspector、keyboard、asset候補、左右sidebarをMock/Cloud双方の実Chromiumで比較する。Cloudのdomain catalog、permission、workspace assetだけを明示した許容差とし、package CSS未読込、古いasset/cache、host override、container size、version不一致をrelease/deploy時にfailさせる。汎用rectangle/rounded/circle/diamond等はpackage標準presentation catalogとして全hostへ供給し、mock固有workflow ruleは混入させない |
 
 ## P3 — 表現拡張
 
@@ -69,4 +90,4 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 
 ## MVP判定
 
-P0と現在のP1を満たした状態を最初の実用MVPとします。現在はP1の受入条件と最終検証を満たしており、最初の実用MVPを完了と判定します。P2はcloud/LLM/運用の次段階としてcore/editorのMVP判定と分けます。新しいP1課題が見つかった場合は受入条件を持つ行として追加し、完了後は表へ完了行を残さず、基準点と規範文書へ結果を統合します。
+P0と従来のP1基準点を満たした状態で最初の実用MVPは成立しています。P1-53以降は実利用監査から見つかった次の実用性backlogであり、公開済みMVPの成立と、未完の改善課題を区別します。P2はcloud/LLM/運用の次段階としてcore/editorの判定と分けます。各項目は完了後に表へ完了行を残さず、基準点と規範文書へ結果を統合します。

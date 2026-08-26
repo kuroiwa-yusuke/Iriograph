@@ -120,6 +120,14 @@ geometry/routing/template/styleだけで別fileを作り、固定Chromiumで3回
 （reasoning 3,977を含む）、合計1,900,110 tokensでした。3 screenshotは同一hashでconsole/page error 0、
 TurtleのSHA-256はseedと同じ`e367fea3…7afc7bb`、overlayは41件（geometry 30、routing 11）です。
 
+この約190万tokenは約5万文字の文書を一回変換した量ではなく、29 model cycleの累積値です。一cycle平均は
+input 65,042、うちcached 61,696、non-cached 3,346、output 479 tokensで、inputの94.86%はprompt
+cacheから再利用されました。各cycleで指示、schema、capability、作業履歴、tool/browser結果を含むworking
+contextが再計上されるため、対象文書の文字数とtelemetry総量は比例しません。Overlay専用のScene索引・sparse
+patch・validate/render toolがなく、汎用agentがrepository、schema、browser状態を反復して扱ったことはcontextを
+大きくした一因ですが、単に「仕様全文を一回渡したため」ではありません。P2-10ではcompact tool経由の同条件
+実験を行い、特にnon-cached input、model cycle、到達scoreを比較します。
+
 同じrubricによる再実験は71±5/100で、Macro 16、relative placement 15、branch rows 12、cross-lane
 alignment 12、connector geometry 7、BPMN visual language 9です。Lane比、task/event/gatewayの役割、
 主要な上下rowは近づきましたが、長い斜線、predicate labelの密集、cross-lane messageの非直交、縦lane
