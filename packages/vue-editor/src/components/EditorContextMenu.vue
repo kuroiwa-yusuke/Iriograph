@@ -81,6 +81,17 @@ function focusActive(): void {
     : undefined;
   (target ?? menu.value)?.focus();
 }
+
+function iconGlyph(token?: string): string {
+  if (!token) return "";
+  const glyphs: Record<string, string> = {
+    add: "+", paste: "▣", details: "i", relation: "→", membership: "⊂",
+    view: "◇", icon: "◆", reconnect: "↝", line: "⌁", reset: "↺",
+    sequence: "1·2", alternatives: "◇", fit: "↔", forward: "↑",
+    backward: "↓", delete: "×",
+  };
+  return glyphs[token] ?? "•";
+}
 </script>
 
 <template>
@@ -102,9 +113,48 @@ function focusActive(): void {
         :tabindex="index === activeIndex ? 0 : -1"
         :class="{ destructive: action.destructive }"
         :disabled="action.disabled"
+        :aria-disabled="action.disabled ? 'true' : undefined"
+        :aria-describedby="action.disabledReason ? `context-action-reason-${index}` : undefined"
         @focus="activeIndex = index"
         @click="emit('select', action.id)"
-      >{{ action.label }}</button>
+      >
+        <span v-if="action.iconToken" class="iriograph-context-menu-icon" :data-icon-token="action.iconToken" aria-hidden="true">{{ iconGlyph(action.iconToken) }}</span>
+        <span class="iriograph-context-menu-copy">
+          <span>{{ action.label }}</span>
+          <small v-if="action.disabledReason" :id="`context-action-reason-${index}`">{{ action.disabledReason }}</small>
+        </span>
+      </button>
     </nav>
   </div>
 </template>
+
+<style scoped>
+.iriograph-context-menu button[role="menuitem"] {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.iriograph-context-menu-icon {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  border-radius: 0.3rem;
+  background: rgb(37 112 101 / 10%);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.iriograph-context-menu-copy {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+}
+
+.iriograph-context-menu-copy small {
+  line-height: 1.25;
+  opacity: 0.78;
+}
+</style>

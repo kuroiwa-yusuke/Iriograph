@@ -59,10 +59,11 @@ describe("normalized RDF/RDFS mock", () => {
     );
 
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
-    expect(projected.containers).toHaveLength(6);
-    expect(projected.nodes).toHaveLength(8);
-    expect(projected.edges).toHaveLength(5);
+    expect(projected.containers).toHaveLength(7);
+    expect(projected.nodes).toHaveLength(7);
+    expect(projected.edges).toHaveLength(3);
     expect(projected.containers.map((item) => item.semanticRef).sort(compareText)).toEqual([
+      "urn:iriograph:demo:c-01",
       "urn:iriograph:demo:g-01",
       "urn:iriograph:demo:g-02",
       "urn:iriograph:demo:g-03",
@@ -78,9 +79,15 @@ describe("normalized RDF/RDFS mock", () => {
     expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:n-01"))
       .toMatchObject({ templateRef: "urn:iriograph:template:start-event:1" });
     expect(projected.nodes.find((item) => item.semanticRef === "urn:iriograph:demo:c-01"))
-      .toMatchObject({ templateRef: "urn:iriograph:template:gateway:1" });
-    expect(projected.edges.some((edge) => edge.provenance.operator === "alternative")).toBe(true);
+      .toBeUndefined();
+    expect(projected.containers.find((item) => item.semanticRef === "urn:iriograph:demo:c-01"))
+      .toMatchObject({ groupRole: "alternative" });
+    expect(projected.edges.every((edge) => edge.provenance.operator === "direct-edge")).toBe(true);
     expect(projected.edges.some((edge) => edge.provenance.operator === "ordinal-sequence")).toBe(false);
+    expect((projected.groupGuides ?? []).filter((guide) => guide.kind === "alternative-candidate"))
+      .toHaveLength(2);
+    expect((projected.groupGuides ?? []).filter((guide) => guide.kind === "sequence-order"))
+      .toHaveLength(5);
     expect(projected.containers.filter((container) => container.groupRole === "sequence"))
       .toHaveLength(3);
     expect(projected.edges.some((edge) => edge.provenance.operator === "direct-edge")).toBe(true);

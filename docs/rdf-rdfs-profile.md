@@ -70,7 +70,7 @@ label/commentを付けられます。限定RDFS closureで一致したsubpropert
 
 ### 3.3 自由なdomain語彙
 
-上表以外のclassとpredicateも利用できます。ただしdomain resource IRIとdomain vocabulary IRIを区別し、表示だけのtypeをvocabularyとして導入しません。IRIをobjectに持つ未登録predicateは、subjectからobjectへの通常矢印として表示します。edge labelはpredicateの`rdfs:label`を優先し、なければcompact IRIを使います。
+上表以外のclassとpredicateも利用できます。ただしdomain resource IRIとdomain vocabulary IRIを区別し、表示だけのtypeをvocabularyとして導入しません。IRIをobjectに持つ未登録predicateは、subjectからobjectへの通常矢印として表示します。Edge labelはpredicateの`rdfs:label`を優先し、なければ「関係名未設定」等の汎用labelを使います。通常のpresentation item/DOMへcompact IRIをfallback表示せず、exact predicate IRIは内部provenanceとeditable sourceに保持します。
 
 literalをobjectに持つ未登録predicateは意味グラフには保持しますが、annotation投影が未確定のv1ではScene elementを生成しません。
 
@@ -150,7 +150,7 @@ Type ruleでresource自体が`suppress`された場合、そのresourceをendpoi
 2. view localeのprimary languageと一致する`rdfs:label`
 3. language tagのない`rdfs:label`
 4. language tagとliteral valueを正規化してsortした先頭の`rdfs:label`
-5. compact IRI
+5. resource種別に応じた「名前未設定」等の汎用label
 
 同順位のlabelが複数ある場合もsource記述順には依存せず、language tagとliteral valueの辞書順で決定します。v1 documentにview localeがない場合、host localeを保存時にdocumentへ固定するまで、3、4、5の順だけを使います。
 

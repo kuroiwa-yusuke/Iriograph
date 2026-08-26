@@ -58,6 +58,9 @@ type PreparedAuthoringResult = {
  */
 const preparedAuthoringResults = new WeakMap<AuthoringPreview, PreparedAuthoringResult>();
 
+/** Default root work-area ceiling; current Scene bounds are not a placement ceiling. */
+export const DEFAULT_AUTHORING_MAX_INITIAL_POSITION_EXTENT = 32_768;
+
 export async function previewAuthoringCommands(
   document: IriographDocument,
   commands: readonly AuthoringCommand[],
@@ -421,7 +424,9 @@ async function previewInternal(
         validationContext: context.semanticValidation,
         warningConfirmation: options.semanticWarningConfirmation,
         signal: options.signal,
-        reconciliationMode: edgeOnlyCommands(compilation.commands, context) ? "edge-only" : "full",
+        ...(edgeOnlyCommands(compilation.commands, context)
+          ? { reconciliationMode: "edge-only" as const }
+          : {}),
       } as const;
       update = await applyCanonicalSemanticDataset(
         document,
@@ -560,11 +565,13 @@ async function applyInitialPositions(
     const parent = element.parentElementId
       ? scene.containers.find((candidate) => candidate.elementId === element.parentElementId)
       : undefined;
+    const maximumRootExtent = context.resourcePolicy.maxInitialPositionExtent
+      ?? DEFAULT_AUTHORING_MAX_INITIAL_POSITION_EXTENT;
     const bounds = parent ? containerContentBounds(parent) : {
-      x: 8,
-      y: 8,
-      width: Math.max(0, scene.width - 16),
-      height: Math.max(0, scene.height - 16),
+      x: 0,
+      y: 0,
+      width: maximumRootExtent,
+      height: maximumRootExtent,
     };
     if (
       geometry.width > bounds.width
@@ -577,7 +584,9 @@ async function applyInitialPositions(
       diagnostics.push({
         severity: "error",
         code: "initial-position-out-of-bounds",
-        message: `Initial position does not fit bounds (${bounds.x}, ${bounds.y}, ${bounds.width}, ${bounds.height}): ${resourceIri}`,
+        message: parent
+          ? `Initial position does not fit its containing group bounds (${bounds.x}, ${bounds.y}, ${bounds.width}, ${bounds.height}): ${resourceIri}`
+          : `Initial position exceeds the root work-area safety extent ${maximumRootExtent}: ${resourceIri}`,
         semanticRef: resourceIri,
       });
       continue;
@@ -704,6 +713,7 @@ function authoringContextBinding(context: ResolvedAuthoringContext): string {
     contextRevision: context.contextRevision,
     documentRevision: context.documentRevision,
     authoringProfileRef: context.authoringProfileRef,
+    defaultLocale: context.defaultLocale,
   });
 }
 

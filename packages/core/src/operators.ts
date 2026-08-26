@@ -3,6 +3,7 @@ import type { Literal, Quad } from "n3";
 import {
   alternativeBranchIdentity,
   generatedElementId,
+  sequenceTransitionIdentity,
   statementIdentityFromQuad,
 } from "./identity.js";
 import { resolveAppearance } from "./appearance.js";
@@ -16,10 +17,13 @@ import type {
   ProjectedMembership,
   ProjectedRegion,
   ProjectedScene,
+  ProjectedGroupGuide,
   ProjectionCatalogV1,
   ProjectionDiagnostic,
   ProjectionOptions,
+  ProjectionOperator,
   ProjectionProvenance,
+  ProjectionRuleResolutionTrace,
   ProjectionRule,
   SceneSemanticText,
   ViewElementOverlay,
@@ -56,10 +60,12 @@ type ParentBinding = {
   quad: Quad;
   rule: ResolvedProjectionRule;
   ordinal?: number;
+  resolutionTrace?: ProjectionRuleResolutionTrace;
 };
 type DirectEdgePlan = {
   quad: Quad;
   resolved?: ResolvedProjectionRule;
+  resolutionTrace: ProjectionRuleResolutionTrace;
 };
 
 export type ProjectionOperatorInput = {
@@ -118,7 +124,11 @@ export function executeProjectionOperators(
     if (suppressedResources.has(quad.subject.value) || suppressedResources.has(quad.object.value)) {
       continue;
     }
-    directEdges.push({ quad, resolved: resolution.resolved });
+    directEdges.push({
+      quad,
+      resolved: resolution.resolved,
+      resolutionTrace: resolution.trace,
+    });
     candidates.add(quad.subject.value);
     candidates.add(quad.object.value);
   }
@@ -173,18 +183,7 @@ export function executeProjectionOperators(
     );
     if (edge) edges.push(edge);
   }
-  projectDerivedEdges(
-    graph,
-    view,
-    catalog,
-    vocabulary,
-    plans,
-    semanticToElement,
-    overlays,
-    edges,
-    diagnostics,
-    suppressedResources,
-  );
+  const groupGuides = projectGroupGuides(containers, memberships);
 
   return {
     viewId: view.viewId,
@@ -192,6 +191,7 @@ export function executeProjectionOperators(
     containers: [...containers.values()].sort(compareElements),
     regions: [...regions.values()].sort(compareElements),
     memberships,
+    groupGuides,
     edges: edges.sort(compareElements),
     diagnostics,
   };
@@ -227,6 +227,7 @@ function collectStructuralStatements(
           parentIri: plan.semanticRef,
           quad,
           rule: resolved,
+          resolutionTrace: plan.resolutionTrace,
         });
         parentsByChild.set(quad.object.value, bindings);
       }
@@ -244,7 +245,12 @@ function collectStructuralStatements(
         if (!isNamedNode(member)) continue;
         candidates.add(member.value);
         const bindings = parentsByChild.get(member.value) ?? [];
-        bindings.push({ parentIri: plan.semanticRef, quad, rule: resolved });
+        bindings.push({
+          parentIri: plan.semanticRef,
+          quad,
+          rule: resolved,
+          resolutionTrace: plan.resolutionTrace,
+        });
         parentsByChild.set(member.value, bindings);
       }
     } else if (operator.operator === "ordinal-sequence" || operator.operator === "alternative") {
@@ -257,13 +263,14 @@ function collectStructuralStatements(
         consumed.add(statementIdentityFromQuad(member.quad));
         if (member.memberIri) {
           candidates.add(member.memberIri);
-          if (operator.operator === "ordinal-sequence" && member.ordinal !== undefined) {
+          if (member.ordinal !== undefined) {
             const bindings = parentsByChild.get(member.memberIri) ?? [];
             bindings.push({
               parentIri: plan.semanticRef,
               quad: member.quad,
               rule: resolved,
               ordinal: member.ordinal,
+              resolutionTrace: plan.resolutionTrace,
             });
             parentsByChild.set(member.memberIri, bindings);
           }
@@ -287,6 +294,8 @@ function projectResource(
   if (operator?.operator === "suppress") return undefined;
   const structuralKind = operator?.operator === "ordinal-sequence"
     ? "container"
+    : operator?.operator === "alternative"
+      ? "container"
     : operator?.operator === "membership-container"
     ? view.kind === "region" ? "region" : "container"
     : operator?.operator === "membership-region"
@@ -298,12 +307,12 @@ function projectResource(
     ? catalog.defaults!.nodeTemplateRef
     : structuralKind === "region"
       ? catalog.defaults?.regionTemplateRef
-      : plan.resolved?.rule.templateRef ?? catalog.defaults!.nodeTemplateRef;
+      : matchingContainerTemplateRef(catalog, plan.resolved?.rule.templateRef);
   if (!defaultTemplateRef) {
     diagnostics.push({
       severity: "error",
-      code: "region-template-unresolved",
-      message: `region viewに必要なdefault region templateがありません: ${plan.semanticRef}`,
+      code: structuralKind === "region" ? "region-template-unresolved" : "container-template-unresolved",
+      message: `${structuralKind}表示に必要なtemplateがありません: ${plan.semanticRef}`,
       semanticRef: plan.semanticRef,
     });
     return undefined;
@@ -352,26 +361,58 @@ function projectResource(
   };
 
   if (structuralKind === "container") {
+    const groupRole = groupFrameKind(operator?.operator);
+    const appearance = overlayEntry?.overlay.appearance;
     return {
       ...common,
       structuralKind,
-      ...(operator?.operator === "ordinal-sequence" ? { groupRole: "sequence" as const } : {}),
+      ...(groupRole ? {
+        groupRole,
+        groupFrame: {
+          kind: groupRole,
+          semanticRef: plan.semanticRef,
+          ...(plan.resolved?.matchedIri ? { semanticTypeIri: plan.resolved.matchedIri } : {}),
+          provenance: common.provenance,
+          ...(groupRole === "alternative" ? {
+            hub: {
+              elementId: `${elementId}:alternative-hub`,
+              role: "alternative-hub" as const,
+            },
+          } : {}),
+        },
+      } : {}),
+      groupLabelAnchor: groupLabelAnchor(appearance),
+      groupLabelWritingDirection: groupLabelWritingDirection(appearance),
+      groupZOrder: groupZOrder(appearance),
       headerPosition: template.headerPosition ?? "top",
     };
   }
 
   if (structuralKind === "region") {
     const appearance = overlayEntry?.overlay.appearance;
+    const groupRole = groupFrameKind(operator?.operator);
     return {
       ...common,
       structuralKind,
-      regionLabelAnchor: regionLabelAnchor(appearance),
-      regionLabelWritingDirection: regionLabelWritingDirection(appearance),
-      regionZOrder: regionZOrder(appearance),
+      ...(groupRole ? {
+        groupFrame: {
+          kind: operator?.operator === "membership-region" ? "classification" : groupRole,
+          semanticRef: plan.semanticRef,
+          ...(plan.resolved?.matchedIri ? { semanticTypeIri: plan.resolved.matchedIri } : {}),
+          provenance: common.provenance,
+        },
+      } : {}),
+      groupLabelAnchor: groupLabelAnchor(appearance),
+      groupLabelWritingDirection: groupLabelWritingDirection(appearance),
+      groupZOrder: groupZOrder(appearance),
+      regionLabelAnchor: groupLabelAnchor(appearance),
+      regionLabelWritingDirection: groupLabelWritingDirection(appearance),
+      regionZOrder: groupZOrder(appearance),
     };
   }
 
   const iconRef = overlayEntry?.overlay.appearance?.iconRef ?? template.iconRef;
+  const iconPresentation = safeIconPresentation(overlayEntry?.overlay.appearance);
   return {
     ...common,
     structuralKind,
@@ -380,6 +421,7 @@ function projectResource(
     nodeLabelOffset: overlayEntry?.overlay.appearance?.nodeLabelOffset,
     nodeLabelWritingDirection: overlayEntry?.overlay.appearance?.nodeLabelWritingDirection,
     nodeIconOffset: overlayEntry?.overlay.appearance?.nodeIconOffset,
+    ...iconPresentation,
   };
 }
 
@@ -471,6 +513,7 @@ function projectDirectEdge(
       operator: plan.resolved?.rule.project.operator ?? "implicit-direct-edge",
       rule: plan.resolved ? ruleReference(plan.resolved) : undefined,
       derivation: "direct",
+      resolutionTrace: plan.resolutionTrace,
       editCapability: {
         command: "remove-statement",
         statementRef: semanticRef,
@@ -479,155 +522,6 @@ function projectDirectEdge(
         object: plan.quad.object.value,
       },
     },
-  };
-}
-
-function projectDerivedEdges(
-  graph: SemanticGraph,
-  view: DiagramView,
-  catalog: ProjectionCatalogV1,
-  vocabulary: RdfRdfsVocabulary,
-  plans: ReadonlyMap<string, NamedResourcePlan>,
-  semanticToElement: ReadonlyMap<string, string>,
-  overlays: ReadonlyMap<string, OverlayEntry>,
-  edges: ProjectedEdge[],
-  diagnostics: ProjectionDiagnostic[],
-  suppressedResources: ReadonlySet<string>,
-): void {
-  for (const plan of plans.values()) {
-    const resolved = plan.resolved;
-    const operator = resolved?.rule.project;
-    if (!resolved || !operator) continue;
-    if (operator.operator === "ordinal-sequence") {
-      // rdf:_n denotes membership in an ordered structure. It is deliberately
-      // projected as a selectable group plus ordinal member metadata, never as
-      // a synthetic predicate edge.
-      continue;
-    } else if (operator.operator === "alternative") {
-      const sourceElementId = semanticToElement.get(plan.semanticRef);
-      if (!sourceElementId) continue;
-      const members = collectOrdinalMembers(graph, plan.semanticRef, operator.ordinalPredicatePrefix);
-      for (const member of members) {
-        if (!member.memberIri || member.ordinal === undefined) continue;
-        const semanticText = collectSemanticText(
-          graph,
-          plan.semanticRef,
-          vocabulary.labelPredicate,
-          vocabulary.commentPredicate,
-          view.locale,
-        );
-        const sourceStatements = [statementIdentityFromQuad(member.quad)];
-        const semanticRef = alternativeBranchIdentity(plan.semanticRef, member.ordinal);
-        const edge = projectDerivedEdge(
-          catalog,
-          semanticRef,
-          "",
-          semanticText,
-          {
-            kind: "derived-structure",
-            role: "alternative-branch",
-            structureSemanticRef: plan.semanticRef,
-            sourceStatementRefs: [],
-          },
-          plan.semanticRef,
-          member.memberIri,
-          semanticToElement,
-          overlays,
-          {
-            sourceStatementRefs: sourceStatements,
-            operator: "alternative",
-            rule: ruleReference(resolved),
-            derivation: "derived",
-            editCapability: resolved.rule.match.kind === "type" && resolved.matchedIri
-              ? {
-                  command: "set-alternatives",
-                  alternative: plan.semanticRef,
-                  alternativeTypeIri: resolved.matchedIri,
-                  ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
-                  defaultOrdinal: operator.defaultOrdinal,
-                }
-              : undefined,
-          },
-          diagnostics,
-          undefined,
-          suppressedResources,
-        );
-        if (edge) edges.push(edge);
-      }
-    }
-  }
-}
-
-function projectDerivedEdge(
-  catalog: ProjectionCatalogV1,
-  semanticRef: string,
-  label: string,
-  semanticText: SceneSemanticText,
-  labelProvenance: ProjectedEdge["labelProvenance"],
-  sourceIri: string,
-  targetIri: string,
-  semanticToElement: ReadonlyMap<string, string>,
-  overlays: ReadonlyMap<string, OverlayEntry>,
-  provenance: ProjectionProvenance,
-  diagnostics: ProjectionDiagnostic[],
-  requestedTemplateRef?: string,
-  suppressedResources: ReadonlySet<string> = new Set(),
-): ProjectedEdge | undefined {
-  const sourceElementId = semanticToElement.get(sourceIri);
-  const targetElementId = semanticToElement.get(targetIri);
-  if (!sourceElementId || !targetElementId) {
-    if (suppressedResources.has(sourceIri) || suppressedResources.has(targetIri)) return undefined;
-    diagnostics.push({
-      severity: "warning",
-      code: "derived-edge-endpoint-not-visible",
-      message: `${semanticRef}の接続先が現在のviewにありません。`,
-      semanticRef,
-    });
-    return undefined;
-  }
-  const overlay = overlays.get(semanticRef);
-  const defaultTemplateRef = catalog.defaults!.edgeTemplateRef;
-  const template = selectTemplate(
-    catalog,
-    overlay?.overlay.appearance?.templateRef ?? requestedTemplateRef ?? defaultTemplateRef,
-    "edge",
-    semanticRef,
-    diagnostics,
-    defaultTemplateRef,
-  );
-  const waypoints = overlay?.overlay.routing?.waypoints;
-  const manualWaypoints = waypoints?.length ? waypoints : undefined;
-  const routeMode = overlay?.overlay.routing?.routeMode
-    ?? (manualWaypoints ? "manual" : template.routeMode ?? "auto");
-  return {
-    elementId: overlay?.elementId ?? generatedElementId("edge", semanticRef),
-    semanticRef,
-    structuralKind: "edge",
-    label,
-    caption: overlay?.overlay.appearance?.edgeCaption,
-    semanticText,
-    labelProvenance,
-    sourceElementId,
-    targetElementId,
-    templateRef: template.templateRef,
-    style: resolveAppearance(
-      template.style,
-      overlay?.overlay.appearance,
-      catalog,
-      semanticRef,
-      diagnostics,
-    ).style,
-    waypoints: manualWaypoints,
-    curve: copyCurveRouting(overlay?.overlay.routing?.curve),
-    labelOffset: overlay?.overlay.routing?.labelOffset,
-    sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
-    targetAnchor: overlay?.overlay.routing?.targetAnchor,
-    routeMode,
-    sourceMarker: overlay?.overlay.routing?.sourceMarker ?? template.sourceMarker ?? "none",
-    targetMarker: overlay?.overlay.routing?.targetMarker ?? template.targetMarker ?? "arrow",
-    routingPlacement: manualWaypoints ? "user" : "generated",
-    fallback: false,
-    provenance,
   };
 }
 
@@ -660,13 +554,20 @@ function applyMembershipBindings(
         semanticRef: statementIdentityFromQuad(binding.quad),
         containerElementId: parentElementId,
         memberElementId: child.elementId,
-        ...(view.kind === "region" && binding.rule.rule.project.operator !== "ordinal-sequence"
+        ...(view.kind === "region" && regions.has(binding.parentIri)
           ? { regionElementId: parentElementId }
           : {}),
         role: binding.rule.rule.project.operator === "ordinal-sequence"
           ? "sequence-member"
+          : binding.rule.rule.project.operator === "alternative"
+            ? "alternative-member"
           : "membership",
         ...(binding.ordinal !== undefined ? { ordinal: binding.ordinal } : {}),
+        ...(binding.ordinal !== undefined ? { ordinalBadge: String(binding.ordinal) } : {}),
+        ...(binding.rule.rule.project.operator === "alternative"
+          && binding.ordinal === binding.rule.rule.project.defaultOrdinal
+          ? { isDefault: true }
+          : {}),
         provenance,
       });
     }
@@ -676,9 +577,10 @@ function applyMembershipBindings(
         parentBindings.set(entry.parentElementId, entry.binding);
       }
     }
-    const sequenceParents = new Map(
+    const ordinalParents = new Map(
       [...parentBindings].filter(([, binding]) => (
         binding.rule.rule.project.operator === "ordinal-sequence"
+        || binding.rule.rule.project.operator === "alternative"
       )),
     );
     const membershipParents = new Map(
@@ -686,12 +588,12 @@ function applyMembershipBindings(
         binding.rule.rule.project.operator === "membership-container"
       )),
     );
-    const hierarchicalParents = sequenceParents.size > 0
-      ? sequenceParents
+    const hierarchicalParents = ordinalParents.size > 0
+      ? ordinalParents
       : view.kind === "node-link" ? membershipParents : new Map<string, ParentBinding>();
     if (hierarchicalParents.size === 0) continue;
     if (hierarchicalParents.size > 1) {
-      if (sequenceParents.size === 0) diagnostics.push({
+      if (ordinalParents.size === 0) diagnostics.push({
         severity: "warning",
         code: "multiple-container-memberships-not-hierarchical",
         message: `${childIri}の${hierarchicalParents.size}件のcontainer membershipはhierarchy parentへ縮約せず保持します。`,
@@ -717,6 +619,7 @@ function membershipProvenance(
       operator: binding.rule.rule.project.operator,
       rule: ruleReference(binding.rule),
       derivation: "derived",
+      resolutionTrace: binding.resolutionTrace,
       editCapability: binding.rule.rule.match.kind === "type" && binding.rule.matchedIri
         ? operator.operator === "ordinal-sequence"
           ? {
@@ -725,6 +628,14 @@ function membershipProvenance(
               sequenceTypeIri: binding.rule.matchedIri,
               ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
             }
+          : operator.operator === "alternative"
+            ? {
+                command: "set-alternatives",
+                alternative: binding.parentIri,
+                alternativeTypeIri: binding.rule.matchedIri,
+                ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
+                defaultOrdinal: operator.defaultOrdinal,
+              }
           : {
             command: "set-membership",
             container: binding.parentIri,
@@ -736,6 +647,80 @@ function membershipProvenance(
               : "subject",
           }
         : undefined,
+  };
+}
+
+function projectGroupGuides(
+  containers: ReadonlyMap<string, ProjectedContainer>,
+  memberships: readonly ProjectedMembership[],
+): ProjectedGroupGuide[] {
+  const guides: ProjectedGroupGuide[] = [];
+  for (const container of containers.values()) {
+    const frame = container.groupFrame;
+    if (!frame || (frame.kind !== "sequence" && frame.kind !== "alternative")) continue;
+    const members = memberships
+      .filter((membership) => membership.containerElementId === container.elementId)
+      .filter((membership) => membership.ordinal !== undefined)
+      .sort((left, right) => (
+        left.ordinal! - right.ordinal!
+        || compareCodePoints(left.memberElementId, right.memberElementId)
+      ));
+    if (frame.kind === "sequence") {
+      for (let index = 1; index < members.length; index += 1) {
+        const previous = members[index - 1]!;
+        const current = members[index]!;
+        guides.push({
+          guideId: sequenceTransitionIdentity(
+            container.semanticRef,
+            previous.ordinal!,
+            current.ordinal!,
+          ),
+          groupElementId: container.elementId,
+          kind: "sequence-order",
+          sourceElementId: previous.memberElementId,
+          targetElementId: current.memberElementId,
+          ordinal: current.ordinal,
+          muted: true,
+          provenance: combineGuideProvenance(previous.provenance, current.provenance),
+        });
+      }
+      continue;
+    }
+    const hubElementId = frame.hub!.elementId;
+    for (const member of members) {
+      guides.push({
+        guideId: alternativeBranchIdentity(container.semanticRef, member.ordinal!),
+        groupElementId: container.elementId,
+        kind: "alternative-candidate",
+        sourceElementId: hubElementId,
+        targetElementId: member.memberElementId,
+        ordinal: member.ordinal,
+        muted: true,
+        provenance: member.provenance,
+      });
+      if (member.isDefault) {
+        frame.defaultMember = {
+          ordinal: member.ordinal!,
+          memberElementId: member.memberElementId,
+          statementRef: member.semanticRef,
+          provenance: member.provenance,
+        };
+      }
+    }
+  }
+  return guides.sort((left, right) => compareCodePoints(left.guideId, right.guideId));
+}
+
+function combineGuideProvenance(
+  previous: ProjectionProvenance,
+  current: ProjectionProvenance,
+): ProjectionProvenance {
+  return {
+    ...current,
+    sourceStatementRefs: [...new Set([
+      ...previous.sourceStatementRefs,
+      ...current.sourceStatementRefs,
+    ])].sort(compareCodePoints),
   };
 }
 
@@ -752,6 +737,7 @@ function resourceProvenance(
     operator: plan.resolved?.rule.project.operator ?? "implicit-resource",
     rule: plan.resolved ? ruleReference(plan.resolved) : undefined,
     derivation: "resource",
+    resolutionTrace: plan.resolutionTrace,
   };
 }
 
@@ -801,6 +787,18 @@ function selectTemplate(
   return catalog.templates[fallbackRef]!;
 }
 
+function matchingContainerTemplateRef(
+  catalog: ProjectionCatalogV1,
+  requestedRef: string | undefined,
+): string | undefined {
+  if (requestedRef && catalog.templates[requestedRef]?.structuralKind === "container") {
+    return requestedRef;
+  }
+  return Object.keys(catalog.templates)
+    .sort(compareCodePoints)
+    .find((templateRef) => catalog.templates[templateRef]?.structuralKind === "container");
+}
+
 function collectSemanticText(
   graph: SemanticGraph,
   semanticRef: string,
@@ -844,19 +842,30 @@ function collectSemanticText(
   };
 }
 
-function regionLabelAnchor(
+function groupFrameKind(
+  operator: ProjectionOperator["operator"] | undefined,
+): "membership" | "sequence" | "alternative" | undefined {
+  if (operator === "membership-container" || operator === "membership-region") return "membership";
+  if (operator === "ordinal-sequence") return "sequence";
+  if (operator === "alternative") return "alternative";
+  return undefined;
+}
+
+function groupLabelAnchor(
   appearance: ViewElementOverlay["appearance"] | undefined,
 ): number | undefined {
-  const value = appearance?.regionLabelAnchor
+  const value = appearance?.groupLabelAnchor
+    ?? appearance?.regionLabelAnchor
     ?? appearance?.extensions?.[LEGACY_REGION_LABEL_ANCHOR];
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value < 1
     ? value
     : undefined;
 }
 
-function regionLabelWritingDirection(
+function groupLabelWritingDirection(
   appearance: ViewElementOverlay["appearance"] | undefined,
 ): "horizontal-right" | "vertical-down" | undefined {
+  if (appearance?.groupLabelWritingDirection) return appearance.groupLabelWritingDirection;
   if (appearance?.regionLabelWritingDirection) return appearance.regionLabelWritingDirection;
   const legacy = appearance?.extensions?.[LEGACY_REGION_LABEL_WRITING_DIRECTION];
   if (legacy === "horizontal") return "horizontal-right";
@@ -864,12 +873,34 @@ function regionLabelWritingDirection(
   return undefined;
 }
 
-function regionZOrder(
+function groupZOrder(
   appearance: ViewElementOverlay["appearance"] | undefined,
 ): number | undefined {
-  const value = appearance?.regionZOrder
+  const value = appearance?.groupZOrder
+    ?? appearance?.regionZOrder
     ?? appearance?.extensions?.[LEGACY_REGION_Z_ORDER];
   return typeof value === "number" && Number.isSafeInteger(value) ? value : undefined;
+}
+
+function safeIconPresentation(
+  appearance: ViewElementOverlay["appearance"] | undefined,
+): Pick<ProjectedNode, "nodeIconScale" | "nodeIconSize" | "nodeIconFit"> {
+  const scale = appearance?.nodeIconScale;
+  const size = appearance?.nodeIconSize;
+  if (scale !== undefined && size !== undefined) return {};
+  if (scale !== undefined && (
+    !Number.isFinite(scale) || scale < 0.1 || scale > 8
+  )) return {};
+  if (size && ![size.width, size.height].every((dimension) => (
+    Number.isFinite(dimension) && dimension >= 4 && dimension <= 4096
+  ))) return {};
+  const fit = appearance?.nodeIconFit;
+  if (fit !== undefined && fit !== "contain" && fit !== "cover") return {};
+  return {
+    ...(scale !== undefined ? { nodeIconScale: scale } : {}),
+    ...(size ? { nodeIconSize: { width: size.width, height: size.height } } : {}),
+    ...(fit ? { nodeIconFit: fit } : {}),
+  };
 }
 
 function copyCurveRouting(curve: EdgeCurveRouting | undefined): EdgeCurveRouting | undefined {

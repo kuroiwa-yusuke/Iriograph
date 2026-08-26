@@ -7,6 +7,7 @@ import {
   createPackageDefaultIconResolver,
   packageDefaultIconAssets,
   packageDefaultIconDataUrl,
+  packageDefaultIconIntrinsicSize,
   packageDefaultIcons,
   withPackageDefaultIconAccess,
 } from "./default-icons";
@@ -49,6 +50,13 @@ describe("package default icons", () => {
     });
     if (resolved.status === "resolved") {
       expect(resolved.lease.url).toBe(packageDefaultIconDataUrl(icon.assetRef));
+      expect(resolved.lease.svgViewBox).toBe("0 0 24 24");
+      expect(packageDefaultIconIntrinsicSize(icon.assetRef)).toEqual({
+        width: 24,
+        height: 24,
+        aspectRatio: 1,
+        source: "svg-view-box",
+      });
       expect(() => resolved.lease.release()).not.toThrow();
     }
     expect(fallback.resolve).not.toHaveBeenCalled();
@@ -83,6 +91,12 @@ describe("package default icons", () => {
       new AbortController().signal,
     );
     expect(batch.scene.nodes[0]?.iconUrl).toBe(packageDefaultIconDataUrl(icon.assetRef));
+    expect(batch.scene.nodes[0]?.iconIntrinsicSize).toEqual({
+      width: 24,
+      height: 24,
+      aspectRatio: 1,
+      source: "svg-view-box",
+    });
     expect(batch.diagnostics).toEqual([]);
     expect(hostResolver.resolve).not.toHaveBeenCalled();
     batch.release();

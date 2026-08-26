@@ -75,6 +75,17 @@ export function packageDefaultIconDataUrl(assetRef: string): string | undefined 
   return source ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source)}` : undefined;
 }
 
+export function packageDefaultIconIntrinsicSize(assetRef: string): {
+  width: 24;
+  height: 24;
+  aspectRatio: 1;
+  source: "svg-view-box";
+} | undefined {
+  return sourceByRef.has(assetRef)
+    ? { width: 24, height: 24, aspectRatio: 1, source: "svg-view-box" }
+    : undefined;
+}
+
 /** Resolves bundled icons before an optional host workspace resolver. */
 export function createPackageDefaultIconResolver(fallback?: AssetResolver): AssetResolver {
   return {
@@ -89,6 +100,7 @@ export function createPackageDefaultIconResolver(fallback?: AssetResolver): Asse
           url: packageDefaultIconDataUrl(request.assetRef)!,
           mediaType: "image/svg+xml",
           byteLength: new TextEncoder().encode(source).byteLength,
+          svgViewBox: "0 0 24 24",
           release() {},
         },
       };

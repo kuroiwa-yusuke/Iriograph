@@ -86,6 +86,14 @@ Viewの永続変更は`applyViewCommand`の`add`、`duplicate`、`configure`、`
 維持します。deleteは壊れたviewにも適用でき、最後のviewは拒否します。詳細は
 [view-management.md](./view-management.md)を正本とします。
 
+JSON sourceからportable documentを置換する場合は`previewPortableDocumentReplace`と
+`applyPortableDocumentReplace`を対で使います。PreviewはJSON parse、document schema、semantic/profile、
+すべてのnamed viewのprojection・layout・overlay reconciliationを実行し、元document fingerprintと
+candidate fingerprintを保持します。Applyは両fingerprintとruntime identityを再検証し、staleまたは
+一viewでもerrorなら一部を保存しません。Editorの全文Document sourceとactive View overlay sourceは
+この同じ境界へ合流し、一回の成功を一つのhistory itemとして扱います。`confirmationId`はpreviewと
+candidateの改変を検出するintegrity tokenであり、通常のDocument適用一回に別の確認modalを要求しません。
+
 overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
@@ -224,6 +232,8 @@ type AssetAccess = {
   policy: {
     allowedMediaTypes: readonly AssetMediaType[];
     maxBytes: number;
+    maxDecodedPixels?: number;
+    maxConcurrentResolutions?: number;
     allowedSchemes: readonly string[];
     allowedOrigins: readonly string[];
   };
@@ -240,7 +250,7 @@ interface AssetResolver {
 }
 ```
 
-Resolved resultはabsolute URL、実media type、実byte lengthとidempotentな`release()`を持つleaseです。Coreはcatalog宣言とのmedia type一致、byte上限、許可scheme・originを検証します。未解決、移動、削除、取得失敗、policy違反はwarningとしてiconなし表示へfallbackし、semantic transactionをrollbackしません。返されるScene batchの`release()`は採用しなかったstale result、Scene交換、editor破棄時に呼びます。Blob URLの生成・cache・revokeとworkspace revisionの更新はhost責務です。
+Resolved resultはabsolute URL、実media type、実byte lengthとidempotentな`release()`を持つleaseです。Coreはcatalog宣言とのmedia type一致、byte上限、許可scheme・originに加え、decoded raster面積を検証します。`maxBytes`は取得したencoded payloadの転送・保持量、`maxDecodedPixels`は展開後のraster memory規模を制限する独立した上限です。一方を満たしても他方の検証を省略せず、圧縮率の高い巨大画像とbyte数の大きい低解像度画像を同じ値で近似しません。`maxDecodedPixels`省略時は64 Mi pixel、`maxConcurrentResolutions`省略時は4で、同時数のhard上限は32です。面積超過leaseとbatch abort後の未採用leaseはCoreが即時releaseします。未解決、移動、削除、取得失敗、policy違反はwarningとしてiconなし表示へfallbackし、semantic transactionをrollbackしません。返されるScene batchの`release()`は採用しなかったstale result、Scene交換、editor破棄時に呼びます。Blob URLの生成・cache・revokeとworkspace revisionの更新はhost責務です。Coreはviewport visibilityとDOM decodeを知らないため、`loading="lazy"`、viewport優先順位、virtualizationはrenderer/host責務です。
 
 Coreが同梱する既定SVGは`urn:iriograph:icon:lucide:<name>:1`を予約namespaceとして使います。
 `packageDefaultIcons`/`packageDefaultIconAssets`は選択肢と定義を、`packageDefaultIconDataUrl`と
@@ -262,6 +272,14 @@ Domain constraintは任意の`ResolvedSemanticValidationContext`としてhostが
 `applyAuthoringSource`の`actor`は`human`または`llm`のどちらかを必須とし、不明値や欠落はfail closedにします。LLM transactionではauthoring profile未解決、unknown term追加、term minting、許可外resource namespaceをerrorとして扱います。`DiagramCatalog`を受ける同期`applySemanticSource` overloadは既存host向けの移行用互換contractです。
 
 Human structured authoringは`previewAuthoringCommands(document, commands, context, options)`で開始します。Previewは元documentとresolved contextのfingerprint、正規化済みcommand、追加・削除statement、candidate Turtle、diagnostics、stable confirmation IDを返します。Warningを含むpreviewも明示確認できますが、blocking errorを含むpreviewは適用できません。
+
+通常UIの薄い境界には`previewStructuredAuthoringRequest`を使います。`create-direct-relations`は一つのrequest内で同じS/P/Oが重複する場合、または一行でも既存asserted S/P/Oと一致する場合に全行を拒否し、部分的なedge追加を返しません。`set-group-members`の候補グループは`defaultMemberIndex`で選んだ出現位置を`rdf:_1`へ移し、それ以外の出現位置の相対順を維持します。同じIRIが複数ordinalにあってもindexで選んだ一件を基準にします。
+
+既存通常要素の種類は`set-node-roles`へ完全な`roleId`集合を渡して変更します。Coreはprofileのopaque role IDをclassへ解決し、管理対象roleだけを置換してその他の既存typeを保持します。Group構造typeとの混在、現在のprofileにないrole、Group Frameをnodeとして編集するrequestは拒否します。分類領域一件またはderived intersectionを表す複数領域選択は`structuredNodeRoleSeedFromCanvasSelections`でopaque role ID集合へ変換し、class IRIをpresentationへ返しません。
+
+名前・説明の通常編集は`structuredLocalizedTextPresentation`が返すopaque `valueId`を`update-localized-text`へ戻します。Coreは選択したliteralのlexical valueだけを置換し、そのlanguage/datatypeと同じpropertyの他翻訳を完全保持します。Presentationには`default`、`translation`、`untagged`、`typed`という区分だけを返し、生のlanguage tag/datatype IRIの編集はTurtle sourceへ限定します。
+
+Exact predicateの意味階層を通常UIへ渡す場合は、host/editor内部で解決したpathを`structuredPredicateHierarchyPresentation`へ入力します。Coreはtop-levelの既知direct predicateだけを採用し、path内termをpredicate catalogと同じ`termId`優先・hash fallbackでopaque化します。返却DTOは`predicateId`、label、全path、cycle/truncation diagnostic、query/validation policyの説明だけを持ち、生のIRIをpresentation itemやDOMへ返しません。Semantic-accessへの依存やlabel一致によるidentity解決は行いません。
 
 `applyAuthoringPreview(document, preview, context, options)`はconfirmation IDを信用してcandidateを直接保存せず、現在のdocumentとcontextからcommandを再compile・再validateします。元source、document revision、context identity、previewした追加・削除statement集合のいずれかが変わっていればstaleとして拒否します。これによりallocator完了待ち、別のpresentation edit、profile更新、preview JSONの改変を跨いだ適用を防ぎます。Apply後は`applySemanticSource`と同じparse、構造検証、全view投影、非同期layout、reconciliationへ合流します。Human UIとLLMに別々のcandidate graph検証経路を作りません。
 
@@ -285,7 +303,7 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 
 | Command | 意味graphへの効果 | 主な制約 |
 |---|---|---|
-| `create-resource` | named resourceと初期statementを追加 | named IRIと、そのresourceをsubjectまたはobjectに含む少なくとも1tripleが同一transactionに必要。node作成UIではtarget viewでnode/containerに投影できることも検証 |
+| `create-resource` | named resourceと初期statementを追加 | named IRIと、そのresourceをsubjectまたはobjectに含む少なくとも1tripleが同一transactionに必要。node作成UIではtarget viewでnode/containerに投影できることも検証。低水準`initialPosition`はrootで現在のScene外も許可し、省略時32768の安全extentまたは親Group content boundsを超える場合だけ拒否 |
 | `set-property` | literalまたはIRI propertyを追加・置換・削除 | predicate、datatype/language、cardinalityはprofile/domain validationの対象 |
 | `connect-resources` | subjectからobjectへの関係を作る | predicate必須。直接IRI-object tripleまたはcapability定義のgraph patchとし、generic predicateを暗黙生成しない |
 | `set-statement-comments` | exact direct statementの説明集合を置換・削除 | `statementRef`とnamed S/P/Oの一致、元tripleの存在を必須とする。複数language・複数行literalを許可し、空配列は個別説明を削除する |
@@ -310,11 +328,13 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 predicateIri, objectIri })`でexact identityを得られます。同一command列で先に新statementを接続し、
 続けてその説明を設定できます。
 
-Standard editorの`要素を追加`は、label一項目、host allocatorが返すopaque named IRI、そのIRIをsubjectにしたactive localeの`rdfs:label`一文だけを`create-resource`へcompileします。空label、allocator失敗、IRI衝突、namespace違反は一件も保存せず作成を拒否します。Type、comment、上位概念、既存resourceとのedge、membership、初期位置は作成formに含めず、作成確定後の`要素の詳細を編集`、`所属・並び順を編集`、`ビュー`で別transactionとして追加します。Generic node fallbackと標準layoutが初期displayを補完します。
+Standard editorの`新しい要素を作る`は、最初にnodeまたはgroupを選びます。Nodeは名前とresolved profileが公開するnode-roleを一件以上（`allowUntypedNodes`のときだけ0件）、groupは名前と分類・包含・順序付き・候補の構造kind一件を要求します。Host allocatorが返すopaque named IRIへ`rdfs:label`と選択済みの全`rdf:type`を一つの`create-resource`へcompileします。空label、未許可role、allocator失敗、IRI衝突、namespace違反は一件も保存せず作成を拒否します。Comment、上位概念、既存resourceとのedge、membership、初期位置は作成formに含めず、作成確定後の対象別意味編集と`ビュー`で別transactionとして追加します。Catalog projectionと標準layoutが初期displayを補完します。
 
 Coreの一般`create-resource.initialStatements` contractはhost/LLM adapter向けに複数statementを扱えますが、standard editorが複合作成formを公開する理由にしません。構造predicateを一般initial statementで迂回できず、ordinal predicate等は専用commandを使います。Edgeはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属を暗黙変更しません。
 
-右Inspectorの初期状態はCanvas選択のlabel中心概要と`要素を追加`、`関係を追加`の2入口を表示します。Resource選択時は`要素の詳細を編集`と`所属・並び順を編集`、direct edge選択時は`関係の意味を編集`を段階表示します。`要素を追加`はlabel一項目だけで、種類や関係を尋ねません。非削除の意味操作は一回の実行内でcandidate validationとatomic transactionを行い、確認画面を重ねません。Details dialogは選択後の段階UIであり、独立入口にしません。意味入力とビュー入力は同時表示せず、`意味`と`ビュー`のtabで片方だけを表示します。Tabを往復しても未実行の段階入力を黙って破棄しません。右クリック、Context Menu key、Shift+F10は別menuを表示せず、選択対象のビューtabと該当段階を直接開き、semantic commandを開始しません。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はlabel、説明、形のpreviewを主表示にし、完全IRIを内部option value、tooltip、read-only Advanced参照情報として保持します。Standard editorの通常UIとAdvancedにIRI入力欄を置かず、Coreへ渡す値はallocatorまたは選択肢が保持する完全IRIとします。同名labelをidentityとして使いません。順序・選択肢・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
+右Inspectorの意味編集は初期blur状態で`新しい要素を作る`、`関係を作る`、`要素を変更する`、`関係を変更する`の4入口だけを表示し、入口の後は一段に一つの判断を順次表示します。要素作成はnode/group、node-roleまたはgroup kind、名前の順です。関係作成はicon cardでdirect/membershipを先に選び、directは一始点・複数接続先・共通または行別predicate、membershipは既存group・複数member・必要な順序/既定候補を一つのrequestへcompileします。Membership memberは既存Canvas選択と、名前・node-roleだけのephemeral新規chipを混在でき、確定時に全resourceとmembershipをatomicに作ります。Canvas事前選択は各roleへ明示的にseedし、family切替でdraftを相互変換しません。非削除の意味操作は一回の実行内でcandidate validationとatomic transactionを行い、確認画面を重ねません。意味入力とビュー入力は同時表示せず、`意味`と`ビュー`のtabで片方だけを表示します。Tabを往復しても未実行の段階入力を黙って破棄しません。
+
+右クリック、Context Menu key、Shift+F10は同じ対象別menuを表示します。Node、direct edge、derived sequence/alternative guide、各group kind、空白ごとに適用可能な意味・ビュー・配置・削除の入口だけを示し、derived guideは所有groupの構造編集へ委譲します。Menu選択は対応Inspector/actionへfocusするだけでmutationを実行せず、disabled理由とfocus returnを維持します。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はopaque option IDとlabel/comment、形のpreviewだけをpresentation DTO/DOMへ返し、完全IRIをoption value、tooltip、read-only Advanced参照情報へ渡しません。Host/editor内部でopaque IDをresolved contextとScene provenanceからexact IRIへ戻してCore transactionを構成します。同名labelをidentityとして使いません。生IRIを表示・編集できる標準入口はeditableなTurtle/Document sourceだけです。順序・候補グループ・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
 
 Relation pickerは候補名を`A（predicate label）B`、説明をcatalog/vocabularyの日本語文型metadataとしてcategory別に表示します。候補はresolved profile内のRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の標準predicateを、source/targetの明示型、限定subclass closure、`rdfs:domain`/`rdfs:range`、object/literal kind、semantic capabilityで絞ります。型不明は後順位に残し、完全OWL推論やlabel推測を行わず、candidate validationを最終判定とします。同じpredicateを使う個別edge captionはview overlay annotationであり、semantic commandを生成しません。
 
@@ -324,7 +344,7 @@ Relation pickerは候補名を`A（predicate label）B`、説明をcatalog/vocab
 
 選択外へ波及する削除の確認modalは、対象label、関係・所属・並び順の種別、影響件数をraw Turtleより先に示し、Canvas上の削除対象を赤線・赤破線で示します。このpreviewはeditor内部のephemeral session stateであり、portable document、Scene正本、overlay、historyへ入りません。通常の非削除操作には別の確認画面を設けません。
 
-`set-property`はsubjectとpredicateに対応する既存値をすべて置換し、値配列が空なら明示削除します。空文字列literalは削除ではなく有効な一値です。IRI/literalの複数値を保持し、Literalのlanguageとdatatypeは同時指定できません。Property参照の削除は、そのstatementだけを除去し、参照先blank nodeのclosureが孤立しても推測cascadeしません。`rdfs:member`と正規の正整数suffixを持つ`rdf:_n`等の構造predicateはproperty UIから変更せず、membership、sequence、alternative専用commandを使います。`set-alternatives`は上記の最終ordinal順とdefault slotの一致を必須にします。
+`set-property`はsubjectとpredicateに対応する既存値をすべて置換し、値配列が空なら明示削除します。空文字列literalは削除ではなく有効な一値です。IRI/literalの複数値を保持し、Literalのlanguageとdatatypeは同時指定できません。Property参照の削除は、そのstatementだけを除去し、参照先blank nodeのclosureが孤立しても推測cascadeしません。`rdfs:member`と正規の正整数suffixを持つ`rdf:_n`等の構造predicateはproperty UIから変更せず、membership、sequence、alternative専用commandを使います。`set-alternatives`は上記の最終ordinal順と既定候補のordinal 1配置を必須にします。
 
 Capabilityのparameterは`required: false`の場合だけoptionalです。Optional bindingを省略したcommandでは、そのbindingを参照するexact template statementをadd/remove双方からskipし、残りのstatementだけをatomic patchへ含めます。
 
@@ -361,9 +381,13 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
     :saving="saving"
     :asset-access="assetAccess"
     :asset-options="workspaceAssetOptions"
+    :workspace-locator="workspaceLocator"
     :pick-asset="pickWorkspaceAsset"
     :authoring-context="resolvedAuthoringContext"
     :resource-iri-allocator="resourceIriAllocator"
+    :document-identity-allocator="documentIdentityAllocator"
+    :predicate-inference-policy="{ query: 'rdfs-subproperty', validation: 'exact' }"
+    @duplicated-as-new="openDuplicatedDocument"
     @save="saveToWorkspace"
   />
 </template>
@@ -375,23 +399,55 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `runtimeContext`: profile別catalog、layout registry、projection optionを持つ正規contract
 - `catalog`: 単一catalog host向けのdeprecated互換prop
 - `activeViewId` / `update:activeViewId`: optional controlled active view。省略時はuncontrolled
-- `save`: packageは永続化せずhostへ保存要求を通知
+- `save`: packageは未適用draftのflush成功後にだけ永続化要求を通知する。Event handlerは現在の`modelValue`を保存し、同じEditorへ`flushPendingEdits()`を再入しない
 - `validationChanged`: semantic/project diagnostics
 - `assetAccess`: 非同期resolver、media/size/URL policy、host revision
 - `assetOptions`: `{ assetRef, label?, path?, mediaType? }[]`。workspace treeの画像を人向けlabelと正確なpath候補へ対応付けるhost注入値。Editorはpathを入力補完へだけ使い、保存時は`assetRef`へ変換する
+- `workspaceLocator`: document pathと入力pathを受け、segment候補、breadcrumb、最終`assetRef`解決を返す同期metadata port。Workspace-root相対、`/`始まり、`./` / `../`を正規化し、root escape、folder、not-found、曖昧pathを拒否する。Asset取得、認証、権限確認は行わない
 - `pickAsset(request)`: workspace pickerを開き、選択時はassetRefだけを返すhost callback
 - `authoringContext`: hostが解決した語彙・capability・policy・projection runtime
 - `semanticValidationContext`: hostが解決したdomain validation identity/revision/port。省略時は`authoringContext.semanticValidation`を利用可能
 - `resourceIriAllocator`: resource IRI省略時の同期または非同期allocator。返却IRIはCoreが再検証する
+- `documentIdentityAllocator`: 「新しい図として複製」用にhost内で一意なopaque `documentId`と、現在と異なるabsolute base IRIを発行するhost port。CoreはID形式を固定せず、Mock/CloudはUUIDを採用できる。requestの`requestId`と`documentRevision`を応答へそのまま返し、stale responseをEditorが拒否できるようにする
+- `duplicatedAsNew(handoff)`: parsed term単位のIRI rebaseと全view検証を終えたcopyをhostへ渡す。現在の`modelValue`、history、dirty stateは変更しないため、hostが別fileへ保存して開く
+- `predicateInferencePolicy`: `query`と`validation`がexact predicateだけか限定`rdfs:subPropertyOf`推論を使うかをInspectorへ説明するpolicy。Projection ruleやasserted edge数を変更しない
 - `fitOnInitialLoad`: 各document/viewで最初に完成したSceneだけを、負座標とrouteを含む実content boundsへfitするhost opt-in。session-only作業余白はfit対象に含めず、後続のsemantic/presentation編集では利用者のviewportを維持する
-- `flushPendingEdits()`: Turtle textareaの未適用draftを検証し、保存前に正本へ反映する。入力途中または未実行のstructured draftは自動適用せず保存を拒否する
+- `flushPendingEdits()`: Turtle、View overlay、全文Document sourceの未適用draftをそれぞれのatomic pipelineで検証し、保存前に正本へ反映する。入力途中または未実行のstructured draftは自動適用せず保存を拒否する
 - `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作
 - `revealSelection()` / `focusElement(elementId)`: 現在の選択またはstable Scene element IDをviewportへ表示
 - `selectElement(elementId)` / `selectElements(elementIds)` / `selectAll()` / `clearSelection()`: hostからsession selectionを操作
 - `setSnapSettings(settings)`: grid、対象要素へのsnapをsession内で設定
 - `selectionChanged(primaryElementId)`: 既存のprimary selection通知
 - `selectionSetChanged(elementIds)`: ordered selection集合の通知
-- `pendingDraftsChanged(pending)`: 未適用のTurtleまたはstructured authoring draftの有無。hostの保存可否・離脱確認に利用
+- `pendingDraftsChanged(pending)`: 未適用のTurtle、View overlay、全文Document source、structured authoring draftの有無。hostの保存可否・離脱確認に利用
+
+`DocumentIdentityAllocator.allocate()`のrequest/resultは次のrevision-bound contractです。
+
+```ts
+type DocumentIdentityAllocationRequest = {
+  currentDocumentId: string;
+  currentBaseIri: string;
+  documentRevision: string;
+  requestId: string;
+  signal?: AbortSignal;
+};
+
+type DocumentIdentityAllocation = {
+  documentId: string;
+  baseIri: string;
+  documentRevision: string;
+  requestId: string;
+};
+```
+
+Editorはallocator完了後に元document fingerprint、revision、request IDを再確認し、Coreの
+`previewDocumentRebase` / `applyDocumentRebasePreview`でlocal namespaceのnamed termとoverlay referenceだけを
+一括mappingします。Preview適用は元documentを置換せず、`DocumentDuplicateHandoff`を一回emitするだけです。
+現在と同じbaseは`document-rebase-base-unchanged`と`allocate-new-document-base`の修正行動で拒否します。
+衝突判定は旧termが移動する前の占有ではなく、RDF term、overlay key/semanticRef、statement identityをすべて
+同時に写した最終集合で行います。異なるsource identityが同じ最終identityへ集約されるmany-to-oneだけを拒否するため、
+旧namespace配下へ新namespaceを置くcopyでも、さらに先へ移動するnested termを偽衝突にしません。
+同一内容のclipboard copyはこのallocatorを呼ばずidentityも変更しません。
 
 公開`IriographDiagramCanvas`はedge編集時に
 `routingUpdate({ elementId, routing?: { waypoints?, curve?, labelOffset?, sourceAnchor?, targetAnchor? } })`を発行します。`routing`は
@@ -406,7 +462,7 @@ Canvasだけをpreviewします。`offset`省略はresetです。標準Editorは
 
 取込、書出、workspace tree、HTTP、revision conflict、認証・権限はhostの責務です。
 
-Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、focusされたviewport自身のArrow/Page key、fit、選択への移動、minimapを提供します。Node drag中にpointerがviewport端へ近づいた場合は同じ方向へsession scrollを進め、geometry transactionとは分離します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。Viewport以外にfocusがあるArrow keyは既存のelement編集へ渡すため、keyboard panとnode移動を同時実行しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
+Viewport navigationはportable documentを更新せず、`update:modelValue`、presentation history、dirty stateを発生させません。標準UIはblank canvasのprimary dragと任意箇所のmiddle drag、選択geometryがないfocus済みCanvasのArrow/Page key、fit、選択への移動、minimapを提供します。位置を持つ要素を選択しているArrowは1 unit、Shift+Arrowは10 unitのpresentation移動とし、`N` / `Shift+N`を次 / 前のobject focusへ割り当てます。処理済みArrowはpage scrollへ伝播させず、input、contenteditable、IME composition中はCanvas shortcutを無効にします。Node drag中にpointerがviewport端へ近づいた場合は同じ方向へsession scrollを進め、geometry transactionとは分離します。Node、container、resize handle、waypoint上のprimary pointerは編集gestureを優先し、panを開始しません。`readOnly`はsemantic/presentation editを禁止しますが、閲覧に必要なpan、zoom、fit、minimap、selection revealは無効化しません。
 
 埋込みEditor自身はhostの横幅を広げる固定最小幅を持ちません。右Inspectorは選択概要と段階actionを優先したcompact密度とし、長い説明・技術情報を折り畳みます。三列layoutが狭い場合はEditor内部で横scrollでき、左右sidebarを折り畳めばCanvasが利用可能幅へ拡張します。Canvasのscroll viewportは`min-width: 0`を持ち、scene外周のlabelやresize handleはpaperでclipせずscroll padding内へ描画します。公開CanvasをEditor外で単独利用する場合もpaper色とgridのfallbackを持ちます。HostはEditorを置く領域に有限のblock-sizeを与えます。
 
@@ -456,7 +512,7 @@ source参照・presentation編集の許可まで失わせません。
 
 Host asset pickerは選択したabsolute asset IRIだけを返し、Editorは`appearance.iconRef`のpresentation transactionとして保存します。URLやbytesをpicker resultへ含めません。Cancel、stale response、不正IRIではdocumentを変更しません。
 
-ファイル移動後も維持できるopaque IRIを優先します。同じIRIを維持できる移動はhost mappingの更新だけで透過的に解決し、path由来IRI等で維持できない場合は`moved`とreplacement IRIをdiagnosticにします。Editorは自動置換せず、削除・not-foundと同様にユーザーの再選択を待ちます。同期`ProjectionOptions.resolveAssetUrl`はlegacy `DiagramCatalog`投影だけに残すdeprecated APIであり、正規化projectionとVue editorは使用しません。
+ファイル移動後も維持できるopaque IRIを優先します。Assetまたはdocumentのpath renameでは、hostがworkspace locatorとAsset resolverのmapping/revisionだけを更新し、同じstable `assetRef`を新しいpath・取得先へ解決します。既存documentの`appearance.iconRef`とview overlayは書き換えません。Path由来IRI等でidentityを維持できない場合だけ`moved`とreplacement IRIをdiagnosticにし、Editorは自動置換せず、削除・not-foundと同様にユーザーの再選択を待ちます。同期`ProjectionOptions.resolveAssetUrl`はlegacy `DiagramCatalog`投影だけに残すdeprecated APIであり、正規化projectionとVue editorは使用しません。
 
 ## LLM adapter
 

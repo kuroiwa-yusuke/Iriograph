@@ -42,6 +42,7 @@ import {
   isProtectedVocabularyResource,
   RDF_TYPE,
   RDFS_COMMENT,
+  RDFS_LABEL,
   RDFS_MEMBER,
   validateAuthoringGraphPolicy,
   validateLiteralInput,
@@ -157,7 +158,7 @@ export async function compileAuthoringCommands(
         break;
       case "set-statement-comments":
         resolvedCommands.push(clone(command));
-        applySetStatementComments(store, command, diagnostics);
+        applySetStatementComments(store, command, context, diagnostics);
         break;
     }
   }
@@ -316,7 +317,13 @@ function applyCreateResource(
     }
     includesCreatedResource ||= subjectIri === command.resourceIri
       || (object.kind === "iri" && object.iri === command.resourceIri);
-    const result = authoringQuad(subjectIri, statement.predicateIri, object, diagnostics);
+    const result = authoringQuad(
+      subjectIri,
+      statement.predicateIri,
+      object,
+      diagnostics,
+      context.defaultLocale,
+    );
     if (result) quads.push(result);
   }
   if (!includesCreatedResource) {
@@ -397,7 +404,13 @@ function applySetProperty(
   }
   store.removeQuads(store.getQuads(command.subjectIri, command.predicateIri, null, null));
   for (const object of command.values) {
-    const value = authoringQuad(command.subjectIri, command.predicateIri, object, diagnostics);
+    const value = authoringQuad(
+      command.subjectIri,
+      command.predicateIri,
+      object,
+      diagnostics,
+      context.defaultLocale,
+    );
     if (value) store.addQuad(value);
   }
 }
@@ -433,6 +446,7 @@ function applyConnectResources(
     command.predicateIri,
     { kind: "iri", iri: command.objectIri },
     diagnostics,
+    context.defaultLocale,
   );
   if (value) store.addQuad(value);
 }
@@ -489,12 +503,14 @@ function applyCapability(
     command,
     omittedOptionalBindings,
     diagnostics,
+    context.defaultLocale,
   );
   const add = resolveCapabilityStatements(
     capability.graphPatch.add ?? [],
     command,
     omittedOptionalBindings,
     diagnostics,
+    context.defaultLocale,
   );
   if (hasErrors(diagnostics)) return;
   for (const value of remove) {
@@ -543,6 +559,7 @@ function applyMembership(
       iri: containerPosition === "subject" ? command.memberIri : command.containerIri,
     },
     diagnostics,
+    context.defaultLocale,
   );
   if (!membership) return;
   if (command.enabled) {
@@ -749,6 +766,7 @@ function applyRemoveStatement(
 function applySetStatementComments(
   store: Store,
   command: Extract<AuthoringCommand, { type: "set-statement-comments" }>,
+  context: ResolvedAuthoringContext,
   diagnostics: ProjectionDiagnostic[],
 ): void {
   const asserted = authoringQuad(
@@ -795,8 +813,11 @@ function applySetStatementComments(
     ?? allocateStatementReifier(store, command.statementRef);
   if (!existing[0]) store.addQuads(standardReificationQuads(primary, statement));
   for (const comment of command.comments) {
-    const object = comment.language
-      ? literal(comment.value.normalize("NFC"), comment.language.toLowerCase())
+    const language = comment.language ?? (
+      comment.datatypeIri === undefined ? context.defaultLocale : undefined
+    );
+    const object = language
+      ? literal(comment.value.normalize("NFC"), language.toLowerCase())
       : comment.datatypeIri
         ? literal(comment.value.normalize("NFC"), namedNode(comment.datatypeIri))
         : literal(comment.value.normalize("NFC"));
@@ -917,6 +938,7 @@ function resolveCapabilityStatements(
   command: ApplyCapabilityCommand,
   omittedOptionalBindings: ReadonlySet<string>,
   diagnostics: ProjectionDiagnostic[],
+  defaultLocale?: string,
 ): Quad[] {
   const result: Quad[] = [];
   for (const statement of statements) {
@@ -933,7 +955,7 @@ function resolveCapabilityStatements(
       ));
       continue;
     }
-    const value = authoringQuad(subject.iri, predicate.iri, object, diagnostics);
+    const value = authoringQuad(subject.iri, predicate.iri, object, diagnostics, defaultLocale);
     if (value) result.push(value);
   }
   return result;
@@ -958,6 +980,7 @@ function authoringQuad(
   predicateIri: string,
   object: AuthoringObjectValue,
   diagnostics: ProjectionDiagnostic[],
+  defaultLocale?: string,
 ): Quad | undefined {
   if (!requireIri(subjectIri, "subject", diagnostics)) return undefined;
   if (!requireIri(predicateIri, "predicate", diagnostics)) return undefined;
@@ -969,8 +992,14 @@ function authoringQuad(
     const literalDiagnostics = validateLiteralInput(object, subjectIri);
     diagnostics.push(...literalDiagnostics);
     if (hasErrors(literalDiagnostics)) return undefined;
-    objectTerm = object.language
-      ? literal(object.value, object.language.toLowerCase())
+    const language = object.language ?? (
+      object.datatypeIri === undefined
+      && (predicateIri === RDFS_LABEL || predicateIri === RDFS_COMMENT)
+        ? defaultLocale
+        : undefined
+    );
+    objectTerm = language
+      ? literal(object.value, language.toLowerCase())
       : object.datatypeIri
         ? literal(object.value, namedNode(object.datatypeIri))
         : literal(object.value);

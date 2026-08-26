@@ -113,6 +113,45 @@ describe("SemanticIntentPanel", () => {
     }]);
   });
 
+  it("一括解除はbelongsTo/containsに重複したexact membershipを一度だけ更新する", async () => {
+    const item = {
+      semanticRef: "urn:test:membership:lane-bake",
+      relatedElementId: "bake",
+      relatedSemanticRef: "urn:test:bake",
+      label: "ピザを焼く",
+      relatedStructuralKind: "node" as const,
+      containerKind: "region" as const,
+      role: "membership" as const,
+      provenance: {
+        sourceStatementRefs: ["urn:test:statement:lane-bake"],
+        operator: "membership-region" as const,
+        derivation: "derived" as const,
+        editCapability: {
+          command: "set-membership" as const,
+          container: "urn:test:lane",
+          member: "urn:test:bake",
+          containerTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag",
+          predicate: "http://www.w3.org/2000/01/rdf-schema#member",
+          containerPosition: "subject" as const,
+        },
+      },
+    };
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      resources: [
+        { iri: "urn:test:lane", label: "調理担当" },
+        { iri: "urn:test:bake", label: "ピザを焼く" },
+      ],
+      selectedResources: [{ iri: "urn:test:lane", label: "調理担当" }],
+      membershipOverview: { belongsTo: [item], contains: [{ ...item }] },
+    } });
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="ピザを焼くとの所属を選択"]').setValue(true);
+    await click(wrapper, "選択した 1件を所属から外す");
+
+    expect(wrapper.emitted("executeCommands")?.[0]?.[0]).toHaveLength(1);
+    expect(wrapper.emitted("executeCommands")?.[0]?.[2]).toHaveLength(2);
+  });
+
   it("containerの包含一覧から対象要素を選択して所属編集へ進む", async () => {
     const wrapper = mount(SemanticIntentPanel, { props: {
       selectedResources: [{ iri: "urn:test:lane", label: "調理担当" }],
@@ -211,7 +250,7 @@ describe("SemanticIntentPanel", () => {
     expect(wrapper.find('input[value="urn:test:old"]').exists()).toBe(false);
     expect(button(wrapper, "関係を作成").attributes("disabled")).toBeDefined();
 
-    await wrapper.get('input[value="urn:test:new"]').setValue(true);
+    await wrapper.get('input[value="predicate-1"]').setValue(true);
     expect(wrapper.text()).not.toContain("始点・終点に合う関係の種類を選び直してください。");
     expect(button(wrapper, "関係を作成").attributes("disabled")).toBeUndefined();
   });
@@ -251,6 +290,123 @@ describe("SemanticIntentPanel", () => {
     expect(wrapper.text()).not.toContain("この関係を削除");
   });
 
+  it("requested direct relation destinationをmount時に編集formへseedする", () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      requestedIntent: "edit-relation",
+      resources: [
+        { iri: "urn:test:a", label: "申請" },
+        { iri: "urn:test:b", label: "承認" },
+      ],
+      predicates: [{ iri: "urn:test:next", label: "次へ進む" }],
+      selectedEdge: {
+        label: "次へ進む",
+        sourceIri: "urn:test:a",
+        sourceLabel: "申請",
+        predicateIri: "urn:test:next",
+        targetIri: "urn:test:b",
+        targetLabel: "承認",
+        capability: {
+          command: "remove-statement",
+          statementRef: "statement:next",
+          subject: "urn:test:a",
+          predicate: "urn:test:next",
+          object: "urn:test:b",
+        },
+      },
+    } });
+
+    expect(wrapper.get(".iriograph-intent-fields").text()).toContain("関係を更新");
+    expect(wrapper.get(".iriograph-intent-fields").text()).toContain("この関係だけの説明");
+  });
+
+  it("requested Seq destinationをmount時に専用editorへseedする", () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      requestedIntent: "edit-relation",
+      selectedResources: [{ iri: "urn:test:seq", label: "承認手順" }],
+      sequences: [{
+        sequenceIri: "urn:test:seq",
+        label: "承認手順",
+        sequenceTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Seq",
+        ordinalPredicatePrefix: "http://www.w3.org/1999/02/22-rdf-syntax-ns#_",
+        memberIris: ["urn:test:a", "urn:test:b"],
+        members: [{ iri: "urn:test:a", label: "申請" }, { iri: "urn:test:b", label: "承認" }],
+      }],
+    } });
+
+    expect(wrapper.get('[aria-label="並び順を編集"]').text()).toContain("承認手順");
+    expect(wrapper.get('[aria-label="並び順を編集"] ol').text()).toContain("申請");
+  });
+
+  it("derived Alt edgeは専用editorで既定要素を保ったままordinalをatomic更新する", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      requestedIntent: "edit-relation",
+      selectedEdge: {
+        label: "分岐", sourceIri: "urn:test:alt", sourceLabel: "選択",
+        predicateIri: "urn:test:ordinal", targetIri: "urn:test:a", targetLabel: "A",
+        derivedReason: "この線は分岐構造から自動生成されています。",
+      },
+      alternatives: [{
+        alternativeIri: "urn:test:alt",
+        label: "配送方法",
+        alternativeTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Alt",
+        ordinalPredicatePrefix: "http://www.w3.org/1999/02/22-rdf-syntax-ns#_",
+        defaultMemberIri: "urn:test:b",
+        defaultOrdinal: 2,
+        memberIris: ["urn:test:a", "urn:test:b", "urn:test:c"],
+        members: [
+          { iri: "urn:test:a", label: "店頭" },
+          { iri: "urn:test:b", label: "配達" },
+          { iri: "urn:test:c", label: "予約" },
+        ],
+      }],
+    } });
+
+    expect(wrapper.get('[aria-label="候補グループを編集"]').text()).toContain("配送方法");
+    await wrapper.get('button[aria-label="配達を前へ"]').trigger("click");
+    await click(wrapper, "候補グループを更新");
+
+    expect(wrapper.emitted("executeCommands")?.[0]?.[0]).toEqual([expect.objectContaining({
+      type: "set-alternatives",
+      memberIris: ["urn:test:b", "urn:test:a", "urn:test:c"],
+      defaultMemberIri: "urn:test:b",
+      defaultOrdinal: 1,
+    })]);
+  });
+
+  it("同じ要素が複数回ある選択肢でも既定の出現位置を保つ", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      selectedEdge: {
+        label: "分岐", sourceIri: "urn:test:alt", sourceLabel: "選択",
+        predicateIri: "urn:test:ordinal", targetIri: "urn:test:a", targetLabel: "A",
+        derivedReason: "この線は分岐構造から自動生成されています。",
+      },
+      alternatives: [{
+        alternativeIri: "urn:test:alt",
+        label: "配送方法",
+        alternativeTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Alt",
+        ordinalPredicatePrefix: "http://www.w3.org/1999/02/22-rdf-syntax-ns#_",
+        defaultMemberIri: "urn:test:a",
+        defaultOrdinal: 3,
+        memberIris: ["urn:test:a", "urn:test:b", "urn:test:a"],
+        members: [
+          { iri: "urn:test:a", label: "店頭" },
+          { iri: "urn:test:b", label: "配達" },
+        ],
+      }],
+    } });
+
+    await click(wrapper, "関係の意味を編集");
+    await wrapper.get('button[aria-label="配達を後ろへ"]').trigger("click");
+    await click(wrapper, "候補グループを更新");
+
+    expect(wrapper.emitted("executeCommands")?.[0]?.[0]).toEqual([expect.objectContaining({
+      type: "set-alternatives",
+      memberIris: ["urn:test:a", "urn:test:a", "urn:test:b"],
+      defaultMemberIri: "urn:test:a",
+      defaultOrdinal: 2,
+    })]);
+  });
+
   it("関係変更を開始した後のCanvas edge選択を編集fieldへ同期する", async () => {
     const wrapper = mount(SemanticIntentPanel, { props: {
       predicates: [{ iri: "urn:test:rel", label: "関連する" }],
@@ -272,7 +428,7 @@ describe("SemanticIntentPanel", () => {
         object: "urn:test:b",
       },
     } });
-    expect(wrapper.get<HTMLSelectElement>("select").element.value).toBe("urn:test:rel");
+    expect(wrapper.get<HTMLSelectElement>("select").element.value).toBe("predicate-1");
     expect(wrapper.get("optgroup").attributes("label")).toBe("その他の関係");
     expect(wrapper.get("option").text()).toBe("A（関連する）B — A（関連する）B");
     expect(wrapper.text()).toContain("A");
@@ -501,6 +657,80 @@ describe("SemanticIntentPanel", () => {
       { kind: "literal", value: "申請書", language: "ja" },
       { kind: "literal", value: "Application", language: "en" },
     ]);
+  });
+
+  it("通常編集はlanguage入力を閉じ、plain/tagged/multilingualを保ちながら新規値だけdefaultLocaleにする", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      defaultLocale: "ja",
+      elementDetails: {
+        iri: "urn:test:a", label: "Plain", classIris: [],
+        labelValues: [
+          { value: "Plain", datatypeIri: "http://www.w3.org/2001/XMLSchema#string" },
+          { value: "English", language: "en" },
+        ],
+        commentValues: [{ value: "説明", language: "ja" }],
+      },
+    } });
+    await click(wrapper, "要素の詳細を編集");
+    expect(wrapper.findAll(".iriograph-literal-details").every((item) => !(item.element as HTMLDetailsElement).open)).toBe(true);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="要素の名前"]').setValue("Plain edited");
+    await click(wrapper, "別名を追加");
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="要素の別名 2"]').setValue("日本語の別名");
+    await click(wrapper, "変更を保存");
+
+    const commands = wrapper.emitted("executeCommands")?.[0]?.[0] as Array<{ values: unknown[] }>;
+    expect(commands[0]?.values).toEqual([
+      { kind: "literal", value: "Plain edited", datatypeIri: "http://www.w3.org/2001/XMLSchema#string" },
+      { kind: "literal", value: "English", language: "en" },
+      { kind: "literal", value: "日本語の別名", language: "ja" },
+    ]);
+  });
+
+  it("predicateの意味階層とview resolution traceを別sectionで示しexact IRIを保存する", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      predicates: [
+        { iri: "urn:test:child", label: "承認を依頼する", category: "業務" },
+        { iri: "urn:test:other", label: "参照する", category: "参照" },
+      ],
+      predicateMeanings: {
+        "urn:test:child": {
+          iri: "urn:test:child",
+          label: "承認を依頼する",
+          description: "承認者へ依頼する関係です。",
+          hierarchyPaths: [
+            { iris: ["urn:test:child", "urn:test:parent", "urn:test:root"], labels: ["承認を依頼する", "依頼する", "関係する"] },
+            { iris: ["urn:test:child", "urn:test:audit"], labels: ["承認を依頼する", "監査対象にする"] },
+          ],
+          hierarchyDiagnostics: [],
+        },
+      },
+      predicateInferencePolicy: { query: "rdfs-subproperty", validation: "exact" },
+      selectedEdge: {
+        label: "申請から承認者", sourceIri: "urn:test:a", sourceLabel: "申請",
+        predicateIri: "urn:test:child", targetIri: "urn:test:b", targetLabel: "承認者",
+        capability: { command: "remove-statement", statementRef: "statement:child", subject: "urn:test:a", predicate: "urn:test:child", object: "urn:test:b" },
+        viewResolution: {
+          candidateMatches: ["explicit-subproperty"],
+          selectedMatch: "explicit-subproperty",
+          conflictCount: 0,
+        },
+      },
+    } });
+    const meaning = wrapper.get('[aria-label="関係の意味"]');
+    expect(meaning.text()).toContain("承認を依頼する → 依頼する → 関係する");
+    expect(meaning.text()).toContain("承認を依頼する → 監査対象にする");
+    expect(meaning.text()).toContain("検索では上位関係としても扱います");
+    const view = wrapper.get('[aria-label="ビュー規則"]');
+    expect(view.text()).toContain("catalog指定のsubPropertyOf一致");
+    expect(view.text()).not.toContain("urn:test:");
+
+    await click(wrapper, "関係の意味を編集");
+    const predicateSelect = wrapper.get<HTMLSelectElement>(".iriograph-intent-fields select");
+    const otherToken = predicateSelect.findAll("option").find((option) => option.text().includes("参照する"))!.attributes("value");
+    await predicateSelect.setValue(otherToken);
+    await click(wrapper, "関係を更新");
+    const commands = wrapper.emitted("executeCommands")?.[0]?.[0] as Array<Record<string, unknown>>;
+    expect(commands.find((item) => item.type === "connect-resources")?.predicateIri).toBe("urn:test:other");
   });
 });
 

@@ -4,8 +4,8 @@ import type {
   SceneMembership,
 } from "@iriograph/core";
 
-export type MembershipContainerKind = "container" | "region" | "sequence";
-export type MembershipOverviewRole = "membership" | "sequence-member";
+export type MembershipContainerKind = "container" | "region" | "sequence" | "alternative";
+export type MembershipOverviewRole = "membership" | "sequence-member" | "alternative-member";
 
 export type MembershipOverviewItem = {
   semanticRef: string;
@@ -89,6 +89,9 @@ function membershipContainerKind(
   if (membership.role === "sequence-member" || (
     container.structuralKind === "container" && container.groupRole === "sequence"
   )) return "sequence";
+  if (membership.role === "alternative-member" || (
+    container.structuralKind === "container" && container.groupRole === "alternative"
+  )) return "alternative";
   return container.structuralKind;
 }
 
@@ -96,7 +99,10 @@ function compareMembershipOverview(
   left: MembershipOverviewItem,
   right: MembershipOverviewItem,
 ): number {
-  if (left.containerKind === "sequence" || right.containerKind === "sequence") {
+  if (
+    left.containerKind === "sequence" || right.containerKind === "sequence"
+    || left.containerKind === "alternative" || right.containerKind === "alternative"
+  ) {
     const ordinal = (left.ordinal ?? Number.MAX_SAFE_INTEGER)
       - (right.ordinal ?? Number.MAX_SAFE_INTEGER);
     if (ordinal !== 0) return ordinal;

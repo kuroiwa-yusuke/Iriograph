@@ -92,6 +92,25 @@ describe("selection membership overview", () => {
       ordinal: 101,
     });
   });
+
+  it("keeps alternative membership separate from ordinary containment", () => {
+    const choice = node("delivery", "配達");
+    const alternative = container("alternative", "配送方法", "alternative");
+    const scene = sceneFor({ nodes: [choice], containers: [alternative] });
+    scene.memberships = [membership(
+      "alternative-2",
+      alternative.elementId,
+      choice.elementId,
+      { role: "alternative-member", ordinal: 2 },
+    )];
+
+    expect(membershipOverviewForElement(scene, choice.elementId).belongsTo[0]).toMatchObject({
+      label: "配送方法",
+      containerKind: "alternative",
+      role: "alternative-member",
+      ordinal: 2,
+    });
+  });
 });
 
 function sceneFor(parts: {
@@ -131,7 +150,7 @@ function node(elementId: string, label: string): SceneNode {
 function container(
   elementId: string,
   label: string,
-  groupRole?: "sequence",
+  groupRole?: "sequence" | "alternative",
 ): SceneContainer {
   return {
     elementId,
@@ -170,7 +189,7 @@ function membership(
   memberElementId: string,
   options: {
     regionElementId?: string;
-    role?: "membership" | "sequence-member";
+    role?: "membership" | "sequence-member" | "alternative-member";
     ordinal?: number;
   } = {},
 ) {

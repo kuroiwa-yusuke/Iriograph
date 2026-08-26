@@ -18,14 +18,14 @@ Turtleへ置くdomain resourceとdomain vocabularyも区別します。`rdf:type
 
 リッチエディタでnode、属性、edge、包含を作る操作は、Sceneへの図形追加ではなくsemantic graphの編集です。Editorは操作をTurtleのgraph delta候補へ変換し、semantic transactionの検証に成功した場合だけ正本とSceneを更新します。Sceneに仮nodeを作り、後から意味を付けて保存する状態をdocumentには許容しません。
 
-- Standard editorのnode作成ではallocatorがopaque named IRIを決め、同じtransactionで利用者が入力した`rdfs:label`一文だけを作る。Type、comment、domain property、既存resourceとの関係、位置は作成後の別操作で追加し、template選択だけを目的とするtypeは作らない。
+- Standard editorの作成ではallocatorがopaque named IRIを決め、nodeは利用者が入力した`rdfs:label`とresolved profileから選んだnode-role type、groupは名前と分類・包含・順序付き・候補の標準構造typeを同じtransactionで作る。Comment、domain property、既存resourceとの関係、位置は作成後の別操作で追加し、template選択だけを目的とするtypeは作らない。
 - 属性編集はpredicateとIRI/literal valueを持つtripleの追加、置換、削除として行う。
 - edge作成ではpredicateを必須とし、直接IRI-object tripleまたはprojection capabilityが定義するgraph patchを作る。便宜的な`:relation`のような語彙を暗黙に生成しない。
 - 包含編集では`rdf:Bag`resourceと`rdfs:member`等、選択したcapabilityの意味構造を書く。nodeをcontainer内へdragするだけの操作はpresentationであり、意味的所属を暗黙に追加しない。
 
 これらの操作はCanvas選択中心の右Inspectorから開始します。常設する作成入口は`要素を追加`と`関係を追加`だけで、resource選択時に詳細・所属・並び順、direct edge選択時に関係の意味を段階表示します。右clickは選択objectのappearance入口に限定します。Canvas gestureは作成formのsource/targetをseedするだけで、意味を確定しません。非削除操作は利用者の実行一回の内部でcandidate graphの検証とsemantic transactionのcommitを続けて行います。未実行formはephemeral UI stateであり、Scene、overlay、undo対象documentへ保存しません。
 
-利用者はTurtle、RDF/RDFS、完全IRIを知らなくても操作できることをUIの前提にします。Resource、class、predicateはlabelと説明を主表示し、Canvas上の対象選択を優先します。IRIはidentity、同名候補の識別、詳細tooltip、read-only Advanced情報にだけ残します。右Inspectorは選択対象の概要と「要素を追加」「関係を追加」から始め、対象別の詳細・所属・関係編集は選択後にだけ開きます。内部command名、ordinal、capability graph patchは通常UIへ露出せず、「順序」「選択肢」「定義済み操作」の利用者語彙へ翻訳します。
+利用者はTurtle、RDF/RDFS、完全IRIを知らなくても操作できることをUIの前提にします。Resource、class、predicateはlabelと説明を主表示し、Canvas上の対象選択を優先します。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやread-only Advanced情報へ渡しません。同名候補は説明、型、近傍とopaque identityで区別します。完全IRIはeditableなTurtle/Document sourceとHost/Core内部transaction・監査logに保持します。右Inspectorは選択対象の概要と「要素を追加」「関係を追加」から始め、対象別の詳細・所属・関係編集は選択後にだけ開きます。内部command名、ordinal、capability graph patchは通常UIへ露出せず、「順序」「選択肢」「定義済み操作」の利用者語彙へ翻訳します。
 
 Coreの低水準resource削除は、他resourceからの参照や構造membershipが残る場合にcascade省略を拒否します。標準Editorは現在の選択集合を一つの削除transactionとして扱い、選択外のedge、membership、Seq/Alt membershipへ波及する場合だけlabel付き影響一覧とCanvas上の変化を示して確認します。影響objectをすべて選択済みなら確認画面を挟まず一括削除します。`rdf:Seq`または`rdf:Alt`のmemberを削除する場合は、残るordinal predicateを一つのgraph patchで再採番し、欠番のある途中状態を正本にしません。Altの最低member数など、再構成後の制約を満たせなければtransaction全体を拒否します。
 

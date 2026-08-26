@@ -15,7 +15,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Semantic projection、layout、rendererを分離する。Coreは非同期layout adapter契約と標準の軽量layoutを持ち、hostが同じ契約で高機能layoutへ差し替えられるようにする。
 - Asset URIは識別子であり、取得URLと同一視しない。取得は注入resolverへ委譲する。
 - ResourceのidentityにlabelやTurtleの行番号を使わない。IRIを優先する。
-- 人間とLLMの発見・理解ではlabel/commentを主表示にし、完全IRIはidentity、曖昧性解消、Advanced情報として保持する。
+- 人間とLLMの発見・理解ではlabel/commentを主表示にする。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやAdvanced情報へ渡さない。完全IRIはeditableなTurtle/Document sourceと、Host/Core内部transaction・監査logのexact identityとして保持する。
 - LLMへはsemantic Turtleまたはそこから索引化した関連subgraph、許可語彙、関連projection capabilityだけを公開し、view overlayを編集対象にしない。
 
 ## 拡張規則
@@ -38,8 +38,8 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Rich editorのnode、edge、属性、包含作成はsemantic transactionとする。表示だけの仮nodeをdocumentへ保存せず、node作成時はnamed IRIと少なくとも1つのtripleを同時に確定する。
 - Edge作成はpredicateまたはprofile由来capabilityを必須にし、空欄を補うgeneric predicateを暗黙生成しない。Containerへのplain dragからmembership tripleを推測しない。
 - Human structured command、Turtle直接編集、LLM返却Turtleはcandidate graph以降のvalidation、全view projection、display reconciliationを共有する。
-- Rich editorの意味InspectorはCanvas選択中心とし、初期状態に選択対象のlabel中心の概要と「要素を追加」「関係を追加」の2入口だけを常設する。選択resourceには「要素の詳細を編集」「所属・並び順を編集」、選択direct edgeには「関係の意味を編集」を段階表示する。非削除の意味操作は、利用者の実行一回の中でcandidate graph validationとatomic semantic transactionを続けて行い、別のPreview/Apply確認画面を挟まない。新規要素はhost allocatorが発行するopaque IRIと名前を表す`rdfs:label`だけで作り、種類、説明、関係、所属、位置は後続操作へ分ける。Canvasの右クリックはビュー編集だけを開始し、意味編集を混在させない。未実行のformとghost node/edgeはephemeral UI stateに留め、documentへ保存しない。
-- 通常の意味編集UIではIRI、`rdf:type`、`rdfs:label`、`rdfs:comment`という語を露出せず、それぞれ種類、名前、説明として扱う。関係候補はcatalog/profileを正本としてsubjectをA、objectをBとした日本語例文でcategory別に表示し、識別IRIはAdvancedな参照情報に留める。A/Bは候補説明だけに使い、確定edgeへ保存しない。
+- Rich editorの意味InspectorはCanvas選択中心とし、初期blur状態には「新しい要素を作る」「関係を作る」「要素を変更する」「関係を変更する」の4入口だけを表示する。入口の後は一段に一つの判断を順次表示し、Canvas事前選択をroleへ明示的にseedする。新規nodeはhost allocatorが発行するopaque IRI、名前、resolved profileで選んだnode-roleを、新規groupは名前と分類・包含・順序付き・候補のgroup kindを一つのatomic transactionで作る。関係作成はdirect/membershipをicon familyで先に選び、family切替時にdraftを相互変換しない。非削除の意味操作は、利用者の実行一回の中でcandidate graph validationとatomic semantic transactionを続けて行い、別のPreview/Apply確認画面を挟まない。Canvasの右クリック、Context Menu key、Shift+F10は対象別context menuを開き、node、direct edge、derived guide、各group、空白に応じた意味・ビュー各入口を示すが、menu選択だけではmutationせず該当Inspector/actionへfocusする。未実行のform、inline新規member chip、ghost node/edgeはephemeral UI stateに留め、documentへ保存しない。
+- 通常の意味編集UIではIRI、`rdf:type`、`rdfs:label`、`rdfs:comment`という語を露出せず、それぞれ種類、名前、説明として扱う。関係候補はcatalog/profileを正本としてsubjectをA、objectをBとした日本語例文でcategory別に表示し、opaque option IDでexact termへ解決する。生のIRIは通常UI、tooltip、Advanced DOMへ渡さず、A/Bは候補説明だけに使い確定edgeへ保存しない。
 - Direct edgeの意味上の始点・終点変更は意味tabでwritableなedgeを選択した場合に許可し、Canvas上の端子を別の有効nodeへdropした時点で、元statement削除、新statement追加、個別statement comment移送をcandidate validation後の一つのsemantic transactionとして直接確定する。空白や領域へのdropでは元の接続を維持し、未接続状態をsemantic graphにもview overlayにも保存しない。ビューtabの同じ端子操作はnode周囲の接続位置だけを変更し、S/P/Oを変えない。
 - Predicate resource全体の説明と個別statementの説明を分ける。個別説明はexact S/P/OをRDF標準reificationで指し、その`rdfs:comment`としてTurtleへ保存する。View-only captionへ意味説明を代入しない。
 - Structured commandとLLM editの成功時は、同じdataset serializerでTurtleを決定的に再生成する。Turtle sourceの直接編集は適用された原文を保持するが、後の再serialize時にcomment、空白、triple記述順などの書式が保持されることを保証しない。
@@ -79,7 +79,10 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 
 ### 作成とレビューの分担
 
-- サブエージェントが利用可能な場合、設計文書や実装の作成は原則として責務と変更範囲を明示して委譲し、サブエージェントが初稿または実装を担当する。利用できない場合は主エージェントが同じ作成・レビュー観点を自己適用する。
+- サブエージェントが利用可能な場合、境界の明確な実装とtestは責務と変更範囲を明示して委譲する。設計判断、backlog、`AGENTS.md`、既存設計文書の同期は主エージェントが直接担当する。利用できない場合は主エージェントが同じ作成・レビュー観点を自己適用する。
+- サブエージェントは、独立して並行実行する価値がある境界の明確な実装・testだけへ使う。`AGENTS.md`、backlog、既存設計文書の同期や軽微な文書修正だけの作業は主エージェントがレビュー結果に基づいて直接行い、委譲のためのcontextを増やさない。
+- 委譲時は会話履歴全体を渡さず、必要最小限のturnだけをforkするかcontextなしで開始し、対象repository、必読`AGENTS.md`、変更可能file、守る不変条件、受入test、禁止事項を短いtask文として渡す。既知の調査結果や具体的な行動だけを共有し、同じrepository探索や仕様読解を複数agentへ重複させない。
+- 続きの作業は可能なら同じサブエージェントへ差分だけを追記して依頼する。報告は変更file、判断、test結果、未解決事項に絞り、長いsource全文や一般説明を再掲させない。
 - 主エージェントは統括責任を持ち、責務境界、設計文書間と実装間の整合性、既存規則への適合、diff、testをレビューする。問題があれば主エージェントが必要な修正を行うか、具体的な指摘を添えてサブエージェントへ再依頼する。
 - 委譲前に`git status`と対象範囲を確認する。複数のサブエージェントへ同じファイルを同時に編集させず、ユーザーの未commit変更や他エージェントの作業を上書き・混入させない。
 - サブエージェントの完了報告だけで変更を承認しない。主エージェントが実ファイルとdiffを確認し、最終的な`npm run verify`、local mockの起動確認、commit、push、ユーザーへの結果報告を行う。

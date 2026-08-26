@@ -5,6 +5,7 @@ import {
   type EdgeTerminalMarker,
   type ElementGeometry,
   type Point,
+  type SceneDerivedRouteChoice,
   type SceneEdge,
 } from "@iriograph/core";
 
@@ -44,6 +45,50 @@ export type EdgeCurveControlHandle = {
   point: Point;
   manual: boolean;
 };
+
+export type RenderedEdgeRouteFamily = SceneDerivedRouteChoice["family"];
+
+/**
+ * Resolves one renderer family without leaking the layout choice into the
+ * portable overlay. An explicit presentation mode always wins; `auto` is the
+ * only mode that consumes the Scene's transient layout decision.
+ */
+export function renderedEdgeRouteFamily(
+  edge: Pick<SceneEdge, "derivedRouteChoice" | "routeMode" | "waypoints">,
+  requestedMode: NonNullable<SceneEdge["routeMode"]> = edge.routeMode
+    ?? (edge.waypoints?.length ? "manual" : "auto"),
+): RenderedEdgeRouteFamily {
+  if (requestedMode !== "auto") return requestedMode;
+  return edge.derivedRouteChoice?.source === "auto"
+    ? edge.derivedRouteChoice.family
+    : "polyline";
+}
+
+/**
+ * Converts layout-owned absolute Bezier controls into the same sparse,
+ * endpoint-relative representation used by the renderer. The vectors keep
+ * following their endpoint while a node is preview-moved, but are never
+ * persisted as user-authored curve controls.
+ */
+export function derivedSceneCurveRouting(
+  edge: Pick<SceneEdge, "derivedRouteChoice" | "route">,
+): EdgeCurveRouting | undefined {
+  const choice = edge.derivedRouteChoice;
+  const route = derivedEdgeRoute(edge);
+  const start = route[0];
+  const end = route.at(-1);
+  if (
+    choice?.source !== "auto"
+    || choice.family !== "curve"
+    || !choice.curve
+    || !start
+    || !end
+  ) return undefined;
+  return {
+    sourceHandle: subtractPoint(choice.curve.sourceControl, start),
+    targetHandle: subtractPoint(choice.curve.targetControl, end),
+  };
+}
 
 /**
  * Follows ephemeral node geometry without changing persisted manual points.

@@ -195,6 +195,7 @@ export const iriographDocumentSchema = {
         accent: { $ref: "#/$defs/color" },
         fillOpacity: { type: "number", minimum: 0, maximum: 1 },
         strokeWidth: { type: "number", minimum: 0, maximum: 20 },
+        labelFontSize: { type: "number", minimum: 8, maximum: 72 },
         dash: { $ref: "#/$defs/dash" },
         extensions: extensionProperty,
       },
@@ -211,6 +212,15 @@ export const iriographDocumentSchema = {
     appearance: {
       type: "object",
       additionalProperties: false,
+      allOf: [{
+        not: {
+          required: ["nodeIconScale", "nodeIconSize"],
+          properties: {
+            nodeIconScale: {},
+            nodeIconSize: {},
+          },
+        },
+      }],
       properties: {
         templateRef: { type: "string", format: "iri" },
         iconRef: { type: "string", format: "iri" },
@@ -221,6 +231,24 @@ export const iriographDocumentSchema = {
         nodeLabelOffset: { $ref: "#/$defs/point" },
         nodeLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },
         nodeIconOffset: { $ref: "#/$defs/point" },
+        nodeIconScale: { type: "number", minimum: 0.1, maximum: 8 },
+        nodeIconSize: {
+          type: "object",
+          additionalProperties: false,
+          required: ["width", "height"],
+          properties: {
+            width: { type: "number", minimum: 4, maximum: 4096 },
+            height: { type: "number", minimum: 4, maximum: 4096 },
+          },
+        },
+        nodeIconFit: { enum: ["contain", "cover"] },
+        groupLabelAnchor: { type: "number", minimum: 0, exclusiveMaximum: 1 },
+        groupLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },
+        groupZOrder: {
+          type: "integer",
+          minimum: -9007199254740991,
+          maximum: 9007199254740991,
+        },
         regionLabelAnchor: { type: "number", minimum: 0, exclusiveMaximum: 1 },
         regionLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },
         regionZOrder: {
@@ -480,6 +508,7 @@ export const projectionCatalogSchema = {
         accent: { $ref: "#/$defs/color" },
         fillOpacity: { type: "number", minimum: 0, maximum: 1 },
         strokeWidth: { type: "number", minimum: 0, maximum: 20 },
+        labelFontSize: { type: "number", minimum: 8, maximum: 72 },
         dash: { $ref: "#/$defs/dash" },
         extensions: extensionProperty,
       },
@@ -495,6 +524,7 @@ export const projectionCatalogSchema = {
         accent: { $ref: "#/$defs/color" },
         fillOpacity: { type: "number", minimum: 0, maximum: 1 },
         strokeWidth: { type: "number", minimum: 0, maximum: 20 },
+        labelFontSize: { type: "number", minimum: 8, maximum: 72 },
         dash: { $ref: "#/$defs/dash" },
         extensions: extensionProperty,
       },

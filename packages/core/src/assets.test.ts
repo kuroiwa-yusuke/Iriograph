@@ -54,6 +54,12 @@ describe("resolveDiagramSceneAssets", () => {
       "https://assets.example/icon.svg",
       "https://assets.example/icon.svg",
     ]);
+    expect(batch.scene.nodes[0]?.iconIntrinsicSize).toEqual({
+      width: 24,
+      height: 12,
+      aspectRatio: 2,
+      source: "decoded",
+    });
     expect(batch.diagnostics).toEqual([]);
     batch.release();
     batch.release();
@@ -115,6 +121,216 @@ describe("resolveDiagramSceneAssets", () => {
     expect(batch.diagnostics).toEqual([]);
     batch.release();
     expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("SVG viewBox fallbackを検証し巨大・非finite・decode失敗をfail-closedにする", async () => {
+    const svg = await resolveDiagramSceneAssets(
+      sceneWithIcons(ICON_REF),
+      {},
+      {
+        resolver: { resolve: async () => resolvedLease(() => {}, {
+          intrinsicSize: undefined,
+          svgViewBox: "0 0 48 24",
+        }) },
+        policy: POLICY,
+        revision: "svg-viewbox",
+      },
+      new AbortController().signal,
+    );
+    expect(svg.scene.nodes[0]?.iconIntrinsicSize).toEqual({
+      width: 48,
+      height: 24,
+      aspectRatio: 2,
+      source: "svg-view-box",
+    });
+
+    for (const intrinsicSize of [
+      { width: 100_001, height: 10, aspectRatio: 10_000.1 },
+      { width: Number.POSITIVE_INFINITY, height: 10, aspectRatio: 1 },
+      { width: 24, height: 12, aspectRatio: 3 },
+    ]) {
+      const failed = await resolveDiagramSceneAssets(
+        sceneWithIcons(ICON_REF),
+        {},
+        {
+          resolver: { resolve: async () => resolvedLease(() => {}, { intrinsicSize }) },
+          policy: POLICY,
+          revision: "invalid-intrinsic",
+        },
+        new AbortController().signal,
+      );
+      expect(failed.scene.nodes[0]?.iconUrl).toBe("https://assets.example/icon.svg");
+      expect(failed.scene.nodes[0]?.iconIntrinsicSize).toBeUndefined();
+      expect(failed.diagnostics).toContainEqual(expect.objectContaining({
+        code: "asset-intrinsic-size-invalid",
+      }));
+      failed.release();
+    }
+
+    const decodeFailure = await resolveDiagramSceneAssets(
+      sceneWithIcons(ICON_REF),
+      {},
+      {
+        resolver: { resolve: async () => ({ status: "unresolved", reason: "decode-failed" }) },
+        policy: POLICY,
+        revision: "decode-failed",
+      },
+      new AbortController().signal,
+    );
+    expect(decodeFailure.scene.nodes[0]?.iconUrl).toBeUndefined();
+    expect(decodeFailure.diagnostics).toContainEqual(expect.objectContaining({
+      code: "asset-decode-failed",
+    }));
+  });
+
+  it("decoded pixel area上限で100000² raster leaseを採用せず解放する", async () => {
+    const release = vi.fn();
+    const batch = await resolveDiagramSceneAssets(
+      sceneWithIcons(ICON_REF),
+      {},
+      {
+        resolver: {
+          resolve: async () => resolvedLease(release, {
+            mediaType: "image/png",
+            url: "https://assets.example/huge.png",
+            intrinsicSize: { width: 100_000, height: 100_000, aspectRatio: 1 },
+          }),
+        },
+        policy: POLICY,
+        revision: "huge-raster",
+      },
+      new AbortController().signal,
+    );
+
+    expect(batch.scene.nodes[0]?.iconUrl).toBeUndefined();
+    expect(batch.scene.nodes[0]?.iconIntrinsicSize).toBeUndefined();
+    expect(batch.diagnostics).toContainEqual(expect.objectContaining({
+      code: "asset-decoded-pixel-limit-exceeded",
+      assetRef: ICON_REF,
+    }));
+    expect(release).toHaveBeenCalledTimes(1);
+    batch.release();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("SVG viewBoxはvector unitsとしてdecoded raster pixel上限を適用しない", async () => {
+    const batch = await resolveDiagramSceneAssets(
+      sceneWithIcons(ICON_REF),
+      {},
+      {
+        resolver: {
+          resolve: async () => resolvedLease(() => {}, {
+            intrinsicSize: undefined,
+            svgViewBox: "0 0 100000 100000",
+          }),
+        },
+        policy: { ...POLICY, maxDecodedPixels: 1 },
+        revision: "large-vector-viewbox",
+      },
+      new AbortController().signal,
+    );
+
+    expect(batch.scene.nodes[0]?.iconUrl).toBe("https://assets.example/icon.svg");
+    expect(batch.scene.nodes[0]?.iconIntrinsicSize).toEqual({
+      width: 100_000,
+      height: 100_000,
+      aspectRatio: 1,
+      source: "svg-view-box",
+    });
+    expect(batch.diagnostics).toEqual([]);
+    batch.release();
+  });
+
+  it("many asset resolutionをpolicy同時数以内に制限し全leaseを一度だけ解放する", async () => {
+    const refs = Array.from({ length: 15 }, (_, index) => `urn:test:asset:many:${index}`);
+    const releases = refs.map(() => vi.fn());
+    let active = 0;
+    let maximumActive = 0;
+    const batch = await resolveDiagramSceneAssets(
+      sceneWithIcons(...refs),
+      {},
+      {
+        resolver: {
+          async resolve(request) {
+            const index = refs.indexOf(request.assetRef);
+            active += 1;
+            maximumActive = Math.max(maximumActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            active -= 1;
+            return resolvedLease(releases[index]!);
+          },
+        },
+        policy: { ...POLICY, maxConcurrentResolutions: 3 },
+        revision: "many-assets",
+      },
+      new AbortController().signal,
+    );
+
+    expect(maximumActive).toBe(3);
+    expect(batch.scene.nodes.every((node) => node.iconUrl !== undefined)).toBe(true);
+    batch.release();
+    batch.release();
+    expect(releases.every((release) => release.mock.calls.length === 1)).toBe(true);
+  });
+
+  it("resolution concurrency省略時もCore既定値でboundedにする", async () => {
+    const refs = Array.from({ length: 10 }, (_, index) => `urn:test:asset:default-limit:${index}`);
+    let active = 0;
+    let maximumActive = 0;
+    const batch = await resolveDiagramSceneAssets(
+      sceneWithIcons(...refs),
+      {},
+      {
+        resolver: {
+          async resolve() {
+            active += 1;
+            maximumActive = Math.max(maximumActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 1));
+            active -= 1;
+            return resolvedLease(() => {});
+          },
+        },
+        policy: POLICY,
+        revision: "default-concurrency",
+      },
+      new AbortController().signal,
+    );
+
+    expect(maximumActive).toBe(4);
+    batch.release();
+  });
+
+  it("bounded batch中のabortで採用前leaseをすべて解放し待機assetを開始しない", async () => {
+    const refs = Array.from({ length: 8 }, (_, index) => `urn:test:asset:abort:${index}`);
+    const releases: Array<ReturnType<typeof vi.fn>> = [];
+    const controller = new AbortController();
+    let calls = 0;
+    const batch = await resolveDiagramSceneAssets(
+      sceneWithIcons(...refs),
+      {},
+      {
+        resolver: {
+          async resolve() {
+            calls += 1;
+            const release = vi.fn();
+            releases.push(release);
+            if (calls === 3) controller.abort();
+            await Promise.resolve();
+            return resolvedLease(release);
+          },
+        },
+        policy: { ...POLICY, maxConcurrentResolutions: 2 },
+        revision: "abort-batch",
+      },
+      controller.signal,
+    );
+
+    expect(calls).toBe(3);
+    expect(batch.scene.nodes.every((node) => node.iconUrl === undefined)).toBe(true);
+    expect(batch.diagnostics.some((item) => item.code === "asset-resolution-aborted")).toBe(true);
+    expect(releases.every((release) => release.mock.calls.length === 1)).toBe(true);
+    batch.release();
+    expect(releases.every((release) => release.mock.calls.length === 1)).toBe(true);
   });
 
   it.each([
@@ -276,6 +492,7 @@ function resolvedLease(
       url: "https://assets.example/icon.svg",
       mediaType: "image/svg+xml",
       byteLength: 128,
+      intrinsicSize: { width: 24, height: 12, aspectRatio: 2 },
       release,
       ...override,
     },

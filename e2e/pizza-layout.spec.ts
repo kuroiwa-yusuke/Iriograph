@@ -118,14 +118,17 @@ test("pizza注文配送Turtleをoverlayなしで店舗領域と4 laneの自動la
 
   const routeRecords = await page.locator(".iriograph-edge-path").evaluateAll((paths) => paths.map((path) => {
     const matrix = path.getScreenCTM();
-    const localPoints = [...(path.getAttribute("d") ?? "").matchAll(/-?\d+(?:\.\d+)?/gu)]
-      .map((match) => Number(match[0]))
-      .reduce<Array<{ x: number; y: number }>>((points, value, index, values) => {
-        if (index % 2 === 0) points.push({ x: value, y: values[index + 1]! });
-        return points;
-      }, []);
+    const length = path.getTotalLength();
+    const sampleCount = Math.max(2, Math.ceil(length / 12));
+    const localPoints = Array.from({ length: sampleCount + 1 }, (_, index) => {
+      const point = path.getPointAtLength(length * index / sampleCount);
+      return { x: point.x, y: point.y };
+    });
+    const edge = path.parentElement;
     return {
-      edgeId: path.parentElement?.getAttribute("data-element-id") ?? "",
+      edgeId: edge?.getAttribute("data-element-id") ?? "",
+      routeFamily: edge?.getAttribute("data-route-family") ?? "",
+      routePointCount: Number(edge?.getAttribute("data-route-point-count") ?? "0"),
       points: localPoints.map((point) => {
         const transformed = matrix
           ? new DOMPoint(point.x, point.y).matrixTransform(matrix)
@@ -135,7 +138,7 @@ test("pizza注文配送Turtleをoverlayなしで店舗領域と4 laneの自動la
     };
   }));
   const routes = routeRecords.map((record) => record.points);
-  expect(routes.every((route) => route.length >= 2 && route.length <= 3)).toBe(true);
+  expect(routeRecords.every((route) => route.routePointCount >= 2 && route.routePointCount <= 3)).toBe(true);
 
   const nodeRecords = await page.locator(".iriograph-scene-node").evaluateAll((nodes) => nodes.map((node) => {
     const element = node as HTMLElement;
@@ -218,7 +221,7 @@ test("pizza注文配送Turtleをoverlayなしで店舗領域と4 laneの自動la
     nodeOverlapPairs,
     nodeRouteIntersections,
     edgeCrossings,
-    routesCompact: routes.every((route) => route.length <= 3),
+    routesCompact: routeRecords.every((route) => route.routePointCount <= 3),
     contentAspect,
     fitScale: fitScale / 100,
     minimumPrimaryLabelFontPx,
@@ -227,7 +230,7 @@ test("pizza注文配送Turtleをoverlayなしで店舗領域と4 laneの自動la
     laneCount: laneBoxes.length,
     nodeCount: nodeBoxes.length,
     edgeCount: routes.length,
-    maximumRouteIntermediatePoints: Math.max(...routes.map((route) => route.length - 2)),
+    maximumRouteIntermediatePoints: Math.max(...routeRecords.map((route) => route.routePointCount - 2)),
     nodeOverlapPairs,
     nodeRouteIntersections,
     intersectingEdgeIds,
@@ -269,7 +272,7 @@ function nodeWithLabel(page: Page, label: string): Locator {
 
 function regionWithLabel(page: Page, label: string): Locator {
   return page.locator(".iriograph-scene-region").filter({
-    has: page.locator(".iriograph-region-label", { hasText: exactText(label) }),
+    has: page.locator(".iriograph-group-frame-label-text", { hasText: exactText(label) }),
   });
 }
 

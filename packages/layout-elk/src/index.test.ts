@@ -4,6 +4,7 @@ import {
   buildIriographView,
   edgeEndpointAnchorFromPoint,
   edgeEndpointAnchorPoint,
+  flattenLayoutDerivedCurve,
   layoutExternalReservationGeometries,
   LayoutAdapterRegistry,
   layoutProjectedScene,
@@ -167,9 +168,14 @@ describe("ElkLayeredLayoutAdapter", () => {
       commented,
       result.geometries.commented!,
     )[0]!;
+    const choice = result.derivedRouteChoices?.flow;
+    const renderedRoute = choice?.curve
+      ? flattenLayoutDerivedCurve(result.routes.flow!, choice.curve)
+      : result.routes.flow!;
 
     expect(result.geometries.commented).toMatchObject({ width: 100, height: 60 });
-    expect(polylineCrossesBox(result.routes.flow!, reservation)).toBe(false);
+    expect(polylineCrossesBox(renderedRoute, reservation)).toBe(false);
+    expect(choice?.family).toMatch(/^(curve|polyline)$/);
   });
 
   test("keeps manual waypoints and completes self and parallel routes", async () => {
@@ -273,6 +279,11 @@ describe("ElkLayeredLayoutAdapter", () => {
         edgeEndpointAnchorPoint(a, "rectangle", edgeEndpointAnchorFromPoint(a, bCenter)),
         edgeEndpointAnchorPoint(b, "rectangle", edgeEndpointAnchorFromPoint(b, aCenter)),
       ]);
+      expect(result.derivedRouteChoices?.direct).toEqual({
+        family: "straight",
+        source: "explicit",
+        reason: "explicit-route-mode",
+      });
   });
 
   test("gives straight priority over stale manual points, including self-routes", async () => {
@@ -305,6 +316,34 @@ describe("ElkLayeredLayoutAdapter", () => {
     ));
 
     expect(result.routes.curved).toHaveLength(2);
+    expect(result.derivedRouteChoices?.curved).toMatchObject({
+      family: "curve",
+      source: "explicit",
+      reason: "explicit-route-mode",
+      curve: { guideAngleDegrees: expect.any(Number) },
+    });
+  });
+
+  test.each([
+    ["LR", "urn:test:elk-auto-straight-lr"],
+    ["TB", "urn:test:elk-auto-straight-tb"],
+  ] as const)("propagates the safe auto route family for %s", async (direction, layoutRef) => {
+    const adapter = new ElkLayeredLayoutAdapter(layoutRef, direction, {
+      engine: new RecordingEngine(),
+    });
+
+    const result = await adapter.layout(request(
+      [element("a"), element("b")],
+      [edge("flow", "a", "b")],
+      layoutRef,
+    ));
+
+    expect(result.routes.flow).toHaveLength(2);
+    expect(result.derivedRouteChoices?.flow).toEqual({
+      family: "straight",
+      source: "auto",
+      reason: "auto-straight-safe",
+    });
   });
 
   test("never invokes ELK for fixed geometry and returns a Core-valid result", async () => {
@@ -494,6 +533,54 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(containsCenter(result.geometries.left!, result.geometries.shared!)).toBe(true);
     expect(containsCenter(result.geometries.right!, result.geometries.shared!)).toBe(true);
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
+
+  test.each([
+    ["LR", "urn:test:elk-region-separation-lr"],
+    ["TB", "urn:test:elk-region-separation-tb"],
+  ] as const)("applies common disjoint-region and free-node completion for %s", async (
+    direction,
+    layoutRef,
+  ) => {
+    const engine: ElkLayoutEngine = {
+      layout: async (input) => {
+        const graph = structuredClone(input);
+        for (const child of graph.children ?? []) {
+          child.x = 40;
+          child.y = 40;
+          child.width ??= 120;
+          child.height ??= 60;
+        }
+        return graph;
+      },
+    };
+    const adapter = new ElkLayeredLayoutAdapter(layoutRef, direction, { engine });
+    const layoutRequest = request([
+      element("region-a", "region", undefined, { width: 240, height: 160 }),
+      element("region-b", "region", undefined, { width: 240, height: 160 }),
+      element("a"),
+      element("b"),
+      element("free"),
+    ], [], layoutRef);
+    layoutRequest.scene.memberships = [
+      membership("a-m", "region-a", "a"),
+      membership("b-m", "region-b", "b"),
+    ];
+
+    const result = await layoutProjectedScene(
+      layoutRequest,
+      new LayoutAdapterRegistry([adapter]),
+    );
+
+    expect(result.direction).toBe(direction);
+    expect(rectanglesOverlap(
+      result.geometries["region-a"]!,
+      result.geometries["region-b"]!,
+    )).toBe(false);
+    expect(rectanglesOverlap(result.geometries.free!, result.geometries["region-a"]!)).toBe(false);
+    expect(rectanglesOverlap(result.geometries.free!, result.geometries["region-b"]!)).toBe(false);
+    expect(containsCenter(result.geometries["region-a"]!, result.geometries.a!)).toBe(true);
+    expect(containsCenter(result.geometries["region-b"]!, result.geometries.b!)).toBe(true);
   });
 
   test("defers regions and adds deterministic membership-only ordering edges to ELK", async () => {
@@ -778,6 +865,16 @@ function pairwiseOverlapCount(
     }
   }
   return count;
+}
+
+function rectanglesOverlap(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
 }
 
 function polylineCrossesBox(

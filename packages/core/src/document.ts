@@ -11,7 +11,10 @@ import {
   parseIriographSemanticSource,
   projectIriographDocument,
 } from "./projection.js";
-import { reconcileIriographDocumentViews } from "./reconciliation.js";
+import {
+  classifySemanticReconciliationScope,
+  reconcileIriographDocumentViews,
+} from "./reconciliation.js";
 import type { ProjectionRuntimeContext } from "./scene.js";
 import {
   canonicalizeTurtleSourceV1,
@@ -142,8 +145,12 @@ async function applyPreparedSemanticSourceTarget(
   // Direct source editing keeps the user's exact accepted Turtle text. Rich
   // command canonical serialization is a separate authoring concern.
   candidate.semantic.source = source;
+  const inferredMode = classifySemanticReconciliationScope(document, candidate)
+    === "subproperty-hierarchy-only"
+    ? "edge-only"
+    : "full";
   const result = await reconcileIriographDocumentViews(document, candidate, context, {
-    mode: options.reconciliationMode ?? "full",
+    mode: options.reconciliationMode ?? inferredMode,
   });
   const categorized = categorizePipelineDiagnostics(result.diagnostics);
   if (!result.accepted) {

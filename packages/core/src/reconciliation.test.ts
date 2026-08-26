@@ -14,7 +14,7 @@ import {
   type LayoutRequest,
   type StandardLayoutPerformanceSample,
 } from "./layout";
-import type { IriographDocumentV1 } from "./model";
+import type { IriographDocument, IriographDocumentV1 } from "./model";
 import { buildIriographView, type ProjectionRuntimeContext } from "./scene";
 import {
   reconcileIriographDocumentViews,
@@ -114,6 +114,39 @@ describe("display reconciliation", () => {
       requestedMode: "edge-only",
       viewId: expect.any(String),
     })));
+  });
+
+  it("direct sourceのsubPropertyOf-only deltaを自動route-onlyにし既存geometryを維持する", async () => {
+    const beforeSource = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:p a rdf:Property ; rdfs:label "P" .
+:q a rdf:Property ; rdfs:label "Q" .
+:a rdfs:label "A" ; :p :b .
+:b rdfs:label "B" .
+`;
+    const afterSource = `${beforeSource}\n:p rdfs:subPropertyOf :q .\n`;
+    const requests: LayoutRequest[] = [];
+    const samples: StandardLayoutPerformanceSample[] = [];
+    const context = localizedRuntimeContext(requests, samples);
+    const initial = await applySemanticSource(
+      localizedDocumentFor(beforeSource),
+      beforeSource,
+      context,
+    );
+    expect(initial.accepted).toBe(true);
+    const beforeGeometry = geometryBySemantic(initial.document);
+    requests.length = 0;
+
+    const updated = await applySemanticSource(initial.document, afterSource, context);
+
+    expect(updated.accepted).toBe(true);
+    expect(requests.filter((request) => request.mode === "route-only"))
+      .toHaveLength(initial.document.views.length);
+    for (const [viewId, geometry] of Object.entries(beforeGeometry)) {
+      expect(geometryBySemantic(updated.document)[viewId]).toMatchObject(geometry);
+    }
   });
 
   it.each([
@@ -303,7 +336,12 @@ describe("display reconciliation", () => {
       view.overlay = {
         sequence: {
           semanticRef: `${NS}flow`,
-          appearance: { templateRef: "urn:iriograph:template:container:sequence:1" },
+          appearance: {
+            templateRef: "urn:iriograph:template:container:sequence:1",
+            groupLabelAnchor: .4,
+            groupLabelWritingDirection: "vertical-down",
+            groupZOrder: 2,
+          },
         },
       };
     }
@@ -318,6 +356,9 @@ describe("display reconciliation", () => {
     const reconciled = overlayFor(result.document.views[0]!.overlay, `${NS}flow`);
     expect(reconciled?.appearance).toEqual({
       templateRef: "urn:iriograph:template:container:sequence:1",
+      groupLabelAnchor: .4,
+      groupLabelWritingDirection: "vertical-down",
+      groupZOrder: 2,
     });
     expect(result.diagnostics.some((diagnostic) => (
       diagnostic.code === "reconcile-edge-endpoints-changed"
@@ -330,7 +371,9 @@ describe("display reconciliation", () => {
     const node = overlayFor(previous.views[0]!.overlay, `${NS}a`)!;
     node.appearance = {
       styleToken: styleRef,
-      style: { fill: "#123456", strokeWidth: 3 },
+      style: { fill: "#123456", strokeWidth: 3, labelFontSize: 19 },
+      nodeIconSize: { width: 48, height: 32 },
+      nodeIconFit: "contain",
     };
 
     const result = await applySemanticSource(previous, oldSource, runtimeContext());
@@ -338,11 +381,22 @@ describe("display reconciliation", () => {
     expect(result.accepted).toBe(true);
     expect(overlayFor(result.document.views[0]!.overlay, `${NS}a`)?.appearance).toEqual({
       styleRef,
-      style: { fill: "#123456", strokeWidth: 3 },
+      style: { fill: "#123456", strokeWidth: 3, labelFontSize: 19 },
+      nodeIconSize: { width: 48, height: 32 },
+      nodeIconFit: "contain",
     });
     const scene = await buildIriographView(result.document, "main", runtimeContext());
     expect(scene.nodes.find((entry) => entry.semanticRef === `${NS}a`)?.style)
-      .toMatchObject({ fill: "#123456", stroke: "#7c3aed", strokeWidth: 3 });
+      .toMatchObject({
+        fill: "#123456",
+        stroke: "#7c3aed",
+        strokeWidth: 3,
+        labelFontSize: 19,
+      });
+    expect(scene.nodes.find((entry) => entry.semanticRef === `${NS}a`)).toMatchObject({
+      nodeIconSize: { width: 48, height: 32 },
+      nodeIconFit: "contain",
+    });
     expect(result.diagnostics).toContainEqual(expect.objectContaining({
       code: "reconcile-style-token-migrated",
       semanticRef: `${NS}a`,
@@ -608,4 +662,15 @@ function overlayFor(
   semanticRef: string,
 ) {
   return Object.values(overlay).find((entry) => entry.semanticRef === semanticRef);
+}
+
+function geometryBySemantic(
+  document: IriographDocument,
+): Record<string, Record<string, IriographDocumentV1["views"][number]["overlay"][string]["geometry"]>> {
+  return Object.fromEntries(document.views.map((view) => [
+    view.viewId,
+    Object.fromEntries(Object.values(view.overlay)
+      .filter((entry) => entry.geometry)
+      .map((entry) => [entry.semanticRef, entry.geometry])),
+  ]));
 }

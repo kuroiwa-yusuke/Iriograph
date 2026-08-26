@@ -12,20 +12,18 @@ const base = {
 };
 
 describe("canvas keyboard commands", () => {
-  it("secondary edit、primary edit、range、focusの優先順位を固定する", () => {
+  it("修飾付き表示編集、plain nudge、明示的object navigationを分離する", () => {
     expect(resolveCanvasKeyboardCommand({ ...base, ctrlKey: true, shiftKey: true }).kind)
       .toBe("presentation-secondary");
     expect(resolveCanvasKeyboardCommand({ ...base, metaKey: true }).kind)
       .toBe("presentation-primary");
-    expect(resolveCanvasKeyboardCommand({ ...base, shiftKey: true })).toEqual({
-      kind: "focus",
-      movement: "next",
-      range: true,
+    expect(resolveCanvasKeyboardCommand({ ...base, shiftKey: true })).toEqual({ kind: "nudge" });
+    expect(resolveCanvasKeyboardCommand(base)).toEqual({ kind: "nudge" });
+    expect(resolveCanvasKeyboardCommand({ ...base, key: "n" })).toEqual({
+      kind: "focus", movement: "next",
     });
-    expect(resolveCanvasKeyboardCommand(base)).toEqual({
-      kind: "focus",
-      movement: "next",
-      range: false,
+    expect(resolveCanvasKeyboardCommand({ ...base, key: "N", shiftKey: true })).toEqual({
+      kind: "focus", movement: "previous",
     });
   });
 

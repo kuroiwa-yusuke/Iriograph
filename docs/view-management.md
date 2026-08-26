@@ -75,6 +75,17 @@ exact IDだけを起点とし、containerの場合だけ全structural descendant
 新しいedgeを生成しません。Work areaは一つのgesture中も正負方向へ単調に拡張し、負方向では
 viewport位置を補正します。Fitはwork area全体でなく、負座標とrouteを含む実content boundsを使います。
 
+## 標準Editorの管理UI
+
+左sidebarはactive viewを切り替えるcompact selectorだけを常時表示します。Viewが一件だけならselectorを
+出さず、そのview名と`…`管理buttonを表示します。Viewの追加、複製、profile/layout/locale設定、削除、
+overlay resetは`…`から開く一つの管理dialogへ集約し、左sidebarへ個別buttonを並べません。
+
+管理dialogの各操作も上記`ViewCommand`へ合流し、viewごとのselection、viewport、一時hideを保持します。
+最後の1 viewは削除できず、複数viewの削除だけは対象名を示す二段階確認にします。追加・設定の子dialogを
+CancelまたはEscapeで閉じた場合は管理dialogへ戻して先頭controlへfocusし、管理dialogを閉じた場合は元の
+`…`buttonへfocusを戻します。Dialogを開閉しただけではdocument、history、dirty stateを変更しません。
+
 ## 制限
 
 v1はviewごとのSPARQL、filter DSL、predicate条件式、非表示nodeを跨ぐedge再接続を持ちません。

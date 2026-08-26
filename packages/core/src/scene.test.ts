@@ -6,6 +6,7 @@ import {
   LayoutAdapterRegistry,
   STANDARD_LAYOUT_REFS,
   StandardLightweightLayoutAdapter,
+  type LayoutAdapter,
 } from "./layout";
 import type { IriographDocumentV1 } from "./model";
 import { projectSemanticView } from "./projection";
@@ -29,6 +30,10 @@ describe("ProjectedScene conversion", () => {
     expect(scene.diagnostics).toEqual([]);
     expect(scene.edges[0]!.route!.length).toBeGreaterThanOrEqual(2);
     expect(scene.edges[0]!.route!.length).toBeLessThanOrEqual(3);
+    expect(scene.edges[0]!.derivedRouteChoice).toMatchObject({
+      source: "auto",
+      family: expect.stringMatching(/^(straight|curve|polyline)$/),
+    });
     expect(scene.edges[0]?.waypoints).toBeUndefined();
     expect(scene.nodes.every((node) => node.geometry.width > 0)).toBe(true);
   });
@@ -162,6 +167,12 @@ describe("ProjectedScene conversion", () => {
       createStandardLayoutRegistry(),
     );
     expect(scene.edges[0]?.curve).toEqual(document.views[0]!.overlay.edge!.routing!.curve);
+    expect(scene.edges[0]?.derivedRouteChoice).toMatchObject({
+      family: "curve",
+      source: "explicit",
+      reason: "explicit-route-mode",
+    });
+    expect(document.views[0]!.overlay.edge).not.toHaveProperty("derivedRouteChoice");
     expect(scene.edges[0]?.curve?.sourceHandle?.extensions).not.toBe(
       document.views[0]!.overlay.edge!.routing!.curve?.sourceHandle?.extensions,
     );
@@ -180,6 +191,9 @@ describe("ProjectedScene conversion", () => {
           nodeLabelOffset: { x: 14, y: -6 },
           nodeLabelWritingDirection: "vertical-down",
           nodeIconOffset: { x: -12, y: 8 },
+          nodeIconScale: 1.5,
+          nodeIconFit: "cover",
+          style: { labelFontSize: 21 },
         },
       },
     });
@@ -192,6 +206,9 @@ describe("ProjectedScene conversion", () => {
       nodeLabelOffset: { x: 14, y: -6 },
       nodeLabelWritingDirection: "vertical-down",
       nodeIconOffset: { x: -12, y: 8 },
+      nodeIconScale: 1.5,
+      nodeIconFit: "cover",
+      style: { labelFontSize: 21 },
     });
   });
 
@@ -208,6 +225,31 @@ describe("ProjectedScene conversion", () => {
     const scene = await buildIriographView(documentFor({}), "main", context);
     expect(scene.nodes).toHaveLength(2);
     expect(scene.diagnostics).toEqual([]);
+  });
+
+  it("sparse font/icon content metricsをlayout minimumへ渡してnodeをautogrowする", async () => {
+    const document = documentFor({
+      a: {
+        semanticRef: "urn:test:scene:a",
+        appearance: { style: { labelFontSize: 72 } },
+      },
+    });
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :a rdfs:label "非常に長い業務ラベルを安全に折り返して全体表示する" ; :p :b .
+      :b rdfs:label "B" .
+    `;
+    const scene = await layoutProjectedDiagramScene(
+      projectSemanticView(document, standardRdfRdfsCatalog),
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    const node = scene.nodes.find((candidate) => candidate.semanticRef === "urn:test:scene:a")!;
+    expect(node.style.labelFontSize).toBe(72);
+    expect(node.geometry.width).toBeGreaterThan(164);
+    expect(node.geometry.height).toBeGreaterThan(72);
+    expect(document.views[0]!.overlay.a!.appearance!.style).toEqual({ labelFontSize: 72 });
   });
 
   it("非表示時もcomment callout全体の表示領域をlayout boundsへ予約する", async () => {
@@ -276,9 +318,9 @@ describe("ProjectedScene conversion", () => {
     document.views[0]!.overlay["left-region"] = {
       semanticRef: "urn:test:scene:left",
       appearance: {
-        regionLabelAnchor: .3,
-        regionLabelWritingDirection: "vertical-down",
-        regionZOrder: 7,
+        groupLabelAnchor: .3,
+        groupLabelWritingDirection: "vertical-down",
+        groupZOrder: 7,
       },
     };
     document.semantic.source = `
@@ -302,6 +344,10 @@ describe("ProjectedScene conversion", () => {
 
     expect(scene.regions).toHaveLength(2);
     expect(scene.regions?.find((region) => region.semanticRef.endsWith(":left"))).toMatchObject({
+      groupFrame: { kind: "membership" },
+      groupLabelAnchor: .3,
+      groupLabelWritingDirection: "vertical-down",
+      groupZOrder: 7,
       regionLabelAnchor: .3,
       regionLabelWritingDirection: "vertical-down",
       regionZOrder: 7,
@@ -316,6 +362,87 @@ describe("ProjectedScene conversion", () => {
     expect(containingRegions).toHaveLength(2);
     expect(scene.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   });
+
+  it("Altをadapter非依存でmemberを囲うframeへ完成しguideをsemantic edgeにしない", async () => {
+    const document = documentFor({});
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :choice a rdf:Alt ; rdfs:label "選択" ; rdf:_1 :a ; rdf:_2 :b .
+      :a rdfs:label "A" .
+      :b rdfs:label "B" .
+    `;
+    const scene = await layoutProjectedDiagramScene(
+      projectSemanticView(document, standardRdfRdfsCatalog),
+      STANDARD_LAYOUT_REFS.hierarchicalLr,
+      createStandardLayoutRegistry(),
+    );
+    const frame = scene.containers.find((container) => container.semanticRef.endsWith(":choice"))!;
+    const members = scene.nodes.filter((node) => node.parentElementId === frame.elementId);
+    expect(frame.groupFrame).toMatchObject({ kind: "alternative" });
+    expect(members).toHaveLength(2);
+    for (const member of members) {
+      expect(member.geometry.x).toBeGreaterThanOrEqual(frame.geometry.x);
+      expect(member.geometry.y).toBeGreaterThanOrEqual(frame.geometry.y);
+      expect(member.geometry.x + member.geometry.width)
+        .toBeLessThanOrEqual(frame.geometry.x + frame.geometry.width);
+      expect(member.geometry.y + member.geometry.height)
+        .toBeLessThanOrEqual(frame.geometry.y + frame.geometry.height);
+    }
+    expect(scene.groupGuides?.filter((guide) => guide.kind === "alternative-candidate"))
+      .toHaveLength(2);
+    expect(scene.edges).toEqual([]);
+  });
+
+  it("Bag Group Frame kindをScene境界から外部adapter後処理へ渡す", async () => {
+    const document = documentFor({});
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :bag a rdf:Bag ; rdfs:label "Bag" ; rdfs:member :member .
+      :member rdfs:label "Member" .
+    `;
+    const projected = projectSemanticView(document, standardRdfRdfsCatalog);
+    const frame = projected.containers.find((container) => container.groupRole === "membership")!;
+    const member = projected.nodes.find((node) => node.semanticRef.endsWith(":member"))!;
+    const layoutRef = "urn:test:scene:external-bag-layout";
+    let observedGroupRole: string | undefined;
+    const adapter: LayoutAdapter = {
+      layoutRef,
+      async layout(request) {
+        observedGroupRole = request.scene.elements.find((element) => (
+          element.elementId === frame.elementId
+        ))?.groupRole;
+        return {
+          layoutRef,
+          structuralCompletion: true,
+          geometries: Object.fromEntries(request.scene.elements.map((element) => [
+            element.elementId,
+            element.elementId === member.elementId
+              ? { x: 500, y: 300, width: 120, height: 60 }
+              : { x: 0, y: 0, width: 80, height: 50 },
+          ])),
+          routes: {},
+          width: 620,
+          height: 360,
+          diagnostics: [],
+        };
+      },
+    };
+    const scene = await layoutProjectedDiagramScene(
+      projected,
+      layoutRef,
+      new LayoutAdapterRegistry([adapter]),
+    );
+    const sceneFrame = scene.containers.find((container) => container.elementId === frame.elementId)!;
+    const sceneMember = scene.nodes.find((node) => node.elementId === member.elementId)!;
+
+    expect(observedGroupRole).toBe("membership");
+    expect(isInside(sceneMember.geometry, sceneFrame.geometry)).toBe(true);
+    expect(scene.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+  });
 });
 
 function containsCenter(
@@ -326,6 +453,16 @@ function containsCenter(
   const y = inner.y + inner.height / 2;
   return x >= outer.x && x <= outer.x + outer.width
     && y >= outer.y && y <= outer.y + outer.height;
+}
+
+function isInside(
+  child: { x: number; y: number; width: number; height: number },
+  parent: { x: number; y: number; width: number; height: number },
+): boolean {
+  return child.x >= parent.x
+    && child.y >= parent.y
+    && child.x + child.width <= parent.x + parent.width
+    && child.y + child.height <= parent.y + parent.height;
 }
 
 function documentFor(

@@ -5,7 +5,7 @@
 ## 操作の基本
 
 - Node、container、region、edgeをclickすると選択し、右Inspectorで対象を確認できます。Ctrl/Cmd clickは選択のtoggle、Shift clickは追加、空白clickまたはEscapeは選択解除です。
-- 操作名、resource、class、predicateは人が読めるlabelを主表示にします。完全IRIはidentityとして内部で保持し、同名labelの識別、tooltip、read-onlyの`Advanced`詳細で確認できます。Label文字列をidentityやcatalog ruleの判定には使いません。
+- 操作名、resource、class、predicateは人が読めるlabel/commentを主表示にします。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやread-onlyの`Advanced`詳細へ渡しません。完全IRIはHost/Core内部transaction・監査logとeditableなTurtle/Document sourceに保持し、label文字列をidentityやcatalog ruleの判定には使いません。
 - `意味`の作成・変更は、利用者が実行buttonを一度押すと内部でcandidate graphのvalidationとsemantic transactionを続けて行い、一つのrevisionへ確定します。Validation error時は確定せず、対象fieldの近くに次の行動を示します。通常変更に別のPreview/Apply確認画面は挟みません。
 - `ビュー`の変更は現在のnamed viewだけへ作用します。位置、size、template、icon、edge routingを変更してもTurtleは変わりません。
 - 意味入力とビュー入力を同時に表示しません。対象を選んだ後は`意味`と`ビュー`のtabで片方だけを表示し、tabを切り替えても未実行の段階入力を保持して、黙って確定または破棄しません。
@@ -13,12 +13,14 @@
 
 ## 選択中心の右Inspector
 
-右Inspectorの初期状態は、RDF statementや全propertyを平坦に並べず、Canvasで選択している要素または関係のlabel中心の概要を最初に表示します。常時表示する追加入口は次の2つです。
+右Inspectorの意味編集は、RDF statementや全propertyを平坦に並べず、初期blur状態では次の4入口だけを表示します。Canvasの事前選択は後続段階へseedしますが、入口を選んだだけでは意味graphを変更しません。
 
-1. `要素を追加`
-2. `関係を追加`
+1. `新しい要素を作る`
+2. `関係を作る`
+3. `要素を変更する`
+4. `関係を変更する`
 
-Resourceを選択したときは`要素の詳細を編集`と`所属・並び順を編集`、direct edgeを選択したときは`関係の意味を編集`だけを追加表示します。Action選択後にだけ必要なfieldを段階表示し、一つの画面に全fieldを先出ししません。前段で選んだclass、predicate、resource、Scene provenanceにより次段の候補を絞ります。通常UIにIRI、`rdf:_1`、内部command名、capability patchを入力させません。完全IRIとexact statementは`Advanced`のread-only参照情報であり、standard editorにIRI override入力を設けません。
+入口の後は一段に一つの判断だけを表示します。`新しい要素を作る`では最初にpreview付きの`要素` / `グループ`を選び、要素ならprofileが許可する種類を一件以上選んでから名前、グループなら分類・包含・順序付き・候補グループから一つ選んでから名前へ進みます。`要素を変更する`と`関係を変更する`は対象をCanvasから選び、対象に適用できる操作だけを次段に表示します。前段で選んだ種類、predicate、resource、Scene provenanceにより次段の候補を絞ります。通常UIとAdvanced DOMにIRI、`rdf:type`、`rdf:_1`、内部command名、capability patchを表示・入力させません。Presentationはopaque option/statement IDを使い、完全IRIとexact statementはHost/Core内部transaction・監査logとeditable sourceに保持します。
 
 Resource、region、container、Seqを一つ選択した初期概要には、`属する領域`と`含む要素`を
 件数付きのlabel-first一覧で示します。一覧はSceneのexact membershipとprovenanceだけから作り、
@@ -26,62 +28,81 @@ Resource、region、container、Seqを一つ選択した初期概要には、`�
 region、nested membership、Seq membershipを区別し、Seqは一始まりのordinalを表示します。
 同じ要素が複数領域へ属する場合は各membershipを失わず別行で示します。各通常membershipは
 一覧から対象をCanvasへfocusし、対象を選択した`所属・並び順を編集`へ移るか、exact predicateと
-container positionを保ったままそのmembershipだけを直接解除できます。解除は一つのatomic
-semantic transactionであり追加確認を挟みません。Seq/Alt membershipはこの個別解除へ流さず、
-ordinal/default slotを一括検証する専用の順序・選択editorへ委譲します。一覧の展開やfocusはsession
-操作でありdocumentやoverlayへ複製しません。
+container positionを保ったままそのmembershipだけを直接解除できます。複数行を選んだ一括解除も、
+同じexact membershipが`属する領域`と`含む要素`の両方へ現れた場合は一件へ正規化し、一つのcommand列を
+一つのatomic semantic transactionとして確定します。解除は追加確認を挟まず、失敗時は全件をrollbackします。
+Seq/Alt membershipは個別・一括解除のcheckboxへ混ぜず、ordinal/default slotを一括検証する専用の
+順序・選択editorへ委譲します。一覧の展開やfocusはsession操作でありdocumentやoverlayへ複製しません。
 
-InspectorはCanvasを圧迫しないcompactな密度を標準とし、対象概要、2つの追加入口、選択後の主要actionだけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳めます。
+InspectorはCanvasを圧迫しないcompactな密度を標準とし、4つの意味編集入口だけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳めます。
 
-`要素を追加`はlabel一項目だけを入力して確定します。Opaque IRIはhost allocatorが生成し、初期semantic statementはそのIRIの`rdfs:label`だけです。種類、説明、分類、所属、関係、位置を作成formへ混ぜず、作成後の対象別編集と`ビュー`で追加します。`関係を追加`はCanvasで選んだ始点・終点とlabel-firstの関係候補を使います。必要なauthoring context、provenance、書込権限が不足するactionは推測で実行せず、無効理由と次に必要な操作を日本語で示します。
+`新しい要素を作る`ではhost allocatorがopaque IRIを生成し、選んだ要素種類またはグループ種類と名前を一つのatomic semantic transactionで保存します。説明、既存要素との関係、位置、iconは作成後の意味編集または`ビュー`で追加します。`関係を作る`は最初に大きなicon cardで`線でつなぐ` / `グループへ所属させる`を選びます。前者はCanvasで一つの始点と一件以上の接続先を選び、category別の日本語predicate catalogから共通関係を選択します。必要な場合だけ接続先ごとの関係を上書きできます。後者は既存Group Frame一件とmemberを複数選び、順序付きでは並べ替え、候補グループでは既定候補を指定します。Member一覧では既存要素と、名前・種類だけを持つ未確定の新規要素chipを混在でき、確定時に全要素と所属を一つのtransactionへまとめます。
+
+Canvas事前選択が0件なら各roleは未選択、1件ならdirectの始点または選択対象、複数件ならdirectの先頭を始点・残りを接続先としてlabel付きでseedします。Membershipでは、事前選択に既存Group Frameがちょうど一件あるときだけ所属先にし、選択nodeをmemberにします。`線でつなぐ`と`グループへ所属させる`をBackで切り替えた場合は一方のdraftを他方へ変換せず、元のCanvas事前選択から作り直します。必要なauthoring context、provenance、書込権限が不足するactionは推測で実行せず、無効理由と次に必要な操作を日本語で示します。
 
 各段階はBackで戻れ、CancelまたはEscapeでdraftだけを破棄します。Validation errorはcodeだけでなく「どの選択を、なぜ、どう直すか」を該当fieldの近くに示します。実行前はdocument、portable overlay、historyを変更せず、実行時もvalidationとapplyを別historyへ分割しません。確認modalは後述する選択外への削除影響だけに限定します。
 
 ## Document source編集
 
-`Document`タブは`意味（semantic.source）`、`View overlay`、`Document全体`を分離します。意味の
-正本は参照表示し、編集はTurtleタブのsemantic transactionへ移ります。`Document全体`は
-`documentId`、portable base、catalog import、全named viewを確認するread-only表示です。
+`Document`タブは意味の件数要約、active viewの`View overlay`、portableな`Document全体`を分離します。
+Turtle全文を同じtabへ重複表示せず、意味の編集はTurtleタブへ移ります。Overlay JSONとDocument JSONは
+いずれも通常表示のeditable sourceであり、技術情報を利用しないユーザーはsectionを閉じられます。
 
-`View overlay`はactive named viewのsparse overlayだけをJSON sourceとして編集するAdvanced入口です。
-JSON整形、runtime schema、実Sceneの複数region containment、stale draftを適用前に検証し、失敗時は
-該当pathと修正行動を示して正本を変えません。成功時はTurtleをbyte単位で維持した一つのpresentation
-transactionとなり、dirty、undo/redo、保存前flushへ通常のCanvas操作と同じように接続します。
-未適用のTurtle、意味form、overlay sourceを同時確定せず、先にどのdraftを適用または破棄するか示します。
-日常的な位置、size、route、style調整はCanvasと右Inspectorを主入口とします。
+`View overlay`はactive named viewのsparse overlayだけを、`Document全体`は`documentId`、portable base、
+catalog import、Turtle、全named viewを含む一つのJSONとして編集します。どちらもJSON parse、runtime schema、
+semantic/profile検証、全named viewの投影・空間制約、stale draftをCoreのportable replace pipelineで検証します。
+失敗時はJSON Pointerと修正行動を示し、正本を部分更新しません。成功時は一回のundo/dirty/save flushへ確定し、
+全文Document編集ではTurtleを含む全正本を、overlay編集ではTurtleをbyte単位で維持してactive overlayだけを置換します。
+Coreの`confirmationId`はpreview改変を検出するintegrity tokenであり、この通常の適用操作へ別の確認modalを重ねません。
+未適用のTurtle、意味form、overlay source、Document sourceを同時確定せず、先にどのdraftを適用または破棄するか
+示します。日常的な位置、size、route、style調整はCanvasと右Inspectorを主入口とします。
+
+同じ文書内容をclipboardへコピーする操作はidentityとexpanded IRIを変えません。「新しい図として複製」は
+hostの`DocumentIdentityAllocator`がhost内で一意なopaque `documentId`と現在と異なるabsolute baseを発行した場合だけ利用でき、Coreがparsed RDF termと
+overlayのsemantic referenceを旧local namespaceから新namespaceへ対応付けます。標準・外部IRI、catalog/asset IRI、
+literalは変更しません。Editorはmapping previewを表示し、適用後も現在の文書・history・dirty stateを変更せず、
+検証済みcopyを`duplicatedAsNew`でhostへ渡します。新しいworkspace fileの作成と表示切替はhostの責務です。
 
 Sceneへ表示するdiagnosticは操作のscopeに合わせます。Edge端点変更では変更edgeと旧新endpointに
 関係するlayout diagnosticだけを返し、既存または別named viewの同じ警告を再掲しません。Semantic/profile
 diagnosticは全viewで保持し、同一identityの通知は一件へまとめます。Overlay-only変更は以前のlayout
 warningを次のSceneへ持ち越しません。
 
-## 右クリックとビュー編集
+## 対象別context menu
 
-Pointerの右click、Canvasのactive itemに対するContext Menu keyまたはShift+F10は、対象を選択して右Inspectorの`ビュー`tabと該当段階を直接開きます。別のcontext menuやCanvas横のpopoverは出しません。右クリックから意味の追加・変更・削除を開始せず、入口を開いただけではdocument、overlay、historyを変更しません。未適用の意味draftも破棄しません。Canvas本体のsingle-tab-stop listbox、`aria-activedescendant`、live statusの規範は[accessibility.md](./accessibility.md)を参照してください。
+Pointerの右click、Canvasのactive itemに対するContext Menu keyまたはShift+F10は同じ対象別menuを開きます。空白には要素追加とpaste、nodeには詳細・ビュー・icon・関係作成・所属・削除、direct edgeには関係詳細・線・再接続・route reset・削除を示します。Derived順序ガイドと候補線は線単体を編集させず、所有する順序付きグループまたは候補グループの構造編集へ委譲します。Group Frameには詳細、member/順序/候補、枠、fit、許可層内の前後移動、削除を示します。
+
+Menu項目の選択は右Inspectorの意味flow、ビューInspector、または対応するCanvas commandへfocusするだけで、その時点ではdocument、overlay、historyを変更しません。Raw IRIや一段で意味を変える危険操作を置かず、利用できない項目は隠すだけでなく日本語の無効理由を示します。Escapeまたはmenuを閉じた後はCanvasの元のactive itemへfocusを戻します。未適用の意味draftも黙って破棄しません。Canvas本体のsingle-tab-stop listbox、`aria-activedescendant`、live statusの規範は[accessibility.md](./accessibility.md)を参照してください。
 
 ## Resourceの作成
 
-`要素を追加`はactive localeのlabelだけを要求します。空文字列は拒否し、hostのresource IRI allocatorが許可namespace内の衝突しないopaque IRIを発行します。内部で検証する初期graph patchは次の一文だけです。
+`新しい要素を作る`は`要素` / `グループ`を最初に選びます。要素はactive authoring profileが許可するnode-roleを一件以上（未分類を明示許可するprofileだけ0件）とactive localeの名前を要求します。グループは分類・包含・順序付き・候補のいずれかと名前を要求します。空文字列は拒否し、hostのresource IRI allocatorが許可namespace内の衝突しないopaque IRIを発行します。要素の内部patchは名前と選択済みの全種類を、グループは名前と対応する標準構造typeを同時に作ります。例えば一種類の要素は次の形です。
 
 ```turtle
-<allocated-opaque-iri> rdfs:label "入力したlabel"@ja .
+<allocated-opaque-iri> rdfs:label "入力した名前"@ja ;
+  a <profileで選択した種類> .
 ```
 
-確定後のprojectionはgeneric node fallbackと標準layoutでdisplayを補完します。初期位置、template、iconを同じsemantic transactionに含めません。分類、概念クラス化、説明、上位概念は`要素の詳細を編集`、edgeは`関係の意味を編集`、領域membershipは`所属・並び順を編集`、位置やiconは`ビュー`から別の明示操作として行います。これにより作成失敗をlabel/allocator/profile検証へ限定し、初回formでRDFの種類や関係を理解させません。
+確定後のprojectionは選択したrole/group kindとcatalogからGroup Frameまたはnodeを作り、標準layoutでdisplayを補完します。初期位置、template override、icon overrideを同じsemantic transactionに含めません。説明、上位概念、edge、領域membershipは対象別の意味編集、位置やiconは`ビュー`から別の明示操作として行います。UIにはRDF用語やIRIではなく、種類の日本語名、説明、形のpreviewを示します。
 
-Allocatorが失敗、衝突、許可namespace外のIRIを返した場合は確定せず、「要素を作れませんでした。再試行してください」等のaction付きerrorを示します。完全IRIはAdvanced詳細でread-only表示します。Canvas上のghostは確定前の一時表示であり、Cancel、Escape、失敗時に消え、documentやoverlayへ保存しません。
+Allocatorが失敗、衝突、許可namespace外のIRIを返した場合は確定せず、「要素を作れませんでした。再試行してください」等のaction付きerrorを示します。該当IRIはHost/Core内部diagnosticと監査logに保持し、通常UIやAdvanced DOMへ表示しません。Canvas上のghostは確定前の一時表示であり、Cancel、Escape、失敗時に消え、documentやoverlayへ保存しません。
 
-Concept classや関係種別を定義する場合も、初回作成formで種類を選ばせません。Human vocabulary definitionを許すprofileでは作成済みresourceを`rdfs:Class`または`rdf:Property`等へ変更する後続の`要素の詳細を編集`を、一回のvalidationとtransactionとして提供します。禁止profileではその編集候補を無効理由付きで出しません。Templateやiconを正当化するためだけの`rdf:type`は生成しません。
+作成時の種類はresolved profileが公開する既存node-roleだけから選び、新しいclassや関係種別をこのflowで定義しません。Human vocabulary definitionを許すprofileでは、作成済みresourceを対象にした別の高度な編集を一回のvalidationとtransactionとして提供できます。禁止profileではその編集候補を出しません。Templateやiconを正当化するためだけの種類は生成しません。
 
 ## Detailsとproperty編集
 
-右Inspectorの`要素の詳細を編集`で対象を選んだ後、resourceのlabelを見出しにしたdetails/property dialogを段階入力として開けます。Details dialogを独立した意味編集入口にはしません。通常表示ではlabel、値の種類、関係先を読みやすく示し、完全IRI、datatype、language、exact tripleはread-onlyの`Advanced`または詳細領域に置きます。Standard editorはAdvanced identityやexact statementを直接編集する入力欄を持ちません。
+右Inspectorの`要素の詳細を編集`で対象を選んだ後、resourceのlabelを見出しにしたdetails/property dialogを段階入力として開けます。Details dialogを独立した意味編集入口にはしません。通常表示とAdvanced DOMではlabel、説明、値の種類、関係先を読みやすく示し、resource・predicate・datatypeの生IRI、language tag、exact tripleを表示しません。各値とstatementはopaque IDでidentityを維持し、生のRDF表現を扱う入口はeditableなTurtle/Document sourceに限定します。
 
 Property編集はsubjectとpredicateの値集合を扱います。複数のIRI/literal値、literalのdatatypeまたはlanguage、空文字列literalを区別します。値を空にする明示削除と、空文字列を一値として保存する操作は同じではありません。`rdfs:member`や`rdf:_n`などの構造predicateは通常propertyとして編集せず、包含、順序、選択の専用actionを使います。
 
-通常detailsは、RDF statementの平坦な一覧ではなく、`名前・説明・別名`、`分類・概念階層`、`関係・参照`、`データ属性`、`Advanced identity`へ分けます。`rdf:_n`は順序editorだけに表示します。Predicate resourceを編集する場合は「関係種別」としてlabel、comment、`rdfs:subPropertyOf`を示し、label変更が同じpredicateを使う全edgeへ反映されることを説明します。
+通常detailsは、RDF statementの平坦な一覧ではなく、`名前・説明・別名`、`分類・概念階層`、`関係・参照`、`データ属性`、`解決情報`へ分けます。解決情報はlabel/commentで読めるrule traceだけを示し、identityはDOMへ表示しないopaque option/statement IDで維持します。`rdf:_n`は順序editorだけに表示します。Predicate resourceを編集する場合は「関係種別」としてlabel、comment、`rdfs:subPropertyOf`を示し、label変更が同じpredicateを使う全edgeへ反映されることを説明します。
 
-Labelとcommentは複数行literalを入力でき、language別の値集合として編集します。Canvasの既定labelはactive localeのprimary label一つです。同一languageの`rdfs:label`が複数ありprimaryを決定できない場合は警告し、別名を必要とするprofileは`skos:altLabel`等の標準語彙を明示的に許可します。文字列をidentityやrule matchingには使いません。
+Labelとcommentは複数行literalを入力でき、language別の値集合として編集します。通常UIは`@ja`やdatatypeを
+名前・説明fieldへ併記せず、新規値へauthoring profileの`defaultLocale`を自動設定します。既存のlanguage tag付き、
+tagなし`xsd:string`、多言語値は区別したままround-tripし、必要な場合だけ折り畳んだ言語・型詳細で確認します。
+Canvasの既定labelはactive localeのprimary label一つです。同一languageの`rdfs:label`が複数ありprimaryを決定できない
+場合は警告し、別名を必要とするprofileは`skos:altLabel`等の標準語彙を明示的に許可します。文字列をidentityや
+rule matchingには使いません。
 
 Dialogは表示時に見出しまたは最初のfieldへfocusし、focusをdialog内に保ちます。EscapeまたはCancelは未適用draftを破棄し、閉じた後は存在するopenerまたはCanvasのactive itemへfocusを戻します。Semantic propertyはdialogの保存操作一回で共通validationとtransactionへ進み、dialogを閉じただけでは保存しません。
 
@@ -89,13 +110,25 @@ Dialogは表示時に見出しまたは最初のfieldへfocusし、focusをdialo
 
 Edge作成はsource、predicate、targetを明示するsemantic authoringです。`関係を追加`を開いた時点でresourceを一つだけ選択していればそれを始点にし、続くCanvasの通常clickを終点として受け取ります。事前のCtrl/Cmd複数選択は要求しません。始点を終点pickerへ自動転記せず、同じnodeの通常clickは次段階へ進めません。自己関係は専用の「始点自身へ接続」actionを利用者が明示した場合だけcandidateにし、profile/domain validationを通ったときだけ確定します。始点変更後は古い終点を破棄し、blank、region、container、Escapeは未接続のsemantic stateを保存しません。
 
-Canvas gestureを使う場合も、最初のresourceと次のresourceをsession draftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補から選び、standard editorのAdvancedはread-onlyで候補外IRIの入力欄を持ちません。空欄をgeneric predicateで補完することはありません。
+Canvas gestureを使う場合も、最初のresourceと次のresourceをsession draftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補とopaque predicate IDから選び、standard editorの通常UIとAdvanced DOMへ候補内外の生IRIを表示・入力しません。空欄をgeneric predicateで補完することはありません。
 
 Predicate pickerは「分類」「参照」「依存」「由来」等のcategoryごとに候補をまとめ、候補名を`A（predicate label）B`、補足説明をsubjectが`A`、objectが`B`の短い日本語例文として表示します。たとえばPROV-Oの派生関係は「A（派生元）B」と「AはBから派生した」を併記します。A/Bは基準要素と相手要素の役割を比較するためだけの仮記号で、確定後のedge表示には実際の要素名とpredicate labelだけを使います。語順、助詞を含む文型、comment、category、利用例は解決済みcatalog/vocabulary metadataから得て、IRI local nameや英語labelの機械分割から生成しません。Metadataが不足する候補は`A（通常predicate label）B`という決定的fallbackを使い、意味を推測しません。
 
+選択したdirect edgeの`関係の意味`はassertedされたexact predicateの名前と説明を主表示し、
+`rdfs:subPropertyOf`で到達する上位関係をmulti-parent DAGの全pathとして別に示します。Hostが
+`predicateInferencePolicy`でqueryまたはvalidationの`rdfs-subproperty`推論を明示した場合だけ、
+「上位関係としても検索・検証される」とpolicyを説明します。この説明から上位predicateのedgeをScene、
+overlay、Turtleへ複製せず、pickerで選んだexact predicateを編集・削除対象として保ちます。Hierarchy cycleは
+有限のwarningとして表示します。Hierarchy表示はCoreのopaque predicate IDとlabel-only DTOを使い、生のIRIを
+presentation itemやDOMへ追加しません。Identityはlabel一致で解決せず、predicate catalogと同じID規則を使います。
+
+`ビュー規則`は意味階層と分け、採用catalog ID/version/profile、rule ID、exact・subclass・subproperty・wildcardの
+どの照合を使ったか、template/styleの出所、競合候補、generic fallback理由をresolution traceとして表示します。
+上位predicateであること自体はstyle継承を意味せず、catalog ruleが明示した照合だけが表示解決へ作用します。
+
 `要素の詳細を編集`の「要素の種類」は`rdf:type`の編集です。選んだclassが現在のviewで概念領域にも投影される場合はその旨を併記しますが、同じtripleを独立した所属操作から二重編集しません。「所属する領域」は`rdfs:member`またはその下位predicateによる業務上の所属を編集する別sectionです。Nodeを選んだ意味編集には入出力関係、方向、相手要素を、direct edgeを選んだ意味編集には始点、関係、終点、個別説明をまとめて示します。重なってCanvasから直接押せないedgeもこの一覧から選択してrevealできます。
 
-候補集合はactive authoring profileが許可し、解決済み標準catalogが提供するRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の関係語彙を基準にします。Source/targetの明示型と限定`rdfs:subClassOf` closure、predicateの`rdfs:domain`/`rdfs:range`、object/literal kind、catalog capabilityを使って型適合するものへ絞ります。完全なOWL推論をpicker内で実行しません。型情報が不足する場合は適合を断定して除外せず「型未確認」として後順位に残し、候補graphは確定前の共通validationへ必ず通します。全predicateを平坦に並べず、検索とcategory絞り込みを提供します。近い既存predicateがない場合は、standard editor内でIRIを入力させずcatalog/vocabularyの整備を促します。表示名が同じ候補は説明とread-only Advanced IRIで識別します。
+候補集合はactive authoring profileが許可し、解決済み標準catalogが提供するRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の関係語彙を基準にします。Source/targetの明示型と限定`rdfs:subClassOf` closure、predicateの`rdfs:domain`/`rdfs:range`、object/literal kind、catalog capabilityを使って型適合するものへ絞ります。完全なOWL推論をpicker内で実行しません。型情報が不足する場合は適合を断定して除外せず「型未確認」として後順位に残し、候補graphは確定前の共通validationへ必ず通します。全predicateを平坦に並べず、検索とcategory絞り込みを提供します。近い既存predicateがない場合は、standard editor内でIRIを入力させずcatalog/vocabularyの整備を促します。表示名が同じ候補は説明、category、型、上位関係とopaque option IDで識別し、生IRIをDOMへ渡しません。
 
 Predicateから導出するedge labelは関係種別の意味表示です。個々のdirect edgeへ利用者が追加する「この関係の説明」は`選択対象の意味を編集`の意味操作とし、asserted S/P/Oを残したRDF 1.1標準reificationの`rdfs:comment`として保存します。複数language・複数行を扱い、predicate自体のlabel/commentとは区別します。これにより説明は意味検索とLLM contextへ含められます。View overlayのlegacy captionは表示専用データとして読み込めますが、標準Editorは意味説明の入力先として使いません。
 
@@ -109,7 +142,7 @@ Edgeを選択して`ビュー`の`線の表示`を開くと、最初に経路形
 
 Template、icon、style、geometry等のdisplay項目は、右Inspectorの`ビュー`内で編集します。Canvas外のpopoverや別の「適用」確認は使いません。Checkbox、select、preset、resetは操作時に一つのpresentation transactionとして直接確定します。Color、range、numberは`input`中だけ一時Sceneへpreviewし、`change`で変更前後を一つのpresentation history itemとして確定します。Inline editorの`閉じる`は既に確定した変更を取り消さずsectionだけを畳み、確定前のsession previewだけを破棄します。同じpointer gestureや連続入力をkey repeatごとに複数のundo itemへ分割しません。
 
-Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Template/shapeはIRI文字列のselectでなく、実shape・style・iconの小previewから選びます。Workspace assetはhost pickerがabsolute asset IRIだけを返すか、hostが`assetRef`と正確なworkspace pathの候補を注入します。利用者は候補pathを選び、Editorは対応するasset IRIだけを保存します。URL、認証情報、画像bytes、手入力されたIRIはdocumentへ保存しません。
+Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Template/shapeはIRI文字列のselectでなく、実shape・style・iconの小previewから選びます。Workspace assetはhost pickerがabsolute asset IRIだけを返すか、hostがmetadata-onlyのworkspace locatorを注入します。Locatorは現在のdocument pathと入力segmentから候補とbreadcrumbを返し、workspace-root相対、`/`始まりのroot絶対、`./` / `../`のdocument相対を解決します。利用者はpathをsegment単位で辿れますが、Editorは最終解決した安定`assetRef`だけを保存します。Assetまたはdocumentをrenameした場合、hostは同じ`assetRef`へ新しいpathと取得先を対応付け、既存overlayを変更しません。Workspace外へのescape、folder、曖昧な同一path、未解決pathはinlineに拒否し、URL、認証情報、画像bytes、手入力されたIRIはdocumentへ保存しません。
 
 Nodeの`ビュー`は少なくとも色、透明度、線、template、package同梱またはhost workspaceから選ぶicon、位置、sizeを扱います。選択中はCanvas上のlabelとiconを個別にdragでき、node中心からの相対offsetだけをsparse appearanceへ保存します。Drag中はCanvasでpreviewし、node外へ完全に失われない範囲へclampします。右Inspectorからlabel/icon位置を別々にresetでき、一gestureを一つのundo itemにし、Turtleとnode geometryは変更しません。Resize可能なnode、container、regionは四隅と四辺中央の8 handleだけをtransient interaction layerへ表示し、背面要素と重なっても操作できます。選択中のobject本体は元のsemantic層を越えません。Regionのresize制約は後述のmembershipを優先します。
 
@@ -153,7 +186,13 @@ Region、Seq、通常containerの移動と8-handle resizeは、意味上のmembe
 
 ## 順序と分岐
 
-`rdf:Seq`は薄い外枠の順序付きgroupと各memberの番号badgeで表示し、通常の関係線とは区別します。`rdfs:label`はgroup headerへ一度だけ表示し、member間のedgeやAlt branch edgeのlabelへ転記しません。`所属・並び順を編集`を開く前は順序・包含候補を展開せず、Seq groupまたはそのmemberをCanvasで選択した後だけ、label付きcardの追加・上下移動・除外を表示します。利用者に`rdf:_1`等のpredicateやIRI改行textareaを表示せず、確定時は標準`rdf:Seq`/`rdf:_n`を`set-sequence`で一括再構成します。`rdf:Alt`がSeqを選択肢にする場合は、選択nodeからSeq group境界への無名branchとして表示します。
+`rdf:Seq`は薄い外枠の順序付きgroupと各memberの番号badgeで表示し、通常の関係線とは区別します。`rdfs:label`はgroup headerへ一度だけ表示し、member間のedgeやAlt branch edgeのlabelへ転記しません。`所属・並び順を編集`を開く前は順序・包含候補を展開せず、Seq groupまたはそのmemberをCanvasで選択した後だけ、label付きcardの追加・上下移動・除外を表示します。利用者に`rdf:_1`等のpredicateやIRI改行textareaを表示せず、確定時は標準`rdf:Seq`/`rdf:_n`を`set-sequence`で一括再構成します。
+
+`rdf:Alt`も同じ入口とlabel付きcardを使いますが、二件以上の選択肢、上下移動、既定radioをまとめて
+previewします。確定時は選択肢配列と既定ordinalを一つのatomic更新にし、同じIRIが複数ordinalへ現れても
+既定の「出現位置」を保持します。既定選択肢を除外した場合は隣接する残存slotを既定にしてから検証し、
+不正な途中状態をTurtleへ保存しません。`rdf:Alt`がSeqを選択肢にする場合は、選択nodeからSeq group境界への
+無名branchとして表示します。
 
 ## 削除などの破壊操作
 
@@ -174,10 +213,13 @@ Resource削除が、選択していないincident edge、membership、Seq/Alt me
 | `resourceIriAllocator` | Resource IRIをユーザーに直接入力させない作成フロー |
 | `semanticValidationContext` | SHACL等を含むdomain constraintのengine-independent port |
 | `assetAccess` / `pickAsset` | Asset IRIの安全な表示URL解決とworkspace picker |
+| `workspaceLocator` | Document path基準の画像path候補、breadcrumb、安定assetRef解決。Bytes取得や認証は含まない |
 | `v-model` / `save` | Portable document正本とhost-owned persistence |
-| `pendingDraftsChanged` | 未適用Turtle/structured draftを含むSave・離脱確認状態 |
+| `pendingDraftsChanged` | 未適用Turtle/overlay/全文Document/structured draftを含むSave・離脱確認状態 |
+
+`assetAccess`のhost policyは、取得payloadの`maxBytes`とdecode後raster面積の`maxDecodedPixels`を別々に設定します。どちらも画像sizeの近似値として相互代用せず、上限超過はiconなしの安全なfallbackとして扱います。Workspace rename時はlocatorとresolverのrevisionを更新しますが、stable `assetRef`と既存overlayの`appearance.iconRef`は維持します。
 
 `authoringContext`が未解決ならsemantic actionを無効化しますが、source参照、selection、navigation、許可されたpresentation編集は維持します。Host独自のcontext menu、dialog、toast、asset pickerを重ねる場合は、Editorが処理したkeyboard eventの`defaultPrevented`を尊重し、initial focus、Escape、focus return、live statusを同じ契約で実装してください。
 
-保存前にはcomponent refの`flushPendingEdits()`を`await`します。未適用Turtle draftは検証して確定できますが、入力中のstructured formや確認中の削除を自動実行せず、保存要求を拒否します。
+Host側のtoolbarやshortcutから保存する前にはcomponent refの`flushPendingEdits()`を`await`します。Editor内の保存buttonから発行される`save` eventはflush成功後なので、そのevent handlerは同じEditorへ再入せず現在の`v-model`を永続化します。未適用Turtle draftは検証して確定できますが、入力中のstructured formや確認中の削除を自動実行せず、保存要求を拒否します。
 Hostは`pendingDraftsChanged`を購読し、`v-model` dirtyと合わせてSave buttonを有効化します。このeventはmount時、draftの発生・適用・破棄、read-only切替、外部`modelValue`置換に追随する現在値であり、Turtle textareaのbyte列をhost側で比較する必要はありません。

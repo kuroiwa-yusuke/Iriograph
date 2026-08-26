@@ -9,6 +9,7 @@ import { statementIdentityForNamedStatement } from "./identity";
 
 import {
   createStandardLayoutRegistry,
+  flattenLayoutDerivedCurve,
   layoutProjectedDiagramScene,
   LayoutAdapterRegistry,
   projectSemanticView,
@@ -113,6 +114,9 @@ describe("P1-08 fixed graph performance", () => {
       const quality = routeQuality(last.scene);
       expect(last.scene.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
       expect(quality.nodeObstacleIntersections).toBe(0);
+      if (fixture.name !== "sparse-small") {
+        expect(quality.publicRouteObstacleIntersections).toBeGreaterThan(0);
+      }
       expect(quality.endpointInteriorTraversals).toBe(0);
       expect(quality.maximumRoutePoints).toBeLessThanOrEqual(3);
       expect(quality.strictCrossings).toBeLessThanOrEqual(fixture.maximumStrictCrossings);
@@ -492,6 +496,8 @@ function pizzaFixture(): IriographDocumentV1 {
 }
 
 type RouteQuality = {
+  /** Endpoint-only curve routes are not renderer geometry; retained as a guard. */
+  publicRouteObstacleIntersections: number;
   nodeObstacleIntersections: number;
   endpointInteriorTraversals: number;
   strictCrossings: number;
@@ -500,17 +506,28 @@ type RouteQuality = {
 };
 
 function routeQuality(scene: DiagramScene): RouteQuality {
+  let publicRouteObstacleIntersections = 0;
   let nodeObstacleIntersections = 0;
   let endpointInteriorTraversals = 0;
   let strictCrossings = 0;
   let overlapLength = 0;
   let maximumRoutePoints = 0;
   const nodes = new Map(scene.nodes.map((node) => [node.elementId, node]));
+  const renderedRoutes = new Map(scene.edges.map((edge) => {
+    const publicRoute = edge.route ?? [];
+    return [edge.elementId, edge.derivedRouteChoice?.curve
+      ? flattenLayoutDerivedCurve(publicRoute, edge.derivedRouteChoice.curve)
+      : publicRoute] as const;
+  }));
   for (const edge of scene.edges) {
-    const route = edge.route ?? [];
-    maximumRoutePoints = Math.max(maximumRoutePoints, route.length);
+    const publicRoute = edge.route ?? [];
+    const route = renderedRoutes.get(edge.elementId) ?? publicRoute;
+    maximumRoutePoints = Math.max(maximumRoutePoints, publicRoute.length);
     for (const node of scene.nodes) {
       if (node.elementId === edge.sourceElementId || node.elementId === edge.targetElementId) continue;
+      if (polylineCrossesGeometryInterior(publicRoute, node.geometry)) {
+        publicRouteObstacleIntersections += 1;
+      }
       if (polylineCrossesGeometryInterior(route, node.geometry)) {
         nodeObstacleIntersections += 1;
       }
@@ -525,11 +542,11 @@ function routeQuality(scene: DiagramScene): RouteQuality {
     }
   }
   for (let left = 0; left < scene.edges.length; left += 1) {
-    const leftRoute = scene.edges[left]!.route ?? [];
+    const leftRoute = renderedRoutes.get(scene.edges[left]!.elementId) ?? [];
     for (let right = left + 1; right < scene.edges.length; right += 1) {
       const leftEdge = scene.edges[left]!;
       const rightEdge = scene.edges[right]!;
-      const rightRoute = rightEdge.route ?? [];
+      const rightRoute = renderedRoutes.get(rightEdge.elementId) ?? [];
       const sharedEndpointGeometries = [leftEdge.sourceElementId, leftEdge.targetElementId]
         .filter((id) => id === rightEdge.sourceElementId || id === rightEdge.targetElementId)
         .flatMap((id) => {
@@ -545,6 +562,7 @@ function routeQuality(scene: DiagramScene): RouteQuality {
     }
   }
   return {
+    publicRouteObstacleIntersections,
     nodeObstacleIntersections,
     endpointInteriorTraversals,
     strictCrossings,

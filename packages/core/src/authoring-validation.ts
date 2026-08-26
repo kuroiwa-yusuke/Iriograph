@@ -96,6 +96,12 @@ export function validateResolvedAuthoringContext(
   ] as const) {
     if (!value) diagnostics.push(error("authoring-context-invalid", `${field} is required.`));
   }
+  if (context.defaultLocale !== undefined && !isLanguageTag(context.defaultLocale)) {
+    diagnostics.push(error(
+      "authoring-context-invalid",
+      `defaultLocale must be a BCP 47 language tag: ${context.defaultLocale}`,
+    ));
+  }
   if (
     context.termPolicy.llmUnknown !== "reject"
     || context.termPolicy.llmMinting !== "deny"
@@ -110,6 +116,7 @@ export function validateResolvedAuthoringContext(
   }
 
   const terms = new Set<string>();
+  const termIds = new Set<string>();
   for (const term of context.terms) {
     if (!isAbsoluteIri(term.iri)) {
       diagnostics.push(error("authoring-context-invalid", `Term is not an absolute IRI: ${term.iri}`));
@@ -118,6 +125,19 @@ export function validateResolvedAuthoringContext(
       diagnostics.push(error("authoring-context-invalid", `Duplicate authoring term: ${term.iri}`));
     }
     terms.add(term.iri);
+    if (term.termId !== undefined) {
+      if (
+        typeof term.termId !== "string"
+        || !term.termId.trim()
+        || termIds.has(term.termId)
+      ) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `Term ID must be non-empty and unique: ${term.termId}`,
+        ));
+      }
+      termIds.add(term.termId);
+    }
     for (const [field, value] of [
       ["label", term.label],
       ["description", term.description],
@@ -199,6 +219,52 @@ export function validateResolvedAuthoringContext(
       ));
     }
     capabilityIds.add(capability.capabilityId);
+    if (
+      capability.label !== undefined
+      && (typeof capability.label !== "string" || !capability.label.trim())
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `Capability label must be non-empty: ${capability.capabilityId}`,
+      ));
+    }
+    if (
+      capability.description !== undefined
+      && (typeof capability.description !== "string" || !capability.description.trim())
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `Capability description must be non-empty: ${capability.capabilityId}`,
+      ));
+    }
+    if (
+      capability.role !== undefined
+      && !["direct-relation", "membership", "sequence", "alternative"].includes(capability.role)
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `Capability role is invalid: ${capability.capabilityId}`,
+      ));
+    }
+    if (
+      capability.groupKind !== undefined
+      && !["classification", "membership", "sequence", "alternative"].includes(capability.groupKind)
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `Capability group kind is invalid: ${capability.capabilityId}`,
+      ));
+    }
+    if (
+      capability.groupKind !== undefined
+      && capability.role !== capability.groupKind
+      && !(capability.groupKind === "classification" && capability.role === "membership")
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        `Capability role/group kind are incompatible: ${capability.capabilityId}`,
+      ));
+    }
     const parameters = new Set<string>();
     for (const parameter of capability.parameters) {
       const objectKinds = Array.isArray(parameter.objectKinds) ? parameter.objectKinds : [];
@@ -220,6 +286,51 @@ export function validateResolvedAuthoringContext(
     diagnostics.push(...validateCapability(capability, parameters, context));
   }
 
+  if (context.structuredAuthoring !== undefined) {
+    if (
+      (context.structuredAuthoring.allowUntypedNodes !== undefined
+        && typeof context.structuredAuthoring.allowUntypedNodes !== "boolean")
+      || (context.structuredAuthoring.allowClassificationGroups !== undefined
+        && typeof context.structuredAuthoring.allowClassificationGroups !== "boolean")
+    ) {
+      diagnostics.push(error(
+        "authoring-context-invalid",
+        "Structured authoring permission flags must be boolean.",
+      ));
+    }
+    const roleIds = new Set<string>();
+    for (const role of context.structuredAuthoring.nodeRoles) {
+      if (!role.roleId.trim() || roleIds.has(role.roleId)) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `Node role ID must be non-empty and unique: ${role.roleId}`,
+        ));
+      }
+      roleIds.add(role.roleId);
+      if (!role.label.trim() || (role.description !== undefined && !role.description.trim())) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `Node role label/description must be non-empty: ${role.roleId}`,
+        ));
+      }
+      const term = context.terms.find((candidate) => candidate.iri === role.classIri);
+      if (!term || term.kind !== "class" || !authoringTermRolesFromResolved(term).includes("type-object")) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `Node role must resolve to an allowed class term: ${role.roleId}`,
+          role.classIri,
+        ));
+      }
+      if ([RDF_BAG, RDF_SEQ, RDF_ALT, RDFS_CLASS].includes(role.classIri)) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `Structural group classes cannot be node roles: ${role.roleId}`,
+          role.classIri,
+        ));
+      }
+    }
+  }
+
   const namespaces = new Set<string>();
   for (const namespace of context.resourcePolicy.allowedMintNamespaces) {
     if (!isAbsoluteIri(namespace) || namespaces.has(namespace)) {
@@ -229,6 +340,19 @@ export function validateResolvedAuthoringContext(
       ));
     }
     namespaces.add(namespace);
+  }
+  const maxInitialPositionExtent = context.resourcePolicy.maxInitialPositionExtent;
+  if (
+    maxInitialPositionExtent !== undefined
+    && (
+      !Number.isFinite(maxInitialPositionExtent)
+      || maxInitialPositionExtent <= 0
+    )
+  ) {
+    diagnostics.push(error(
+      "authoring-context-invalid",
+      "Resource maxInitialPositionExtent must be a finite positive number.",
+    ));
   }
   return diagnostics;
 }
@@ -269,6 +393,17 @@ export function validateAuthoringGraphPolicy(
   }
   for (const term of [...touchedTerms].sort(compareCodePoints)) {
     if (isKnownAuthoringTerm(term, context)) continue;
+    if (
+      actor === "human"
+      && context.structuredAuthoring?.allowClassificationGroups === true
+      && added.some((quad) => (
+        isNamedNode(quad.subject)
+        && quad.subject.value === term
+        && quad.predicate.value === RDF_TYPE
+        && isNamedNode(quad.object)
+        && quad.object.value === RDFS_CLASS
+      ))
+    ) continue;
     const policy = actor === "llm"
       ? context.termPolicy.llmUnknown
       : context.termPolicy.humanUnknown;
@@ -399,6 +534,19 @@ function hasAuthoringContextShape(context: unknown): context is ResolvedAuthorin
     && value.terms.every(isRecord)
     && Array.isArray(value.capabilities)
     && value.capabilities.every(hasCapabilityShape)
+    && (
+      value.structuredAuthoring === undefined
+      || (
+        isRecord(value.structuredAuthoring)
+        && Array.isArray(value.structuredAuthoring.nodeRoles)
+        && value.structuredAuthoring.nodeRoles.every((role) => (
+          isRecord(role)
+          && typeof role.roleId === "string"
+          && typeof role.classIri === "string"
+          && typeof role.label === "string"
+        ))
+      )
+    )
     && isRecord(runtime)
     && runtime.catalogsByProfile instanceof Map
     && [...runtime.catalogsByProfile.values()].every((profile) => (

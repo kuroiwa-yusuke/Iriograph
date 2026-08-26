@@ -17,7 +17,6 @@ const RDFS_LABEL = "http://www.w3.org/2000/01/rdf-schema#label";
 const RDFS_COMMENT = "http://www.w3.org/2000/01/rdf-schema#comment";
 const RDFS_SUBCLASS_OF = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 const RDFS_SUBPROPERTY_OF = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
-const XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
 
 export type ResourcePropertyCategory =
   | "name-description"
@@ -62,9 +61,10 @@ export function resourcePropertyEditorRows(
           objectKind: "literal" as const,
           value: object.value,
           language: object.language,
-          datatypeIri: object.language || object.datatype.value === XSD_STRING
-            ? ""
-            : object.datatype.value,
+          // Keep an existing plain RDF literal explicitly xsd:string while it
+          // passes through structured editing. This distinguishes it from a
+          // newly added untagged label/comment which receives defaultLocale.
+          datatypeIri: object.language ? "" : object.datatype.value,
         };
       }
       return undefined;

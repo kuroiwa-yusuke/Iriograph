@@ -30,6 +30,8 @@ export type SemanticAccessOptions = {
   alternativeLabelPredicates?: readonly string[];
   /** Additional comment/description predicates, after rdfs:comment. */
   commentPredicates?: readonly string[];
+  /** Maximum number of hierarchy explanation paths materialized per query. */
+  hierarchyPathBudget?: number;
 };
 
 export type SemanticResourceSummary = {
@@ -65,6 +67,42 @@ export type HierarchyRelation = {
   alias?: string;
   reference?: RevisionAlias;
   distance: number;
+  /** Every finite simple path from the requested term to this ancestor. */
+  paths?: readonly (readonly string[])[];
+  /** True when this path set may be incomplete because the query budget was reached. */
+  pathsTruncated?: boolean;
+};
+
+export type SemanticHierarchyActionHint = {
+  actionId: string;
+  iri?: string;
+  parameters?: Readonly<Record<string, string | number | boolean | readonly string[]>>;
+};
+
+export type SemanticHierarchyDiagnostic =
+  | {
+      code: "hierarchy-cycle";
+      kind: "class" | "property";
+      /** Closed path: the first and final IRI are equal. */
+      path: readonly string[];
+      message: string;
+      suggestedActions: readonly SemanticHierarchyActionHint[];
+    }
+  | {
+      code: "hierarchy-path-budget-exceeded";
+      kind: "class" | "property";
+      message: string;
+      suggestedActions: readonly SemanticHierarchyActionHint[];
+    };
+
+export type SemanticHierarchy = {
+  revision: string;
+  rootIri: string;
+  kind: "class" | "property";
+  relations: readonly HierarchyRelation[];
+  diagnostics: readonly SemanticHierarchyDiagnostic[];
+  truncated: boolean;
+  pathBudget: number;
 };
 
 export type SemanticResourceDescription = SemanticResourceSummary & {
@@ -72,6 +110,10 @@ export type SemanticResourceDescription = SemanticResourceSummary & {
   comments: readonly LocalizedText[];
   superClasses: readonly HierarchyRelation[];
   superProperties: readonly HierarchyRelation[];
+  /** Reachable class/property cycles; traversal always remains finite. */
+  hierarchyDiagnostics?: readonly SemanticHierarchyDiagnostic[];
+  /** True when either class/property hierarchy explanation hit its path budget. */
+  hierarchyTruncated?: boolean;
   incomingCount: number;
   outgoingCount: number;
   isPredicate: boolean;

@@ -19,6 +19,7 @@ import type {
   ViewElementOverlay,
 } from "./model.js";
 import { projectSemanticView } from "./projection.js";
+import { canonicalQuad, parseSemanticGraph } from "./rdf.js";
 import {
   buildIriographView,
   type ProjectionRuntimeContext,
@@ -51,6 +52,43 @@ export type DisplayReconciliationEvent = {
   /** Previous generated routes reused exactly by this view. */
   fixedDerivedRoutes?: number;
 };
+
+export type SemanticReconciliationScope =
+  | "none"
+  | "subproperty-hierarchy-only"
+  | "semantic-or-structure";
+
+const RDFS_SUBPROPERTY_OF = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
+
+/**
+ * Classifies the asserted dataset delta without inferring superproperty
+ * statements. A hierarchy-only result is an optimization hint, never license
+ * to synthesize an edge for an unasserted superproperty.
+ */
+export function classifySemanticReconciliationScope(
+  previous: IriographDocument,
+  candidate: IriographDocument,
+): SemanticReconciliationScope {
+  let before: ReturnType<typeof parseSemanticGraph>["quads"];
+  let after: ReturnType<typeof parseSemanticGraph>["quads"];
+  try {
+    before = parseSemanticGraph(previous).quads;
+    after = parseSemanticGraph(candidate).quads;
+  } catch {
+    // Syntax diagnostics belong to the normal projection/validation pipeline.
+    return "semantic-or-structure";
+  }
+  const beforeByKey = new Map(before.map((value) => [canonicalQuad(value), value]));
+  const afterByKey = new Map(after.map((value) => [canonicalQuad(value), value]));
+  const changed = [
+    ...before.filter((value) => !afterByKey.has(canonicalQuad(value))),
+    ...after.filter((value) => !beforeByKey.has(canonicalQuad(value))),
+  ];
+  if (changed.length === 0) return "none";
+  return changed.every((value) => value.predicate.value === RDFS_SUBPROPERTY_OF)
+    ? "subproperty-hierarchy-only"
+    : "semantic-or-structure";
+}
 
 /** Reprojects and lays out every candidate view as one atomic operation. */
 export async function reconcileIriographDocumentViews(
@@ -204,6 +242,9 @@ function planEdgeOnlyRoutes(
     elementId: overlayElementBySemantic.get(edge.semanticRef) ?? edge.elementId,
     sourceElementId: effectiveElementId(edge.sourceElementId),
     targetElementId: effectiveElementId(edge.targetElementId),
+  })).map((candidate) => ({
+    ...candidate,
+    overlay: overlay[candidate.elementId],
   })).sort((left, right) => compareIdentity(left.elementId, right.elementId));
   const previousById = new Map(previous.edges.map((edge) => [edge.elementId, edge]));
   const candidateById = new Map(candidates.map((edge) => [edge.elementId, edge]));
@@ -218,6 +259,7 @@ function planEdgeOnlyRoutes(
       !candidate
       || candidate.sourceElementId !== oldEdge.sourceElementId
       || candidate.targetElementId !== oldEdge.targetElementId
+      || routeRelevantEdgeChanged(oldEdge, candidate.edge, candidate.overlay)
     ) {
       changedEndpointIds.add(oldEdge.sourceElementId);
       changedEndpointIds.add(oldEdge.targetElementId);
@@ -229,6 +271,7 @@ function planEdgeOnlyRoutes(
       !oldEdge
       || candidate.sourceElementId !== oldEdge.sourceElementId
       || candidate.targetElementId !== oldEdge.targetElementId
+      || routeRelevantEdgeChanged(oldEdge, candidate.edge, candidate.overlay)
     ) {
       changedCandidateIds.add(candidate.elementId);
       changedEndpointIds.add(candidate.sourceElementId);
@@ -251,6 +294,19 @@ function planEdgeOnlyRoutes(
     fixedDerivedRoutes[candidate.elementId] = oldEdge.route.map((point) => clone(point));
   }
   return { affectedEdgeIds, fixedDerivedRoutes };
+}
+
+function routeRelevantEdgeChanged(
+  previous: SceneEdge,
+  candidate: ProjectedEdge,
+  overlay: ViewElementOverlay | undefined,
+): boolean {
+  return previous.templateRef !== (overlay?.appearance?.templateRef ?? candidate.templateRef)
+    || previous.routeMode !== (overlay?.routing?.routeMode ?? candidate.routeMode)
+    || JSON.stringify(previous.sourceAnchor)
+      !== JSON.stringify(overlay?.routing?.sourceAnchor ?? candidate.sourceAnchor)
+    || JSON.stringify(previous.targetAnchor)
+      !== JSON.stringify(overlay?.routing?.targetAnchor ?? candidate.targetAnchor);
 }
 
 function edgeOnlyFallbackReason(
@@ -534,6 +590,9 @@ function compatibleAppearance(
     result.nodeLabelOffset
     || result.nodeLabelWritingDirection
     || result.nodeIconOffset
+    || result.nodeIconScale !== undefined
+    || result.nodeIconSize
+    || result.nodeIconFit
   )) {
     diagnostics.push({
       severity: "warning",
@@ -544,6 +603,50 @@ function compatibleAppearance(
     delete result.nodeLabelOffset;
     delete result.nodeLabelWritingDirection;
     delete result.nodeIconOffset;
+    delete result.nodeIconScale;
+    delete result.nodeIconSize;
+    delete result.nodeIconFit;
+  }
+  if (next.structuralKind === "node" && (
+    (result.nodeIconScale !== undefined && (
+      !Number.isFinite(result.nodeIconScale)
+      || result.nodeIconScale < 0.1
+      || result.nodeIconScale > 8
+    ))
+    || (result.nodeIconScale !== undefined && result.nodeIconSize !== undefined)
+    || (result.nodeIconSize !== undefined && (
+      !Number.isFinite(result.nodeIconSize.width)
+      || !Number.isFinite(result.nodeIconSize.height)
+      || result.nodeIconSize.width < 4
+      || result.nodeIconSize.height < 4
+      || result.nodeIconSize.width > 4096
+      || result.nodeIconSize.height > 4096
+    ))
+  )) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}の安全でないicon presentationを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.nodeIconScale;
+    delete result.nodeIconSize;
+    delete result.nodeIconFit;
+  }
+  if (next.structuralKind !== "container" && next.structuralKind !== "region" && (
+    result.groupLabelAnchor !== undefined
+    || result.groupLabelWritingDirection
+    || result.groupZOrder !== undefined
+  )) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}と互換性のないgroup frame appearanceを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.groupLabelAnchor;
+    delete result.groupLabelWritingDirection;
+    delete result.groupZOrder;
   }
   if (!result.styleRef && result.styleToken && catalog.styles?.[result.styleToken]) {
     result.styleRef = result.styleToken;

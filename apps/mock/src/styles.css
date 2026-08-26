@@ -194,6 +194,13 @@ button {
   opacity: .45;
 }
 
+.reset-unavailable-reason {
+  max-width: 150px;
+  color: #f1d58b;
+  font-size: 9px;
+  line-height: 1.25;
+}
+
 .host-workbench {
   min-height: 0;
   flex: 1;

@@ -1,9 +1,11 @@
 import {
   containerContentBounds,
+  resolveIconContentMetrics,
   type DiagramScene,
   type ElementGeometry,
   type Point,
   type SceneMembership,
+  type SceneNode,
 } from "@iriograph/core";
 
 import type { GeometryChange, GeometryElement } from "./selection";
@@ -18,6 +20,79 @@ export type RegionMembershipConstraintResult = {
   changes: GeometryChange[];
   issue?: RegionMembershipConstraintIssue;
 };
+
+export type IconPresentationConstraintResult = {
+  size: { width: number; height: number };
+  geometry?: ElementGeometry;
+  constrained: boolean;
+  issue?: RegionMembershipConstraintIssue;
+};
+
+/**
+ * Applies the same all-membership intersection contract to a node/icon resize.
+ * A rejected node growth is reduced, aspect-preservingly, to the largest
+ * accepted step. Callers therefore never persist a large icon without the
+ * matching node geometry.
+ */
+export function constrainIconPresentationResize(
+  scene: DiagramScene,
+  node: SceneNode,
+  requestedSize: { width: number; height: number },
+  requestedGeometry?: ElementGeometry,
+): IconPresentationConstraintResult {
+  if (!requestedGeometry) {
+    const size = fitIconSizeToFrame(requestedSize, node.geometry);
+    return {
+      size,
+      constrained: size.width !== requestedSize.width || size.height !== requestedSize.height,
+    };
+  }
+  const accepted = constrainMembershipRegionMovement(scene, [{
+    elementId: node.elementId,
+    geometry: requestedGeometry,
+  }]);
+  if (accepted.changes[0]) {
+    return {
+      size: requestedSize,
+      geometry: accepted.changes[0].geometry,
+      constrained: false,
+    };
+  }
+
+  const initial = resolveIconContentMetrics(node.iconIntrinsicSize, {
+    scale: node.nodeIconScale,
+    size: node.nodeIconSize,
+    fit: node.nodeIconFit,
+  }) ?? { width: 24, height: 24, fit: "contain" as const };
+  let lower = 0;
+  let upper = 1;
+  let bestGeometry: ElementGeometry | undefined;
+  let bestSize = { width: initial.width, height: initial.height };
+  for (let iteration = 0; iteration < 24; iteration += 1) {
+    const ratio = (lower + upper) / 2;
+    const candidateGeometry = interpolateGeometry(node.geometry, requestedGeometry, ratio);
+    const candidate = constrainMembershipRegionMovement(scene, [{
+      elementId: node.elementId,
+      geometry: candidateGeometry,
+    }]);
+    if (candidate.changes[0]) {
+      lower = ratio;
+      bestGeometry = candidate.changes[0].geometry;
+      bestSize = fitIconSizeToFrame(
+        interpolateSize(initial, requestedSize, ratio),
+        bestGeometry,
+      );
+    } else {
+      upper = ratio;
+    }
+  }
+  return {
+    size: bestSize,
+    ...(bestGeometry ? { geometry: bestGeometry } : {}),
+    constrained: true,
+    ...(accepted.issue ? { issue: accepted.issue } : {}),
+  };
+}
 
 /**
  * Keeps a member inside the intersection of every semantic membership target.
@@ -252,6 +327,43 @@ function geometryElement(scene: DiagramScene, elementId: string): ElementGeometr
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function fitIconSizeToFrame(
+  requested: { width: number; height: number },
+  frame: ElementGeometry,
+): { width: number; height: number } {
+  const maximumWidth = Math.max(4, frame.width - 40);
+  const maximumHeight = Math.max(4, frame.height - 32);
+  const factor = Math.min(1, maximumWidth / requested.width, maximumHeight / requested.height);
+  return {
+    width: Math.max(4, requested.width * factor),
+    height: Math.max(4, requested.height * factor),
+  };
+}
+
+function interpolateGeometry(
+  start: ElementGeometry,
+  end: ElementGeometry,
+  ratio: number,
+): ElementGeometry {
+  return {
+    x: start.x + (end.x - start.x) * ratio,
+    y: start.y + (end.y - start.y) * ratio,
+    width: start.width + (end.width - start.width) * ratio,
+    height: start.height + (end.height - start.height) * ratio,
+  };
+}
+
+function interpolateSize(
+  start: { width: number; height: number },
+  end: { width: number; height: number },
+  ratio: number,
+): { width: number; height: number } {
+  return {
+    width: start.width + (end.width - start.width) * ratio,
+    height: start.height + (end.height - start.height) * ratio,
+  };
 }
 
 function rejected(

@@ -26,6 +26,12 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     expect(wrapper.get(".iriograph-diagram-canvas").attributes("style")).toContain("--iriograph-grid-size: 12px");
     expect(wrapper.get(".iriograph-canvas-grid").attributes("aria-hidden")).toBe("true");
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').attributes()).toMatchObject({
+      "data-scene-x": "20",
+      "data-scene-y": "40",
+      "data-scene-width": "120",
+      "data-scene-height": "60",
+    });
     await wrapper.setProps({ showGrid: false });
     expect(wrapper.find(".iriograph-canvas-grid").exists()).toBe(false);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
@@ -103,7 +109,7 @@ describe("DiagramCanvas pointer gestures", () => {
       .toContain("deletion-preview");
     expect(wrapper.get('.iriograph-edge-group[data-element-id="edge-same-predicate-not-removed"]').classes())
       .not.toContain("deletion-preview");
-    expect(wrapper.get('.iriograph-deletion-preview-membership[data-semantic-ref="urn:test:membership:a"]')
+    expect(wrapper.get('.iriograph-deletion-preview-membership')
       .attributes("d")).toMatch(/^M /u);
     expect(scene).toEqual(original);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
@@ -377,6 +383,60 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe("M 140 70 L 300 70");
   });
 
+  it("auto route choiceのBezierをpath・hitarea・labelで共通利用しoverlay化しない", async () => {
+    const scene = generatedRouteScene();
+    const edge = scene.edges[0]!;
+    edge.routeMode = "auto";
+    edge.route = [{ x: 140, y: 70 }, { x: 300, y: 190 }];
+    edge.derivedRouteChoice = {
+      family: "curve",
+      source: "auto",
+      reason: "auto-curve-safe",
+      curve: {
+        sourceControl: { x: 170, y: 20 },
+        targetControl: { x: 270, y: 250 },
+        guidePivot: { x: 220, y: 145 },
+        guideAngleDegrees: 41,
+      },
+    };
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+
+    const expected = "M 140 70 C 170 20, 270 250, 300 190";
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe(expected);
+    expect(wrapper.get(".iriograph-edge-hitarea").attributes("d")).toBe(expected);
+    expect(Number(wrapper.get(".iriograph-edge-label").attributes("y"))).toBeGreaterThan(130);
+    expect(wrapper.find(".iriograph-curve-controls").exists()).toBe(false);
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+
+    await wrapper.setProps({ edgeRouteModes: { [edge.elementId]: "straight" } });
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe("M 140 70 L 300 190");
+  });
+
+  it("explicitからautoへ戻すとstale explicit choice/controlを再利用しない", async () => {
+    const scene = generatedRouteScene();
+    const edge = scene.edges[0]!;
+    edge.routeMode = "curve";
+    edge.route = [{ x: 140, y: 70 }, { x: 300, y: 190 }];
+    edge.derivedRouteChoice = {
+      family: "curve",
+      source: "explicit",
+      reason: "explicit-route-mode",
+      curve: {
+        sourceControl: { x: 150, y: -200 },
+        targetControl: { x: 290, y: 400 },
+        guidePivot: { x: 220, y: 100 },
+        guideAngleDegrees: 80,
+      },
+    };
+    wrapper = mount(DiagramCanvas, {
+      props: { scene, edgeRouteModes: { [edge.elementId]: "curve" } },
+    });
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toContain(" C ");
+
+    await wrapper.setProps({ edgeRouteModes: { [edge.elementId]: "auto" } });
+    expect(wrapper.get(".iriograph-edge-path").attributes("d")).toBe("M 140 70 L 300 190");
+  });
+
   it("選択node内のlabel/iconをzoom考慮でdragしpreview後にoffsetだけを確定する", async () => {
     const scene = sceneFixture();
     scene.nodes[0]!.iconUrl = "data:image/svg+xml,%3Csvg/%3E";
@@ -431,6 +491,72 @@ describe("DiagramCanvas pointer gestures", () => {
     dispatchPointer("pointermove", 40, 40);
     dispatchPointer("pointerup", 40, 40);
     expect(wrapper.emitted("nodeContentOffsetUpdate")).toHaveLength(2);
+  });
+
+  it("画像のintrinsic比率・scale/明示size・fitとlabel font sizeを描画へ反映する", async () => {
+    const scene = generatedRouteScene();
+    const node = scene.nodes[0]!;
+    node.iconUrl = "data:image/svg+xml,%3Csvg/%3E";
+    node.iconIntrinsicSize = { width: 80, height: 40, aspectRatio: 2, source: "svg-view-box" };
+    node.nodeIconScale = 1.5;
+    node.nodeIconFit = "cover";
+    node.style.labelFontSize = 18;
+    scene.edges[0]!.style.labelFontSize = 15;
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+
+    expect(wrapper.get(".iriograph-node-icon").attributes("style"))
+      .toContain("width: 36px; height: 18px; object-fit: cover");
+    expect(wrapper.get(".iriograph-node-icon").attributes("loading")).toBe("lazy");
+    expect(wrapper.get(".iriograph-node-label").attributes("style")).toContain("font-size: 18px");
+    expect(wrapper.get(".iriograph-edge-label").attributes("font-size")).toBe("15");
+
+    node.nodeIconSize = { width: 44, height: 72 };
+    await wrapper.setProps({ scene: structuredClone(scene) });
+    expect(wrapper.get(".iriograph-node-icon").attributes("style"))
+      .toContain("width: 44px; height: 72px");
+
+    delete node.nodeIconSize;
+    node.nodeIconScale = undefined;
+    node.iconIntrinsicSize = { width: 4000, height: 1000, aspectRatio: 4, source: "decoded" };
+    await wrapper.setProps({ scene: structuredClone(scene) });
+    expect(wrapper.get(".iriograph-node-icon").attributes("style"))
+      .toContain("width: 24px; height: 6px");
+  });
+
+  it("Canvas handleでicon比率を保ってresizeし必要なnode growthを一payloadにする", async () => {
+    const scene = sceneFixture();
+    const node = scene.nodes[0]!;
+    node.iconUrl = "data:image/svg+xml,%3Csvg/%3E";
+    node.iconIntrinsicSize = { width: 24, height: 24, aspectRatio: 1, source: "svg-view-box" };
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: node.elementId,
+        selectedElementIds: [node.elementId],
+        nodeContentEditing: true,
+      },
+    });
+
+    await wrapper.get(".iriograph-node-icon-resize-handle").trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 80,
+    });
+    dispatchPointer("pointermove", 150, 130);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get(".iriograph-node-icon").attributes("style"))
+      .toContain("width: 74px; height: 74px");
+    dispatchPointer("pointerup", 150, 130);
+
+    expect(lastPayload(wrapper, "nodeIconPresentationUpdate")).toEqual({
+      elementId: node.elementId,
+      size: { width: 74, height: 74 },
+      geometry: { x: 20, y: 40, width: 120, height: 106 },
+    });
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+    expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+    expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
   });
 
   it("Diamondは図形surfaceだけを描画し横書き・縦書きの日本語labelを内接contentに保つ", () => {
@@ -899,18 +1025,17 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.get(".iriograph-minimap svg").attributes("tabindex")).toBe("-1");
   });
 
-  it("Arrow focus、toggle、range selectionを共通navigator順序で通知する", async () => {
+  it("N focus navigationとtoggleをspatial Arrowから分離する", async () => {
     wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene: sceneFixture() } });
     const viewport = wrapper.get(".iriograph-canvas-scroll");
     expect(viewport.attributes("aria-activedescendant")).toContain("node-a");
 
-    await viewport.trigger("keydown", { key: "ArrowRight" });
+    await viewport.trigger("keydown", { key: "n" });
     expect(viewport.attributes("aria-activedescendant")).toContain("node-b");
     await viewport.trigger("keydown", { key: " ", ctrlKey: true });
     expect(lastPayload(wrapper, "selectionRequest")).toEqual({ elementId: "node-b", mode: "toggle" });
-    await viewport.trigger("keydown", { key: "ArrowRight", shiftKey: true });
-    expect(lastPayload(wrapper, "selectionSetRequest")).toEqual(["node-b", "edge-a-b"]);
-    expect(viewport.attributes("aria-activedescendant")).toContain("edge-a-b");
+    await viewport.trigger("keydown", { key: "N", shiftKey: true });
+    expect(viewport.attributes("aria-activedescendant")).toContain("node-a");
   });
 
   it("key repeatをephemeral geometry preview一つにまとめkeyupでcommitする", async () => {
@@ -923,14 +1048,14 @@ describe("DiagramCanvas pointer gestures", () => {
       },
     });
     const viewport = wrapper.get(".iriograph-canvas-scroll");
-    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true });
-    await viewport.trigger("keydown", { key: "ArrowRight", ctrlKey: true, repeat: true });
+    await viewport.trigger("keydown", { key: "ArrowRight" });
+    await viewport.trigger("keydown", { key: "ArrowRight", repeat: true });
 
     expect(wrapper.get(".iriograph-scene-node.selected").attributes("style")).toContain("left: 342px");
     expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
     expect(wrapper.emitted("gestureStart")).toHaveLength(1);
 
-    await viewport.trigger("keyup", { key: "ArrowRight", ctrlKey: true });
+    await viewport.trigger("keyup", { key: "ArrowRight" });
     expect(lastPayload<{ elementId: string; geometry: ElementGeometry }[]>(wrapper, "geometryBatchChange"))
       .toEqual([{ elementId: "node-a", geometry: { x: 22, y: 40, width: 120, height: 60 } }]);
     expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
@@ -1103,7 +1228,7 @@ describe("DiagramCanvas pointer gestures", () => {
     }).routing.curve.knots).toHaveLength(3);
   });
 
-  it("blank canvasのmouse drag、Page key pan、Arrow scene navigationを分離する", async () => {
+  it("blank canvasのmouse drag、Arrow/Page pan、N scene navigationを分離する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
       props: { scene: sceneFixture() },
@@ -1125,8 +1250,9 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("gestureStart")).toBeUndefined();
 
     await viewport.trigger("keydown", { key: "ArrowRight" });
-    expect(viewport.attributes("aria-activedescendant")).toContain("node-b");
     expect(viewport.element.scrollLeft).toBeGreaterThan(50);
+    await viewport.trigger("keydown", { key: "n" });
+    expect(viewport.attributes("aria-activedescendant")).toContain("node-b");
     viewport.element.scrollTop = 40;
     await viewport.trigger("keydown", { key: "PageDown" });
     expect(viewport.element.scrollTop).toBeGreaterThan(40);
@@ -1570,6 +1696,77 @@ describe("DiagramCanvas pointer gestures", () => {
     });
   });
 
+  it("Seq/Alt guideのpointerとkeyboard context要求はguide identityとgroup identityを保持する", async () => {
+    const scene = sceneFixture();
+    scene.groupGuides = [{
+      guideId: "guide-seq-1",
+      groupElementId: "container-seq",
+      kind: "sequence-order",
+      sourceElementId: "node-a",
+      targetElementId: "node-b",
+      ordinal: 1,
+      muted: true,
+      provenance: {
+        sourceStatementRefs: ["urn:test:seq:_1"],
+        operator: "ordinal-sequence",
+        derivation: "derived",
+      },
+    }];
+    scene.containers.push({
+      elementId: "container-seq",
+      semanticRef: "urn:test:seq",
+      structuralKind: "container",
+      groupRole: "sequence",
+      groupFrame: {
+        kind: "sequence",
+        semanticRef: "urn:test:seq",
+        provenance: {
+          sourceStatementRefs: ["urn:test:seq:type"],
+          operator: "ordinal-sequence",
+          derivation: "resource",
+        },
+      },
+      label: "順序",
+      templateRef: "urn:test:template:container",
+      geometry: { x: 20, y: 20, width: 440, height: 220 },
+      headerPosition: "top",
+      style: { fill: "#fff", stroke: "#222", text: "#111" },
+      pinned: false,
+      placement: "generated",
+    });
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+    const guide = wrapper.get(".iriograph-group-guide");
+    await guide.trigger("contextmenu", { clientX: 160, clientY: 100 });
+    expect(wrapper.emitted("contextMenuRequest")?.at(-1)?.[0]).toMatchObject({
+      origin: "pointer",
+      guide: { guideId: "guide-seq-1", groupElementId: "container-seq", kind: "sequence-order" },
+    });
+    await guide.trigger("keydown", { key: "F10", shiftKey: true });
+    expect(wrapper.emitted("contextMenuRequest")?.at(-1)?.[0]).toMatchObject({
+      origin: "keyboard",
+      guide: { guideId: "guide-seq-1", groupElementId: "container-seq", kind: "sequence-order" },
+    });
+  });
+
+  it("structured pickerはresource IRIでなくexact elementIdとmulti selection modeを返す", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), structuredSelectionPicking: true },
+    });
+    await wrapper.get(".iriograph-scene-node").trigger("pointerdown", {
+      button: 0,
+      clientX: 100,
+      clientY: 80,
+      shiftKey: true,
+    });
+    expect(wrapper.emitted("structuredSelectionRequest")?.at(-1)).toEqual([{
+      elementId: "node-a",
+      mode: "add",
+    }]);
+    expect(wrapper.emitted("semanticResourceRequest")).toBeUndefined();
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+  });
+
   it("region選択中の位置指定はregion IRIを包含候補として通知する", async () => {
     const scene = sceneFixture();
     scene.regions = [{
@@ -1809,7 +2006,7 @@ describe("DiagramCanvas pointer gestures", () => {
       .toMatchObject({ elementId: "node-a", geometry: { x: 100, y: 90, width: 40, height: 30 } });
   });
 
-  it("Seqを薄いgroupとmember ordinal badgeで通常edgeから分ける", () => {
+  it("Seqを共通frame・ordinal badge・無記名guideで通常edgeから分ける", async () => {
     const scene = sceneFixture();
     scene.edges = [];
     scene.containers = [{
@@ -1817,6 +2014,11 @@ describe("DiagramCanvas pointer gestures", () => {
       semanticRef: "urn:test:seq",
       structuralKind: "container",
       groupRole: "sequence",
+      groupFrame: {
+        kind: "sequence",
+        semanticRef: "urn:test:seq",
+        provenance: { operator: "ordinal-sequence", derivation: "resource", sourceStatementRefs: [] },
+      },
       label: "審査手順",
       templateRef: "urn:test:template:sequence",
       headerPosition: "top",
@@ -1826,6 +2028,7 @@ describe("DiagramCanvas pointer gestures", () => {
       placement: "generated",
     }];
     scene.nodes[0]!.parentElementId = "sequence-a";
+    scene.nodes[1]!.parentElementId = "sequence-a";
     scene.memberships = [{
       semanticRef: "urn:test:seq-1",
       containerElementId: "sequence-a",
@@ -1836,6 +2039,31 @@ describe("DiagramCanvas pointer gestures", () => {
         operator: "ordinal-sequence",
         derivation: "derived",
         sourceStatementRefs: ["urn:test:seq-1"],
+      },
+    }, {
+      semanticRef: "urn:test:seq-2",
+      containerElementId: "sequence-a",
+      memberElementId: "node-b",
+      role: "sequence-member",
+      ordinal: 2,
+      provenance: {
+        operator: "ordinal-sequence",
+        derivation: "derived",
+        sourceStatementRefs: ["urn:test:seq-2"],
+      },
+    }];
+    scene.groupGuides = [{
+      guideId: "urn:test:seq-guide",
+      groupElementId: "sequence-a",
+      kind: "sequence-order",
+      sourceElementId: "node-a",
+      targetElementId: "node-b",
+      ordinal: 2,
+      muted: true,
+      provenance: {
+        operator: "ordinal-sequence",
+        derivation: "derived",
+        sourceStatementRefs: ["urn:test:seq-1", "urn:test:seq-2"],
       },
     }];
     wrapper = mount(DiagramCanvas, {
@@ -1849,10 +2077,139 @@ describe("DiagramCanvas pointer gestures", () => {
       "sequence-group",
       "interaction-front",
     ]));
-    expect(wrapper.findAll(".iriograph-container-header").map((header) => header.text()))
-      .toEqual(["審査手順"]);
+    expect(wrapper.get(".iriograph-container-header .iriograph-group-kind-label").text())
+      .toBe("順番");
+    expect(wrapper.get(".iriograph-container-header .iriograph-group-frame-label-text").text())
+      .toBe("審査手順");
     expect(wrapper.get('.iriograph-scene-node .iriograph-sequence-badges').text()).toBe("1");
+    expect(wrapper.findAll('.iriograph-scene-node .iriograph-sequence-badges')[1]!.text()).toBe("2");
+    expect(wrapper.get(".iriograph-group-guide-path").attributes("d")).toMatch(/^M /u);
+    expect(wrapper.get(".iriograph-group-guide-path").attributes("marker-end")).toMatch(/^url\(#/u);
+    expect(wrapper.find(".iriograph-edge-label").exists()).toBe(false);
     expect(wrapper.find(".iriograph-edge-group").exists()).toBe(false);
+    await wrapper.get(".iriograph-group-guide").trigger("click");
+    expect(lastPayload(wrapper, "selectionRequest")).toEqual({
+      elementId: "sequence-a",
+      mode: "preserve",
+    });
+  });
+
+  it("Altを候補グループframe・virtual hub・無記名candidate guideとして描く", async () => {
+    const scene = sceneFixture();
+    scene.edges = [];
+    scene.containers = [{
+      elementId: "alternative-a",
+      semanticRef: "urn:test:alt",
+      structuralKind: "container",
+      groupRole: "alternative",
+      groupFrame: {
+        kind: "alternative",
+        semanticRef: "urn:test:alt",
+        provenance: { operator: "alternative", derivation: "resource", sourceStatementRefs: [] },
+        hub: { elementId: "alternative-a:hub", role: "alternative-hub" },
+        defaultMember: {
+          ordinal: 1,
+          memberElementId: "node-a",
+          statementRef: "urn:test:alt-1",
+          provenance: { operator: "alternative", derivation: "derived", sourceStatementRefs: [] },
+        },
+      },
+      label: "非常に長い配送方法の選択肢グループ名称",
+      templateRef: "urn:test:template:alternative",
+      headerPosition: "top",
+      style: { fill: "#fff", stroke: "#64748b", text: "#334155", dash: "5 5" },
+      geometry: { x: 8, y: 8, width: 150, height: 240 },
+      pinned: false,
+      placement: "generated",
+    }];
+    scene.groupGuides = scene.nodes.map((node, index) => ({
+      guideId: `urn:test:alt-guide-${index}`,
+      groupElementId: "alternative-a",
+      kind: "alternative-candidate" as const,
+      sourceElementId: "alternative-a:hub",
+      targetElementId: node.elementId,
+      ordinal: index + 1,
+      muted: true as const,
+      provenance: { operator: "alternative" as const, derivation: "derived" as const, sourceStatementRefs: [] },
+    }));
+    wrapper = mount(DiagramCanvas, { props: { scene } });
+
+    expect(wrapper.get(".iriograph-group-kind-label").text()).toBe("分岐");
+    expect(wrapper.get(".iriograph-group-frame-label-text").text())
+      .toBe("非常に長い配送方法の選択肢グループ名称");
+    expect(wrapper.get(".iriograph-container-header").attributes("title"))
+      .toBe("非常に長い配送方法の選択肢グループ名称");
+    expect(wrapper.findAll(".iriograph-group-guide")).toHaveLength(2);
+    expect(wrapper.findAll(".iriograph-alternative-hub")).toHaveLength(1);
+    expect(wrapper.get('[data-element-id="node-a"] .iriograph-alternative-default-badges').text())
+      .toBe("既定");
+    expect(wrapper.findAll(".iriograph-group-guide-path").every((path) => (
+      path.attributes("marker-end") === undefined
+    ))).toBe(true);
+    expect(wrapper.find(".iriograph-edge-group").exists()).toBe(false);
+    await wrapper.get(".iriograph-alternative-hub").trigger("click");
+    expect(lastPayload(wrapper, "selectionRequest")).toEqual({
+      elementId: "alternative-a",
+      mode: "replace",
+    });
+  });
+
+  it("空のBag container/classification regionも選択可能な共通構造層と8 resize handleで保つ", () => {
+    const scene = sceneFixture();
+    scene.edges = [];
+    scene.containers = [{
+      elementId: "membership-frame",
+      semanticRef: "urn:test:membership",
+      structuralKind: "container" as const,
+      groupRole: "membership" as const,
+      groupFrame: {
+        kind: "membership" as const,
+        semanticRef: "urn:test:membership",
+        provenance: { operator: "membership-container" as const, derivation: "resource" as const, sourceStatementRefs: [] },
+      },
+      label: "空の領域",
+      templateRef: "urn:test:template:container",
+      headerPosition: "top" as const,
+      style: { fill: "#fff", stroke: "#64748b", text: "#334155" },
+      geometry: { x: 10, y: 10, width: 180, height: 120 },
+      pinned: false,
+      placement: "generated" as const,
+    }];
+    scene.regions = [{
+      elementId: "classification-frame",
+      semanticRef: "urn:test:classification",
+      structuralKind: "region",
+      groupFrame: {
+        kind: "classification",
+        semanticRef: "urn:test:classification",
+        provenance: { operator: "membership-region", derivation: "resource", sourceStatementRefs: [] },
+      },
+      label: "空の分類",
+      templateRef: "urn:test:template:region",
+      style: { fill: "#fff", stroke: "#64748b", text: "#334155" },
+      geometry: { x: 100, y: 40, width: 180, height: 120 },
+      pinned: false,
+      placement: "generated",
+    }];
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene,
+        selectedElementId: "classification-frame",
+        selectedElementIds: ["classification-frame"],
+      },
+    });
+
+    expect(wrapper.findAll(".iriograph-scene-container.group-frame")).toHaveLength(1);
+    expect(wrapper.findAll(".iriograph-scene-region.group-frame.classification-group")).toHaveLength(1);
+    expect(wrapper.get(".iriograph-scene-container.group-frame .iriograph-group-frame-label").text())
+      .toContain("空の領域");
+    expect(wrapper.get(".iriograph-scene-region.group-frame .iriograph-group-frame-label").text())
+      .toContain("空の分類");
+    const selected = wrapper.get('[data-element-id="classification-frame"]');
+    expect(selected.classes()).toContain("interaction-front");
+    expect(selected.attributes("role")).toBe("option");
+    expect(selected.attributes("aria-label")).toContain("空の分類");
+    expect(wrapper.findAll(".iriograph-resize-handle")).toHaveLength(8);
   });
 });
 

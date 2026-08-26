@@ -31,6 +31,7 @@ import { statementIdentity, statementIdentityForNamedStatement } from "./identit
 import {
   createStandardLayoutRegistry,
   type LayoutAdapter,
+  type LayoutRequest,
   LayoutAdapterRegistry,
   STANDARD_LAYOUT_REFS,
   StandardLightweightLayoutAdapter,
@@ -46,6 +47,7 @@ import { standardRdfRdfsCatalog } from "./standard-catalog";
 const NS = "urn:test:authoring:";
 const XSD_INTEGER = `${XSD_NAMESPACE}integer`;
 const RDFS_SUBCLASS_OF = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
+const RDFS_SUBPROPERTY_OF = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
 
 describe("structured semantic authoring", () => {
   it("全structured commandをcanonical datasetと全view reconciliationへatomicに適用する", async () => {
@@ -646,7 +648,7 @@ describe("structured semantic authoring", () => {
     expect(ordinalObjects(graph, `${NS}alt`)).toEqual([`${NS}a`, `${NS}c`]);
   });
 
-  it("cascade後のSeq>=1/Alt>=2違反とknown vocabulary削除をrollbackする", async () => {
+  it("cascade後のincomplete Seq/Altをwarningで保持しknown vocabulary削除だけrollbackする", async () => {
     const context = contextFor("revision-1");
     const tooSmallDocument = documentFor(`
 @prefix ex: <${NS}> .
@@ -664,9 +666,10 @@ ex:b rdfs:label "B" .
         resourceIri,
         cascade: true,
       }], context);
-      expect(preview.valid).toBe(false);
+      expect(preview.valid).toBe(true);
       expect(preview.diagnostics.some((item) => (
-        item.code === "sequence-empty" || item.code === "alternative-too-few-members"
+        item.severity === "warning"
+        && (item.code === "sequence-empty" || item.code === "alternative-too-few-members")
       ))).toBe(true);
     }
 
@@ -1106,6 +1109,27 @@ ex:b rdfs:label "B" .
     }], contextFor("revision-1"));
     expect(beyondScene.diagnostics).toContainEqual(expect.objectContaining({
       code: "initial-position-out-of-bounds",
+    }));
+    const hostBounded = await previewAuthoringCommands(document, [{
+      type: "create-resource",
+      commandId: "host-bounded",
+      resourceIri: `${NS}hostBounded`,
+      initialStatements: [{
+        subject: { kind: "created-resource" },
+        predicateIri: RDFS_LABEL,
+        object: { kind: "literal", value: "Host bounded" },
+      }],
+      initialPosition: { viewId: "main", x: 300, y: 300 },
+    }], {
+      ...contextFor("revision-1"),
+      resourcePolicy: {
+        allowedMintNamespaces: [NS],
+        maxInitialPositionExtent: 360,
+      },
+    });
+    expect(hostBounded.diagnostics).toContainEqual(expect.objectContaining({
+      code: "initial-position-out-of-bounds",
+      message: expect.stringContaining("360"),
     }));
     expect(document).toEqual(documentFor(baseSource));
   });
@@ -1743,9 +1767,9 @@ ex:b rdfs:label "B" .
         memberIris: [`${NS}a`, `${NS}b`],
         ordinalPredicatePrefix: `${NS}ordinal-`,
       });
-    const alternativeCapability = scene.edges.find((edge) => (
-      edge.provenance?.editCapability?.command === "set-alternatives"
-    ))!.provenance!.editCapability!;
+    const alternativeCapability = scene.memberships!.find((entry) => (
+      entry.provenance.editCapability?.command === "set-alternatives"
+    ))!.provenance.editCapability!;
     expect(seedAuthoringCommandFromProvenance(document, alternativeCapability, "seed-alt").command)
       .toMatchObject({
         type: "set-alternatives",
@@ -1860,6 +1884,62 @@ ex:b rdfs:label "B" .
     const graph = graphFor(preview.candidateSource!);
     expect(graph.countQuads(`${NS}a`, RDF_TYPE, `${NS}Task`, null)).toBe(1);
     expect(graph.countQuads(`${NS}Task`, RDFS_SUBCLASS_OF, `${NS}Category`, null)).toBe(1);
+  });
+
+  it("structured subPropertyOf-only deltaを全体再配置せずroute-only reconciliationへ渡す", async () => {
+    const document = documentFor(`
+      @prefix : <${NS}> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :p a rdf:Property ; rdfs:label "P" .
+      :q a rdf:Property ; rdfs:label "Q" .
+      :a rdfs:label "A" ; :p :b .
+      :b rdfs:label "B" .
+    `);
+    const requests: LayoutRequest[] = [];
+    const layouts = new LayoutAdapterRegistry(([
+      [STANDARD_LAYOUT_REFS.hierarchicalLr, "LR"],
+      [STANDARD_LAYOUT_REFS.hierarchicalTb, "TB"],
+    ] as const).map(([layoutRef, direction]): LayoutAdapter => {
+      const standard = new StandardLightweightLayoutAdapter(layoutRef, direction);
+      return {
+        layoutRef,
+        async layout(request) {
+          requests.push(request);
+          return standard.layout(request);
+        },
+      };
+    }));
+    const base = contextFor("revision-subproperty");
+    const context: ResolvedAuthoringContext = {
+      ...base,
+      runtime: { ...base.runtime, layouts },
+      terms: [...base.terms, {
+        iri: `${NS}p`,
+        kind: "property",
+        objectKinds: ["iri"],
+      }, {
+        iri: `${NS}q`,
+        kind: "property",
+        objectKinds: ["iri"],
+      }, {
+        iri: RDFS_SUBPROPERTY_OF,
+        kind: "property",
+        roles: ["predicate"],
+        objectKinds: ["iri"],
+      }],
+    };
+    const preview = await previewAuthoringCommands(document, [{
+      type: "set-property",
+      commandId: "property-hierarchy",
+      subjectIri: `${NS}p`,
+      predicateIri: RDFS_SUBPROPERTY_OF,
+      values: [{ kind: "iri", iri: `${NS}q` }],
+    }], context);
+
+    expect(preview.valid).toBe(true);
+    expect(requests.filter((request) => request.mode === "route-only"))
+      .toHaveLength(document.views.length);
   });
 
   it("rdfs:memberのdomain subpropertyをmembership authoringとprovenanceでexact保持する", async () => {
@@ -2035,6 +2115,10 @@ ex:b rdfs:label "B" .
       { ...contextFor("revision-1"), terms: undefined },
       { ...contextFor("revision-1"), capabilities: {} },
       { ...contextFor("revision-1"), resourcePolicy: {} },
+      {
+        ...contextFor("revision-1"),
+        resourcePolicy: { allowedMintNamespaces: [NS], maxInitialPositionExtent: 0 },
+      },
       { ...contextFor("revision-1"), runtime: {} },
       { ...contextFor("revision-1"), runtime: { catalogsByProfile: new Map(), layouts: "x" } },
       {
@@ -2054,6 +2138,71 @@ ex:b rdfs:label "B" .
         code: "authoring-context-invalid",
       }));
     }
+  });
+
+  it("structured label/commentだけにdefaultLocaleを補完し明示languageを保持する", async () => {
+    const document = documentFor(baseSource);
+    const context: ResolvedAuthoringContext = {
+      ...contextFor("revision-locale"),
+      defaultLocale: "ja-JP",
+    };
+    const preview = await previewAuthoringCommands(document, [{
+      type: "set-property",
+      commandId: "localized-label",
+      subjectIri: `${NS}b`,
+      predicateIri: RDFS_LABEL,
+      values: [
+        { kind: "literal", value: "表示名" },
+        { kind: "literal", value: "Name", language: "en" },
+      ],
+    }, {
+      type: "set-property",
+      commandId: "localized-comment",
+      subjectIri: `${NS}b`,
+      predicateIri: RDFS_COMMENT,
+      values: [{ kind: "literal", value: "説明" }],
+    }], context);
+
+    expect(preview.valid).toBe(true);
+    const graph = graphFor(preview.candidateSource!);
+    expect(graph.getObjects(`${NS}b`, RDFS_LABEL, null).map((value) => [
+      value.value,
+      value.termType === "Literal" ? value.language : "",
+    ])).toEqual(expect.arrayContaining([
+      ["表示名", "ja-jp"],
+      ["Name", "en"],
+    ]));
+    expect(graph.getObjects(`${NS}b`, RDFS_COMMENT, null)[0]).toMatchObject({
+      value: "説明",
+      language: "ja-jp",
+    });
+
+    const directSource = baseSource.replace(
+      'ex:b rdfs:label "B" .',
+      'ex:b rdfs:label "Direct untagged" .',
+    );
+    for (const actor of ["human", "llm"] as const) {
+      const direct = await applyAuthoringSource(document, directSource, context, { actor });
+      expect(direct.accepted).toBe(true);
+      expect(graphFor(direct.document.semantic.source)
+        .getObjects(`${NS}b`, RDFS_LABEL, null)[0]).toMatchObject({
+          value: "Direct untagged",
+          language: "",
+        });
+    }
+
+    const invalid = await previewAuthoringCommands(document, [{
+      type: "connect-resources",
+      commandId: "invalid-locale",
+      subjectIri: `${NS}a`,
+      predicateIri: `${NS}rel`,
+      objectIri: `${NS}b`,
+    }], { ...context, defaultLocale: "not_a_language" });
+    expect(invalid.valid).toBe(false);
+    expect(invalid.diagnostics).toContainEqual(expect.objectContaining({
+      code: "authoring-context-invalid",
+      message: expect.stringContaining("defaultLocale"),
+    }));
   });
 });
 

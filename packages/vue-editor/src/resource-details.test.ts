@@ -27,7 +27,7 @@ describe("resource details", () => {
       { iri: "http://www.w3.org/2000/01/rdf-schema#seeAlso", kind: "property", label: "関連資料", objectKinds: ["iri"] },
     ]);
     expect(rows).toEqual([
-      expect.objectContaining({ label: "名前", values: [expect.objectContaining({ value: "Item" })] }),
+      expect.objectContaining({ label: "名前", values: [expect.objectContaining({ value: "Item", datatypeIri: "http://www.w3.org/2001/XMLSchema#string" })] }),
       expect.objectContaining({ label: "関連資料", values: [expect.objectContaining({ value: "urn:test:other" })] }),
     ]);
   });
@@ -40,7 +40,7 @@ describe("resource details", () => {
       expect.objectContaining({
         type: "set-property",
         subjectIri: "urn:test:item",
-        values: [expect.objectContaining({ value: "Renamed" })],
+        values: [expect.objectContaining({ value: "Renamed", datatypeIri: "http://www.w3.org/2001/XMLSchema#string" })],
       }),
     ]);
   });

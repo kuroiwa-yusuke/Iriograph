@@ -32,13 +32,17 @@ describe("RDF/RDFS standard projection", () => {
     const scene = projectSemanticView(documentFor(workflowSource), standardRdfRdfsCatalog);
 
     expect(scene.diagnostics).toEqual([]);
-    expect(scene.containers).toHaveLength(5);
-    expect(scene.nodes).toHaveLength(8);
-    expect(scene.edges).toHaveLength(4);
+    expect(scene.containers).toHaveLength(6);
+    expect(scene.nodes).toHaveLength(7);
+    expect(scene.edges).toHaveLength(2);
     expect(scene.nodes.every((node) => node.geometry === undefined)).toBe(true);
-    expect(scene.nodes.find((node) => node.semanticRef === "urn:test:workflow:decision")).toMatchObject({
+    expect(scene.containers.find((node) => node.semanticRef === "urn:test:workflow:decision")).toMatchObject({
       label: "判断",
-      shape: "diamond",
+      groupFrame: {
+        kind: "alternative",
+        semanticTypeIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#Alt",
+        hub: { role: "alternative-hub" },
+      },
       provenance: {
         operator: "alternative",
         rule: {
@@ -61,7 +65,11 @@ describe("RDF/RDFS standard projection", () => {
     expect(scene.containers.filter((container) => container.groupRole === "sequence")).toHaveLength(3);
     expect(scene.memberships?.filter((membership) => membership.role === "sequence-member"))
       .toHaveLength(8);
-    expect(scene.edges.filter((edge) => edge.provenance.operator === "alternative")).toHaveLength(2);
+    expect(scene.edges.filter((edge) => edge.provenance.operator === "alternative")).toHaveLength(0);
+    expect(scene.memberships?.filter((membership) => membership.role === "alternative-member"))
+      .toHaveLength(2);
+    expect(scene.groupGuides?.filter((guide) => guide.kind === "alternative-candidate"))
+      .toHaveLength(2);
   });
 
   it("subClassOf/subPropertyOfの限定closureをrule matchingだけに使う", () => {
@@ -152,6 +160,8 @@ describe("RDF/RDFS standard projection", () => {
       "urn:test:class-region:left",
       "urn:test:class-region:right",
     ]);
+    expect(region.regions?.every((value) => value.groupFrame?.kind === "classification"))
+      .toBe(true);
     expect(region.memberships).toHaveLength(2);
     expect(region.memberships?.every((value) => value.provenance.operator === "membership-region"))
       .toBe(true);
@@ -197,36 +207,60 @@ describe("RDF/RDFS standard projection", () => {
     expect(edge.labelProvenance?.sourceStatementRefs).toHaveLength(2);
   });
 
-  it("Altはderived edge、Seqはordinal membershipとして由来を公開する", () => {
+  it("Alt/Seqをpredicate edgeではなくframe membershipとmuted guideで公開する", () => {
     const scene = projectSemanticView(documentFor(workflowSource), standardRdfRdfsCatalog);
     const approvedPath = scene.containers.find((container) => (
       container.semanticRef === "urn:test:workflow:approvedPath"
     ))!;
-    const branch = scene.edges.find((edge) => (
-      edge.labelProvenance?.kind === "derived-structure"
-      && edge.labelProvenance.role === "alternative-branch"
-      && edge.targetElementId === approvedPath.elementId
+    const alternative = scene.containers.find((container) => (
+      container.semanticRef === "urn:test:workflow:decision"
+    ))!;
+    const branch = scene.groupGuides?.find((guide) => (
+      guide.kind === "alternative-candidate"
+      && guide.targetElementId === approvedPath.elementId
     ))!;
     const firstMember = scene.memberships?.find((membership) => (
       membership.role === "sequence-member" && membership.ordinal === 1
     ))!;
+    const orderGuide = scene.groupGuides?.find((guide) => (
+      guide.kind === "sequence-order"
+      && guide.groupElementId === approvedPath.elementId
+    ))!;
 
-    expect(branch.labelProvenance).toMatchObject({
-      kind: "derived-structure",
-      role: "alternative-branch",
-      structureSemanticRef: "urn:test:workflow:decision",
-      sourceStatementRefs: [],
+    expect(alternative.groupFrame).toMatchObject({
+      kind: "alternative",
+      defaultMember: {
+        ordinal: 1,
+        provenance: { operator: "alternative" },
+      },
     });
-    expect(branch.label).toBe("");
+    const defaultMember = alternative.groupFrame!.defaultMember!;
+    expect(defaultMember.provenance.sourceStatementRefs)
+      .toEqual([defaultMember.statementRef]);
+    expect(branch).toMatchObject({
+      kind: "alternative-candidate",
+      groupElementId: alternative.elementId,
+      sourceElementId: alternative.groupFrame?.hub?.elementId,
+      muted: true,
+      provenance: { operator: "alternative" },
+    });
     expect(branch.provenance.sourceStatementRefs).toHaveLength(1);
     expect(firstMember).toMatchObject({
       role: "sequence-member",
       ordinal: 1,
+      ordinalBadge: "1",
       provenance: {
         operator: "ordinal-sequence",
         editCapability: { command: "set-sequence" },
       },
     });
+    expect(orderGuide).toMatchObject({
+      kind: "sequence-order",
+      ordinal: 2,
+      muted: true,
+      provenance: { operator: "ordinal-sequence" },
+    });
+    expect(orderGuide.provenance.sourceStatementRefs).toHaveLength(2);
   });
 
   it("cloud承認Seqをlabel付きgroupとordinalだけへ投影し偽edgeを生成しない", () => {
@@ -485,6 +519,87 @@ describe("RDF/RDFS standard projection", () => {
       value.code === "edge-endpoint-not-visible"
       || value.code === "derived-edge-endpoint-not-visible"
     ))).toBe(false);
+  });
+
+  it("empty Seq/Altもactionable warning付きGroup Frameとして投影する", () => {
+    const scene = projectSemanticView(documentFor(`
+      @prefix : <urn:test:empty-group:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :sequence a rdf:Seq ; rdfs:label "空の順序" .
+      :alternative a rdf:Alt ; rdfs:label "未完成の選択肢" .
+    `), standardRdfRdfsCatalog);
+
+    expect(scene.containers.map((container) => container.groupFrame?.kind).sort())
+      .toEqual(["alternative", "sequence"]);
+    expect(scene.nodes).toEqual([]);
+    expect(scene.edges).toEqual([]);
+    expect(scene.groupGuides).toEqual([]);
+    expect(scene.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        severity: "warning",
+        code: "sequence-empty",
+        suggestedActions: [expect.objectContaining({ actionId: "add-sequence-member" })],
+      }),
+      expect.objectContaining({
+        severity: "warning",
+        code: "alternative-too-few-members",
+        suggestedActions: [expect.objectContaining({ actionId: "add-alternative-members" })],
+      }),
+      expect.objectContaining({
+        severity: "warning",
+        code: "alternative-default-missing",
+        suggestedActions: [expect.objectContaining({ actionId: "choose-alternative-default" })],
+      }),
+    ]));
+  });
+
+  it("sparse labelFontSizeをnode/group/edge caption/commentへ同じstyle契約で投影する", () => {
+    const document = documentFor(`
+      @prefix : <urn:test:font-size:> .
+      @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :bag a rdf:Bag ; rdfs:label "領域" ; rdfs:comment "領域コメント" ; rdfs:member :a .
+      :a rdfs:label "A" ; rdfs:comment "Aコメント" ; :connects :b .
+      :b rdfs:label "B" .
+      :connects rdfs:label "接続" ; rdfs:comment "関係コメント" .
+    `);
+    const edgeRef = statementIdentity(
+      "urn:test:font-size:a",
+      "urn:test:font-size:connects",
+      "urn:test:font-size:b",
+    );
+    document.views[0]!.overlay = {
+      node: {
+        semanticRef: "urn:test:font-size:a",
+        appearance: { style: { labelFontSize: 16 } },
+      },
+      group: {
+        semanticRef: "urn:test:font-size:bag",
+        appearance: { style: { labelFontSize: 18 } },
+      },
+      edge: {
+        semanticRef: edgeRef,
+        appearance: { style: { labelFontSize: 20 }, edgeCaption: "表示注記" },
+      },
+    };
+
+    const scene = projectSemanticView(document, standardRdfRdfsCatalog);
+    expect(scene.nodes.find((node) => node.semanticRef.endsWith(":a"))).toMatchObject({
+      style: { labelFontSize: 16 },
+      semanticText: { comments: [{ value: "Aコメント" }] },
+    });
+    expect(scene.containers.find((group) => group.semanticRef.endsWith(":bag"))).toMatchObject({
+      style: { labelFontSize: 18 },
+      semanticText: { comments: [{ value: "領域コメント" }] },
+    });
+    expect(scene.edges.find((edge) => edge.semanticRef === edgeRef)).toMatchObject({
+      style: { labelFontSize: 20 },
+      caption: "表示注記",
+      semanticText: { comments: [{ value: "関係コメント" }] },
+    });
+    expect(document.views[0]!.overlay.node!.appearance!.style)
+      .not.toHaveProperty("fill");
   });
 });
 

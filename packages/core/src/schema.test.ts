@@ -156,7 +156,16 @@ describe("Iriograph document v1 schema", () => {
       semanticRef: "urn:test:region",
       appearance: {
         styleRef: "urn:test:style:calm",
-        style: { fill: "#abcdef80", fillOpacity: 0.25, strokeWidth: 3, dash: "6 4" },
+        style: {
+          fill: "#abcdef80",
+          fillOpacity: 0.25,
+          strokeWidth: 3,
+          labelFontSize: 18,
+          dash: "6 4",
+        },
+        groupLabelAnchor: .25,
+        groupLabelWritingDirection: "horizontal-right",
+        groupZOrder: 3,
         regionLabelAnchor: .375,
         regionLabelWritingDirection: "vertical-down",
         regionZOrder: 4,
@@ -175,6 +184,9 @@ describe("Iriograph document v1 schema", () => {
   });
 
   it.each([
+    ["groupLabelAnchor", 1],
+    ["groupLabelWritingDirection", "vertical-up"],
+    ["groupZOrder", 1.5],
     ["regionLabelAnchor", 1],
     ["regionLabelWritingDirection", "vertical-up"],
     ["regionZOrder", 1.5],
@@ -187,6 +199,29 @@ describe("Iriograph document v1 schema", () => {
       appearance: { [property]: value },
     };
 
+    expect(validateIriographDocumentV1(source).valid).toBe(false);
+  });
+
+  it("accepts bounded sparse icon presentation and rejects conflicting or unbounded values", () => {
+    const source = structuredClone(fixture("document.valid.json")) as {
+      views: Array<{ overlay: Record<string, unknown> }>;
+    };
+    source.views[0]!.overlay.node = {
+      semanticRef: "urn:test:node",
+      appearance: {
+        nodeIconSize: { width: 48, height: 32 },
+        nodeIconFit: "cover",
+      },
+    };
+    expect(validateIriographDocumentV1(source).valid).toBe(true);
+
+    (source.views[0]!.overlay.node as { appearance: Record<string, unknown> })
+      .appearance.nodeIconScale = 2;
+    expect(validateIriographDocumentV1(source).valid).toBe(false);
+    delete (source.views[0]!.overlay.node as { appearance: Record<string, unknown> })
+      .appearance.nodeIconSize;
+    (source.views[0]!.overlay.node as { appearance: Record<string, unknown> })
+      .appearance.nodeIconScale = 9;
     expect(validateIriographDocumentV1(source).valid).toBe(false);
   });
 
@@ -285,11 +320,16 @@ describe("normalized projection catalog v1 schema", () => {
   });
 
   it("accepts IRI-keyed style presets and a region default template", () => {
-    const result = validateProjectionCatalogV1(standardRdfRdfsCatalog);
+    const catalog = structuredClone(standardRdfRdfsCatalog);
+    catalog.styles!["urn:iriograph:style:region:overlap:1"]!.labelFontSize = 17;
+    const result = validateProjectionCatalogV1(catalog);
     expect(result).toMatchObject({ valid: true });
     expect(standardRdfRdfsCatalog.defaults?.regionTemplateRef).toBe(
       "urn:iriograph:template:region:overlap:1",
     );
+
+    catalog.styles!["urn:iriograph:style:region:overlap:1"]!.labelFontSize = 73;
+    expect(validateProjectionCatalogV1(catalog).valid).toBe(false);
   });
 
   it("accepts JPEG catalog assets", () => {

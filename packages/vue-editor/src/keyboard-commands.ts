@@ -5,7 +5,8 @@ export type CanvasKeyboardCommand =
   | { kind: "select" }
   | { kind: "toggle-selection" }
   | { kind: "semantic-edit" }
-  | { kind: "focus"; movement: "next" | "previous" | "first" | "last"; range: boolean }
+  | { kind: "focus"; movement: "next" | "previous" | "first" | "last" }
+  | { kind: "nudge" }
   | { kind: "pan" }
   | { kind: "presentation-primary" }
   | { kind: "presentation-secondary" }
@@ -33,7 +34,9 @@ export function resolveCanvasKeyboardCommand(
   if (event.key === "Escape") return { kind: "cancel" };
   if (command && event.key.toLowerCase() === "a") return { kind: "select-all" };
 
-  // Precedence is intentionally secondary edit > primary edit > range > focus.
+  // Modified arrows keep the detailed presentation controls. Plain arrows
+  // are reserved for selection nudge (or viewport pan when nothing is
+  // selected), so object navigation has an explicit, non-spatial command.
   if (arrow && command && event.shiftKey) return { kind: "presentation-secondary" };
   if (arrow && command) return { kind: "presentation-primary" };
   if (!command && !event.altKey && (event.key === "Insert" || event.key.toLowerCase() === "w")) {
@@ -54,8 +57,12 @@ export function resolveCanvasKeyboardCommand(
     return { kind: "semantic-edit" };
   }
   if (!command && !event.altKey) {
-    const movement = focusMovement(event.key);
-    if (movement) return { kind: "focus", movement, range: event.shiftKey && isArrowKey(event.key) };
+    if (arrow) return { kind: "nudge" };
+    if (event.key.toLowerCase() === "n") {
+      return { kind: "focus", movement: event.shiftKey ? "previous" : "next" };
+    }
+    const movement = focusBoundaryMovement(event.key);
+    if (movement) return { kind: "focus", movement };
     if (event.key === "PageUp" || event.key === "PageDown") return { kind: "pan" };
   }
   return { kind: "none" };
@@ -70,15 +77,11 @@ export function keyboardArrowMovement(key: string, step: number): { x: number; y
   } as Record<string, { x: number; y: number }>)[key];
 }
 
-function focusMovement(key: string): "next" | "previous" | "first" | "last" | undefined {
+function focusBoundaryMovement(key: string): "first" | "last" | undefined {
   return ({
-    ArrowRight: "next",
-    ArrowDown: "next",
-    ArrowLeft: "previous",
-    ArrowUp: "previous",
     Home: "first",
     End: "last",
-  } as Record<string, "next" | "previous" | "first" | "last">)[key];
+  } as Record<string, "first" | "last">)[key];
 }
 
 function isArrowKey(key: string): boolean {

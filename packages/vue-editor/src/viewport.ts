@@ -1,6 +1,10 @@
 import type { DiagramScene, ElementGeometry, Point, SceneEdge } from "@iriograph/core";
 
-import { edgeCurveSegments } from "./edge-routing";
+import {
+  derivedSceneCurveRouting,
+  edgeCurveSegments,
+  renderedEdgeRouteFamily,
+} from "./edge-routing";
 
 export const DIAGRAM_ZOOM_MIN = 0.1;
 export const DIAGRAM_ZOOM_MAX = 2;
@@ -110,11 +114,17 @@ export function diagramContentBounds(scene: DiagramScene): ElementGeometry {
  * hull keeps fit and selection reveal on the same clipping-safe contract.
  */
 export function edgeRenderedBoundsPoints(
-  edge: Pick<SceneEdge, "curve" | "route" | "routeMode" | "waypoints">,
+  edge: Pick<SceneEdge, "curve" | "derivedRouteChoice" | "route" | "routeMode" | "waypoints">,
   renderedRoute: readonly Point[] = edge.route ?? [],
 ): Point[] {
-  const curvePoints = edge.routeMode === "curve"
-    ? edgeCurveSegments(renderedRoute, edge.curve).flatMap((segment) => [
+  const family = renderedEdgeRouteFamily(edge);
+  const curve = edge.routeMode === "curve"
+    ? edge.curve
+    : family === "curve"
+      ? derivedSceneCurveRouting(edge)
+      : undefined;
+  const curvePoints = family === "curve"
+    ? edgeCurveSegments(renderedRoute, curve).flatMap((segment) => [
         segment.start,
         segment.control1,
         segment.control2,

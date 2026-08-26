@@ -201,6 +201,79 @@ describe("SemanticAccessIndex", () => {
     ))).toBe(true);
   });
 
+  it("multi-parent predicate hierarchyの全simple pathを返しcycleを有限診断する", () => {
+    const source = `
+@prefix ex: <${NS}> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:p rdfs:subPropertyOf ex:left, ex:right .
+ex:left rdfs:subPropertyOf ex:top .
+ex:right rdfs:subPropertyOf ex:top .
+ex:top rdfs:subPropertyOf ex:p .
+`;
+    const index = indexFor(source, "hierarchy-revision");
+    const hierarchy = index.predicateHierarchy(required(index.predicateAlias(`${NS}p`)));
+    const top = hierarchy.relations.find((relation) => relation.iri === `${NS}top`)!;
+    expect(top.distance).toBe(2);
+    expect(top.paths).toEqual([
+      [`${NS}p`, `${NS}left`, `${NS}top`],
+      [`${NS}p`, `${NS}right`, `${NS}top`],
+    ]);
+    expect(hierarchy.diagnostics).toHaveLength(2);
+    expect(hierarchy.diagnostics.every((diagnostic) => (
+      diagnostic.code === "hierarchy-cycle"
+      && diagnostic.path[0] === diagnostic.path.at(-1)
+    ))).toBe(true);
+    expect(index.describe(required(index.resourceAlias(`${NS}p`))).superProperties)
+      .toContainEqual(expect.objectContaining({ iri: `${NS}top`, paths: top.paths }));
+  });
+
+  it("dense hierarchyのpath列挙を決定的budgetで打ち切りactionを返す", () => {
+    const source = denseHierarchySource();
+    const document = documentFor(source);
+    const first = new SemanticAccessIndex(document, "dense-hierarchy", {
+      hierarchyPathBudget: 8,
+    });
+    const second = new SemanticAccessIndex(documentFor(denseHierarchySource(true)), "dense-hierarchy", {
+      hierarchyPathBudget: 8,
+    });
+    const firstResult = first.predicateHierarchy(required(first.predicateAlias(`${NS}p`)));
+    const secondResult = second.predicateHierarchy(required(second.predicateAlias(`${NS}p`)));
+
+    expect(firstResult).toEqual(secondResult);
+    expect(firstResult).toMatchObject({ truncated: true, pathBudget: 8 });
+    expect(firstResult.relations.reduce((count, relation) => (
+      count + (relation.paths?.length ?? 0)
+    ), 0)).toBeLessThanOrEqual(8);
+    expect(firstResult.relations.every((relation) => relation.pathsTruncated)).toBe(true);
+    expect(firstResult.diagnostics).toContainEqual(expect.objectContaining({
+      code: "hierarchy-path-budget-exceeded",
+      suggestedActions: [expect.objectContaining({
+        actionId: "narrow-semantic-hierarchy-query",
+      })],
+    }));
+    expect(() => new SemanticAccessIndex(document, "invalid-zero", {
+      hierarchyPathBudget: 0,
+    })).toThrow("1 to 4096");
+    expect(() => new SemanticAccessIndex(document, "invalid-large", {
+      hierarchyPathBudget: 4097,
+    })).toThrow("1 to 4096");
+
+    // 12^16 paths are possible in principle. The traversal must stop globally
+    // at the materialization budget instead of continuing through sibling paths.
+    const startedAt = Date.now();
+    const huge = new SemanticAccessIndex(
+      documentFor(denseHierarchySource(false, 16, 12)),
+      "huge-dense-hierarchy",
+      { hierarchyPathBudget: 8 },
+    );
+    const hugeResult = huge.predicateHierarchy(required(huge.predicateAlias(`${NS}p`)));
+    expect(hugeResult.truncated).toBe(true);
+    expect(hugeResult.relations.reduce((count, relation) => (
+      count + (relation.paths?.length ?? 0)
+    ), 0)).toBe(8);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
   it("aliasをrevisionへ束縛しstale参照・未知aliasを拒否する", () => {
     const index = indexFor(SOURCE, "rev-current");
     const a = required(index.resourceAlias(`${NS}a`));
@@ -312,6 +385,25 @@ describe("alias authoring facade", () => {
 
 function indexFor(source: string, revision = "rev-1", locales: readonly string[] = ["ja"]): SemanticAccessIndex {
   return new SemanticAccessIndex(documentFor(source), revision, { locales });
+}
+
+function denseHierarchySource(reverse = false, levels = 4, width = 4): string {
+  const headers = [
+    `@prefix ex: <${NS}> .`,
+    "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+  ];
+  const triples: string[] = [];
+  let previous = ["p"];
+  for (let level = 0; level < levels; level += 1) {
+    const next = Array.from({ length: width }, (_, index) => `l${level}-${index}`);
+    for (const child of previous) {
+      for (const parent of next) {
+        triples.push(`ex:${child} rdfs:subPropertyOf ex:${parent} .`);
+      }
+    }
+    previous = next;
+  }
+  return `${[...headers, ...(reverse ? triples.reverse() : triples)].join("\n")}\n`;
 }
 
 function documentFor(source: string): IriographDocumentV1 {

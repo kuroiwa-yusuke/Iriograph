@@ -8,6 +8,7 @@ export type MockWorkspaceEntry = {
   path: string;
   mediaType: string;
   url: string;
+  documentId?: string;
   assetRef?: string;
 };
 
@@ -24,6 +25,19 @@ export type MockWorkspaceTreeRow = {
   name: string;
   depth: number;
   entry?: MockWorkspaceEntry;
+};
+
+export const MOCK_WORKSPACE_INDEX_SCHEMA_VERSION = "1";
+export const MOCK_WORKSPACE_INDEX_KIND = "iriograph.mock.workspace-index";
+
+export type MockPersistedWorkspaceIndexV1 = {
+  schemaVersion: "1";
+  kind: typeof MOCK_WORKSPACE_INDEX_KIND;
+  workspaceId: string;
+  documents: {
+    path: string;
+    documentId: string;
+  }[];
 };
 
 export async function loadMockWorkspace(): Promise<MockWorkspaceManifest> {
@@ -43,6 +57,9 @@ export async function readIriographDocument(
 ): Promise<IriographDocumentV1> {
   if (entry.kind !== "iriograph-document") {
     throw new Error(`${entry.path}はIriograph documentではありません。`);
+  }
+  if (!hasMockRepositorySource(entry)) {
+    throw new Error(`${entry.path}にはrepository上の正本がありません。`);
   }
   const response = await fetch(entry.url, { cache: "no-store" });
   if (!response.ok) {
@@ -70,6 +87,135 @@ export function parseMockWorkingCopy(
   } catch {
     return undefined;
   }
+}
+
+/** Dynamic copies use one canonical path shape so a persisted index cannot escape the workspace. */
+export function mockCopyDocumentPath(documentId: string): string {
+  return `copies/${encodeURIComponent(documentId)}.iriograph`;
+}
+
+export function parseMockPersistedWorkspaceIndex(
+  source: string | null,
+  workspaceId: string,
+): MockPersistedWorkspaceIndexV1 | undefined {
+  if (!source) return undefined;
+  try {
+    const value = JSON.parse(source) as unknown;
+    if (!isRecord(value)) return undefined;
+    if (
+      value.schemaVersion !== MOCK_WORKSPACE_INDEX_SCHEMA_VERSION
+      || value.kind !== MOCK_WORKSPACE_INDEX_KIND
+      || value.workspaceId !== workspaceId
+      || !Array.isArray(value.documents)
+    ) return undefined;
+    const seenPaths = new Set<string>();
+    const seenDocumentIds = new Set<string>();
+    const documents: MockPersistedWorkspaceIndexV1["documents"] = [];
+    for (const item of value.documents) {
+      if (
+        !isRecord(item)
+        || typeof item.path !== "string"
+        || typeof item.documentId !== "string"
+        || item.documentId.length === 0
+        || item.path !== mockCopyDocumentPath(item.documentId)
+        || seenPaths.has(item.path)
+        || seenDocumentIds.has(item.documentId)
+      ) return undefined;
+      seenPaths.add(item.path);
+      seenDocumentIds.add(item.documentId);
+      documents.push({ path: item.path, documentId: item.documentId });
+    }
+    return {
+      schemaVersion: MOCK_WORKSPACE_INDEX_SCHEMA_VERSION,
+      kind: MOCK_WORKSPACE_INDEX_KIND,
+      workspaceId,
+      documents,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function createMockPersistedWorkspaceIndex(
+  workspace: MockWorkspaceManifest,
+): MockPersistedWorkspaceIndexV1 {
+  return {
+    schemaVersion: MOCK_WORKSPACE_INDEX_SCHEMA_VERSION,
+    kind: MOCK_WORKSPACE_INDEX_KIND,
+    workspaceId: workspace.workspaceId,
+    documents: workspace.entries.flatMap((entry) => (
+      entry.kind === "iriograph-document"
+      && entry.url === ""
+      && typeof entry.documentId === "string"
+      && entry.path === mockCopyDocumentPath(entry.documentId)
+        ? [{ path: entry.path, documentId: entry.documentId }]
+        : []
+    )),
+  };
+}
+
+/** Restores only schema-valid copies whose stored document identity still matches the index. */
+export function restoreMockPersistedDocuments(
+  workspace: MockWorkspaceManifest,
+  index: MockPersistedWorkspaceIndexV1 | undefined,
+  readWorkingCopy: (path: string) => IriographDocumentV1 | undefined,
+): MockWorkspaceManifest {
+  if (!index || index.workspaceId !== workspace.workspaceId) return workspace;
+  const entries = [...workspace.entries];
+  const documentPaths = new Set(entries.map((entry) => entry.path));
+  const documentIds = new Set(entries.flatMap((entry) => (
+    entry.kind === "iriograph-document" && entry.documentId ? [entry.documentId] : []
+  )));
+  for (const item of index.documents) {
+    if (documentPaths.has(item.path) || documentIds.has(item.documentId)) continue;
+    const copy = readWorkingCopy(item.path);
+    if (!copy || copy.documentId !== item.documentId) continue;
+    entries.push({
+      kind: "iriograph-document",
+      path: item.path,
+      documentId: item.documentId,
+      mediaType: "application/vnd.iriograph+json",
+      url: "",
+    });
+    documentPaths.add(item.path);
+    documentIds.add(item.documentId);
+  }
+  return entries.length === workspace.entries.length ? workspace : { ...workspace, entries };
+}
+
+export async function resolveMockWorkspaceDocument(
+  entry: MockWorkspaceEntry,
+  preferWorkingCopy: boolean,
+  workingCopy: IriographDocumentV1 | undefined,
+  inMemoryDocument: IriographDocumentV1 | undefined,
+  readRepository: (entry: MockWorkspaceEntry) => Promise<IriographDocumentV1>,
+): Promise<IriographDocumentV1> {
+  if (preferWorkingCopy) {
+    const local = workingCopy ?? inMemoryDocument;
+    if (local) return local;
+  }
+  if (!hasMockRepositorySource(entry)) {
+    throw new Error(`${entry.path}にはrepository上の正本がありません。`);
+  }
+  return readRepository(entry);
+}
+
+/** Only manifest-backed documents can discard a working copy and reload repository bytes. */
+export function hasMockRepositorySource(
+  entry: MockWorkspaceEntry | undefined,
+): entry is MockWorkspaceEntry & { kind: "iriograph-document"; url: string } {
+  return entry?.kind === "iriograph-document" && entry.url.trim().length > 0;
+}
+
+export function hasMockDocumentIdentityConflict(
+  workspace: MockWorkspaceManifest,
+  documentId: string,
+  path = mockCopyDocumentPath(documentId),
+): boolean {
+  return workspace.entries.some((entry) => (
+    entry.path === path
+    || (entry.kind === "iriograph-document" && entry.documentId === documentId)
+  ));
 }
 
 /**
@@ -137,6 +283,7 @@ function isMockWorkspaceEntry(value: unknown): value is MockWorkspaceEntry {
     && typeof value.path === "string"
     && typeof value.mediaType === "string"
     && typeof value.url === "string"
+    && (value.documentId === undefined || typeof value.documentId === "string")
     && (value.assetRef === undefined || typeof value.assetRef === "string");
 }
 

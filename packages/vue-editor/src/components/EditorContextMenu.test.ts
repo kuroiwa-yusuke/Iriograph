@@ -31,4 +31,38 @@ describe("EditorContextMenu", () => {
     await wrapper.get("[role='menu']").trigger("keydown", { key: "Escape" });
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
+
+  it("任意action IDのiconとdisabled理由を表示する", async () => {
+    const wrapper = mount(EditorContextMenu, {
+      props: {
+        x: 0,
+        y: 0,
+        actions: [
+          { id: "open-structured-flow", label: "関係を作る", iconToken: "relation" },
+          {
+            id: "unavailable-action",
+            label: "順序を編集",
+            disabled: true,
+            disabledReason: "グループに要素がありません。",
+            iconToken: "sequence",
+          },
+        ],
+      },
+    });
+    expect(wrapper.get("[data-icon-token='relation']").text()).toBe("→");
+    expect(wrapper.text()).toContain("グループに要素がありません。");
+    expect(wrapper.get("[aria-disabled='true']").attributes("aria-describedby")).toBeTruthy();
+    await wrapper.get("[aria-disabled='true']").trigger("click");
+    expect(wrapper.emitted("select")).toBeUndefined();
+    await wrapper.setProps({
+      actions: [{
+        id: "unavailable-action",
+        label: "順序を編集",
+        disabled: true,
+        disabledReason: "グループに要素がありません。",
+      }],
+    });
+    await wrapper.get("[role='menu']").trigger("keydown", { key: "Enter" });
+    expect(wrapper.emitted("select")).toBeUndefined();
+  });
 });

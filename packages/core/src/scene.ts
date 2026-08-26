@@ -11,9 +11,11 @@ import {
   type LayoutMode,
 } from "./layout.js";
 import { containerContentInsets } from "./container-content.js";
+import { measureNodeContent, measureTextContent } from "./content-metrics.js";
 import type {
   DiagramScene,
   EdgeCurveRouting,
+  GroupFrame,
   IriographDocument,
   Point,
   ProjectedScene,
@@ -26,6 +28,7 @@ import type {
   SceneRegion,
   SceneNode,
   SceneSemanticText,
+  VisualStyle,
 } from "./model.js";
 import { projectSemanticView } from "./projection.js";
 
@@ -119,10 +122,14 @@ export async function layoutProjectedDiagramScene(
       elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
         elementId: element.elementId,
         structuralKind: element.structuralKind,
-        groupRole: element.structuralKind === "container" ? element.groupRole : undefined,
+        groupRole: element.structuralKind === "node"
+          ? undefined
+          : element.groupFrame?.kind
+            ?? (element.structuralKind === "container" ? element.groupRole : undefined),
         parentElementId: element.structuralKind === "region" ? undefined : element.parentElementId,
         geometry: element.geometry,
         size: element.defaultSize,
+        minimumContentSize: minimumContentSize(element),
         // route-only is a transaction-local constraint. The returned Scene
         // retains the projected pin/placement values below; only the adapter
         // request treats every existing geometry as fixed.
@@ -135,7 +142,7 @@ export async function layoutProjectedDiagramScene(
           ? containerContentInsets(element.headerPosition)
           : undefined,
         externalReservations: element.structuralKind === "node"
-          ? commentCalloutReservations(element.semanticText)
+          ? commentCalloutReservations(element.semanticText, element.style)
           : undefined,
       })),
       edges: projected.edges.map((edge) => ({
@@ -176,10 +183,14 @@ export async function layoutProjectedDiagramScene(
     nodeLabelOffset: node.nodeLabelOffset,
     nodeLabelWritingDirection: node.nodeLabelWritingDirection,
     nodeIconOffset: node.nodeIconOffset,
+    nodeIconScale: node.nodeIconScale,
+    nodeIconSize: node.nodeIconSize ? { ...node.nodeIconSize } : undefined,
+    nodeIconFit: node.nodeIconFit,
     templateRef: node.templateRef,
     shape: node.shape,
     iconRef: node.iconRef,
     iconUrl: node.iconUrl,
+    iconIntrinsicSize: node.iconIntrinsicSize ? { ...node.iconIntrinsicSize } : undefined,
     geometry: layout.geometries[node.elementId]!,
     parentElementId: node.parentElementId,
     parentProvenance: node.parentProvenance,
@@ -193,9 +204,13 @@ export async function layoutProjectedDiagramScene(
     semanticRef: container.semanticRef,
     structuralKind: "container",
     groupRole: container.groupRole,
+    groupFrame: container.groupFrame ? structuredClone(container.groupFrame) : undefined,
     label: container.label,
     semanticText: container.semanticText,
     labelPlacement: container.labelPlacement,
+    groupLabelAnchor: container.groupLabelAnchor,
+    groupLabelWritingDirection: container.groupLabelWritingDirection,
+    groupZOrder: container.groupZOrder,
     templateRef: container.templateRef,
     geometry: layout.geometries[container.elementId]!,
     headerPosition: container.headerPosition,
@@ -213,6 +228,10 @@ export async function layoutProjectedDiagramScene(
     label: region.label,
     semanticText: region.semanticText,
     labelPlacement: region.labelPlacement,
+    groupFrame: region.groupFrame ? structuredClone(region.groupFrame) : undefined,
+    groupLabelAnchor: region.groupLabelAnchor,
+    groupLabelWritingDirection: region.groupLabelWritingDirection,
+    groupZOrder: region.groupZOrder,
     regionLabelAnchor: region.regionLabelAnchor,
     regionLabelWritingDirection: region.regionLabelWritingDirection,
     regionZOrder: region.regionZOrder,
@@ -242,6 +261,9 @@ export async function layoutProjectedDiagramScene(
       templateRef: edge.templateRef,
       style: edge.style,
       route: route?.map((point) => ({ ...point })),
+      derivedRouteChoice: layout.derivedRouteChoices?.[edge.elementId]
+        ? structuredClone(layout.derivedRouteChoices[edge.elementId])
+        : undefined,
       waypoints,
       curve: edge.curve ? cloneCurveRouting(edge.curve) : undefined,
       labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
@@ -265,6 +287,7 @@ export async function layoutProjectedDiagramScene(
       ...membership,
       provenance: { ...membership.provenance },
     })),
+    groupGuides: (projected.groupGuides ?? []).map((guide) => structuredClone(guide)),
     edges,
     diagnostics,
   };
@@ -296,13 +319,42 @@ const COMMENT_CALLOUT_MIN_WIDTH = 140;
 const COMMENT_CALLOUT_MAX_WIDTH = 280;
 const COMMENT_CALLOUT_HORIZONTAL_CHROME = 22;
 const COMMENT_CALLOUT_VERTICAL_CHROME = 18;
-const COMMENT_CALLOUT_CHARACTER_WIDTH = 9;
-const COMMENT_CALLOUT_LINE_HEIGHT = 13.5;
 const COMMENT_CALLOUT_GAP = 10;
+
+function minimumContentSize(
+  element: ProjectedScene["nodes"][number]
+    | ProjectedScene["containers"][number]
+    | NonNullable<ProjectedScene["regions"]>[number],
+): { width: number; height: number } {
+  if (element.structuralKind === "node") {
+    return measureNodeContent({
+      label: element.label,
+      style: element.style,
+      writingDirection: element.nodeLabelWritingDirection,
+      maxTextWidth: 240,
+      iconIntrinsicSize: element.iconIntrinsicSize,
+      icon: element.iconRef ? {
+        scale: element.nodeIconScale,
+        size: element.nodeIconSize,
+        fit: element.nodeIconFit,
+      } : undefined,
+    }).minimumSize;
+  }
+  const text = measureTextContent(element.label, {
+    style: element.style,
+    maxWidth: 320,
+    writingDirection: element.groupLabelWritingDirection,
+  });
+  return {
+    width: text.width + 32,
+    height: text.height + 24,
+  };
+}
 
 /** Mirrors the Editor's bottom-centered, pre-wrapped comment callout box. */
 function commentCalloutReservations(
   semanticText: SceneSemanticText | undefined,
+  style: Pick<VisualStyle, "labelFontSize">,
 ): LayoutExternalReservation[] | undefined {
   const comments = semanticText?.comments ?? [];
   if (comments.length === 0) return undefined;
@@ -311,29 +363,22 @@ function commentCalloutReservations(
       ? `${comment.value.normalize("NFC")} (${comment.language.toLowerCase()})`
       : comment.value.normalize("NFC")
   )).join("\n\n");
-  const lines = text.split("\n");
-  const longestLine = Math.max(1, ...lines.map((line) => Array.from(line).length));
+  const metrics = measureTextContent(text, {
+    style,
+    maxWidth: COMMENT_CALLOUT_MAX_WIDTH - COMMENT_CALLOUT_HORIZONTAL_CHROME,
+  });
   const width = Math.max(
     COMMENT_CALLOUT_MIN_WIDTH,
     Math.min(
       COMMENT_CALLOUT_MAX_WIDTH,
-      longestLine * COMMENT_CALLOUT_CHARACTER_WIDTH + COMMENT_CALLOUT_HORIZONTAL_CHROME,
+      metrics.width + COMMENT_CALLOUT_HORIZONTAL_CHROME,
     ),
   );
-  const charactersPerLine = Math.max(
-    1,
-    Math.floor(
-      (width - COMMENT_CALLOUT_HORIZONTAL_CHROME) / COMMENT_CALLOUT_CHARACTER_WIDTH,
-    ),
-  );
-  const visualLines = lines.reduce((count, line) => (
-    count + Math.max(1, Math.ceil(Array.from(line).length / charactersPerLine))
-  ), 0);
   return [{
     placement: "bottom-center",
     width,
     height: Math.ceil(
-      COMMENT_CALLOUT_VERTICAL_CHROME + visualLines * COMMENT_CALLOUT_LINE_HEIGHT,
+      COMMENT_CALLOUT_VERTICAL_CHROME + metrics.height,
     ),
     gap: COMMENT_CALLOUT_GAP,
   }];
@@ -352,9 +397,41 @@ export function remapProjectedRuleOrigins(
       ? {
           ...provenance,
           rule: { catalogRef: origin.catalogRef, ruleId: origin.localRuleId },
+          resolutionTrace: provenance.resolutionTrace
+            ? {
+                ...provenance.resolutionTrace,
+                candidates: provenance.resolutionTrace.candidates.map(remapTraceCandidate),
+                selected: provenance.resolutionTrace.selected
+                  ? remapTraceCandidate(provenance.resolutionTrace.selected)
+                  : undefined,
+                conflicts: provenance.resolutionTrace.conflicts?.map(remapTraceCandidate),
+              }
+            : undefined,
         }
       : provenance;
   };
+  const remapTraceCandidate = (
+    candidate: import("./model.js").ProjectionRuleCandidateTrace,
+  ): import("./model.js").ProjectionRuleCandidateTrace => {
+    const origin = byQualifiedId.get(candidate.ruleId);
+    return origin
+      ? { ...candidate, catalogRef: origin.catalogRef, ruleId: origin.localRuleId }
+      : candidate;
+  };
+  const remapGroupFrame = (frame: GroupFrame | undefined): GroupFrame | undefined => (
+    frame
+      ? {
+          ...frame,
+          provenance: remap(frame.provenance)!,
+          ...(frame.defaultMember
+            ? { defaultMember: {
+                ...frame.defaultMember,
+                provenance: remap(frame.defaultMember.provenance)!,
+              } }
+            : {}),
+        }
+      : undefined
+  );
   return {
     ...projected,
     nodes: projected.nodes.map((node) => ({
@@ -366,14 +443,20 @@ export function remapProjectedRuleOrigins(
       ...container,
       provenance: remap(container.provenance)!,
       parentProvenance: remap(container.parentProvenance),
+      groupFrame: remapGroupFrame(container.groupFrame),
     })),
     regions: (projected.regions ?? []).map((region) => ({
       ...region,
       provenance: remap(region.provenance)!,
+      groupFrame: remapGroupFrame(region.groupFrame),
     })),
     memberships: (projected.memberships ?? []).map((membership) => ({
       ...membership,
       provenance: remap(membership.provenance)!,
+    })),
+    groupGuides: (projected.groupGuides ?? []).map((guide) => ({
+      ...guide,
+      provenance: remap(guide.provenance)!,
     })),
     edges: projected.edges.map((edge) => ({
       ...edge,

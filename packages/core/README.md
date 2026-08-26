@@ -20,6 +20,10 @@ import {
   statementIdentityForNamedStatement,
   validateIriographDocumentV1,
   packageDefaultIcons,
+  previewPortableDocumentReplace,
+  applyPortableDocumentReplace,
+  previewDocumentRebase,
+  applyDocumentRebasePreview,
   withPackageDefaultIconAccess,
 } from "@iriograph/core";
 
@@ -74,8 +78,69 @@ if (preview.valid) {
 policyを変更しません。Workspaceや外部iconは従来どおりhost resolver/policyの対象です。出典とlicenseは
 package内の`THIRD_PARTY_NOTICES.md`を参照してください。
 
-Structured authoringは必ずpreviewと明示confirmationを経由します。Apply時にはcommand、
-document/context revision、exact graph patchを再計算し、staleまたは改変されたpreviewを拒否します。
+`AssetLease.intrinsicSize`はhostがdecodeした`width`/`height`/`aspectRatio`を一時的に渡す契約です。
+Coreはfinite値、dimension、aspect比に加えて`AssetPolicy.maxDecodedPixels`を検証します。面積上限超過はleaseを
+即時releaseしてURLも採用せず、その他の不正なoptional metadataは寸法だけを採用しません。省略時のpixel上限は
+64 Mi pixelです。resolverの`decode-failed`はiconなしへfail-closedします。Asset解決は
+`maxConcurrentResolutions`でboundedに実行し、省略時4、hard上限32です。Batch abort後の未採用leaseは全て解放します。
+SVGはleaseの`svgViewBox`から安全な寸法を復元できます。検証済み寸法と解決URLはSceneにだけ現れ、
+URL、byte列、intrinsic metadataを`.iriograph`へ保存しません。Iconのview指定は`nodeIconScale`または
+`nodeIconSize`のどちらか一方と`nodeIconFit: "contain" | "cover"`をsparseに保存します。
+
+Coreはviewport visibilityやDOM decodeを扱いません。`loading="lazy"`、viewport優先解決、virtualizationは
+Vue rendererまたはhostが担い、Coreの同時数制限はresolver全体のresource budgetだけを保証します。
+
+`VisualStyle.labelFontSize`は8〜72のsparseな共通表示契約です。Node、Group Frame、edgeのlabel/caption/
+commentが同じ値を参照し、省略時の既定値はdocumentへ補完しません。`measureTextContent`、
+`resolveIconContentMetrics`、`measureNodeContent`はlayout engineから独立したDOM-freeのautogrow用APIです。
+
+Auto layoutが選んだstraight/curve/polylineとcurve controlは`SceneEdge.derivedRouteChoice`へだけ構造コピーされます。
+Rendererはcurveの場合このcubic controlを優先します。この選択結果はtransientで、`routing.routeMode`、waypoint、
+その他のportable overlayへ逆書きしません。
+
+Bag、class region、`rdf:Seq`、`rdf:Alt`はSceneの共通`groupFrame`として公開します。Seqの番号badgeと
+muted order guide、Altのhub-to-member candidate guideは`groupGuides`というdisplay-only derived dataで、
+predicate edgeでもoverlay routingでもありません。各membershipとAlt defaultは元の`rdf:_n` statement
+provenanceを保持します。空/未完成のSeq/Altもframeとして表示し、補完方法付きwarningを返します。
+
+Structured authoringは内部でpreviewを作り、同じ利用者操作の中でatomicにapplyします。標準UIの
+非削除操作に別の確認画面は要求しません。`confirmationId`はpreview改変を検出する整合性tokenであり、
+利用者の明示確認を意味しません。Apply時にはcommand、document/context revision、exact graph patchを
+再計算し、staleまたは改変されたpreviewを拒否します。明示確認は選択外へ波及する削除、または
+外部・LLM・host policyがreviewを要求する境界に限定します。
+`ResolvedAuthoringContext.defaultLocale`を指定すると、structured commandが新規生成する
+language未指定の`rdfs:label`/`rdfs:comment`だけへそのBCP 47 tagを補います。既存literal、明示language、
+human/LLM Turtle sourceは書き換えません。
+
+通常UI向けには`structuredAuthoringPresentation(context)`と
+`previewStructuredAuthoringRequest(document, request, context)`を利用できます。UIは既存要素を
+`viewId + elementId`、node roleを`roleId`、predicateを`predicateId`で選び、完全IRIを組み立てません。
+Facadeはnode/group作成、一始点から複数targetへのdirect relation、既存Group Frameへのmember追加、
+Seq/Altのfinal order、inline新規nodeを既存のatomic `AuthoringCommand[]`へcompileします。
+`ResolvedAuthoringContext.structuredAuthoring`はnode roleと未分類許可、分類group mint許可をprofileから
+解決したmetadataとして持ち、predicate catalogとは分離します。
+複数direct relationはrequest内または既存graphとのS/P/O重複が一件でもあれば全件rejectします。
+Altの`defaultMemberIndex`は選択した出現位置をordinal 1へ移し、残りの相対順を維持します。
+既存node roleは`set-node-roles`で完全選択し、分類region複数選択は
+`structuredNodeRoleSeedFromCanvasSelections`でopaque role IDへseedできます。
+`structuredLocalizedTextPresentation`と`update-localized-text`はopaque value IDで一翻訳だけを更新し、
+他language/datatype値を同じatomic property replacement内で保持します。
+`structuredPredicateHierarchyPresentation`はhostが解決したexact predicate hierarchyを、predicate catalogと
+同じopaque ID規則のlabel-only DTOへ変換します。未知・構造predicateをtop-level候補にせず、全path、
+cycle/truncation、query/validation policyを生のIRIなしで返します。
+
+完全なDocument JSONの置換には`previewPortableDocumentReplace` / `applyPortableDocumentReplace`を
+使います。JSON Schema、Turtle、domain、profile、全view projection/layoutを一つのrevision-boundな
+transactionとして再検証し、失敗時は元Documentを返します。schema診断は`jsonPointer`を持ちます。
+この境界の`confirmationId`もintegrity tokenであり、通常のDocument適用一回へ別modalを要求しません。
+Asserted region membershipの外に固定されたmember等のspatial invariant違反は、通常layoutのwarning表示とは
+別にportable write境界でblocking errorへ昇格し、該当view overlayの`jsonPointer`を返します。
+`previewDocumentRebase` / `applyDocumentRebasePreview`は、parsed RDFの旧local namespaceだけを
+現在と異なる新baseへ写し、S/P/O、local class/property、membership/Seq、derived overlay semanticRefを同時に更新します。
+`documentId`はhost内で一意なopaque IDとしCoreはUUID等の形式を固定しません。
+外部・標準・catalog/asset IRIとliteral lexical valueは変更せず、IRI/overlay衝突をapply前に拒否します。
+Nested namespaceを含む衝突判定は全term、overlay key/semanticRef、statement identityを同時に写した
+最終集合で行い、異なるsource identityが同じ結果へ集約されるmany-to-oneだけを拒否します。
 
 個々のdirect relationへ意味上の説明を付ける場合は、predicate resourceの説明やview captionではなく
 `set-statement-comments`を使います。Coreはasserted S/P/Oを残し、RDF 1.1標準reificationの

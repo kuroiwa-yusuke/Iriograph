@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DiagramScene } from "@iriograph/core";
 
 import {
+  constrainIconPresentationResize,
   constrainMembershipRegionMovement,
   membershipRegionClassIrisAtPoint,
 } from "./region-membership-constraints";
@@ -213,6 +214,42 @@ describe("membership-region presentation constraints", () => {
       changes: [],
       issue: { code: "membership-region-intersection-empty", elementId: "node" },
     });
+  });
+
+  it("icon growthを複数所属領域のintersectionへ比率を保ってclampする", () => {
+    const scene = matrixScene();
+    const node = scene.nodes[0]!;
+    node.geometry = { x: 140, y: 90, width: 80, height: 70 };
+    node.iconIntrinsicSize = { width: 24, height: 24, aspectRatio: 1, source: "svg-view-box" };
+
+    const result = constrainIconPresentationResize(
+      scene,
+      node,
+      { width: 260, height: 260 },
+      { x: 140, y: 90, width: 300, height: 292 },
+    );
+
+    expect(result.constrained).toBe(true);
+    expect(result.geometry).toBeDefined();
+    expect(result.geometry!.x + result.geometry!.width).toBeLessThanOrEqual(240.001);
+    expect(result.geometry!.y + result.geometry!.height).toBeLessThanOrEqual(200.001);
+    expect(result.size.width / result.size.height).toBeCloseTo(1);
+    expect(result.size.width + 40).toBeLessThanOrEqual(result.geometry!.width + .001);
+    expect(result.size.height + 32).toBeLessThanOrEqual(result.geometry!.height + .001);
+  });
+
+  it("nodeを広げないicon resizeはframe内へ比率を保ってclampする", () => {
+    const scene = matrixScene();
+    const node = scene.nodes[0]!;
+    node.geometry = { x: 140, y: 90, width: 80, height: 70 };
+
+    const result = constrainIconPresentationResize(scene, node, { width: 400, height: 100 });
+
+    expect(result).toMatchObject({
+      constrained: true,
+      size: { width: 40, height: 10 },
+    });
+    expect(result.geometry).toBeUndefined();
   });
 });
 

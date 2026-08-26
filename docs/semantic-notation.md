@@ -10,7 +10,7 @@
 
 Domain resource IRIは、業務上の対象や出来事を識別します。たとえば`ex:review`、`ex:approvalPolicy`はresourceであり、subjectまたはobjectとして関係、label、構造membershipを持ちます。
 
-Resource IRIのlocal nameに人間が読める意味語を入れることは必須ではありません。IRIはrenameに耐える安定identityであり、人間とLLMが理解する名前・説明は`rdfs:label`と`rdfs:comment`を主に使います。Labelが欠落する場合の最終fallbackとしてcompact IRIを表示しますが、IRIの綴りをclass、relation、構造として推論しません。
+Resource IRIのlocal nameに人間が読める意味語を入れることは必須ではありません。IRIはrenameに耐える安定identityであり、人間とLLMが理解する名前・説明は`rdfs:label`と`rdfs:comment`を主に使います。Labelが欠落する通常UIでは「名前未設定」等の汎用表示とopaque presentation IDを使い、compact IRIをtooltipやAdvanced DOMへfallback表示しません。完全IRIはeditableなTurtle/Document sourceとHost/Core内部transaction・監査logに保持し、IRIの綴りをclass、relation、構造として推論しません。
 
 このrename耐性には`.iriograph`のファイル名とworkspace pathも含みます。ファイル名、path、
 `documentId`からresource IRIやTurtle baseを推測しません。`semantic.baseIri`はportable documentに明示した

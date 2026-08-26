@@ -112,6 +112,41 @@ describe("ephemeral Canvas work area", () => {
     });
   });
 
+  it("layoutがautoで選んだBezier controlもcontent boundsへ含める", () => {
+    const scene = sceneFixture();
+    scene.edges = [{
+      elementId: "derived-curve",
+      semanticRef: "urn:test:derived-curve",
+      structuralKind: "edge",
+      label: "Derived curve",
+      sourceElementId: "a",
+      targetElementId: "b",
+      templateRef: "urn:test:edge",
+      style: { fill: "none", stroke: "#000", text: "#000" },
+      route: [{ x: 20, y: 100 }, { x: 580, y: 100 }],
+      routeMode: "auto",
+      derivedRouteChoice: {
+        family: "curve",
+        source: "auto",
+        reason: "auto-curve-safe",
+        curve: {
+          sourceControl: { x: -80, y: -120 },
+          targetControl: { x: 680, y: 520 },
+          guidePivot: { x: 300, y: 200 },
+          guideAngleDegrees: 40,
+        },
+      },
+      fallback: false,
+    }];
+
+    expect(diagramContentBounds(scene)).toEqual({
+      x: -80,
+      y: -120,
+      width: 760,
+      height: 640,
+    });
+  });
+
   it("Sceneの全周へ大きな初期余白を設ける", () => {
     const workArea = diagramWorkAreaBounds(sceneFixture());
 

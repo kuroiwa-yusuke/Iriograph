@@ -21,6 +21,8 @@ export type AuthoringTermRole = "predicate" | "type-object";
 
 export type ResolvedAuthoringTerm = {
   iri: string;
+  /** Stable, non-IRI picker identity. Structured UI should submit this ID, not `iri`. */
+  termId?: string;
   kind: "class" | "property" | "structure";
   /** Required for non-standard structure terms whose RDF role is otherwise ambiguous. */
   roles?: readonly AuthoringTermRole[];
@@ -68,6 +70,10 @@ export type AuthoringCapabilityStatement = {
 export type ResolvedAuthoringCapability = {
   capabilityId: string;
   label?: string;
+  description?: string;
+  /** UI grouping only. Exact graph behavior remains defined by `graphPatch`. */
+  role?: "direct-relation" | "membership" | "sequence" | "alternative";
+  groupKind?: "classification" | "membership" | "sequence" | "alternative";
   parameters: readonly {
     name: string;
     objectKinds: readonly AuthoringObjectKind[];
@@ -78,6 +84,22 @@ export type ResolvedAuthoringCapability = {
     add?: readonly AuthoringCapabilityStatement[];
     remove?: readonly AuthoringCapabilityStatement[];
   };
+};
+
+export type ResolvedNodeRole = {
+  /** Stable UI identity which deliberately is not the class IRI. */
+  roleId: string;
+  classIri: string;
+  label: string;
+  description?: string;
+};
+
+export type ResolvedStructuredAuthoringProfile = {
+  /** `true` is an explicit opt-in. Omission/false requires at least one node role. */
+  allowUntypedNodes?: boolean;
+  /** Explicitly permits human creation of a new `rdfs:Class` Group Frame. */
+  allowClassificationGroups?: boolean;
+  nodeRoles: readonly ResolvedNodeRole[];
 };
 
 export type ResourceIriAllocationRequest = {
@@ -111,13 +133,26 @@ export type ResolvedAuthoringContext = {
   contextRevision: string;
   documentRevision: string;
   authoringProfileRef: string;
+  /**
+   * Default BCP 47 language for newly generated structured label/comment
+   * literals. Existing literals and explicitly tagged inputs stay untouched.
+   */
+  defaultLocale?: string;
   runtime: ProjectionRuntimeContext;
   resourcePolicy: {
     allowedMintNamespaces: readonly string[];
+    /**
+     * Maximum right/bottom extent for a root initial position. Root placement
+     * may grow beyond the current Scene; this independent ceiling prevents
+     * accidentally creating an impractically large Canvas work area.
+     */
+    maxInitialPositionExtent?: number;
   };
   termPolicy: AuthoringTermPolicy;
   terms: readonly ResolvedAuthoringTerm[];
   capabilities: readonly ResolvedAuthoringCapability[];
+  /** Host-resolved creation metadata, separate from the predicate vocabulary catalog. */
+  structuredAuthoring?: ResolvedStructuredAuthoringProfile;
   allocator?: ResourceIriAllocator;
   /** Optional host-resolved domain validation context shared by all write entries. */
   semanticValidation?: ResolvedSemanticValidationContext;

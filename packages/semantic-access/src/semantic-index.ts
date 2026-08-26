@@ -16,6 +16,8 @@ import type {
   NeighborQuery,
   RevisionAlias,
   SemanticAccessOptions,
+  SemanticHierarchy,
+  SemanticHierarchyDiagnostic,
   SemanticMembership,
   SemanticPredicateSearchMatch,
   SemanticPredicateSummary,
@@ -61,6 +63,8 @@ type MembershipClassification = {
 
 const DEFAULT_LIMIT = 25;
 const DEFAULT_SUBGRAPH_LIMIT = 500;
+const DEFAULT_HIERARCHY_PATH_BUDGET = 256;
+const MAX_HIERARCHY_PATH_BUDGET = 4096;
 
 /**
  * Immutable, revision-bound read index over one Iriograph semantic snapshot.
@@ -84,6 +88,7 @@ export class SemanticAccessIndex {
   readonly #membershipClassifications: ReadonlyMap<string, MembershipClassification>;
   readonly #predicateUsage: ReadonlyMap<string, number>;
   readonly #statementComments: ReadonlyMap<string, readonly LocalizedText[]>;
+  readonly #hierarchyPathBudget: number;
 
   constructor(document: IriographDocument, revision: string, options: SemanticAccessOptions = {}) {
     if (!revision) throw new TypeError("Semantic access revision must not be empty.");
@@ -92,6 +97,7 @@ export class SemanticAccessIndex {
     this.document = deepFreeze(clonePortableDocument(document));
     this.revision = revision;
     this.#locales = normalizeLocales(options.locales ?? []);
+    this.#hierarchyPathBudget = normalizedHierarchyPathBudget(options.hierarchyPathBudget);
 
     const preferredPredicates = unique([
       RDFS_LABEL,
@@ -284,17 +290,42 @@ export class SemanticAccessIndex {
     const record = this.#records.get(iri) ?? emptyRecord(iri);
     const summary = this.#resourceSummary(iri);
     const predicateAlias = this.#predicateAliases.get(iri);
+    const classHierarchy = this.#hierarchy(iri, this.#superClasses, "resource", "class");
+    const propertyHierarchy = this.#hierarchy(iri, this.#superProperties, "predicate", "property");
     return {
       ...summary,
       labels: [...record.labels],
       comments: [...record.comments],
-      superClasses: this.#hierarchy(iri, this.#superClasses, "resource"),
-      superProperties: this.#hierarchy(iri, this.#superProperties, "predicate"),
+      superClasses: classHierarchy.relations,
+      superProperties: propertyHierarchy.relations,
+      hierarchyDiagnostics: [...classHierarchy.diagnostics, ...propertyHierarchy.diagnostics],
+      hierarchyTruncated: classHierarchy.truncated || propertyHierarchy.truncated,
       incomingCount: this.#quads.filter((quad) => namedValue(quad.object) === iri).length,
       outgoingCount: this.#quads.filter((quad) => namedValue(quad.subject) === iri).length,
       isPredicate: Boolean(predicateAlias),
       ...(predicateAlias ? { predicateAlias } : {}),
     };
+  }
+
+  /** Returns a full-path, multi-parent transitive hierarchy explanation. */
+  hierarchy(reference: RevisionAlias, kind: "class" | "property"): SemanticHierarchy {
+    const aliasKind: AliasKind = kind === "class" ? "resource" : "predicate";
+    const iri = this.resolveAlias(reference, aliasKind);
+    const adjacency = kind === "class" ? this.#superClasses : this.#superProperties;
+    const result = this.#hierarchy(iri, adjacency, aliasKind, kind);
+    return {
+      revision: this.revision,
+      rootIri: iri,
+      kind,
+      relations: result.relations,
+      diagnostics: result.diagnostics,
+      truncated: result.truncated,
+      pathBudget: this.#hierarchyPathBudget,
+    };
+  }
+
+  predicateHierarchy(predicate: RevisionAlias): SemanticHierarchy {
+    return this.hierarchy(predicate, "property");
   }
 
   neighbors(query: NeighborQuery): SemanticRelation[] {
@@ -498,20 +529,37 @@ export class SemanticAccessIndex {
     iri: string,
     adjacency: ReadonlyMap<string, readonly string[]>,
     aliasKind: AliasKind,
-  ): HierarchyRelation[] {
-    return [...ancestorDistances(iri, adjacency).entries()]
-      .filter(([ancestor]) => ancestor !== iri)
-      .map(([ancestor, distance]) => {
+    kind: "class" | "property",
+  ): {
+    relations: HierarchyRelation[];
+    diagnostics: SemanticHierarchyDiagnostic[];
+    truncated: boolean;
+  } {
+    const traversal = hierarchyPaths(
+      iri,
+      adjacency,
+      kind,
+      this.#hierarchyPathBudget,
+    );
+    const relations = [...traversal.paths.entries()]
+      .map(([ancestor, paths]) => {
         const alias = aliasKind === "resource"
           ? this.#resourceAliases.get(ancestor)
           : this.#predicateAliases.get(ancestor);
         return {
           iri: ancestor,
           ...(alias ? { alias, reference: { alias, revision: this.revision } } : {}),
-          distance,
+          distance: Math.min(...paths.map((path) => path.length - 1)),
+          paths,
+          ...(traversal.truncated ? { pathsTruncated: true } : {}),
         };
       })
       .sort((left, right) => left.distance - right.distance || compareCodePoints(left.iri, right.iri));
+    return {
+      relations,
+      diagnostics: traversal.diagnostics,
+      truncated: traversal.truncated,
+    };
   }
 }
 
@@ -554,22 +602,123 @@ function freezeAdjacency(map: Map<string, Set<string>>): ReadonlyMap<string, rea
   );
 }
 
-function ancestorDistances(
+function hierarchyPaths(
   start: string,
   adjacency: ReadonlyMap<string, readonly string[]>,
-): ReadonlyMap<string, number> {
-  const distances = new Map<string, number>([[start, 0]]);
-  const queue = [start];
-  for (let index = 0; index < queue.length; index += 1) {
-    const child = queue[index]!;
-    const distance = distances.get(child)! + 1;
-    for (const parent of adjacency.get(child) ?? []) {
-      if (distances.has(parent)) continue;
-      distances.set(parent, distance);
-      queue.push(parent);
+  kind: "class" | "property",
+  pathBudget: number,
+): {
+  paths: ReadonlyMap<string, readonly (readonly string[])[]>;
+  diagnostics: SemanticHierarchyDiagnostic[];
+  truncated: boolean;
+} {
+  const paths = new Map<string, string[][]>();
+  const cycles = new Map<string, SemanticHierarchyDiagnostic>();
+  let materializedPathCount = 0;
+  let truncated = false;
+  const visit = (current: string, path: readonly string[]): void => {
+    if (truncated) return;
+    for (const parent of adjacency.get(current) ?? []) {
+      if (truncated) return;
+      const repeatedAt = path.indexOf(parent);
+      if (repeatedAt >= 0) {
+        const cycle = [...path.slice(repeatedAt), parent];
+        const key = canonicalCycleKey(cycle);
+        if (!cycles.has(key)) {
+          cycles.set(key, {
+            code: "hierarchy-cycle",
+            kind,
+            path: cycle,
+            message: `${kind} hierarchy contains a cycle: ${cycle.join(" -> ")}`,
+            suggestedActions: [{
+              actionId: kind === "class"
+                ? "break-semantic-subclass-cycle"
+                : "break-semantic-subproperty-cycle",
+              iri: cycle[0],
+              parameters: { path: cycle },
+            }],
+          });
+        }
+        continue;
+      }
+      const nextPath = [...path, parent];
+      if (parent !== start) {
+        const values = paths.get(parent) ?? [];
+        const pathKey = nextPath.join("\u0000");
+        if (!values.some((value) => value.join("\u0000") === pathKey)) {
+          values.push(nextPath);
+          materializedPathCount += 1;
+        }
+        paths.set(parent, values);
+        if (materializedPathCount >= pathBudget) {
+          // A budget hit is conservatively reported as truncated. Do not
+          // recurse into this path or inspect later siblings: runtime work is
+          // bounded by the same deterministic budget as the output.
+          truncated = true;
+          return;
+        }
+      }
+      visit(parent, nextPath);
+      if (truncated) return;
     }
+  };
+  visit(start, [start]);
+  if (truncated) {
+    cycles.set("\uffffpath-budget", {
+      code: "hierarchy-path-budget-exceeded",
+      kind,
+      message: `${kind} hierarchy explanation reached the deterministic ${pathBudget}-path budget.`,
+      suggestedActions: [{
+        actionId: "narrow-semantic-hierarchy-query",
+        iri: start,
+        parameters: { pathBudget },
+      }],
+    });
   }
-  return distances;
+  return {
+    paths: new Map([...paths.entries()]
+      .sort(([left], [right]) => compareCodePoints(left, right))
+      .map(([ancestor, values]) => [
+        ancestor,
+        values.sort(compareHierarchyPaths),
+      ])),
+    diagnostics: [...cycles.values()].sort(compareHierarchyDiagnostics),
+    truncated,
+  };
+}
+
+function compareHierarchyDiagnostics(
+  left: SemanticHierarchyDiagnostic,
+  right: SemanticHierarchyDiagnostic,
+): number {
+  return compareCodePoints(left.code, right.code)
+    || compareCodePoints(
+      left.code === "hierarchy-cycle" ? left.path.join("\u0000") : "",
+      right.code === "hierarchy-cycle" ? right.path.join("\u0000") : "",
+    );
+}
+
+function normalizedHierarchyPathBudget(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_HIERARCHY_PATH_BUDGET;
+  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_HIERARCHY_PATH_BUDGET) {
+    throw new TypeError(`hierarchyPathBudget must be an integer from 1 to ${MAX_HIERARCHY_PATH_BUDGET}.`);
+  }
+  return value;
+}
+
+function compareHierarchyPaths(left: readonly string[], right: readonly string[]): number {
+  return left.length - right.length
+    || compareCodePoints(left.join("\u0000"), right.join("\u0000"));
+}
+
+function canonicalCycleKey(closedPath: readonly string[]): string {
+  const cycle = closedPath.slice(0, -1);
+  if (cycle.length === 0) return "";
+  const rotations = cycle.map((_, index) => {
+    const rotated = [...cycle.slice(index), ...cycle.slice(0, index)];
+    return [...rotated, rotated[0]!].join("\u0000");
+  });
+  return rotations.sort(compareCodePoints)[0]!;
 }
 
 function membershipClassifications(

@@ -6,24 +6,28 @@
     {
       "kind": "iriograph-document",
       "path": "models/purchase-approval.iriograph",
+      "documentId": "purchase-approval",
       "mediaType": "application/vnd.iriograph+json",
       "url": "/workspace/models/purchase-approval.iriograph"
     },
     {
       "kind": "iriograph-document",
       "path": "models/pizza-order-delivery.iriograph",
+      "documentId": "pizza-order-delivery",
       "mediaType": "application/vnd.iriograph+json",
       "url": "/workspace/models/pizza-order-delivery.iriograph"
     },
     {
       "kind": "iriograph-document",
       "path": "models/pizza-order-delivery-llm-overlay.iriograph",
+      "documentId": "pizza-order-delivery-llm-overlay",
       "mediaType": "application/vnd.iriograph+json",
       "url": "/workspace/models/pizza-order-delivery-llm-overlay.iriograph"
     },
     {
       "kind": "iriograph-document",
       "path": "models/pizza-order-delivery-llm-overlay-r2.iriograph",
+      "documentId": "pizza-order-delivery-llm-overlay-r2",
       "mediaType": "application/vnd.iriograph+json",
       "url": "/workspace/models/pizza-order-delivery-llm-overlay-r2.iriograph"
     },

@@ -17,11 +17,11 @@ const GUIDANCE: Readonly<Record<string, Omit<DiagnosticGuidance, "detail">>> = {
   },
   "resource-namespace-denied": {
     title: "この場所には新しい要素を保存できません",
-    action: "IRIを空欄にして自動採番するか、このworkspaceで許可されたIRIを指定してください。",
+    action: "自動採番を使うか、このworkspaceで利用できる保存先を管理者に確認してください。",
   },
   "resource-iri-collision": {
     title: "同じ識別子の要素が既にあります",
-    action: "IRIを空欄にして自動採番するか、別のIRIを指定してください。",
+    action: "自動採番を使うか、別の識別子で作り直してください。",
   },
   "unknown-term-introduced": {
     title: "この図に未登録の種類または関係が含まれます",
@@ -49,7 +49,7 @@ const GUIDANCE: Readonly<Record<string, Omit<DiagnosticGuidance, "detail">>> = {
   },
   "authoring-iri-invalid": {
     title: "識別子の書式が正しくありません",
-    action: "AdvancedのIRIを空欄にして自動採番するか、完全IRIを入力してください。",
+    action: "自動採番を使うか、詳細設定の識別子を確認してください。",
   },
   "ordinal-prefix-invalid": {
     title: "並び順の定義を利用できません",
@@ -75,28 +75,83 @@ const GUIDANCE: Readonly<Record<string, Omit<DiagnosticGuidance, "detail">>> = {
     title: "変更内容がありません",
     action: "現在と異なる値を指定してください。",
   },
+  "document-json-invalid": {
+    title: "Document JSONを読み取れません",
+    action: "示されたJSON Pointer付近の括弧、引用符、カンマを確認してください。",
+  },
+  "document-schema-invalid": {
+    title: "Document JSONに未対応または不足している項目があります",
+    action: "JSON Pointerの項目をschemaに合わせて直し、未対応項目は削除するか、extensionsへ移してください。",
+  },
+  "document-replace-stale-revision": {
+    title: "編集開始後に文書のrevisionが変わりました",
+    action: "現在のDocument JSONを開き直して変更を入れ直してください。",
+  },
+  "document-replace-stale-document": {
+    title: "編集開始後に文書が変更されました",
+    action: "現在のDocument JSONを開き直して変更を入れ直してください。",
+  },
+  "document-rebase-id-invalid": {
+    title: "新しい文書IDを利用できません",
+    action: "Hostの文書ID発行設定を確認してください。",
+  },
+  "document-rebase-base-invalid": {
+    title: "新しい保存先情報を利用できません",
+    action: "Hostの文書作成設定を確認してください。",
+  },
+  "document-rebase-iri-collision": {
+    title: "付け替え後の文書内識別子が衝突します",
+    action: "別の保存先識別情報を発行して複製をやり直してください。",
+  },
+  "document-rebase-overlay-collision": {
+    title: "付け替え後のビュー参照が衝突します",
+    action: "別の保存先識別情報を発行して複製をやり直してください。",
+  },
 };
 
 export function diagnosticGuidance(diagnostic: ProjectionDiagnostic): DiagnosticGuidance {
   const known = GUIDANCE[diagnostic.code];
-  if (known) return { ...known, detail: diagnostic.message };
+  if (known) return { ...known, detail: diagnosticLocator(diagnostic) };
   if (diagnostic.category === "syntax") {
     return {
       title: "Turtleの書式を読み取れません",
       action: "Sourceへ移動し、示された位置の記号や引用符を確認してください。",
-      detail: diagnostic.message,
+      detail: diagnosticLocator(diagnostic),
     };
   }
   if (diagnostic.category === "layout") {
     return {
       title: "配置を完了できません",
       action: "固定位置を解除するか、領域や要素の重なりを調整してください。",
-      detail: diagnostic.message,
+      detail: diagnosticLocator(diagnostic),
     };
   }
   return {
     title: diagnostic.severity === "warning" ? "確認が必要です" : "変更を適用できません",
     action: "対象と入力内容を確認してください。解決しない場合は詳細コードを管理者へ伝えてください。",
-    detail: diagnostic.message,
+    detail: diagnosticLocator(diagnostic),
   };
+}
+
+/**
+ * Core diagnostics intentionally retain machine identities in `message` for
+ * logging and host integration. The normal editor must not turn that internal
+ * message into presentation data. Point the user at a stable, non-semantic
+ * location instead.
+ */
+function diagnosticLocator(diagnostic: ProjectionDiagnostic): string {
+  if (diagnostic.sourceLocation) {
+    return `Source ${diagnostic.sourceLocation.startLine}行 ${diagnostic.sourceLocation.startColumn}列付近（コード: ${safeCode(diagnostic.code)}）`;
+  }
+  if (diagnostic.jsonPointer) {
+    const pointer = /(?:https?:|urn:)/iu.test(diagnostic.jsonPointer)
+      ? "対象項目"
+      : diagnostic.jsonPointer;
+    return `Document JSON ${pointer}（コード: ${safeCode(diagnostic.code)}）`;
+  }
+  return `診断コード: ${safeCode(diagnostic.code)}`;
+}
+
+function safeCode(code: string): string {
+  return /^[a-z0-9][a-z0-9-]*$/u.test(code) ? code : "unknown-diagnostic";
 }

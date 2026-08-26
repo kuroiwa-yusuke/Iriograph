@@ -5,6 +5,7 @@ import {
   edgeEndpointAnchorPoint,
   isValidEdgeEndpointAnchor,
   layoutElementFootprintGeometry,
+  layoutDerivedRouteControlPoints,
   layoutExternalReservationGeometries,
   type ElementGeometry,
   type LayoutAdapter,
@@ -159,15 +160,17 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
       const engine = await this.#getEngine();
       const output = await engine.layout(prepared.graph);
       const parsed = parseEngineOutput(request, prepared, output, this.direction);
+      let derivedRouteChoices: LayoutResult["derivedRouteChoices"];
       if (!parsed.invalidGeometry) {
         const regionCompleted = completeRegionLayout(request, {
           layoutRef: request.layoutRef,
+          direction: this.direction,
           geometries: parsed.geometries,
           routes: parsed.routes,
           width: 0,
           height: 0,
           diagnostics: [],
-        });
+        }, this.direction);
         parsed.geometries = regionCompleted.geometries;
         // ELK owns placement, while Core's route-only pass applies the same
         // endpoint clipping, manual-route hard constraints, comment obstacles,
@@ -178,6 +181,7 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
           this.direction,
         );
         parsed.routes = routed.routes;
+        derivedRouteChoices = routed.derivedRouteChoices;
         parsed.diagnostics.push(...routed.diagnostics);
       }
       const diagnostics = [...prepared.diagnostics, ...parsed.diagnostics];
@@ -186,8 +190,11 @@ export class ElkLayeredLayoutAdapter implements LayoutAdapter {
       }
       return ensureCompleteResult(request, this.direction, {
         layoutRef: request.layoutRef,
+        direction: this.direction,
+        structuralCompletion: true,
         geometries: parsed.geometries,
         routes: parsed.routes,
+        derivedRouteChoices,
         width: 0,
         height: 0,
         diagnostics,
@@ -815,13 +822,19 @@ function ensureCompleteResult(
         ? [geometry, ...layoutExternalReservationGeometries(element, geometry)]
         : [];
     }),
-    Object.values(routes).flat(),
+    [
+      ...Object.values(routes).flat(),
+      ...layoutDerivedRouteControlPoints(candidate.derivedRouteChoices),
+    ],
     spacing.margin,
   );
   return {
     layoutRef: request.layoutRef,
+    direction,
+    structuralCompletion: candidate.structuralCompletion,
     geometries,
     routes,
+    derivedRouteChoices: candidate.derivedRouteChoices,
     width: bounds.width,
     height: bounds.height,
     diagnostics,

@@ -21,7 +21,10 @@ import { executeProjectionOperators } from "./operators.js";
 import { validateProfileStructure } from "./profile-validation.js";
 import { buildLimitedRdfsClosure } from "./rdfs-closure.js";
 import { parseSemanticGraph } from "./rdf.js";
-import { validateProjectionCatalog } from "./rule-resolution.js";
+import {
+  hierarchyRuleResolutionDiagnostics,
+  validateProjectionCatalog,
+} from "./rule-resolution.js";
 import { rdfRdfsVocabulary } from "./standard-catalog.js";
 
 const { namedNode } = DataFactory;
@@ -86,6 +89,7 @@ export function projectSemanticView(
     return emptyProjectedScene(view.viewId, diagnostics);
   }
   const closure = buildLimitedRdfsClosure(graph, rdfRdfsVocabulary);
+  diagnostics.push(...hierarchyRuleResolutionDiagnostics(closure));
   diagnostics.push(...validateProfileStructure(
     graph,
     catalog,

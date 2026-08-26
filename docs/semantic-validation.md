@@ -44,7 +44,7 @@ Diagnostic categoryは少なくとも次を区別します。
 
 Diagnosticは安定したmachine `code`と詳細`message`に加え、任意のpresentation hintを返せます。Hintは`title`、利用者向け`reason`、一つ以上の`nextActions`、対象resource/statementを持ちます。Actionは`open-vocabulary-manager`、`choose-existing-term`、`open-region-picker`、`show-source`等の汎用IDとseed dataであり、validatorがVue componentや業務predicateを指定しません。Editorは既知actionをbuttonとして表示し、未知actionもreasonを失わず表示します。
 
-選択時点で判定できる無効なclass、region、predicateは候補から除外または理由付きdisableにし、Apply後のdiagnosticだけへ依存しません。Raw codeと完全IRIはAdvancedへ残し、通常表示は「何ができなかったか」「なぜか」「次に何をすればよいか」をlabel中心で示します。
+選択時点で判定できる無効なclass、region、predicateは候補から除外または理由付きdisableにし、Apply後のdiagnosticだけへ依存しません。Machine codeと完全IRIはHost/Core内部diagnostic・監査logのexact identityとして保持し、通常のpresentation item/DOMやAdvanced詳細へ生IRIを渡しません。利用者には「何ができなかったか」「なぜか」「次に何をすればよいか」をlabel中心で示します。
 
 ## Transactionとwarning
 

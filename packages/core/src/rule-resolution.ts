@@ -1,6 +1,8 @@
 import type {
   ProjectionCatalogV1,
   ProjectionDiagnostic,
+  ProjectionRuleCandidateTrace,
+  ProjectionRuleResolutionTrace,
   ProjectionRule,
   VisualTemplate,
 } from "./model.js";
@@ -21,7 +23,32 @@ export type ResolvedProjectionRule = {
 export type RuleResolution = {
   resolved?: ResolvedProjectionRule;
   diagnostics: ProjectionDiagnostic[];
+  trace: ProjectionRuleResolutionTrace;
 };
+
+/**
+ * Explains cycles in the semantic RDFS hierarchy consulted by catalog rule
+ * matching. Catalog rules themselves are a flat ordered set and do not form a
+ * separate inheritance graph.
+ */
+export function hierarchyRuleResolutionDiagnostics(
+  closure: RdfsClosure,
+): ProjectionDiagnostic[] {
+  return closure.diagnostics.map((diagnostic) => ({
+    severity: "warning" as const,
+    category: "projection" as const,
+    code: diagnostic.code,
+    semanticRef: diagnostic.path[0],
+    message: `${diagnostic.kind === "class" ? "class" : "property"} hierarchy used for projection rule matching contains a cycle: ${diagnostic.path.join(" -> ")}`,
+    suggestedActions: [{
+      actionId: diagnostic.kind === "class"
+        ? "break-subclass-entailment-cycle"
+        : "break-subproperty-entailment-cycle",
+      semanticRef: diagnostic.path[0],
+      parameters: { path: [...diagnostic.path] },
+    }],
+  }));
+}
 
 export function resolveResourceRule(
   catalog: ProjectionCatalogV1,
@@ -32,6 +59,7 @@ export function resolveResourceRule(
   return resolveCandidates(
     matchingResourceRuleCandidates(catalog, assertedTypes, closure),
     semanticRef,
+    catalog.defaults?.nodeTemplateRef,
   );
 }
 
@@ -72,7 +100,7 @@ export function resolveStatementRule(
     if (distance === undefined) continue;
     candidates.push(candidateFor(catalog, rule, distance, predicateIri));
   }
-  return resolveCandidates(candidates, semanticRef);
+  return resolveCandidates(candidates, semanticRef, catalog.defaults?.edgeTemplateRef);
 }
 
 export function validateProjectionCatalog(
@@ -172,13 +200,34 @@ export function validateProjectionCatalog(
 function resolveCandidates(
   candidates: readonly ResolvedProjectionRule[],
   semanticRef: string,
+  fallbackTemplateRef: string | undefined,
 ): RuleResolution {
   const ordered = [...candidates].sort(compareCandidates);
   const first = ordered[0];
   const second = ordered[1];
-  if (!first) return { diagnostics: [] };
+  const candidateTrace = [...ordered]
+    .sort((left, right) => compareCandidates(left, right) || compareCandidateIdentity(left, right))
+    .map(traceCandidate);
+  if (!first) {
+    return {
+      diagnostics: [],
+      trace: {
+        semanticRef,
+        outcome: "fallback",
+        candidates: [],
+        fallback: {
+          reason: "no-matching-rule",
+          ...(fallbackTemplateRef ? {
+            templateRef: fallbackTemplateRef,
+            styleSource: "catalog-default-template" as const,
+          } : {}),
+        },
+      },
+    };
+  }
   if (second && sameRank(first, second)) {
-    const ruleNames = [first, second]
+    const conflicts = ordered.filter((candidate) => sameRank(first, candidate));
+    const ruleNames = conflicts
       .map((candidate) => `${candidate.catalogRef}#${candidate.rule.ruleId}`)
       .sort(compareCodePoints)
       .join(", ");
@@ -189,9 +238,73 @@ function resolveCandidates(
         message: `同順位のprojection ruleが競合しています: ${ruleNames}`,
         semanticRef,
       }],
+      trace: {
+        semanticRef,
+        outcome: "conflict",
+        candidates: candidateTrace,
+        conflicts: conflicts.map(traceCandidate).sort(compareTraceIdentity),
+      },
     };
   }
-  return { resolved: first, diagnostics: [] };
+  return {
+    resolved: first,
+    diagnostics: [],
+    trace: {
+      semanticRef,
+      outcome: first.specificity === "wildcard" ? "fallback" : "resolved",
+      candidates: candidateTrace,
+      selected: traceCandidate(first),
+      ...(first.specificity === "wildcard" ? {
+        fallback: {
+          reason: "wildcard-rule" as const,
+          ...(first.rule.templateRef ? {
+            templateRef: first.rule.templateRef,
+            styleSource: "template" as const,
+          } : {}),
+        },
+      } : {}),
+    },
+  };
+}
+
+function traceCandidate(candidate: ResolvedProjectionRule): ProjectionRuleCandidateTrace {
+  const match = candidate.rule.match.kind === "any-iri-object"
+    ? "wildcard"
+    : candidate.distance === 0
+      ? "exact"
+      : candidate.rule.match.kind === "predicate"
+        ? "explicit-subproperty"
+        : "explicit-subclass";
+  return {
+    catalogRef: candidate.catalogRef,
+    ruleId: candidate.rule.ruleId,
+    priority: candidate.rule.priority,
+    match,
+    distance: candidate.distance,
+    ...(candidate.matchedIri ? { matchedIri: candidate.matchedIri } : {}),
+    ...(candidate.rule.templateRef ? {
+      templateRef: candidate.rule.templateRef,
+      styleSource: "template" as const,
+    } : {}),
+  };
+}
+
+function compareCandidateIdentity(
+  left: ResolvedProjectionRule,
+  right: ResolvedProjectionRule,
+): number {
+  return compareCodePoints(left.catalogRef, right.catalogRef)
+    || compareCodePoints(left.rule.ruleId, right.rule.ruleId)
+    || compareCodePoints(left.matchedIri ?? "", right.matchedIri ?? "");
+}
+
+function compareTraceIdentity(
+  left: ProjectionRuleCandidateTrace,
+  right: ProjectionRuleCandidateTrace,
+): number {
+  return compareCodePoints(left.catalogRef, right.catalogRef)
+    || compareCodePoints(left.ruleId, right.ruleId)
+    || compareCodePoints(left.matchedIri ?? "", right.matchedIri ?? "");
 }
 
 function typeDistance(
@@ -288,7 +401,7 @@ function expectedTemplateKind(
     case "membership-region":
       return "node";
     case "alternative":
-      return "node";
+      return "container";
     case "ordinal-sequence":
       return "container";
     case "direct-edge":

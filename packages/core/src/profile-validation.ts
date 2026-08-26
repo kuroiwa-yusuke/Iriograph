@@ -5,6 +5,7 @@ import type {
   ProjectionCatalogV1,
   ProjectionDiagnostic,
   ProjectionOperator,
+  ProjectionRuleResolutionTrace,
 } from "./model.js";
 import type { RdfsClosure } from "./rdfs-closure.js";
 import {
@@ -26,6 +27,7 @@ export type NamedResourcePlan = {
   semanticRef: string;
   assertedTypes: string[];
   resolved?: ResolvedProjectionRule;
+  resolutionTrace?: ProjectionRuleResolutionTrace;
 };
 
 export type OrdinalMember = {
@@ -50,6 +52,7 @@ export function resolveNamedResourcePlans(
       semanticRef,
       assertedTypes,
       resolved: resolution.resolved,
+      resolutionTrace: resolution.trace,
     });
   }
   return { plans, diagnostics };
@@ -330,12 +333,19 @@ function validateOrdinalStructure(
   const minimum = operator.operator === "alternative" ? 2 : 1;
   if (ordinals.length < minimum) {
     diagnostics.push({
-      severity: "error",
+      severity: "warning",
       code: operator.operator === "alternative"
         ? "alternative-too-few-members"
         : "sequence-empty",
-      message: `${resourceIri}には${minimum}件以上のordinal memberが必要です。`,
+      message: `${resourceIri}のframeは表示できますが、完了には${minimum}件以上のordinal memberが必要です。`,
       semanticRef: resourceIri,
+      suggestedActions: [{
+        actionId: operator.operator === "alternative"
+          ? "add-alternative-members"
+          : "add-sequence-member",
+        semanticRef: resourceIri,
+        parameters: { minimumMembers: minimum },
+      }],
     });
   }
   for (let expected = 1; expected <= ordinals.length; expected += 1) {
@@ -350,10 +360,15 @@ function validateOrdinalStructure(
   }
   if (operator.operator === "alternative" && !byOrdinal.has(operator.defaultOrdinal)) {
     diagnostics.push({
-      severity: "error",
+      severity: "warning",
       code: "alternative-default-missing",
-      message: `${resourceIri}にdefault ordinal ${operator.defaultOrdinal}がありません。`,
+      message: `${resourceIri}のdefault ordinal ${operator.defaultOrdinal}が未設定です。候補は表示できます。`,
       semanticRef: resourceIri,
+      suggestedActions: [{
+        actionId: "choose-alternative-default",
+        semanticRef: resourceIri,
+        parameters: { defaultOrdinal: operator.defaultOrdinal },
+      }],
     });
   }
 }

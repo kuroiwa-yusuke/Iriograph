@@ -9,6 +9,7 @@ import type {
   EdgeEndpointShape,
   EdgeRouteMode,
   ElementGeometry,
+  GroupFrameKind,
   Point,
 } from "./model.js";
 import type { ContainerContentInsets } from "./container-content.js";
@@ -31,10 +32,16 @@ export type LayoutExternalReservation = {
 export type LayoutElement = {
   elementId: string;
   structuralKind: "node" | "container" | "region" | "annotation";
-  groupRole?: "sequence";
+  /** Present only for the common Bag/classification/Seq/Alt Group Frame grammar. */
+  groupRole?: GroupFrameKind;
   parentElementId?: string;
   geometry?: ElementGeometry;
   size?: { width: number; height: number };
+  /**
+   * DOM-free content measurement supplied by projection/host. Generated
+   * geometry grows to this minimum; fixed/user geometry remains unchanged.
+   */
+  minimumContentSize?: { width: number; height: number };
   pinned?: boolean;
   placement?: "generated" | "user";
   /** Concrete renderer boundary used when resolving endpoint anchors. */
@@ -50,7 +57,7 @@ export type LayoutMembership = {
   containerElementId: string;
   memberElementId: string;
   regionElementId?: string;
-  role?: "membership" | "sequence-member";
+  role?: "membership" | "sequence-member" | "alternative-member";
   ordinal?: number;
 };
 
@@ -107,11 +114,59 @@ export type LayoutDiagnostic = {
   edgeId?: string;
 };
 
+export type LayoutDerivedRouteFamily =
+  | "straight"
+  | "curve"
+  | "polyline"
+  | "orthogonal"
+  | "manual";
+
+export type LayoutDerivedRouteRejection = {
+  family: "straight" | "curve";
+  reason:
+    | "obstacle"
+    | "interaction"
+    | "parallel-identity"
+    | "self-loop"
+    | "no-guide"
+    | "tight-turn"
+    | "endpoint-direction";
+};
+
+export type LayoutDerivedCurve = {
+  /** Absolute renderer-only cubic controls; never persisted as a waypoint. */
+  sourceControl: Point;
+  targetControl: Point;
+  /** Private corridor guide retained for diagnostics and reproducible tests. */
+  guidePivot: Point;
+  guideAngleDegrees: number;
+};
+
+export type LayoutDerivedRouteChoice = {
+  family: LayoutDerivedRouteFamily;
+  source: "auto" | "explicit" | "fixed";
+  reason:
+    | "auto-straight-safe"
+    | "auto-curve-safe"
+    | "auto-polyline-fallback"
+    | "auto-self-loop-preserved"
+    | "explicit-route-mode"
+    | "fixed-derived-route";
+  curve?: LayoutDerivedCurve;
+  rejected?: LayoutDerivedRouteRejection[];
+};
+
 export type LayoutResult = {
   layoutRef: string;
+  /** Adapter-resolved orientation reused by adapter-independent completion. */
+  direction?: LayoutDirection;
+  /** Adapter-independent group/region completion already ran before routing. */
+  structuralCompletion?: true;
   geometries: Record<string, ElementGeometry>;
   /** Every route includes its source and target attachment points. */
   routes: Record<string, Point[]>;
+  /** Renderer-only family/control output. It is not a portable overlay. */
+  derivedRouteChoices?: Record<string, LayoutDerivedRouteChoice>;
   width: number;
   height: number;
   diagnostics: LayoutDiagnostic[];
@@ -209,14 +264,17 @@ export async function layoutProjectedScene(
   if (!resolution.resolved) return emptyResult(request.layoutRef, resolution.diagnostics);
   try {
     const result = await resolution.adapter.layout(request);
+    // `structuralCompletion` is an optimization hint, never a trust boundary.
+    // Every adapter result crosses the same idempotent Group Frame completion.
     const completed = restoreFixedDerivedRoutes(
       request,
-      completeRegionLayout(request, result),
+      completeRegionLayout(request, result, result.direction ?? "LR"),
     );
-    const invalid = validateAdapterResult(request, completed);
+    const normalized = normalizeGeneratedAdapterRoutes(request, completed);
+    const invalid = validateAdapterResult(request, normalized);
     return invalid.length > 0
-      ? emptyResult(request.layoutRef, [...completed.diagnostics, ...invalid])
-      : completed;
+      ? emptyResult(request.layoutRef, [...normalized.diagnostics, ...invalid])
+      : normalized;
   } catch (cause) {
     return emptyResult(request.layoutRef, [{
       severity: "error",
@@ -248,8 +306,11 @@ function restoreFixedDerivedRoutes(
   }
   const spacing = { ...DEFAULT_SPACING, ...request.spacing };
   const bounds = sceneBounds(
-    Object.values(candidate.geometries),
-    Object.values(routes).flat(),
+    layoutResultBoundGeometries(request, candidate.geometries),
+    [
+      ...Object.values(routes).flat(),
+      ...layoutDerivedRouteControlPoints(candidate.derivedRouteChoices),
+    ],
     spacing.margin,
   );
   return {
@@ -261,112 +322,705 @@ function restoreFixedDerivedRoutes(
 }
 
 /**
- * Completes structural enclosure geometry for overlap regions and ordered
- * sequence groups. Regions are not hierarchy parents: each generated region
- * encloses all visible members, so a multiply-associated member lies in the
- * geometric intersection. User/pinned geometry remains a hard constraint.
+ * Completes the common Bag/classification/Seq/Alt Group Frame grammar. Legacy
+ * region fixtures without an explicit groupRole remain membership frames.
+ * Normal hierarchy containers without a groupRole are deliberately excluded.
+ * Every generated frame encloses all visible members; multiply-associated
+ * members must fit the common intersection. User/pinned geometry is a hard
+ * constraint and is diagnosed rather than moved.
  */
 export function completeRegionLayout(
   request: LayoutRequest,
   candidate: LayoutResult,
+  direction: LayoutDirection = "LR",
 ): LayoutResult {
   const regionCandidates = request.scene.elements
     .filter((element) => element.structuralKind === "region")
     .sort((left, right) => compareText(left.elementId, right.elementId));
-  const sequenceCandidates = request.scene.elements
-    .filter((element) => element.structuralKind === "container" && element.groupRole === "sequence")
+  const groupFrameCandidates = request.scene.elements
+    .filter(isGroupFrameElement)
     .sort((left, right) => compareText(left.elementId, right.elementId));
-  if (regionCandidates.length === 0 && sequenceCandidates.length === 0) return candidate;
+  if (groupFrameCandidates.length === 0) {
+    return { ...candidate, structuralCompletion: true };
+  }
   const geometries = Object.fromEntries(Object.entries(candidate.geometries).map(([id, geometry]) => [
     id,
     copyGeometry(geometry),
   ]));
   const diagnostics = [...candidate.diagnostics];
-  const memberships = [...(request.scene.memberships ?? [])]
+  const regionMemberships = [...(request.scene.memberships ?? [])]
     .filter((membership) => membership.regionElementId)
     .sort((left, right) => compareText(left.semanticRef, right.semanticRef));
-  const regions = groupCompletionOrder(regionCandidates, memberships);
+  const groupMemberships = [...(request.scene.memberships ?? [])]
+    .filter((membership) => groupFrameCandidates.some((group) => (
+      membershipBelongsToGroup(membership, group)
+    )))
+    .sort(compareMembership);
+  const groups = groupCompletionOrder(groupFrameCandidates, groupMemberships);
   const spacing = { ...DEFAULT_SPACING, ...request.spacing };
 
-  const sequenceMemberships = [...(request.scene.memberships ?? [])]
-    .filter((membership) => membership.role === "sequence-member")
-    .sort((left, right) => (
-      (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER)
-      || compareText(left.semanticRef, right.semanticRef)
-    ));
-  for (const sequence of groupCompletionOrder(sequenceCandidates, sequenceMemberships)) {
-    if (isFixed(sequence)) {
-      if (sequence.geometry) geometries[sequence.elementId] = copyGeometry(sequence.geometry);
-      continue;
-    }
-    const members = sequenceMemberships
-      .filter((membership) => membership.containerElementId === sequence.elementId)
-      .map((membership) => geometries[membership.memberElementId])
-      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
-    if (members.length === 0) continue;
-    geometries[sequence.elementId] = enclosureGeometry(
-      members,
-      sequence.size ?? sequence.geometry ?? { width: 360, height: 160 },
-      spacing,
-    );
-  }
-
-  for (const region of regions) {
-    if (isFixed(region)) {
-      if (region.geometry) geometries[region.elementId] = copyGeometry(region.geometry);
-      continue;
-    }
-    const members = memberships
-      .filter((membership) => membership.regionElementId === region.elementId)
-      .map((membership) => geometries[membership.memberElementId])
-      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
-    if (members.length === 0) continue;
-    const minimum = region.size ?? region.geometry ?? { width: 240, height: 160 };
-    geometries[region.elementId] = enclosureGeometry(members, minimum, spacing);
-  }
-
-  const normalizedRegionIds = normalizeGeneratedRegionSiblingSpans(
-    request,
-    regionCandidates,
-    memberships,
-    geometries,
-  );
-  if (normalizedRegionIds.size > 0) {
-    // Owners and transitive owners must enclose the normalized child spans.
-    // Do not recompute the normalized children themselves, which would shrink
-    // them back to their individual content widths.
-    for (const region of regions) {
-      if (isFixed(region) || normalizedRegionIds.has(region.elementId)) continue;
-      const members = memberships
-        .filter((membership) => membership.regionElementId === region.elementId)
+  // Nested frames, sibling normalization and unrelated-frame separation can
+  // affect one another. Reach the deterministic fixpoint before routing so a
+  // second postcondition pass cannot move geometry underneath adapter routes.
+  const maximumPasses = Math.max(2, groupFrameCandidates.length * 2 + 2);
+  for (let pass = 0; pass < maximumPasses; pass += 1) {
+    const before = copyGeometryRecord(geometries);
+    for (const group of groups) {
+      if (isFixed(group)) {
+        if (group.geometry) geometries[group.elementId] = copyGeometry(group.geometry);
+        continue;
+      }
+      const members = groupMemberships
+        .filter((membership) => membershipBelongsToGroup(membership, group))
         .map((membership) => geometries[membership.memberElementId])
         .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
       if (members.length === 0) continue;
-      geometries[region.elementId] = enclosureGeometry(
+      geometries[group.elementId] = completeGeneratedGroupGeometry(
+        geometries[group.elementId],
         members,
-        region.size ?? region.geometry ?? { width: 240, height: 160 },
+        group.size ?? group.geometry ?? defaultGroupFrameSize(group),
         spacing,
       );
     }
+
+    const normalizedRegionIds = normalizeGeneratedRegionSiblingSpans(
+      request,
+      regionCandidates,
+      regionMemberships,
+      geometries,
+      direction,
+    );
+    if (normalizedRegionIds.size > 0) {
+      // Owners and transitive owners must enclose the normalized child spans.
+      // Do not recompute the normalized children themselves, which would shrink
+      // them back to their individual content widths.
+      for (const group of groups) {
+        if (isFixed(group) || normalizedRegionIds.has(group.elementId)) continue;
+        const members = groupMemberships
+          .filter((membership) => membershipBelongsToGroup(membership, group))
+          .map((membership) => geometries[membership.memberElementId])
+          .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+        if (members.length === 0) continue;
+        geometries[group.elementId] = completeGeneratedGroupGeometry(
+          geometries[group.elementId],
+          members,
+          group.size ?? group.geometry ?? defaultGroupFrameSize(group),
+          spacing,
+        );
+      }
+    }
+
+    packEmptyGeneratedRegions(regionCandidates, regionMemberships, geometries, spacing);
+    separateUnrelatedGeneratedRegions(
+      request,
+      regionCandidates,
+      regionMemberships,
+      geometries,
+      diagnostics,
+      spacing,
+      direction,
+    );
+    relocateUnassignedGeneratedNodes(
+      request,
+      regionCandidates,
+      regionMemberships,
+      geometries,
+      diagnostics,
+      spacing,
+      direction,
+    );
+    if (sameGeometryRecord(before, geometries)) break;
   }
 
-  packEmptyGeneratedRegions(regionCandidates, memberships, geometries, spacing);
-
-  validateRegionMembershipGeometry(request, geometries, memberships, diagnostics);
-  const routes = adjustRegionRouteEndpoints(request, candidate.routes, geometries);
+  validateGroupMembershipGeometry(
+    request,
+    geometries,
+    groupFrameCandidates,
+    groupMemberships,
+    diagnostics,
+    spacing.containerPadding,
+  );
+  const routes = adjustGroupFrameRouteEndpoints(
+    request,
+    candidate.routes,
+    geometries,
+    new Set(groupFrameCandidates.map((group) => group.elementId)),
+  );
   const bounds = sceneBounds(
-    Object.values(geometries),
-    Object.values(routes).flat(),
+    layoutResultBoundGeometries(request, geometries),
+    [
+      ...Object.values(routes).flat(),
+      ...layoutDerivedRouteControlPoints(candidate.derivedRouteChoices),
+    ],
     spacing.margin,
   );
   return {
     ...candidate,
+    structuralCompletion: true,
     geometries,
     routes,
     width: bounds.width,
     height: bounds.height,
     diagnostics,
   };
+}
+
+function isGroupFrameElement(element: LayoutElement): boolean {
+  // Region was the original overlap grammar and remains a Group Frame for
+  // backwards-compatible hand-authored LayoutProjectedScene fixtures.
+  return element.structuralKind === "region"
+    || (element.structuralKind === "container" && element.groupRole !== undefined);
+}
+
+function effectiveGroupFrameKind(element: LayoutElement): GroupFrameKind | undefined {
+  return element.groupRole ?? (element.structuralKind === "region" ? "membership" : undefined);
+}
+
+function membershipBelongsToGroup(
+  membership: LayoutMembership,
+  group: LayoutElement,
+): boolean {
+  const kind = effectiveGroupFrameKind(group);
+  if (!kind) return false;
+  const ownerMatches = group.structuralKind === "region"
+    ? membership.regionElementId === group.elementId
+    : membership.containerElementId === group.elementId;
+  if (!ownerMatches) return false;
+  if (kind === "sequence") return membership.role === "sequence-member";
+  if (kind === "alternative") return membership.role === "alternative-member";
+  return membership.role === undefined || membership.role === "membership";
+}
+
+function compareMembership(left: LayoutMembership, right: LayoutMembership): number {
+  return (left.ordinal ?? Number.MAX_SAFE_INTEGER) - (right.ordinal ?? Number.MAX_SAFE_INTEGER)
+    || compareText(left.semanticRef, right.semanticRef)
+    || compareText(left.containerElementId, right.containerElementId)
+    || compareText(left.memberElementId, right.memberElementId);
+}
+
+function defaultGroupFrameSize(group: LayoutElement): { width: number; height: number } {
+  return group.structuralKind === "region"
+    ? { width: 240, height: 160 }
+    : { width: 360, height: 160 };
+}
+
+type RegionMovementGroup = {
+  key: string;
+  regionIds: string[];
+  elementIds: string[];
+  fixed: boolean;
+};
+
+/**
+ * Generated regions may overlap only when the semantic memberships require
+ * it. A shared member and a region-owner relation therefore form one movement
+ * group; unrelated groups are packed on the layout cross axis. This is a
+ * deterministic completion rule shared by every adapter, rather than an
+ * engine-specific heuristic.
+ */
+function separateUnrelatedGeneratedRegions(
+  request: LayoutRequest,
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  geometries: Record<string, ElementGeometry>,
+  diagnostics: LayoutDiagnostic[],
+  spacing: LayoutSpacing,
+  direction: LayoutDirection,
+): void {
+  if (regions.length < 2) return;
+  const elements = new Map(request.scene.elements.map((element) => [element.elementId, element]));
+  const regionIds = new Set(regions.map((region) => region.elementId));
+  const parent = new Map(regions.map((region) => [region.elementId, region.elementId]));
+  const find = (regionId: string): string => {
+    const current = parent.get(regionId)!;
+    if (current === regionId) return regionId;
+    const root = find(current);
+    parent.set(regionId, root);
+    return root;
+  };
+  const union = (left: string, right: string): void => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot === rightRoot) return;
+    const [root, child] = [leftRoot, rightRoot].sort(compareText);
+    parent.set(child!, root!);
+  };
+  const ownersByMember = new Map<string, string[]>();
+  for (const membership of memberships) {
+    const ownerId = membership.regionElementId;
+    if (!ownerId || !regionIds.has(ownerId)) continue;
+    const owners = ownersByMember.get(membership.memberElementId) ?? [];
+    owners.push(ownerId);
+    ownersByMember.set(membership.memberElementId, owners);
+    if (regionIds.has(membership.memberElementId)) {
+      union(ownerId, membership.memberElementId);
+    }
+  }
+  for (const owners of ownersByMember.values()) {
+    const sorted = [...new Set(owners)].sort(compareText);
+    for (let index = 1; index < sorted.length; index += 1) {
+      union(sorted[0]!, sorted[index]!);
+    }
+  }
+  const childrenByParent = new Map<string, string[]>();
+  for (const element of request.scene.elements) {
+    if (!element.parentElementId) continue;
+    const children = childrenByParent.get(element.parentElementId) ?? [];
+    children.push(element.elementId);
+    childrenByParent.set(element.parentElementId, children);
+  }
+  for (const children of childrenByParent.values()) children.sort(compareText);
+  const descendantsOf = (elementId: string): string[] => {
+    const result: string[] = [];
+    const visited = new Set([elementId]);
+    const visit = (parentId: string): void => {
+      for (const childId of childrenByParent.get(parentId) ?? []) {
+        if (visited.has(childId)) continue;
+        visited.add(childId);
+        result.push(childId);
+        visit(childId);
+      }
+    };
+    visit(elementId);
+    return result;
+  };
+  // A region owning a hierarchy subtree and a region explicitly owning one
+  // of its descendants must move together to preserve both relationships.
+  for (const membership of memberships) {
+    const ownerId = membership.regionElementId;
+    if (!ownerId || !regionIds.has(ownerId)) continue;
+    for (const descendantId of descendantsOf(membership.memberElementId)) {
+      for (const descendantOwner of ownersByMember.get(descendantId) ?? []) {
+        union(ownerId, descendantOwner);
+      }
+    }
+  }
+  separateUnrelatedRegionPairs(
+    request,
+    regions,
+    memberships,
+    elements,
+    geometries,
+    diagnostics,
+    spacing,
+    direction,
+    descendantsOf,
+  );
+
+  const regionIdsByRoot = new Map<string, string[]>();
+  for (const region of regions) {
+    const root = find(region.elementId);
+    const ids = regionIdsByRoot.get(root) ?? [];
+    ids.push(region.elementId);
+    regionIdsByRoot.set(root, ids);
+  }
+  const groups: RegionMovementGroup[] = [...regionIdsByRoot.values()].map((ids) => {
+    const sortedRegionIds = ids.sort(compareText);
+    const memberIds = memberships
+      .filter((membership) => (
+        membership.regionElementId !== undefined
+        && sortedRegionIds.includes(membership.regionElementId)
+      ))
+      .map((membership) => membership.memberElementId);
+    const elementIds = [...new Set([
+      ...sortedRegionIds,
+      ...memberIds,
+      ...memberIds.flatMap(descendantsOf),
+    ])].sort(compareText);
+    const hasExternalHierarchyParent = elementIds.some((elementId) => {
+      const hierarchyParentId = elements.get(elementId)?.parentElementId;
+      return hierarchyParentId !== undefined && !elementIds.includes(hierarchyParentId);
+    });
+    return {
+      key: sortedRegionIds[0]!,
+      regionIds: sortedRegionIds,
+      elementIds,
+      fixed: hasExternalHierarchyParent || elementIds.some((elementId) => {
+        const element = elements.get(elementId);
+        return element ? isFixed(element) : false;
+      }),
+    };
+  }).sort((left, right) => (
+    Number(right.fixed) - Number(left.fixed) || compareText(left.key, right.key)
+  ));
+
+  const occupied: Array<{ group: RegionMovementGroup; bounds: ElementGeometry }> = [];
+  for (const group of groups) {
+    const bounds = regionGroupBounds(group, geometries);
+    if (!bounds) continue;
+    if (group.fixed) {
+      for (const previous of occupied) {
+        if (intersects(bounds, previous.bounds)) {
+          pushDiagnosticOnce(diagnostics, {
+            severity: "warning",
+            code: "layout-region-separation-fixed",
+            message: `${group.key}と${previous.group.key}は共通要素を持たない領域ですが、固定配置または親コンテナの制約により重なりを解消できません。固定位置を解除するか、領域または要素を手動で離してください。`,
+            layoutRef: request.layoutRef,
+            elementId: group.key,
+          });
+        }
+      }
+      occupied.push({ group, bounds });
+      continue;
+    }
+    const translated = copyGeometry(bounds);
+    let offset = 0;
+    for (const previous of occupied) {
+      if (!intersects(translated, previous.bounds)) continue;
+      const delta = direction === "LR"
+        ? previous.bounds.y + previous.bounds.height + spacing.itemGap - translated.y
+        : previous.bounds.x + previous.bounds.width + spacing.itemGap - translated.x;
+      if (delta <= 0) continue;
+      offset += delta;
+      if (direction === "LR") translated.y += delta;
+      else translated.x += delta;
+    }
+    if (offset !== 0) {
+      for (const elementId of group.elementIds) {
+        const geometry = geometries[elementId];
+        if (!geometry) continue;
+        geometries[elementId] = direction === "LR"
+          ? { ...geometry, y: geometry.y + offset }
+          : { ...geometry, x: geometry.x + offset };
+      }
+    }
+    occupied.push({ group, bounds: translated });
+  }
+
+  diagnoseUnrelatedRegionOverlaps(request, regions, memberships, geometries, diagnostics);
+}
+
+function separateUnrelatedRegionPairs(
+  request: LayoutRequest,
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  elements: ReadonlyMap<string, LayoutElement>,
+  geometries: Record<string, ElementGeometry>,
+  diagnostics: LayoutDiagnostic[],
+  spacing: LayoutSpacing,
+  direction: LayoutDirection,
+  descendantsOf: (elementId: string) => string[],
+): void {
+  // Region geometry is derived from the already ordered member bands. Keep
+  // that semantic layout order when overlapping sibling frames need more
+  // cross-axis room; sorting by opaque region identity can invert the lanes
+  // after their members have been placed correctly.
+  const orderedRegions = [...regions].sort((left, right) => {
+    const leftGeometry = geometries[left.elementId];
+    const rightGeometry = geometries[right.elementId];
+    const leftCross = leftGeometry
+      ? direction === "LR" ? leftGeometry.y : leftGeometry.x
+      : Number.POSITIVE_INFINITY;
+    const rightCross = rightGeometry
+      ? direction === "LR" ? rightGeometry.y : rightGeometry.x
+      : Number.POSITIVE_INFINITY;
+    return leftCross - rightCross || compareText(left.elementId, right.elementId);
+  });
+  const membersByRegion = new Map(regions.map((region) => [
+    region.elementId,
+    [...new Set(memberships
+      .filter((membership) => membership.regionElementId === region.elementId)
+      .map((membership) => membership.memberElementId))].sort(compareText),
+  ]));
+  const regionIds = new Set(regions.map((region) => region.elementId));
+  const ownersByRegion = new Map<string, Set<string>>();
+  for (const membership of memberships) {
+    if (
+      !membership.regionElementId
+      || !regionIds.has(membership.regionElementId)
+      || !regionIds.has(membership.memberElementId)
+    ) continue;
+    const owners = ownersByRegion.get(membership.memberElementId) ?? new Set<string>();
+    owners.add(membership.regionElementId);
+    ownersByRegion.set(membership.memberElementId, owners);
+  }
+  const sharesSeparationScope = (leftId: string, rightId: string): boolean => {
+    const leftOwners = ownersByRegion.get(leftId);
+    const rightOwners = ownersByRegion.get(rightId);
+    if (!leftOwners && !rightOwners) return true;
+    if (!leftOwners || !rightOwners) return false;
+    return [...leftOwners].some((ownerId) => rightOwners.has(ownerId));
+  };
+  const blocked = new Set<string>();
+  const maximumMoves = Math.max(1, regions.length * regions.length * 2);
+  for (let moveCount = 0; moveCount < maximumMoves; moveCount += 1) {
+    let moved = false;
+    for (let leftIndex = 0; leftIndex < orderedRegions.length; leftIndex += 1) {
+      for (let rightIndex = leftIndex + 1; rightIndex < orderedRegions.length; rightIndex += 1) {
+        const left = orderedRegions[leftIndex]!;
+        const right = orderedRegions[rightIndex]!;
+        const pairKey = `${left.elementId}\u0000${right.elementId}`;
+        if (
+          blocked.has(pairKey)
+          || !sharesSeparationScope(left.elementId, right.elementId)
+          || regionsMayOverlap(left.elementId, right.elementId, memberships, regionIds)
+        ) continue;
+        const leftGeometry = geometries[left.elementId];
+        const rightGeometry = geometries[right.elementId];
+        if (!leftGeometry || !rightGeometry || !intersects(leftGeometry, rightGeometry)) continue;
+        const candidates = [
+          { moving: right, obstacle: left },
+          { moving: left, obstacle: right },
+        ];
+        let resolved = false;
+        for (const { moving, obstacle } of candidates) {
+          const movingIds = regionTranslationIds(
+            moving.elementId,
+            membersByRegion,
+            regionIds,
+            descendantsOf,
+          );
+          const hasExternalHierarchyParent = [...movingIds].some((elementId) => {
+            const parentId = elements.get(elementId)?.parentElementId;
+            return parentId !== undefined && !movingIds.has(parentId);
+          });
+          if (
+            hasExternalHierarchyParent
+            || [...movingIds].some((elementId) => {
+              const element = elements.get(elementId);
+              return element ? isFixed(element) : false;
+            })
+          ) continue;
+          const movingGeometry = geometries[moving.elementId]!;
+          const obstacleGeometry = geometries[obstacle.elementId]!;
+          const delta = direction === "LR"
+            ? obstacleGeometry.y + obstacleGeometry.height + spacing.itemGap - movingGeometry.y
+            : obstacleGeometry.x + obstacleGeometry.width + spacing.itemGap - movingGeometry.x;
+          if (delta <= 0) continue;
+          for (const elementId of movingIds) {
+            const geometry = geometries[elementId];
+            if (!geometry) continue;
+            geometries[elementId] = direction === "LR"
+              ? { ...geometry, y: geometry.y + delta }
+              : { ...geometry, x: geometry.x + delta };
+          }
+          recomputeGeneratedRegionEnclosures(regions, memberships, geometries, spacing);
+          moved = true;
+          resolved = true;
+          break;
+        }
+        if (!resolved) {
+          blocked.add(pairKey);
+          pushDiagnosticOnce(diagnostics, {
+            severity: "warning",
+            code: "layout-region-separation-fixed",
+            message: `${left.elementId}と${right.elementId}は共通要素を持たない領域ですが、固定配置または親コンテナの制約により重なりを解消できません。固定位置を解除するか、領域または要素を手動で離してください。`,
+            layoutRef: request.layoutRef,
+            elementId: right.elementId,
+          });
+        }
+        if (moved) break;
+      }
+      if (moved) break;
+    }
+    if (!moved) break;
+  }
+}
+
+function regionTranslationIds(
+  regionId: string,
+  membersByRegion: ReadonlyMap<string, readonly string[]>,
+  regionIds: ReadonlySet<string>,
+  descendantsOf: (elementId: string) => string[],
+): Set<string> {
+  const result = new Set<string>();
+  const activeRegions = new Set<string>();
+  const visitRegion = (currentRegionId: string): void => {
+    if (activeRegions.has(currentRegionId)) return;
+    activeRegions.add(currentRegionId);
+    result.add(currentRegionId);
+    for (const memberId of membersByRegion.get(currentRegionId) ?? []) {
+      result.add(memberId);
+      for (const descendantId of descendantsOf(memberId)) result.add(descendantId);
+      if (regionIds.has(memberId)) visitRegion(memberId);
+    }
+  };
+  visitRegion(regionId);
+  return result;
+}
+
+function recomputeGeneratedRegionEnclosures(
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  geometries: Record<string, ElementGeometry>,
+  spacing: LayoutSpacing,
+): void {
+  for (const region of groupCompletionOrder(regions, memberships)) {
+    if (isFixed(region)) continue;
+    const members = memberships
+      .filter((membership) => membership.regionElementId === region.elementId)
+      .map((membership) => geometries[membership.memberElementId])
+      .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
+    if (members.length === 0) continue;
+    geometries[region.elementId] = enclosureGeometry(
+      members,
+      region.size ?? region.geometry ?? { width: 240, height: 160 },
+      spacing,
+    );
+  }
+}
+
+function regionsMayOverlap(
+  leftRegionId: string,
+  rightRegionId: string,
+  memberships: readonly LayoutMembership[],
+  regionIds: ReadonlySet<string>,
+): boolean {
+  const leftMembers = new Set(memberships
+    .filter((membership) => membership.regionElementId === leftRegionId)
+    .map((membership) => membership.memberElementId));
+  if (memberships.some((membership) => (
+    membership.regionElementId === rightRegionId
+    && leftMembers.has(membership.memberElementId)
+  ))) return true;
+  const ownsTransitively = (ownerId: string, targetId: string): boolean => {
+    const pending = [ownerId];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const membership of memberships) {
+        if (membership.regionElementId !== current || !regionIds.has(membership.memberElementId)) {
+          continue;
+        }
+        if (membership.memberElementId === targetId) return true;
+        pending.push(membership.memberElementId);
+      }
+    }
+    return false;
+  };
+  return ownsTransitively(leftRegionId, rightRegionId)
+    || ownsTransitively(rightRegionId, leftRegionId);
+}
+
+function diagnoseUnrelatedRegionOverlaps(
+  request: LayoutRequest,
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  geometries: Readonly<Record<string, ElementGeometry>>,
+  diagnostics: LayoutDiagnostic[],
+): void {
+  const regionIds = new Set(regions.map((region) => region.elementId));
+  for (let leftIndex = 0; leftIndex < regions.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < regions.length; rightIndex += 1) {
+      const left = regions[leftIndex]!;
+      const right = regions[rightIndex]!;
+      const leftGeometry = geometries[left.elementId];
+      const rightGeometry = geometries[right.elementId];
+      if (
+        !leftGeometry
+        || !rightGeometry
+        || regionsMayOverlap(left.elementId, right.elementId, memberships, regionIds)
+        || !intersects(leftGeometry, rightGeometry)
+      ) continue;
+      pushDiagnosticOnce(diagnostics, {
+        severity: "warning",
+        code: "layout-region-separation-unresolved",
+        message: `${left.elementId}と${right.elementId}は共通要素を持たない領域ですが、包含制約を保ったまま重なりを解消できません。領域または所属要素の位置を調整してください。`,
+        layoutRef: request.layoutRef,
+        elementId: right.elementId,
+      });
+    }
+  }
+}
+
+function regionGroupBounds(
+  group: RegionMovementGroup,
+  geometries: Readonly<Record<string, ElementGeometry>>,
+): ElementGeometry | undefined {
+  return geometryUnion(group.regionIds.flatMap((regionId) => {
+    const geometry = geometries[regionId];
+    return geometry ? [geometry] : [];
+  }));
+}
+
+/** Keeps free-standing generated nodes out of every region. */
+function relocateUnassignedGeneratedNodes(
+  request: LayoutRequest,
+  regions: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  geometries: Record<string, ElementGeometry>,
+  diagnostics: LayoutDiagnostic[],
+  spacing: LayoutSpacing,
+  direction: LayoutDirection,
+): void {
+  const elements = new Map(request.scene.elements.map((element) => [element.elementId, element]));
+  const assigned = new Set(memberships.map((membership) => membership.memberElementId));
+  // A hierarchy child of a region member is visually owned through its
+  // containing subtree and must not be pulled out independently.
+  for (const element of request.scene.elements) {
+    let parentId = element.parentElementId;
+    const visited = new Set<string>();
+    while (parentId && !visited.has(parentId)) {
+      visited.add(parentId);
+      if (assigned.has(parentId)) {
+        assigned.add(element.elementId);
+        break;
+      }
+      parentId = elements.get(parentId)?.parentElementId;
+    }
+  }
+  const regionObstacles = regions.flatMap((region) => {
+    const geometry = geometries[region.elementId];
+    return geometry ? [{ elementId: region.elementId, geometry }] : [];
+  }).sort((left, right) => compareText(left.elementId, right.elementId));
+  if (regionObstacles.length === 0) return;
+  const nodes = request.scene.elements
+    .filter((element) => element.structuralKind === "node" && !assigned.has(element.elementId))
+    .sort(compareElement);
+  for (const node of nodes) {
+    const geometry = geometries[node.elementId];
+    if (!geometry || !regionObstacles.some((region) => intersects(geometry, region.geometry))) {
+      continue;
+    }
+    if (isFixed(node) || node.parentElementId) {
+      pushDiagnosticOnce(diagnostics, {
+        severity: "warning",
+        code: "layout-unassigned-node-inside-region-fixed",
+        message: `${node.elementId}は領域に所属していませんが、固定配置または親コンテナの制約により領域外へ移動できません。固定位置を解除するか、所属領域を設定してください。`,
+        layoutRef: request.layoutRef,
+        elementId: node.elementId,
+      });
+      continue;
+    }
+    const translated = copyGeometry(geometry);
+    while (true) {
+      const obstacles = [
+        ...regionObstacles.map((item) => item.geometry),
+        ...request.scene.elements.flatMap((element) => {
+          if (element.elementId === node.elementId || element.structuralKind === "region") return [];
+          const obstacle = geometries[element.elementId];
+          return obstacle ? [layoutElementFootprintGeometry(element, obstacle)] : [];
+        }),
+      ];
+      const conflicts = obstacles.filter((obstacle) => intersects(translated, obstacle));
+      if (conflicts.length === 0) break;
+      if (direction === "LR") {
+        translated.y = Math.max(...conflicts.map((conflict) => (
+          conflict.y + conflict.height + spacing.itemGap
+        )));
+      } else {
+        translated.x = Math.max(...conflicts.map((conflict) => (
+          conflict.x + conflict.width + spacing.itemGap
+        )));
+      }
+    }
+    geometries[node.elementId] = translated;
+  }
+}
+
+function pushDiagnosticOnce(
+  diagnostics: LayoutDiagnostic[],
+  diagnostic: LayoutDiagnostic,
+): void {
+  if (diagnostics.some((item) => (
+    item.code === diagnostic.code
+    && item.elementId === diagnostic.elementId
+    && item.edgeId === diagnostic.edgeId
+    && item.message === diagnostic.message
+  ))) return;
+  diagnostics.push(diagnostic);
 }
 
 /**
@@ -380,11 +1034,8 @@ function normalizeGeneratedRegionSiblingSpans(
   regions: readonly LayoutElement[],
   memberships: readonly LayoutMembership[],
   geometries: Record<string, ElementGeometry>,
+  direction: LayoutDirection,
 ): Set<string> {
-  const direction = request.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalLr
-    ? "LR"
-    : request.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalTb ? "TB" : undefined;
-  if (!direction) return new Set();
   const byId = new Map(regions.map((region) => [region.elementId, region]));
   const normalized = new Set<string>();
   const containerPadding = request.spacing?.containerPadding ?? DEFAULT_SPACING.containerPadding;
@@ -472,6 +1123,33 @@ function enclosureGeometry(
     width,
     height,
   };
+}
+
+function completeGeneratedGroupGeometry(
+  current: ElementGeometry | undefined,
+  members: readonly ElementGeometry[],
+  minimum: { width: number; height: number },
+  spacing: LayoutSpacing,
+): ElementGeometry {
+  // The common Group Frame postcondition is member-bounds + padding. Header
+  // position is a renderer/template concern, so an adapter that already
+  // satisfies that invariant must not be expanded merely because it reserves
+  // its caption on another side.
+  const memberBounds = geometryUnion(members)!;
+  const padding = spacing.containerPadding;
+  const required = {
+    x: memberBounds.x - padding,
+    y: memberBounds.y - padding,
+    width: memberBounds.width + padding * 2,
+    height: memberBounds.height + padding * 2,
+  };
+  if (current && isValidGeometry(current) && containsRectangle(current, required)) {
+    return copyGeometry(current);
+  }
+  return enclosureGeometry(members, {
+    width: Math.max(minimum.width, current?.width ?? 0),
+    height: Math.max(minimum.height, current?.height ?? 0),
+  }, spacing);
 }
 
 function packEmptyGeneratedRegions(
@@ -570,56 +1248,78 @@ function groupCompletionOrder(
   return ordered;
 }
 
-function validateRegionMembershipGeometry(
+function validateGroupMembershipGeometry(
   request: LayoutRequest,
   geometries: Readonly<Record<string, ElementGeometry>>,
+  groups: readonly LayoutElement[],
   memberships: readonly LayoutMembership[],
   diagnostics: LayoutDiagnostic[],
+  padding: number,
 ): void {
-  const byMember = new Map<string, LayoutMembership[]>();
+  const groupsById = new Map(groups.map((group) => [group.elementId, group]));
+  const byMember = new Map<string, Array<{ membership: LayoutMembership; group: LayoutElement }>>();
   for (const membership of memberships) {
-    if (!membership.regionElementId || !geometries[membership.regionElementId]) {
-      diagnostics.push({
+    const group = groups.find((candidate) => membershipBelongsToGroup(membership, candidate));
+    if (!group || !geometries[group.elementId]) {
+      pushDiagnosticOnce(diagnostics, {
         severity: "warning",
-        code: "layout-region-membership-unresolved",
-        message: `region membership endpoint is not present: ${membership.semanticRef}`,
+        code: "layout-group-membership-unresolved",
+        message: `${membership.semanticRef}の所属先Group Frameまたはgeometryを解決できません。所属先が表示対象か確認してください。`,
         layoutRef: request.layoutRef,
         elementId: membership.memberElementId,
       });
       continue;
     }
     const entries = byMember.get(membership.memberElementId) ?? [];
-    entries.push(membership);
+    entries.push({ membership, group });
     byMember.set(membership.memberElementId, entries);
   }
   for (const [memberId, entries] of [...byMember.entries()].sort(([left], [right]) => (
     compareText(left, right)
   ))) {
     const member = geometries[memberId];
-    if (!member) continue;
-    const regionGeometries = entries.flatMap((entry) => {
-      const geometry = entry.regionElementId ? geometries[entry.regionElementId] : undefined;
-      return geometry ? [geometry] : [];
-    });
-    if (regionGeometries.length === 0) continue;
-    const intersection = geometryIntersection(regionGeometries);
-    if (!intersection) {
-      diagnostics.push({
+    if (!member) {
+      pushDiagnosticOnce(diagnostics, {
         severity: "warning",
-        code: "region-membership-intersection-empty",
-        message: `${memberId}が属するregionに共通の交差領域がありません。`,
+        code: "layout-group-member-unresolved",
+        message: `${memberId}のgeometryを解決できないため、所属先Group Frameとの包含を確認できません。`,
         layoutRef: request.layoutRef,
         elementId: memberId,
       });
       continue;
     }
-    if (!containsRectangle(intersection, member)) {
-      diagnostics.push({
+    const frameGeometries = entries.flatMap(({ group }) => {
+      const geometry = geometries[group.elementId];
+      return geometry ? [geometry] : [];
+    });
+    if (frameGeometries.length === 0) continue;
+    const intersection = geometryIntersection(frameGeometries);
+    const onlyLegacyRegions = entries.every(({ group }) => (
+      group.structuralKind === "region" && !groupsById.get(group.elementId)?.groupRole
+    ));
+    const onlyRegions = entries.every(({ group }) => group.structuralKind === "region");
+    if (!intersection) {
+      pushDiagnosticOnce(diagnostics, {
         severity: "warning",
-        code: regionGeometries.length > 1
-          ? "region-member-outside-intersection"
-          : "region-member-outside",
-        message: `${memberId}の全体がmembership region${regionGeometries.length > 1 ? "の交差" : ""}内にありません。`,
+        code: onlyRegions ? "region-membership-intersection-empty" : "group-membership-intersection-empty",
+        message: `${memberId}が属するGroup Frameに共通の交差領域がありません。固定枠を広げるか、所属を見直してください。`,
+        layoutRef: request.layoutRef,
+        elementId: memberId,
+      });
+      continue;
+    }
+    const paddedMember = expandGeometry(member, padding);
+    if (!containsRectangle(intersection, paddedMember)) {
+      pushDiagnosticOnce(diagnostics, {
+        severity: "warning",
+        code: onlyLegacyRegions || onlyRegions
+          ? (frameGeometries.length > 1
+              ? "region-member-outside-intersection"
+              : "region-member-outside")
+          : (frameGeometries.length > 1
+              ? "group-member-outside-intersection"
+              : "group-member-outside"),
+        message: `${memberId}の全体とpadding ${padding}が所属Group Frame${frameGeometries.length > 1 ? "の共通交差" : ""}内にありません。固定位置を解除するか、枠または要素を調整してください。`,
         layoutRef: request.layoutRef,
         elementId: memberId,
       });
@@ -644,14 +1344,13 @@ function containsRectangle(container: ElementGeometry, member: ElementGeometry):
     && member.y + member.height <= container.y + container.height;
 }
 
-function adjustRegionRouteEndpoints(
+function adjustGroupFrameRouteEndpoints(
   request: LayoutRequest,
   input: Readonly<Record<string, Point[]>>,
   geometries: Readonly<Record<string, ElementGeometry>>,
+  groupFrameIds: ReadonlySet<string>,
 ): Record<string, Point[]> {
-  const regions = new Set(request.scene.elements
-    .filter((element) => element.structuralKind === "region")
-    .map((element) => element.elementId));
+  const elements = new Map(request.scene.elements.map((element) => [element.elementId, element]));
   const result = Object.fromEntries(Object.entries(input).map(([id, points]) => [
     id,
     points.map(copyPoint),
@@ -662,18 +1361,97 @@ function adjustRegionRouteEndpoints(
     if (!points || points.length < 2) continue;
     const source = geometries[edge.sourceElementId];
     const target = geometries[edge.targetElementId];
-    if (source && regions.has(edge.sourceElementId)) {
+    if (source && groupFrameIds.has(edge.sourceElementId)) {
+      const shape: EdgeEndpointShape = elements.get(edge.sourceElementId)?.structuralKind === "region"
+        ? "region"
+        : "container";
       points[0] = isValidEdgeEndpointAnchor(edge.sourceAnchor)
-        ? edgeEndpointAnchorPoint(source, "region", edge.sourceAnchor)
+        ? edgeEndpointAnchorPoint(source, shape, edge.sourceAnchor)
         : rectangleBoundaryPoint(source, points[1]!);
     }
-    if (target && regions.has(edge.targetElementId)) {
+    if (target && groupFrameIds.has(edge.targetElementId)) {
+      const shape: EdgeEndpointShape = elements.get(edge.targetElementId)?.structuralKind === "region"
+        ? "region"
+        : "container";
       points[points.length - 1] = isValidEdgeEndpointAnchor(edge.targetAnchor)
-        ? edgeEndpointAnchorPoint(target, "region", edge.targetAnchor)
+        ? edgeEndpointAnchorPoint(target, shape, edge.targetAnchor)
         : rectangleBoundaryPoint(target, points.at(-2)!);
     }
   }
   return result;
+}
+
+/**
+ * Enforces the public route cardinality without rewriting user/manual or
+ * transaction-fixed routes. Adapters may search with richer private paths,
+ * but generated renderer output exposes at most one intermediate pivot.
+ */
+function normalizeGeneratedAdapterRoutes(
+  request: LayoutRequest,
+  candidate: LayoutResult,
+): LayoutResult {
+  const edges = new Map(request.scene.edges.map((edge) => [edge.elementId, edge]));
+  const routes = Object.fromEntries(Object.entries(candidate.routes).map(([edgeId, points]) => [
+    edgeId,
+    points.map(copyPoint),
+  ]));
+  const diagnostics = [...candidate.diagnostics];
+  let changed = false;
+  for (const [edgeId, points] of Object.entries(routes)) {
+    const edge = edges.get(edgeId);
+    if (
+      !edge
+      || request.fixedDerivedRoutes?.[edgeId]
+      || edge.routingPlacement === "user"
+      || edge.routeMode === "manual"
+      || points.length < 2
+    ) continue;
+    const family = candidate.derivedRouteChoices?.[edgeId]?.family;
+    const normalized = family === "straight" || family === "curve"
+      ? [copyPoint(points[0]!), copyPoint(points.at(-1)!)]
+      : points.length > 3
+        ? [copyPoint(points[0]!), copyPoint(points[Math.floor(points.length / 2)]!), copyPoint(points.at(-1)!)]
+        : points;
+    if (sameRouteValue(points, normalized)) continue;
+    routes[edgeId] = normalized;
+    changed = true;
+    pushDiagnosticOnce(diagnostics, {
+      severity: "warning",
+      code: "layout-generated-route-compacted",
+      message: `${edgeId}の生成経路を公開上限の中間点1個へ縮約しました。adapter内の探索経路はrendererへ直接公開しないでください。`,
+      layoutRef: request.layoutRef,
+      edgeId,
+    });
+  }
+  if (!changed) return candidate;
+  const spacing = { ...DEFAULT_SPACING, ...request.spacing };
+  const bounds = sceneBounds(
+    layoutResultBoundGeometries(request, candidate.geometries),
+    [
+      ...Object.values(routes).flat(),
+      ...layoutDerivedRouteControlPoints(candidate.derivedRouteChoices),
+    ],
+    spacing.margin,
+  );
+  return {
+    ...candidate,
+    routes,
+    width: bounds.width,
+    height: bounds.height,
+    diagnostics,
+  };
+}
+
+function layoutResultBoundGeometries(
+  request: LayoutRequest,
+  geometries: Readonly<Record<string, ElementGeometry>>,
+): ElementGeometry[] {
+  return request.scene.elements.flatMap((element) => {
+    const geometry = geometries[element.elementId];
+    return geometry
+      ? [copyGeometry(geometry), ...layoutExternalReservationGeometries(element, geometry)]
+      : [];
+  });
 }
 
 function validateAdapterResult(request: LayoutRequest, result: LayoutResult): LayoutDiagnostic[] {
@@ -686,6 +1464,17 @@ function validateAdapterResult(request: LayoutRequest, result: LayoutResult): La
   }
   const expectedIds = new Set(request.scene.elements.map((element) => element.elementId));
   const expectedEdgeIds = new Set(request.scene.edges.map((edge) => edge.elementId));
+  for (const edge of request.scene.edges) {
+    if (!expectedIds.has(edge.sourceElementId) || !expectedIds.has(edge.targetElementId)) {
+      diagnostics.push({
+        ...invalidResult(
+          request,
+          `edge endpoint refers to an unknown element: ${edge.elementId} (${edge.sourceElementId} -> ${edge.targetElementId})`,
+        ),
+        edgeId: edge.elementId,
+      });
+    }
+  }
   for (const element of request.scene.elements) {
     const geometry = result.geometries[element.elementId];
     if (!geometry || !isValidGeometry(geometry)) {
@@ -721,8 +1510,20 @@ function validateAdapterResult(request: LayoutRequest, result: LayoutResult): La
         ...invalidResult(request, `route contains a non-finite point: ${edgeId}`),
         edgeId,
       });
+    } else {
+      const edge = request.scene.edges.find((candidate) => candidate.elementId === edgeId)!;
+      const generated = !request.fixedDerivedRoutes?.[edgeId]
+        && edge.routingPlacement !== "user"
+        && edge.routeMode !== "manual";
+      if (generated && points.length > 3) {
+        diagnostics.push({
+          ...invalidResult(request, `generated route has more than one intermediate point: ${edgeId}`),
+          edgeId,
+        });
+      }
     }
   }
+  validateDerivedRouteChoices(request, result, expectedEdgeIds, diagnostics);
   for (const [edgeId, fixed] of Object.entries(request.fixedDerivedRoutes ?? {})) {
     const actual = result.routes[edgeId];
     if (!actual || !sameRouteValue(actual, fixed)) {
@@ -733,6 +1534,77 @@ function validateAdapterResult(request: LayoutRequest, result: LayoutResult): La
     }
   }
   return diagnostics;
+}
+
+function validateDerivedRouteChoices(
+  request: LayoutRequest,
+  result: LayoutResult,
+  expectedEdgeIds: ReadonlySet<string>,
+  diagnostics: LayoutDiagnostic[],
+): void {
+  const validFamilies = new Set<LayoutDerivedRouteFamily>([
+    "straight", "curve", "polyline", "orthogonal", "manual",
+  ]);
+  const validSources = new Set<LayoutDerivedRouteChoice["source"]>(["auto", "explicit", "fixed"]);
+  const edges = new Map(request.scene.edges.map((edge) => [edge.elementId, edge]));
+  for (const [edgeId, choice] of Object.entries(result.derivedRouteChoices ?? {})) {
+    const invalid = (message: string): void => {
+      diagnostics.push({ ...invalidResult(request, message), edgeId });
+    };
+    if (!expectedEdgeIds.has(edgeId)) {
+      invalid(`derivedRouteChoice refers to an unknown edge: ${edgeId}`);
+      continue;
+    }
+    if (!validFamilies.has(choice.family) || !validSources.has(choice.source)) {
+      invalid(`derivedRouteChoice family/source is invalid: ${edgeId}`);
+      continue;
+    }
+    const edge = edges.get(edgeId)!;
+    const route = result.routes[edgeId];
+    if (!route) continue;
+    if (choice.family === "straight" && route.length !== 2) {
+      invalid(`straight derivedRouteChoice must have an endpoint-only route: ${edgeId}`);
+    }
+    if (choice.curve) {
+      const points = [
+        choice.curve.sourceControl,
+        choice.curve.targetControl,
+        choice.curve.guidePivot,
+      ];
+      if (
+        choice.family !== "curve"
+        || !Number.isFinite(choice.curve.guideAngleDegrees)
+        || points.some((point) => !Number.isFinite(point.x) || !Number.isFinite(point.y))
+      ) invalid(`derived curve controls are inconsistent or non-finite: ${edgeId}`);
+    }
+    const fixed = request.fixedDerivedRoutes?.[edgeId] !== undefined;
+    if (choice.source === "fixed" && !fixed) {
+      invalid(`fixed derivedRouteChoice has no fixedDerivedRoutes entry: ${edgeId}`);
+    }
+    if (fixed && choice.source !== "fixed") {
+      invalid(`fixedDerivedRoutes entry has a non-fixed derivedRouteChoice: ${edgeId}`);
+    }
+    const explicitFamily = edge.routeMode && edge.routeMode !== "auto"
+      ? edge.routeMode
+      : undefined;
+    if (explicitFamily && choice.source !== "explicit" && !fixed) {
+      invalid(`explicit routeMode has a non-explicit derivedRouteChoice: ${edgeId}`);
+    }
+    if (explicitFamily && choice.family !== explicitFamily && !fixed) {
+      invalid(`derivedRouteChoice does not match explicit routeMode ${explicitFamily}: ${edgeId}`);
+    }
+    if (!explicitFamily && !fixed && choice.source === "explicit") {
+      invalid(`explicit derivedRouteChoice has no explicit routeMode: ${edgeId}`);
+    }
+    const reasonMatchesSource = choice.source === "fixed"
+      ? choice.reason === "fixed-derived-route"
+      : choice.source === "explicit"
+        ? choice.reason === "explicit-route-mode"
+        : choice.reason.startsWith("auto-");
+    if (!reasonMatchesSource) {
+      invalid(`derivedRouteChoice reason/source is inconsistent: ${edgeId}`);
+    }
+  }
 }
 
 function validateFixedDerivedRouteRequest(request: LayoutRequest): LayoutDiagnostic[] {
@@ -849,6 +1721,7 @@ type LayoutState = {
   measured: Map<string, { width: number; height: number }>;
   geometries: Record<string, ElementGeometry>;
   diagnostics: LayoutDiagnostic[];
+  derivedRouteChoices: Record<string, LayoutDerivedRouteChoice>;
   routeObstaclesByEndpointPair: Map<string, RouteObstacle[]>;
   fixedDerivedRoutes: Map<string, readonly Point[]>;
   sharedEndpointGeometriesByEdgePair: Map<string, ElementGeometry[]>;
@@ -899,6 +1772,7 @@ function runStandardLayout(
     measured: new Map(),
     geometries: {},
     diagnostics,
+    derivedRouteChoices: {},
     routeObstaclesByEndpointPair: new Map(),
     fixedDerivedRoutes: new Map(Object.entries(request.fixedDerivedRoutes ?? {}).map(([id, points]) => [
       id,
@@ -913,14 +1787,16 @@ function runStandardLayout(
   // Regions are derived membership geometry. Complete them before routing so
   // they do not consume a layered rank yet region-incident edges still route
   // from their final boundary.
-  state.geometries = completeRegionLayout(request, {
+  const structurallyCompleted = completeRegionLayout(request, {
     layoutRef: request.layoutRef,
     geometries: state.geometries,
     routes: {},
     width: 0,
     height: 0,
     diagnostics: [],
-  }).geometries;
+  }, direction);
+  state.geometries = structurallyCompleted.geometries;
+  state.diagnostics.push(...structurallyCompleted.diagnostics);
   if (performanceSample) {
     performanceSample.placementMs = monotonicMilliseconds() - placementStartedAt;
   }
@@ -928,7 +1804,10 @@ function runStandardLayout(
   const boundsStartedAt = performanceSample ? monotonicMilliseconds() : 0;
   const bounds = sceneBounds(
     layoutBounds(state),
-    Object.values(routes).flat(),
+    [
+      ...Object.values(routes).flat(),
+      ...layoutDerivedRouteControlPoints(state.derivedRouteChoices),
+    ],
     state.spacing.margin,
   );
   if (performanceSample) {
@@ -937,8 +1816,11 @@ function runStandardLayout(
 
   const result: LayoutResult = {
     layoutRef: request.layoutRef,
+    direction,
+    structuralCompletion: true,
     geometries: state.geometries,
     routes,
+    derivedRouteChoices: state.derivedRouteChoices,
     width: bounds.width,
     height: bounds.height,
     diagnostics,
@@ -1063,6 +1945,12 @@ function measureElement(elementId: string, state: LayoutState): { width: number;
     : element.structuralKind === "container"
       ? { width: 360, height: 180 }
       : { width: 160, height: 72 };
+  if (validLayoutSize(element.minimumContentSize)) {
+    size = {
+      width: Math.max(size.width, element.minimumContentSize.width),
+      height: Math.max(size.height, element.minimumContentSize.height),
+    };
+  }
 
   if (element.structuralKind === "container") {
     const childIds = state.children.get(elementId) ?? [];
@@ -1078,6 +1966,16 @@ function measureElement(elementId: string, state: LayoutState): { width: number;
   }
   state.measured.set(elementId, size);
   return size;
+}
+
+function validLayoutSize(
+  value: { width: number; height: number } | undefined,
+): value is { width: number; height: number } {
+  return value !== undefined
+    && Number.isFinite(value.width)
+    && Number.isFinite(value.height)
+    && value.width > 0
+    && value.height > 0;
 }
 
 function placeGroup(groupId: string, origin: Point, state: LayoutState): void {
@@ -1814,7 +2712,10 @@ function routeEdges(
   if (performanceSample) {
     performanceSample.initialRouteMs = monotonicMilliseconds() - startedAt;
   }
-  return improveDerivedRoutes(routes, state, performanceSample);
+  return selectDerivedRouteFamilies(
+    improveDerivedRoutes(routes, state, performanceSample),
+    state,
+  );
 }
 
 function directRoute(
@@ -1845,6 +2746,348 @@ function directRoute(
       edgeEndpointAnchorFromPoint(target, targetToward),
     ),
   ];
+}
+
+/**
+ * Samples renderer-only cubic controls for collision tests or a non-Bezier
+ * renderer. Controls stay outside the portable overlay and semantic graph.
+ */
+export function flattenLayoutDerivedCurve(
+  route: readonly Point[],
+  curve: LayoutDerivedCurve,
+  subdivisions = 16,
+): Point[] {
+  const start = route[0];
+  const end = route.at(-1);
+  if (!start || !end) return route.map(copyPoint);
+  const count = Math.max(4, Math.min(64, Math.floor(subdivisions)));
+  return Array.from({ length: count + 1 }, (_, index) => {
+    const t = index / count;
+    const inverse = 1 - t;
+    return {
+      x: inverse ** 3 * start.x
+        + 3 * inverse ** 2 * t * curve.sourceControl.x
+        + 3 * inverse * t ** 2 * curve.targetControl.x
+        + t ** 3 * end.x,
+      y: inverse ** 3 * start.y
+        + 3 * inverse ** 2 * t * curve.sourceControl.y
+        + 3 * inverse * t ** 2 * curve.targetControl.y
+        + t ** 3 * end.y,
+    };
+  });
+}
+
+/** Returns only transient Bezier controls that can extend renderer bounds. */
+export function layoutDerivedRouteControlPoints(
+  choices: Readonly<Record<string, LayoutDerivedRouteChoice>> | undefined,
+): Point[] {
+  return Object.values(choices ?? {}).flatMap((choice) => choice.curve
+    ? [
+        copyPoint(choice.curve.sourceControl),
+        copyPoint(choice.curve.targetControl),
+      ]
+    : []);
+}
+
+/**
+ * Chooses only for `auto`: safe direct segment, safe gentle cubic, then the
+ * already-refined one-pivot polyline. Explicit modes and fixed routes are
+ * classified for renderer consumption but their public route is unchanged.
+ */
+function selectDerivedRouteFamilies(
+  input: Record<string, Point[]>,
+  state: LayoutState,
+): Record<string, Point[]> {
+  const routes = Object.fromEntries(Object.entries(input).map(([id, points]) => [
+    id,
+    points.map(copyPoint),
+  ]));
+  const sorted = [...state.edges].sort(compareEdge);
+  if (sorted.length > ROUTE_GRID_EDGE_LIMIT) {
+    return selectLargeDerivedRouteFamilies(routes, sorted, state);
+  }
+  const routeStates = indexRoutedEdgeStates(sorted, routes);
+  const autoEdges: LayoutEdge[] = [];
+
+  for (const edge of sorted) {
+    const route = routes[edge.elementId];
+    if (!route || route.length < 2) continue;
+    const explicit = explicitDerivedRouteChoice(edge, route, state);
+    if (!explicit) {
+      autoEdges.push(edge);
+      continue;
+    }
+    state.derivedRouteChoices[edge.elementId] = explicit;
+    if (explicit.curve) {
+      const flattened = flattenLayoutDerivedCurve(route, explicit.curve);
+      routeStates.set(edge.elementId, { edge, points: flattened, bounds: pointBounds(flattened) });
+    }
+  }
+
+  for (const edge of autoEdges) {
+    const base = routes[edge.elementId];
+    const source = state.geometries[edge.sourceElementId];
+    const target = state.geometries[edge.targetElementId];
+    if (!base || base.length < 2 || !source || !target) continue;
+    const rejected: LayoutDerivedRouteRejection[] = [];
+    if (edge.sourceElementId === edge.targetElementId) {
+      rejected.push(
+        { family: "straight", reason: "self-loop" },
+        { family: "curve", reason: "self-loop" },
+      );
+      state.derivedRouteChoices[edge.elementId] = {
+        family: "polyline",
+        source: "auto",
+        reason: "auto-self-loop-preserved",
+        rejected,
+      };
+      continue;
+    }
+
+    const others = routedOthers(sorted, routeStates, edge, state);
+    const obstacles = routeObstacles(edge, state);
+    const baseCost = routeCost(base, edge, obstacles, others);
+    const direct = applyEndpointAnchors(
+      directRoute(edge, source, target, state),
+      edge,
+      source,
+      target,
+      state,
+    );
+    const directCost = routeCost(direct, edge, obstacles, others);
+    const directRejection = routeFamilyRejection(
+      direct,
+      directCost,
+      baseCost,
+      edge,
+      others,
+      source,
+      target,
+    );
+    if (!directRejection) {
+      setRoutedEdgeRoute(routes, routeStates, edge, direct);
+      state.derivedRouteChoices[edge.elementId] = {
+        family: "straight",
+        source: "auto",
+        reason: "auto-straight-safe",
+      };
+      continue;
+    }
+    rejected.push({ family: "straight", reason: directRejection });
+
+    const curveCandidate = derivedCurveCandidate(base, false, edge);
+    if (!curveCandidate) {
+      rejected.push({ family: "curve", reason: "no-guide" });
+    } else if (curveCandidate.curve.guideAngleDegrees < 90 - 1e-6) {
+      rejected.push({ family: "curve", reason: "tight-turn" });
+    } else {
+      const curveCost = routeCost(curveCandidate.flattened, edge, obstacles, others);
+      const curveRejection = routeFamilyRejection(
+        curveCandidate.flattened,
+        curveCost,
+        baseCost,
+        edge,
+        others,
+        source,
+        target,
+      );
+      if (!curveRejection) {
+        routes[edge.elementId] = [copyPoint(base[0]!), copyPoint(base.at(-1)!)];
+        routeStates.set(edge.elementId, {
+          edge,
+          points: curveCandidate.flattened,
+          bounds: pointBounds(curveCandidate.flattened),
+        });
+        state.derivedRouteChoices[edge.elementId] = {
+          family: "curve",
+          source: "auto",
+          reason: "auto-curve-safe",
+          curve: curveCandidate.curve,
+          rejected,
+        };
+        continue;
+      }
+      rejected.push({ family: "curve", reason: curveRejection });
+    }
+    state.derivedRouteChoices[edge.elementId] = {
+      family: "polyline",
+      source: "auto",
+      reason: "auto-polyline-fallback",
+      rejected,
+    };
+  }
+  return routes;
+}
+
+/**
+ * The full candidate comparison is intentionally quadratic because every
+ * curve must be flattened against every visible peer. Beyond the documented
+ * quality budget, preserve the already-bounded route and classify it in one
+ * pass instead of retaining endpoint-pair obstacle copies for the whole graph.
+ */
+function selectLargeDerivedRouteFamilies(
+  routes: Record<string, Point[]>,
+  sorted: readonly LayoutEdge[],
+  state: LayoutState,
+): Record<string, Point[]> {
+  const bundleSignatures = new Map<string, number>();
+  for (const edge of sorted) {
+    const route = routes[edge.elementId];
+    if (!route) continue;
+    const key = `${canonicalEndpointPair(edge).join("\n")}\n${routeSignature(route)}`;
+    bundleSignatures.set(key, (bundleSignatures.get(key) ?? 0) + 1);
+  }
+  for (const edge of sorted) {
+    const route = routes[edge.elementId];
+    if (!route || route.length < 2) continue;
+    const explicit = explicitDerivedRouteChoice(edge, route, state);
+    if (explicit) {
+      state.derivedRouteChoices[edge.elementId] = explicit;
+      continue;
+    }
+    if (edge.sourceElementId === edge.targetElementId) {
+      state.derivedRouteChoices[edge.elementId] = {
+        family: "polyline",
+        source: "auto",
+        reason: "auto-self-loop-preserved",
+        rejected: [
+          { family: "straight", reason: "self-loop" },
+          { family: "curve", reason: "self-loop" },
+        ],
+      };
+      continue;
+    }
+    const signatureKey = `${canonicalEndpointPair(edge).join("\n")}\n${routeSignature(route)}`;
+    if (route.length === 2 && bundleSignatures.get(signatureKey) === 1) {
+      state.derivedRouteChoices[edge.elementId] = {
+        family: "straight",
+        source: "auto",
+        reason: "auto-straight-safe",
+      };
+      continue;
+    }
+    state.derivedRouteChoices[edge.elementId] = {
+      family: "polyline",
+      source: "auto",
+      reason: "auto-polyline-fallback",
+      rejected: [
+        { family: "straight", reason: "interaction" },
+        { family: "curve", reason: "no-guide" },
+      ],
+    };
+  }
+  return routes;
+}
+
+function explicitDerivedRouteChoice(
+  edge: LayoutEdge,
+  route: readonly Point[],
+  state: LayoutState,
+): LayoutDerivedRouteChoice | undefined {
+  if (edge.routeMode === "straight") {
+    return { family: "straight", source: "explicit", reason: "explicit-route-mode" };
+  }
+  if (edge.routeMode === "orthogonal") {
+    return { family: "orthogonal", source: "explicit", reason: "explicit-route-mode" };
+  }
+  if (edge.routeMode === "manual" || (isImmutableRoute(edge) && edge.waypoints?.length)) {
+    return { family: "manual", source: "explicit", reason: "explicit-route-mode" };
+  }
+  if (edge.routeMode === "curve") {
+    const candidate = derivedCurveCandidate(route, true, edge);
+    return {
+      family: "curve",
+      source: "explicit",
+      reason: "explicit-route-mode",
+      ...(candidate ? { curve: candidate.curve } : {}),
+    };
+  }
+  if (isFixedDerivedRoute(edge, state)) {
+    return {
+      family: route.length === 2 ? "straight" : "polyline",
+      source: "fixed",
+      reason: "fixed-derived-route",
+    };
+  }
+  if (isImmutableRoute(edge)) {
+    return { family: "polyline", source: "explicit", reason: "explicit-route-mode" };
+  }
+  return undefined;
+}
+
+function routeFamilyRejection(
+  candidate: readonly Point[],
+  candidateCost: RouteCost,
+  baseCost: RouteCost,
+  edge: LayoutEdge,
+  others: readonly RoutedEdge[],
+  source: ElementGeometry,
+  target: ElementGeometry,
+): LayoutDerivedRouteRejection["reason"] | undefined {
+  if (!endpointLegsLeaveElements(candidate, source, target)) return "endpoint-direction";
+  if (candidateCost[0] !== 0 || candidateCost[2] !== 0) return "obstacle";
+  if (duplicatesBundlePeer(candidate, edge, others)) return "parallel-identity";
+  if (candidateCost[1] > baseCost[1] || candidateCost[3] > baseCost[3]) return "interaction";
+  return undefined;
+}
+
+function derivedCurveCandidate(
+  route: readonly Point[],
+  allowSyntheticGuide: boolean,
+  edge: LayoutEdge,
+): { curve: LayoutDerivedCurve; flattened: Point[] } | undefined {
+  const start = route[0];
+  const end = route.at(-1);
+  if (!start || !end || samePoint(start, end)) return undefined;
+  const guide = route.length === 3
+    ? copyPoint(route[1]!)
+    : allowSyntheticGuide ? syntheticCurveGuide(start, end, edge.elementId) : undefined;
+  if (!guide || samePoint(start, guide) || samePoint(guide, end)) return undefined;
+  const angle = innerAngleDegrees(start, guide, end);
+  const tension = 0.82;
+  const curve: LayoutDerivedCurve = {
+    sourceControl: interpolatePoint(start, guide, tension),
+    targetControl: interpolatePoint(end, guide, tension),
+    guidePivot: guide,
+    guideAngleDegrees: angle,
+  };
+  return { curve, flattened: flattenLayoutDerivedCurve(route, curve) };
+}
+
+function syntheticCurveGuide(start: Point, end: Point, identity: string): Point {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const offset = Math.max(24, Math.min(80, length * 0.15));
+  const sign = stableTextParity(identity) === 0 ? -1 : 1;
+  return {
+    x: (start.x + end.x) / 2 - dy / length * offset * sign,
+    y: (start.y + end.y) / 2 + dx / length * offset * sign,
+  };
+}
+
+function stableTextParity(value: string): 0 | 1 {
+  let result = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    result = (result * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return (result & 1) as 0 | 1;
+}
+
+function interpolatePoint(start: Point, end: Point, ratio: number): Point {
+  return {
+    x: start.x + (end.x - start.x) * ratio,
+    y: start.y + (end.y - start.y) * ratio,
+  };
+}
+
+function innerAngleDegrees(start: Point, pivot: Point, end: Point): number {
+  const left = { x: start.x - pivot.x, y: start.y - pivot.y };
+  const right = { x: end.x - pivot.x, y: end.y - pivot.y };
+  const denominator = Math.hypot(left.x, left.y) * Math.hypot(right.x, right.y);
+  if (denominator === 0) return 0;
+  const cosine = Math.max(-1, Math.min(1, dotProduct(left, right) / denominator));
+  return Math.acos(cosine) * 180 / Math.PI;
 }
 
 type RoutedEdge = {
@@ -3837,6 +5080,29 @@ function crossSize(size: { width: number; height: number }, direction: LayoutDir
 
 function copyGeometry(value: ElementGeometry): ElementGeometry {
   return { ...value };
+}
+
+function copyGeometryRecord(
+  input: Readonly<Record<string, ElementGeometry>>,
+): Record<string, ElementGeometry> {
+  return Object.fromEntries(Object.entries(input).map(([id, geometry]) => [
+    id,
+    copyGeometry(geometry),
+  ]));
+}
+
+function sameGeometryRecord(
+  left: Readonly<Record<string, ElementGeometry>>,
+  right: Readonly<Record<string, ElementGeometry>>,
+): boolean {
+  const leftIds = Object.keys(left).sort(compareText);
+  const rightIds = Object.keys(right).sort(compareText);
+  return leftIds.length === rightIds.length
+    && leftIds.every((id, index) => (
+      id === rightIds[index]
+      && right[id] !== undefined
+      && sameGeometry(left[id]!, right[id]!)
+    ));
 }
 
 function copyPoint(value: Point): Point {

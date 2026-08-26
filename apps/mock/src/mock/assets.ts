@@ -1,11 +1,16 @@
-import type {
-  AssetAccess,
-  AssetLease,
-  AssetMediaType,
-  AssetResolveRequest,
-  AssetResolveResult,
-  AssetResolver,
+import {
+  DEFAULT_ASSET_MAX_DECODED_PIXELS,
+  type AssetAccess,
+  type AssetLease,
+  type AssetMediaType,
+  type AssetResolveRequest,
+  type AssetResolveResult,
+  type AssetResolver,
 } from "@iriograph/core";
+import {
+  createStaticWorkspaceLocator,
+  type WorkspaceLocator,
+} from "@iriograph/vue-editor";
 
 import type {
   MockWorkspaceEntry,
@@ -27,6 +32,12 @@ type CachedAsset = {
   url: string;
   mediaType: string;
   byteLength: number;
+  intrinsicSize?: {
+    width: number;
+    height: number;
+    aspectRatio: number;
+  };
+  svgViewBox?: string;
   references: number;
 };
 
@@ -39,14 +50,22 @@ export type MockAssetResolverOptions = {
   baseUrl: string;
   fetchAsset?: FetchAsset;
   objectUrls?: ObjectUrlApi;
+  decodeIntrinsicSize?: (
+    blob: Blob,
+    signal: AbortSignal,
+  ) => Promise<{ width: number; height: number } | undefined>;
 };
 
-const ALLOWED_MEDIA_TYPES: readonly AssetMediaType[] = [
+export const MOCK_ALLOWED_ASSET_MEDIA_TYPES: readonly AssetMediaType[] = [
   "image/svg+xml",
   "image/png",
+  "image/jpeg",
   "image/webp",
 ];
-const MAX_ASSET_BYTES = 1024 * 1024;
+// Byte transport and decoded pixel area are independent limits: large reports
+// may compress well, while tiny compressed files may decode to unsafe surfaces.
+const MAX_ASSET_BYTES = 16 * 1024 * 1024;
+const MAX_SVG_OPENING_TAG_LENGTH = 8192;
 
 export function createMockAssetHost(
   workspace: MockWorkspaceManifest,
@@ -59,8 +78,9 @@ export function createMockAssetHost(
       resolver,
       revision: workspaceRevision(workspace),
       policy: {
-        allowedMediaTypes: ALLOWED_MEDIA_TYPES,
+        allowedMediaTypes: MOCK_ALLOWED_ASSET_MEDIA_TYPES,
         maxBytes: MAX_ASSET_BYTES,
+        maxDecodedPixels: DEFAULT_ASSET_MAX_DECODED_PIXELS,
         allowedSchemes: ["blob:"],
         allowedOrigins: [origin],
       },
@@ -69,6 +89,20 @@ export function createMockAssetHost(
       resolver.dispose();
     },
   };
+}
+
+/** Manifest metadata adapter for path completion. No bytes or URLs cross this port. */
+export function createMockWorkspaceLocator(workspace: MockWorkspaceManifest): WorkspaceLocator {
+  return createStaticWorkspaceLocator(workspace.entries.flatMap((entry) => (
+    entry.kind === "asset" && entry.assetRef && isMockAssetMediaType(entry.mediaType)
+      ? [{
+          path: entry.path,
+          assetRef: entry.assetRef,
+          label: entry.path.split("/").at(-1) ?? entry.path,
+          mediaType: entry.mediaType,
+        }]
+      : []
+  )));
 }
 
 /** Browser host resolver: workspace manifest source -> verified Blob URL lease. */
@@ -157,11 +191,28 @@ export class MockWorkspaceAssetResolver implements AssetResolver {
       return { status: "unresolved", reason: "unavailable", message: "resolver disposed" };
     }
     const mediaType = normalizeMediaType(blob.type || response.headers.get("content-type") || "");
+    // Do not decode a byte-oversized response merely to discover metadata.
+    // Core still receives the observed byte length and emits the policy diagnostic.
+    const metadata = blob.size > MAX_ASSET_BYTES
+      ? { status: "resolved" as const, value: {} }
+      : await this.resolveIntrinsicMetadata(blob, mediaType, request.signal);
+    if (metadata.status === "decode-failed") {
+      return {
+        status: "unresolved",
+        reason: "decode-failed",
+        message: metadata.message,
+      };
+    }
+    throwIfAborted(request.signal);
+    if (this.disposed) {
+      return { status: "unresolved", reason: "unavailable", message: "resolver disposed" };
+    }
     const created: CachedAsset = {
       key,
       url: this.objectUrls.create(blob),
       mediaType,
       byteLength: blob.size,
+      ...metadata.value,
       references: 0,
     };
     const raced = this.cache.get(key);
@@ -187,6 +238,8 @@ export class MockWorkspaceAssetResolver implements AssetResolver {
       url: entry.url,
       mediaType: entry.mediaType,
       byteLength: entry.byteLength,
+      ...(entry.intrinsicSize ? { intrinsicSize: { ...entry.intrinsicSize } } : {}),
+      ...(entry.svgViewBox !== undefined ? { svgViewBox: entry.svgViewBox } : {}),
       release: () => {
         if (released) return;
         released = true;
@@ -197,6 +250,50 @@ export class MockWorkspaceAssetResolver implements AssetResolver {
       },
     };
   }
+
+  private async resolveIntrinsicMetadata(
+    blob: Blob,
+    mediaType: string,
+    signal: AbortSignal,
+  ): Promise<
+    | { status: "resolved"; value: Pick<CachedAsset, "intrinsicSize" | "svgViewBox"> }
+    | { status: "decode-failed"; message: string }
+  > {
+    if (mediaType === "image/svg+xml") {
+      const viewBox = extractSvgViewBox(await blob.text());
+      throwIfAborted(signal);
+      if (viewBox !== undefined) {
+        return { status: "resolved", value: { svgViewBox: viewBox } };
+      }
+      return { status: "resolved", value: {} };
+    }
+    if (!isMockAssetMediaType(mediaType)) return { status: "resolved", value: {} };
+    try {
+      const decoded = await (this.options.decodeIntrinsicSize ?? decodeWithImageBitmap)(blob, signal);
+      throwIfAborted(signal);
+      if (!decoded) return { status: "resolved", value: {} };
+      return {
+        status: "resolved",
+        value: {
+          intrinsicSize: {
+            width: decoded.width,
+            height: decoded.height,
+            aspectRatio: decoded.width / decoded.height,
+          },
+        },
+      };
+    } catch (cause) {
+      if (signal.aborted || isAbortError(cause)) throw cause;
+      return {
+        status: "decode-failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      };
+    }
+  }
+}
+
+export function isMockAssetMediaType(value: string): value is AssetMediaType {
+  return MOCK_ALLOWED_ASSET_MEDIA_TYPES.includes(value as AssetMediaType);
 }
 
 export function workspaceAssetPickResult(
@@ -233,6 +330,33 @@ function duplicateAssetRefs(assetRefs: readonly string[]): string[] {
 
 function normalizeMediaType(value: string): string {
   return value.split(";", 1)[0]!.trim().toLowerCase();
+}
+
+function extractSvgViewBox(source: string): string | undefined {
+  const openingStart = source.search(/<svg\b/iu);
+  if (openingStart < 0) return undefined;
+  const openingEnd = source.indexOf(">", openingStart);
+  if (
+    openingEnd < 0
+    || openingEnd - openingStart > MAX_SVG_OPENING_TAG_LENGTH
+  ) return undefined;
+  const openingTag = source.slice(openingStart, openingEnd + 1);
+  return /\bviewBox\s*=\s*(["'])(.*?)\1/isu.exec(openingTag)?.[2];
+}
+
+async function decodeWithImageBitmap(
+  blob: Blob,
+  signal: AbortSignal,
+): Promise<{ width: number; height: number } | undefined> {
+  if (typeof globalThis.createImageBitmap !== "function") return undefined;
+  throwIfAborted(signal);
+  const bitmap = await globalThis.createImageBitmap(blob);
+  try {
+    throwIfAborted(signal);
+    return { width: bitmap.width, height: bitmap.height };
+  } finally {
+    bitmap.close();
+  }
 }
 
 function throwIfAborted(signal: AbortSignal): void {

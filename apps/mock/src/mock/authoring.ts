@@ -31,6 +31,52 @@ const RDFS_CLASS = `${RDFS}Class`;
 const RDFS_LABEL = `${RDFS}label`;
 const RDFS_SUBPROPERTY_OF = `${RDFS}subPropertyOf`;
 
+export const MOCK_WORKFLOW_ROLE_CLASSES = {
+  process: "urn:iriograph:authoring-role:workflow:Process",
+  event: "urn:iriograph:authoring-role:workflow:Event",
+  gateway: "urn:iriograph:authoring-role:workflow:Gateway",
+  information: "urn:iriograph:authoring-role:workflow:Information",
+} as const;
+
+const mockWorkflowRoleTerms: readonly ResolvedAuthoringTerm[] = [
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.process,
+    termId: "workflow-role-process",
+    kind: "class",
+    roles: ["type-object"],
+    label: "処理",
+    description: "作業や判断など、業務の中で実行する内容です。",
+    category: "要素の種類",
+  },
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.event,
+    termId: "workflow-role-event",
+    kind: "class",
+    roles: ["type-object"],
+    label: "出来事",
+    description: "開始、待機、受信、完了など、状態が変わる時点です。",
+    category: "要素の種類",
+  },
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.gateway,
+    termId: "workflow-role-gateway",
+    kind: "class",
+    roles: ["type-object"],
+    label: "分岐・合流",
+    description: "流れを複数に分ける、または複数の流れをまとめる地点です。",
+    category: "要素の種類",
+  },
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.information,
+    termId: "workflow-role-information",
+    kind: "class",
+    roles: ["type-object"],
+    label: "情報",
+    description: "注文、料金、帳票など、業務で受け渡す情報です。",
+    category: "要素の種類",
+  },
+];
+
 const mockLayoutRegistry = createStandardLayoutRegistry();
 mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR"));
 mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredTb, "TB"));
@@ -46,22 +92,28 @@ export const mockProjectionRuntimeContext = createProjectionRuntimeContext([
   ruleOrigins: [],
 })), mockLayoutRegistry);
 
-export const mockResourceIriAllocator: ResourceIriAllocator = {
-  allocate(request) {
-    if (request.signal?.aborted) return undefined;
-    return {
-      // Identity remains opaque: label/comment carry meaning and may change freely.
-      iri: `${DEMO_NAMESPACE}r-${shortHash(request.requestId)}`,
-      requestId: request.requestId,
-      baseRevision: request.baseRevision,
-      contextId: request.contextId,
-    };
-  },
-};
+export function createMockResourceIriAllocator(baseIri: string): ResourceIriAllocator {
+  return {
+    allocate(request) {
+      if (request.signal?.aborted) return undefined;
+      return {
+        // Identity remains opaque: label/comment carry meaning and may change freely.
+        iri: `${baseIri}r-${shortHash(request.requestId)}`,
+        requestId: request.requestId,
+        baseRevision: request.baseRevision,
+        contextId: request.contextId,
+      };
+    },
+  };
+}
+
+export const mockResourceIriAllocator = createMockResourceIriAllocator(DEMO_NAMESPACE);
 
 export function createMockAuthoringContext(
   document: IriographDocumentV1,
 ): ResolvedAuthoringContext {
+  const localNamespace = document.semantic.baseIri;
+  const allocator = createMockResourceIriAllocator(localNamespace);
   const standardTerms: ResolvedAuthoringTerm[] = [
     { iri: RDFS_CLASS, kind: "class", roles: ["type-object"], label: "概念クラス" },
     { iri: RDF_PROPERTY, kind: "class", roles: ["type-object"], label: "関係の定義" },
@@ -74,7 +126,7 @@ export function createMockAuthoringContext(
     { iri: `${RDFS}subClassOf`, kind: "property", label: "上位概念", objectKinds: ["iri"] },
     { iri: `${RDFS}member`, kind: "property", label: "標準の包含", objectKinds: ["iri"], structural: true },
     {
-      iri: `${DEMO_NAMESPACE}p-03`,
+      iri: `${localNamespace}p-03`,
       kind: "property",
       label: "監査対象として含む",
       description: "監査領域へ対象工程を所属させます。",
@@ -84,7 +136,7 @@ export function createMockAuthoringContext(
       structural: true,
     },
     {
-      iri: `${DEMO_NAMESPACE}p-01`,
+      iri: `${localNamespace}p-01`,
       kind: "property",
       label: "関連する",
       description: "業務要素間の一般的な関係を示します。",
@@ -93,7 +145,7 @@ export function createMockAuthoringContext(
       objectKinds: ["iri"],
     },
     {
-      iri: `${DEMO_NAMESPACE}p-02`,
+      iri: `${localNamespace}p-02`,
       kind: "property",
       label: "再試行",
       description: "処理が以前の工程へ戻る関係を示します。",
@@ -106,9 +158,10 @@ export function createMockAuthoringContext(
     contextId: "urn:iriograph:mock:authoring-context",
     contextRevision: "1",
     documentRevision: shortHash(JSON.stringify(document)),
+    defaultLocale: "ja",
     authoringProfileRef: document.semantic.authoringProfileRef,
     runtime: mockProjectionRuntimeContext,
-    resourcePolicy: { allowedMintNamespaces: [DEMO_NAMESPACE] },
+    resourcePolicy: { allowedMintNamespaces: [localNamespace] },
     termPolicy: {
       existingUnknown: "preserve",
       humanUnknown: "warn",
@@ -119,11 +172,41 @@ export function createMockAuthoringContext(
       llmMinting: "deny",
     },
     terms: mergeTerms(
-      [...standardPredicateTermsJa(), ...standardTerms],
+      [...standardPredicateTermsJa(), ...mockWorkflowRoleTerms, ...standardTerms],
       discoverDocumentTerms(document),
     ),
     capabilities: [],
-    allocator: mockResourceIriAllocator,
+    structuredAuthoring: {
+      allowUntypedNodes: false,
+      allowClassificationGroups: true,
+      nodeRoles: [
+        {
+          roleId: "role-01",
+          classIri: MOCK_WORKFLOW_ROLE_CLASSES.process,
+          label: "処理",
+          description: "作業や判断など、業務の中で実行する内容です。",
+        },
+        {
+          roleId: "role-02",
+          classIri: MOCK_WORKFLOW_ROLE_CLASSES.event,
+          label: "出来事",
+          description: "開始、待機、受信、完了など、状態が変わる時点です。",
+        },
+        {
+          roleId: "role-03",
+          classIri: MOCK_WORKFLOW_ROLE_CLASSES.gateway,
+          label: "分岐・合流",
+          description: "流れを複数に分ける、または複数の流れをまとめる地点です。",
+        },
+        {
+          roleId: "role-04",
+          classIri: MOCK_WORKFLOW_ROLE_CLASSES.information,
+          label: "情報",
+          description: "注文、料金、帳票など、業務で受け渡す情報です。",
+        },
+      ],
+    },
+    allocator,
   };
 }
 

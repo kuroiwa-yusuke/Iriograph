@@ -5,12 +5,18 @@ export type DiagramContextTargetKind = "node" | "edge" | "container" | "region" 
 export type DiagramContextMenuRequest = {
   kind: DiagramContextTargetKind;
   elementId?: string;
+  origin?: "pointer" | "keyboard";
+  guide?: {
+    guideId: string;
+    groupElementId: string;
+    kind: "sequence-order" | "alternative-candidate";
+  };
   clientX: number;
   clientY: number;
   canvasPosition?: Point;
 };
 
-export type EditorContextActionId =
+export type LegacyEditorContextActionId =
   | "edit-name"
   | "edit-details"
   | "create-relation"
@@ -25,11 +31,19 @@ export type EditorContextActionId =
   | "create-node"
   | "create-region";
 
+/**
+ * The menu renderer is intentionally generic. Legacy callers retain their
+ * literal IDs, while target-specific adapters may use their own stable IDs.
+ */
+export type EditorContextActionId = LegacyEditorContextActionId | (string & {});
+
 export type EditorContextAction = {
   id: EditorContextActionId;
   label: string;
   destructive?: boolean;
   disabled?: boolean;
+  disabledReason?: string;
+  iconToken?: string;
 };
 
 export function contextActionsFor(

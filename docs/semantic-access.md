@@ -7,7 +7,7 @@ Semantic Accessは、Iriographの意味グラフを人間とLLMがlabel-firstで
 この層は次を行います。
 
 - TurtleをRDF datasetとしてparseし、resource、predicate、label、説明、型、階層、近傍、membershipを索引化する
-- 人間とLLMにはlabel/commentを主表示し、同時に完全IRIとrevision-bound aliasを返す
+- Read APIはlabel/commentを主表示にし、machine consumerへ完全IRIとrevision-bound aliasを返す。Standard editorへ渡す場合はpresentation helperでopaque ID化し、生IRIをDOMへ渡さない
 - alias操作を`@iriograph/core`の`AuthoringCommand`へ変換する
 - preview/applyをhost注入の`SemanticWritePort`へ委譲する
 
@@ -53,7 +53,7 @@ Blank nodeとliteralはalias対象にしません。Literalはlabel/commentま�
 3. commentの完全一致、prefix一致、部分一致
 4. IRIの完全一致、prefix一致、部分一致
 
-Scoreが同じ場合は選択label、完全IRI、match fieldの順でsortします。同名labelは複数結果として残し、type、説明、近傍、完全IRIで利用者に曖昧性を解消させます。Label変更はresource identityを変更しません。
+Scoreが同じ場合は選択label、完全IRI、match fieldの順でsortします。同名labelは複数結果として残します。Machine resultは完全IRIを保持しますが、standard presentationはtype、説明、近傍とrevision-boundなopaque IDで曖昧性を解消し、生IRIをDOMへ渡しません。Label変更はresource identityを変更しません。
 
 ## 4. Alias
 
@@ -77,6 +77,7 @@ Index revisionと一致しないaliasは`StaleSemanticRevisionError`、該当nam
 | `searchResources(query)` | label、comment、IRIを検索し、完全IRI、`rN`、選択label、typeを返す |
 | `searchPredicates(query)` / `searchRelations(query)` | predicateだけを検索し、完全IRI、`pN`、resource alias、usage countを返す |
 | `describe(rN)` | 全label/comment、direct type、上位class/property closure、incoming/outgoing件数を返す |
+| `hierarchy(reference, kind)` / `predicateHierarchy(pN)` | class/propertyの上位path、distance、revision alias、到達可能なcycle diagnostic、path budgetとtruncated状態を返す |
 | `neighbors(query)` | direction、predicate、limitでnamed-resource tripleを返し、exact statement identityと個別commentを保持する |
 | `subgraph(query)` | root、0〜10のdepth、direction、predicate、最大relation数を指定し、個別comment付きの部分graphを返す |
 | `memberships(query)` | container/memberの向き、元predicate、`rdfs:member`までのdistanceを返す |
@@ -84,7 +85,36 @@ Index revisionと一致しないaliasは`StaleSemanticRevisionError`、該当nam
 
 `subgraph`は最大relation数に達した場合`truncated: true`を返します。Host/MCPはこの値を隠さず、追加探索が必要であることをLLMへ伝えます。
 
-### 5.1 Membershipの正規化
+### 5.1 Class / predicate階層
+
+`describe`の`superClasses` / `superProperties`と`hierarchy`は、最短親だけに潰さず、要求termから各ancestorへ
+到達するfinite simple pathを返します。同じancestorに複数親から到達する通常規模のdiamond DAGでは、
+`HierarchyRelation.paths`に各IRI列を別々に保持し、`distance`はそのうち最短のedge数です。結果は完全IRIの
+code point順で決定的に並びます。
+
+Path列挙はqueryごとの決定的なbudget（既定256、`hierarchyPathBudget`は1〜4096）を持ちます。
+Budget未満では全simple pathを返し、到達時は保守的に列挙を打ち切って`truncated: true`、各relationの
+`pathsTruncated: true`、`hierarchy-path-budget-exceeded` diagnosticと絞り込みを促すactionを返します。
+Host/MCPはこれらを隠して完全な説明であるかのようにLLMへ提示してはなりません。
+
+`rdfs:subClassOf`または`rdfs:subPropertyOf`にcycleがある場合、cycle内を無限に走査せず
+`hierarchy-cycle` diagnosticへ閉路をcanonicalizeして返し、cycleを切るsuggested actionも添えます。Cycleがあってもcycle外へ到達する
+有限pathは失いません。Consumerはこの階層を説明・検索・検証に使えますが、上位predicateのdirect relationを
+asserted tripleとして追加してはなりません。Query/validationでsubproperty inferenceを有効にするかはhost policy、
+catalogの表示ruleがsubproperty照合を採用するかはCore resolution traceの別責務です。
+
+Semantic Accessの`hierarchy-cycle`は検索・説明用indexの診断です。Coreの
+`projection-subclass-entailment-cycle` / `projection-subproperty-entailment-cycle`は、同じRDFS階層をcatalogの
+rule matchingへ使う際の診断です。Catalog ruleはflatな集合であり、catalog rule自身の継承cycleは存在しません。
+この二責務を同じcodeや一つの警告へ統合しません。
+
+Editor/hostがこのexact hierarchyを通常UIへ渡すときは、Coreの
+`structuredPredicateHierarchyPresentation`へIRI pathとlabelを内部入力し、predicate catalogと同じopaque ID規則へ
+変換します。返却DTOにはlabel、opaque predicate ID、全path、cycle/truncation、host inference policyだけを含め、
+生のIRIやSemantic AccessのIRI入りmessageをpresentation item/DOMへ渡しません。CoreからSemantic Accessへの依存は
+作らず、label一致でidentityを再解決しません。
+
+### 5.2 Membershipの正規化
 
 次をmembershipとして返します。
 

@@ -6,6 +6,7 @@ import {
   appendEdgeCurveKnot,
   appendEdgeWaypoint,
   cubicCurvePath,
+  derivedSceneCurveRouting,
   edgeCurveControlHandles,
   edgeCurveKnotAppendIndex,
   edgeCurveSegments,
@@ -23,6 +24,7 @@ import {
   removeEdgeCurveHandle,
   removeEdgeCurveKnot,
   removeEdgeWaypoint,
+  renderedEdgeRouteFamily,
   routingWithCurve,
   routingWithEndpointAnchor,
   routingWithLabelOffset,
@@ -194,6 +196,43 @@ describe("edge routing helpers", () => {
       { x: 135, y: -30 },
       { x: 200, y: 0 },
     ]);
+  });
+
+  it("autoだけがlayout由来familyと絶対controlを描画用に解決する", () => {
+    const edge = edgeFor({
+      routeMode: "auto",
+      route: [{ x: 20, y: 30 }, { x: 220, y: 130 }],
+      derivedRouteChoice: {
+        family: "curve",
+        source: "auto",
+        reason: "auto-curve-safe",
+        curve: {
+          sourceControl: { x: 80, y: 10 },
+          targetControl: { x: 170, y: 180 },
+          guidePivot: { x: 120, y: 80 },
+          guideAngleDegrees: 26,
+        },
+      },
+    });
+
+    expect(renderedEdgeRouteFamily(edge)).toBe("curve");
+    expect(derivedSceneCurveRouting(edge)).toEqual({
+      sourceHandle: { x: 60, y: -20 },
+      targetHandle: { x: -50, y: 50 },
+    });
+    expect(renderedEdgeRouteFamily(edge, "straight")).toBe("straight");
+    expect(renderedEdgeRouteFamily(edgeFor({ routeMode: "auto" }))).toBe("polyline");
+    const staleExplicit = edgeFor({
+      routeMode: "auto",
+      route: edge.route,
+      derivedRouteChoice: {
+        ...edge.derivedRouteChoice!,
+        source: "explicit",
+        reason: "explicit-route-mode",
+      },
+    });
+    expect(renderedEdgeRouteFamily(staleExplicit)).toBe("polyline");
+    expect(derivedSceneCurveRouting(staleExplicit)).toBeUndefined();
   });
 
   it("curve knotを曲線上へ追加・移動・削除しlabel位置を曲線長から求める", () => {

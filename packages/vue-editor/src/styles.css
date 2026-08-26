@@ -446,26 +446,35 @@
   font-size: 8px;
 }
 
-.iriograph-predicate-group > label {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 3px 6px;
+.iriograph-predicate-group > article {
   margin: 3px 0;
-  padding: 7px;
   border: 1px solid transparent;
   border-radius: 5px;
   background: #fff;
 }
 
-.iriograph-predicate-group > label.selected {
+.iriograph-predicate-group > article > label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 6px;
+  padding: 7px;
+}
+
+.iriograph-predicate-group > article.selected {
   border-color: #4b8582;
   background: #eef8f5;
 }
 
-.iriograph-predicate-group > label span,
-.iriograph-predicate-group > label small {
+.iriograph-predicate-group > article > label span,
+.iriograph-predicate-group > article > label small {
   grid-column: 2;
   color: #667a77;
+  font-size: 8px;
+}
+
+.iriograph-predicate-group > article > details {
+  margin: 0 7px 7px 28px;
+  color: #5a6f6c;
   font-size: 8px;
 }
 
@@ -478,6 +487,45 @@
 .iriograph-predicate-sentence {
   color: #294f4d !important;
   font-weight: 650;
+}
+
+.iriograph-predicate-explanation,
+.iriograph-view-resolution {
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid #cad8d4;
+  border-radius: 6px;
+  background: #f7faf9;
+  font-size: 8px;
+}
+
+.iriograph-predicate-explanation header,
+.iriograph-view-resolution header {
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-predicate-explanation p,
+.iriograph-predicate-explanation ul,
+.iriograph-view-resolution p,
+.iriograph-view-resolution ul,
+.iriograph-view-resolution dl {
+  margin: 0;
+}
+
+.iriograph-view-resolution dl > div {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.iriograph-literal-details {
+  margin: 4px 0;
+  padding: 5px 7px;
+  border: 1px dashed #c9d6d2;
+  border-radius: 5px;
+  font-size: 8px;
 }
 
 .iriograph-current-memberships,
@@ -519,6 +567,22 @@
   min-height: 24px;
   padding: 3px 7px;
   font-size: 8px;
+}
+
+.iriograph-membership-batch-actions {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #c8d5d1;
+  border-radius: 5px;
+  background: #f8fbfa;
+  font-size: 8px;
+}
+
+.iriograph-membership-batch-actions label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .iriograph-sequence-editor,
@@ -567,6 +631,17 @@
   font-size: 8px;
 }
 
+.iriograph-alternative-editor li {
+  grid-template-columns: 24px auto minmax(0, 1fr) 30px 30px 42px;
+}
+
+.iriograph-alternative-editor li > label {
+  display: grid;
+  place-items: center;
+  gap: 1px;
+  font-size: 7px;
+}
+
 .iriograph-authoring-preview {
   display: grid;
   gap: 10px;
@@ -598,6 +673,27 @@
   margin: 5px 0 4px;
   font-family: Georgia, "Yu Mincho", serif;
   font-size: 17px;
+}
+
+.iriograph-view-summary {
+  position: relative;
+}
+
+.iriograph-view-summary > .iriograph-single-view-name,
+.iriograph-view-summary > select {
+  width: calc(100% - 34px);
+}
+
+.iriograph-view-summary > .iriograph-view-manage-button {
+  width: 29px;
+  min-height: 29px;
+  position: absolute;
+  right: 13px;
+  top: 30px;
+  border: 1px solid #b7c7c2;
+  border-radius: 5px;
+  background: #fff;
+  font-weight: 700;
 }
 
 .iriograph-view-summary > select {
@@ -684,6 +780,91 @@
   place-items: center;
   padding: 24px;
   background: rgb(18 36 37 / 50%);
+}
+
+.iriograph-rebase-dialog-backdrop {
+  position: absolute;
+  z-index: 95;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgb(18 36 37 / 50%);
+}
+
+.iriograph-rebase-dialog {
+  width: min(680px, 100%);
+  max-height: min(720px, calc(100% - 24px));
+  display: grid;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #8ca6a0;
+  border-radius: 8px;
+  background: #fffefb;
+  box-shadow: 0 18px 48px rgb(18 36 37 / 28%);
+}
+
+.iriograph-rebase-dialog > header,
+.iriograph-rebase-dialog > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.iriograph-rebase-dialog > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-rebase-identities,
+.iriograph-rebase-change-summary {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #eef4f2;
+}
+
+.iriograph-rebase-identities > div {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.iriograph-rebase-identities dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.iriograph-rebase-changes {
+  max-height: 260px;
+  display: grid;
+  gap: 5px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iriograph-rebase-changes > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 8px;
+  border: 1px solid #d5dfdc;
+  border-radius: 5px;
+}
+
+.iriograph-rebase-changes details {
+  grid-column: 1 / -1;
+}
+
+.iriograph-rebase-changes code {
+  display: block;
+  overflow-wrap: anywhere;
 }
 
 .iriograph-deletion-dialog {
@@ -787,6 +968,90 @@
   background: #275c5e;
 }
 
+.iriograph-view-manager-current,
+.iriograph-view-manager-actions,
+.iriograph-view-manager-danger {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #d7e0dd;
+  border-radius: 6px;
+  background: #f8fbfa;
+}
+
+.iriograph-view-manager-current label,
+.iriograph-view-manager-current p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.iriograph-view-manager-current dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.iriograph-view-manager-current dl div {
+  min-width: 0;
+  padding: 6px;
+  border-radius: 4px;
+  background: #eaf1ee;
+}
+
+.iriograph-view-manager-current dt { color: #657a77; font-size: 8px; }
+.iriograph-view-manager-current dd { overflow: hidden; margin: 2px 0 0; text-overflow: ellipsis; white-space: nowrap; }
+.iriograph-view-manager-actions { grid-template-columns: 1fr 1fr; }
+.iriograph-view-manager-danger { border-color: #e0c4c0; background: #fff8f6; }
+.iriograph-view-manager-danger p { margin: 0; }
+.iriograph-view-manager-danger button.danger { color: #fff; border-color: #963f39; background: #963f39; }
+
+.iriograph-asset-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.iriograph-asset-breadcrumbs button {
+  min-height: 23px;
+  padding: 2px 5px;
+  border: 0;
+  color: #315f5d;
+  background: transparent;
+  font-size: 8px;
+}
+
+.iriograph-asset-breadcrumbs button + button::before { content: "/ "; color: #84918f; }
+
+.iriograph-asset-segment-suggestions {
+  display: grid;
+  gap: 2px;
+  max-height: 120px;
+  overflow: auto;
+  margin: 4px 0;
+  padding: 3px;
+  border: 1px solid #d4dfdb;
+  border-radius: 4px;
+  list-style: none;
+  background: #fff;
+}
+
+.iriograph-asset-segment-suggestions button {
+  width: 100%;
+  display: flex;
+  gap: 6px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 8px;
+}
+
+.iriograph-asset-segment-suggestions button:hover { background: #eef5f2; }
+.iriograph-field-error { display: block; color: #a13e38 !important; }
+
 .iriograph-element-list {
   padding: 14px 9px 17px;
 }
@@ -888,7 +1153,7 @@
 }
 
 .iriograph-authoring-quick-actions button:focus-visible,
-.iriograph-display-actions button:focus-visible {
+.iriograph-inspector-section > summary:focus-visible {
   outline: 3px solid #0b5cab;
   outline-offset: 2px;
 }
@@ -1799,19 +2064,113 @@
   touch-action: none;
 }
 
-.iriograph-scene-container.sequence-group {
+/*
+ * A group frame is a boundary, not an opaque interaction sheet. Its empty
+ * interior must leave member nodes and overlapping frames reachable. The
+ * visible label remains the deterministic pointer/keyboard entry for moving,
+ * selecting, and opening the group context menu.
+ */
+.iriograph-scene-container.group-frame,
+.iriograph-scene-region.group-frame {
+  pointer-events: none;
+}
+
+.iriograph-scene-container.group-frame > .iriograph-group-frame-label,
+.iriograph-scene-region.group-frame > .iriograph-group-frame-label,
+.iriograph-scene-container.group-frame.selected > .iriograph-resize-handle,
+.iriograph-scene-region.group-frame.selected > .iriograph-resize-handle {
+  pointer-events: auto;
+}
+
+.iriograph-scene-container.sequence-group,
+.iriograph-scene-container.alternative-group {
   border-radius: 10px;
   background: rgb(255 255 255 / 44%) !important;
   box-shadow: inset 0 0 0 1px rgb(100 116 139 / 8%);
 }
 
-.iriograph-scene-container.sequence-group > .iriograph-container-header {
+.iriograph-scene-container.sequence-group > .iriograph-container-header,
+.iriograph-scene-container.alternative-group > .iriograph-container-header {
   justify-content: flex-start;
   padding-inline: 12px;
   color: #475569;
   background: transparent !important;
   font-family: Inter, "Yu Gothic", sans-serif;
   font-size: 10px;
+}
+
+.iriograph-scene-container.alternative-group {
+  border-style: dashed !important;
+}
+
+.iriograph-scene-container.alternative-group > .iriograph-container-header::before {
+  content: "◇";
+  margin-inline-end: 5px;
+  color: #2563eb;
+}
+
+.iriograph-group-kind-label {
+  flex: 0 0 auto;
+  margin-inline-end: 6px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: #1d4ed8;
+  background: rgb(219 234 254 / 82%);
+  font-family: Inter, "Yu Gothic", sans-serif;
+  font-size: .72em;
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+
+.iriograph-group-frame-label {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  max-width: min(76%, 260px);
+  height: auto;
+  z-index: 2;
+  gap: 5px;
+  padding: 4px 8px;
+  overflow: visible;
+  border: 1px solid rgb(100 116 139 / 34%);
+  border-radius: 999px;
+  color: inherit;
+  background: rgb(255 255 255 / 92%) !important;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 12%);
+  cursor: move;
+  font-family: Inter, "Yu Gothic", sans-serif;
+  line-height: 1.2;
+  white-space: nowrap;
+  touch-action: none;
+}
+
+.iriograph-group-frame-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-scene-region.group-frame .iriograph-region-label.iriograph-group-frame-label {
+  width: max-content;
+  max-width: min(76%, 260px);
+  overflow: visible;
+  font-family: Inter, "Yu Gothic", sans-serif;
+}
+
+.iriograph-group-frame-label.writing-vertical {
+  max-width: none;
+  max-height: min(76%, 260px);
+  align-items: center;
+  flex-direction: column;
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+}
+
+.iriograph-group-frame-label:hover {
+  border-color: #0b5cab;
+  box-shadow: 0 0 0 3px rgb(11 92 171 / 12%);
 }
 
 .iriograph-sequence-badges {
@@ -1839,6 +2198,28 @@
   line-height: 1;
 }
 
+.iriograph-alternative-default-badges {
+  position: absolute;
+  z-index: 8;
+  right: 6px;
+  top: -9px;
+  display: flex;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.iriograph-alternative-default-badges > span {
+  padding: 3px 7px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  color: #1e3a8a;
+  background: #dbeafe;
+  box-shadow: 0 1px 3px rgb(30 58 138 / 22%);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+}
+
 .iriograph-scene-region {
   position: absolute;
   z-index: var(--iriograph-canvas-structure-layer);
@@ -1859,7 +2240,7 @@
  * and without rewriting portable z-order.
  */
 .iriograph-scene-region.interaction-front,
-.iriograph-scene-container.sequence-group.interaction-front {
+.iriograph-scene-container.group-frame.interaction-front {
   z-index: var(--iriograph-canvas-structure-front-layer);
 }
 
@@ -2018,6 +2399,53 @@
 .iriograph-edge-group {
   cursor: pointer;
   pointer-events: stroke;
+}
+
+.iriograph-group-guide,
+.iriograph-alternative-hub {
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+.iriograph-group-guide-hitarea,
+.iriograph-alternative-hub-hitarea {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 22;
+  vector-effect: non-scaling-stroke;
+}
+
+.iriograph-group-guide-path {
+  fill: none;
+  stroke: #94a3b8;
+  stroke-dasharray: 3 5;
+  stroke-linecap: round;
+  stroke-width: 1.25;
+  opacity: .72;
+  vector-effect: non-scaling-stroke;
+}
+
+.iriograph-group-guide.selected .iriograph-group-guide-path,
+.iriograph-group-guide:hover .iriograph-group-guide-path,
+.iriograph-group-guide:focus-visible .iriograph-group-guide-path {
+  stroke: #2563eb;
+  stroke-width: 2;
+  opacity: 1;
+}
+
+.iriograph-alternative-hub-mark {
+  fill: #eff6ff;
+  stroke: #64748b;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.iriograph-alternative-hub.selected .iriograph-alternative-hub-mark,
+.iriograph-alternative-hub:hover .iriograph-alternative-hub-mark,
+.iriograph-alternative-hub:focus-visible .iriograph-alternative-hub-mark {
+  fill: #dbeafe;
+  stroke: #2563eb;
+  stroke-width: 2;
 }
 
 .iriograph-edge-hitarea {
@@ -2521,6 +2949,25 @@
   transform: translate(-50%, -50%) !important;
 }
 
+.iriograph-node-icon-resize-handle {
+  width: 12px;
+  height: 12px;
+  position: absolute;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #0b5cab;
+  box-shadow: 0 0 0 1px #07457f;
+  cursor: nwse-resize;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+  touch-action: none;
+}
+
+.iriograph-node-icon-resize-handle:focus-visible,
+.iriograph-node-icon-resize-handle:hover {
+  box-shadow: 0 0 0 3px rgb(11 92 171 / 28%), 0 0 0 1px #07457f;
+}
+
 .iriograph-source-panel {
   padding: 16px;
   background: #f4f6f4;
@@ -2581,34 +3028,81 @@
   box-shadow: 0 0 0 2px rgb(199 160 82 / 18%);
 }
 
-.iriograph-document-sections {
+.iriograph-document-sources {
+  min-height: 0;
+  flex: 1 1 auto;
   display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid #cbd6d2;
+  flex-direction: column;
+  gap: 9px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
-.iriograph-document-sections button {
-  padding: 7px 11px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  color: #667b7b;
-  background: transparent;
+.iriograph-document-semantic-summary,
+.iriograph-document-identity-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #cad7d3;
+  border-radius: 6px;
+  background: #f7faf9;
   font-size: 9px;
 }
 
-.iriograph-document-sections button.active {
-  border-bottom-color: #b88425;
-  color: #183f41;
+.iriograph-document-semantic-summary > div,
+.iriograph-document-identity-actions > div {
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-document-semantic-summary > p,
+.iriograph-document-identity-actions > small,
+.iriograph-document-identity-actions > span {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.iriograph-document-source-section {
+  min-height: 44px;
+  flex: 0 0 auto;
+  overflow: visible;
+  border: 1px solid #cad7d3;
+  border-radius: 6px;
   background: #fff;
+}
+
+.iriograph-document-source-section > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px;
+  color: #254c4b;
+  cursor: pointer;
+}
+
+.iriograph-document-source-section > summary small {
+  color: #667a77;
+}
+
+.iriograph-document-source-section > section {
+  min-height: 0;
+  padding: 0 9px 9px;
 }
 
 .iriograph-document-boundary,
 .iriograph-overlay-source {
   min-height: 0;
-  flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.iriograph-document-boundary > textarea,
+.iriograph-overlay-source > textarea {
+  min-height: 260px;
+  height: clamp(260px, 38vh, 460px);
+  flex: 0 0 auto;
 }
 
 .iriograph-document-boundary > p,
@@ -2646,7 +3140,29 @@
 }
 
 .iriograph-overlay-source > textarea {
-  flex: 1;
+  flex: 0 0 auto;
+}
+
+.iriograph-document-boundary > textarea {
+  flex: 0 0 auto;
+}
+
+.iriograph-icon-size-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.iriograph-icon-size-grid > label,
+.iriograph-inline-check {
+  min-width: 0;
+}
+
+.iriograph-inline-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px;
 }
 
 .iriograph-overlay-diagnostics small {
@@ -2798,29 +3314,76 @@
   font-size: 8px;
 }
 
-.iriograph-display-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
-  padding: 12px 0;
+.iriograph-inspector-section {
+  margin: 0;
+  padding: 0;
+  border: 0;
   border-bottom: 1px solid #e0e6e3;
+  background: #fff;
 }
 
-.iriograph-display-actions button {
-  min-height: 30px;
-  padding: 5px 7px;
-  border: 1px solid #afc2bc;
-  border-radius: 5px;
+.iriograph-inspector-section > summary {
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 7px 4px;
   color: #315957;
-  background: #fff;
+  cursor: pointer;
+  list-style: none;
+}
+
+.iriograph-inspector-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.iriograph-inspector-section > summary::before {
+  content: "›";
+  color: #6d817e;
+  font-size: 14px;
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+
+.iriograph-inspector-section[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.iriograph-inspector-section > summary > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-inspector-section > summary strong,
+.iriograph-inspector-section > summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-inspector-section > summary strong {
+  font-size: 10px;
+}
+
+.iriograph-inspector-section > summary small {
+  color: #718282;
   font-size: 8px;
 }
 
-.iriograph-display-actions button.selected,
-.iriograph-display-actions button[aria-current="step"] {
-  color: #fff;
-  border-color: #28666a;
-  background: #28666a;
+.iriograph-inspector-section.active > summary {
+  background: #f1f7f4;
+}
+
+.iriograph-inspector-section[open] {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.iriograph-inspector-section[open] > :not(summary) {
+  margin-inline: 4px;
 }
 
 .iriograph-semantic-reference {
@@ -3011,6 +3574,12 @@
 
 .iriograph-routing-inspector > label {
   margin: 3px 0 0;
+}
+
+.iriograph-routing-inspector textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
 }
 
 .iriograph-template-choices {

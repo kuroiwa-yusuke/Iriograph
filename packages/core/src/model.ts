@@ -79,6 +79,18 @@ export type ViewElementOverlay = {
     nodeLabelWritingDirection?: NodeLabelWritingDirection;
     /** Node-local presentation offset from the template's icon position. */
     nodeIconOffset?: Point;
+    /** Sparse multiplier applied to the icon's intrinsic size. */
+    nodeIconScale?: number;
+    /** Sparse explicit icon box; mutually exclusive with nodeIconScale. */
+    nodeIconSize?: { width: number; height: number };
+    /** Renderer-neutral fit inside the resolved icon box. */
+    nodeIconFit?: "contain" | "cover";
+    /** Common group-frame label position; supersedes the region-only alias. */
+    groupLabelAnchor?: number;
+    /** Common group-frame label glyph flow. */
+    groupLabelWritingDirection?: RegionLabelWritingDirection;
+    /** View-local stacking order among group frames of the same layer. */
+    groupZOrder?: number;
     /** Normalized clockwise position on a region perimeter: 0 is top-left. */
     regionLabelAnchor?: number;
     /** Region label glyph flow, independent of its perimeter position. */
@@ -337,6 +349,8 @@ export type VisualStyle = {
   accent?: string;
   fillOpacity?: number;
   strokeWidth?: number;
+  /** Sparse label/caption/comment font size in renderer-neutral CSS pixels. */
+  labelFontSize?: number;
   /** Safe SVG-like numeric dash list, e.g. `6 4`; never arbitrary CSS. */
   dash?: string;
   extensions?: IriographExtensions;
@@ -344,11 +358,19 @@ export type VisualStyle = {
 
 export type VisualStyleOverride = Partial<
   Pick<VisualStyle,
-    "fill" | "stroke" | "text" | "accent" | "fillOpacity" | "strokeWidth" | "dash"
+    "fill" | "stroke" | "text" | "accent" | "fillOpacity" | "strokeWidth" | "labelFontSize" | "dash"
   >
 > & { extensions?: IriographExtensions };
 
 export type AssetMediaType = "image/svg+xml" | "image/png" | "image/jpeg" | "image/webp";
+
+/** Verified transient image dimensions exposed to renderers and content metrics. */
+export type AssetIntrinsicSize = {
+  width: number;
+  height: number;
+  aspectRatio: number;
+  source: "decoded" | "svg-view-box";
+};
 
 export type AssetDefinition = {
   assetRef: string;
@@ -411,6 +433,33 @@ export type ProjectionProvenance = {
   rule?: CatalogRuleReference;
   derivation: "resource" | "direct" | "derived";
   editCapability?: SemanticEditCapability;
+  /** Stable explanation of catalog rule/template selection for this element. */
+  resolutionTrace?: ProjectionRuleResolutionTrace;
+};
+
+export type ProjectionRuleCandidateTrace = {
+  catalogRef: string;
+  ruleId: string;
+  priority: number;
+  match: "exact" | "explicit-subclass" | "explicit-subproperty" | "wildcard";
+  distance: number;
+  matchedIri?: string;
+  templateRef?: string;
+  /** Styles remain display concerns; this records where the base style came from. */
+  styleSource?: "template";
+};
+
+export type ProjectionRuleResolutionTrace = {
+  semanticRef: string;
+  outcome: "resolved" | "fallback" | "conflict";
+  candidates: ProjectionRuleCandidateTrace[];
+  selected?: ProjectionRuleCandidateTrace;
+  fallback?: {
+    reason: "no-matching-rule" | "wildcard-rule";
+    templateRef?: string;
+    styleSource?: "catalog-default-template" | "template";
+  };
+  conflicts?: ProjectionRuleCandidateTrace[];
 };
 
 export type EdgeLabelProvenance =
@@ -448,6 +497,8 @@ export type ProjectedScene = {
   regions?: ProjectedRegion[];
   /** All semantic memberships, independent of the hierarchy compatibility field. */
   memberships?: ProjectedMembership[];
+  /** Display-only guides for ordered/alternative group grammar; never RDF edges. */
+  groupGuides?: ProjectedGroupGuide[];
   edges: ProjectedEdge[];
   diagnostics: ProjectionDiagnostic[];
 };
@@ -459,9 +510,48 @@ export type ProjectedMembership = {
   /** Region identity in a region view; absent in a hierarchy-only view. */
   regionElementId?: string;
   /** Semantic structure represented by this membership, not a predicate edge. */
-  role?: "membership" | "sequence-member";
-  /** One-based rdf:_n position when role is sequence-member. */
+  role?: "membership" | "sequence-member" | "alternative-member";
+  /** One-based rdf:_n position for sequence/alternative membership. */
   ordinal?: number;
+  /** Display-only ordinal badge, derived from ordinal and never persisted. */
+  ordinalBadge?: string;
+  /** True when this member is the catalog-declared alternative default. */
+  isDefault?: boolean;
+  provenance: ProjectionProvenance;
+};
+
+export type GroupFrameKind = "membership" | "classification" | "sequence" | "alternative";
+
+/** Common Scene grammar for Bag/classification/Seq/Alt frames. */
+export type GroupFrame = {
+  kind: GroupFrameKind;
+  semanticRef: string;
+  /** Exact asserted rdf:type that selected this structural operator. */
+  semanticTypeIri?: string;
+  /** Exact semantic statements that caused the frame to be projected. */
+  provenance: ProjectionProvenance;
+  /** Virtual hub used only to render alternative candidate guides. */
+  hub?: {
+    elementId: string;
+    role: "alternative-hub";
+  };
+  /** Catalog default with exact rdf:_n provenance when that member exists. */
+  defaultMember?: {
+    ordinal: number;
+    memberElementId: string;
+    statementRef: string;
+    provenance: ProjectionProvenance;
+  };
+};
+
+export type ProjectedGroupGuide = {
+  guideId: string;
+  groupElementId: string;
+  kind: "sequence-order" | "alternative-candidate";
+  sourceElementId: string;
+  targetElementId: string;
+  ordinal?: number;
+  muted: true;
   provenance: ProjectionProvenance;
 };
 
@@ -475,10 +565,15 @@ export type ProjectedNode = {
   nodeLabelOffset?: Point;
   nodeLabelWritingDirection?: NodeLabelWritingDirection;
   nodeIconOffset?: Point;
+  nodeIconScale?: number;
+  nodeIconSize?: { width: number; height: number };
+  nodeIconFit?: "contain" | "cover";
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
   iconRef?: string;
   iconUrl?: string;
+  /** Transient verified dimensions; never persisted in an overlay or catalog. */
+  iconIntrinsicSize?: AssetIntrinsicSize;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
   parentElementId?: string;
@@ -494,10 +589,14 @@ export type ProjectedContainer = {
   semanticRef: string;
   structuralKind: "container";
   /** Renderer-neutral grouping grammar derived from the catalog operator. */
-  groupRole?: "sequence";
+  groupRole?: GroupFrameKind;
+  groupFrame?: GroupFrame;
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  groupLabelAnchor?: number;
+  groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupZOrder?: number;
   templateRef: string;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
@@ -517,6 +616,10 @@ export type ProjectedRegion = {
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  groupFrame?: GroupFrame;
+  groupLabelAnchor?: number;
+  groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupZOrder?: number;
   regionLabelAnchor?: number;
   regionLabelWritingDirection?: RegionLabelWritingDirection;
   regionZOrder?: number;
@@ -566,11 +669,14 @@ export type DiagramScene = {
   regions?: SceneRegion[];
   /** Optional for backwards-compatible hand-authored Scene fixtures. */
   memberships?: SceneMembership[];
+  /** Optional for backwards-compatible hand-authored Scene fixtures. */
+  groupGuides?: SceneGroupGuide[];
   edges: SceneEdge[];
   diagnostics: ProjectionDiagnostic[];
 };
 
 export type SceneMembership = ProjectedMembership;
+export type SceneGroupGuide = ProjectedGroupGuide;
 
 export type SceneNode = {
   elementId: string;
@@ -582,10 +688,14 @@ export type SceneNode = {
   nodeLabelOffset?: Point;
   nodeLabelWritingDirection?: NodeLabelWritingDirection;
   nodeIconOffset?: Point;
+  nodeIconScale?: number;
+  nodeIconSize?: { width: number; height: number };
+  nodeIconFit?: "contain" | "cover";
   templateRef: string;
   shape: NonNullable<VisualTemplate["shape"]>;
   iconRef?: string;
   iconUrl?: string;
+  iconIntrinsicSize?: AssetIntrinsicSize;
   geometry: ElementGeometry;
   parentElementId?: string;
   parentProvenance?: ProjectionProvenance;
@@ -601,10 +711,14 @@ export type SceneContainer = {
   semanticRef: string;
   structuralKind: "container";
   /** Renderer-neutral grouping grammar derived from the catalog operator. */
-  groupRole?: "sequence";
+  groupRole?: GroupFrameKind;
+  groupFrame?: GroupFrame;
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  groupLabelAnchor?: number;
+  groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupZOrder?: number;
   templateRef: string;
   geometry: ElementGeometry;
   headerPosition: NonNullable<VisualTemplate["headerPosition"]>;
@@ -624,6 +738,10 @@ export type SceneRegion = {
   label: string;
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
+  groupFrame?: GroupFrame;
+  groupLabelAnchor?: number;
+  groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupZOrder?: number;
   regionLabelAnchor?: number;
   regionLabelWritingDirection?: RegionLabelWritingDirection;
   regionZOrder?: number;
@@ -654,6 +772,8 @@ export type SceneEdge = {
    * This is derived by layout and is never persisted in a view overlay.
    */
   route?: Point[];
+  /** Layout-selected renderer-only route family/control; never portable overlay data. */
+  derivedRouteChoice?: SceneDerivedRouteChoice;
   /** User-authored intermediate points only; endpoints are present in route. */
   waypoints?: Point[];
   /** Sparse manual cubic controls; derived automatic controls are not persisted. */
@@ -667,6 +787,35 @@ export type SceneEdge = {
   projectionRuleId?: string;
   fallback: boolean;
   provenance?: ProjectionProvenance;
+};
+
+export type SceneDerivedRouteChoice = {
+  family: "straight" | "curve" | "polyline" | "orthogonal" | "manual";
+  source: "auto" | "explicit" | "fixed";
+  reason:
+    | "auto-straight-safe"
+    | "auto-curve-safe"
+    | "auto-polyline-fallback"
+    | "auto-self-loop-preserved"
+    | "explicit-route-mode"
+    | "fixed-derived-route";
+  curve?: {
+    sourceControl: Point;
+    targetControl: Point;
+    guidePivot: Point;
+    guideAngleDegrees: number;
+  };
+  rejected?: Array<{
+    family: "straight" | "curve";
+    reason:
+      | "obstacle"
+      | "interaction"
+      | "parallel-identity"
+      | "self-loop"
+      | "no-guide"
+      | "tight-turn"
+      | "endpoint-direction";
+  }>;
 };
 
 export type StatementSemanticComment = SemanticTextValue & {
@@ -691,6 +840,8 @@ export type ProjectionDiagnostic = {
     endLine: number;
     endColumn: number;
   };
+  /** RFC 6901 pointer into a portable document candidate, when applicable. */
+  jsonPointer?: string;
   catalogRef?: string;
   ruleId?: string;
   assetRef?: string;

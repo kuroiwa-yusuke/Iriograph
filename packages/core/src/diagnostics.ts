@@ -35,6 +35,31 @@ export function hasBlockingDiagnostics(
   return diagnostics.some((diagnostic) => diagnostic.severity === "error");
 }
 
+const BLOCKING_SPATIAL_CODES = new Set([
+  "region-membership-intersection-empty",
+  "region-member-outside-intersection",
+  "region-member-outside",
+]);
+
+/**
+ * Overlay write/replace ports use this stricter policy. Layout may surface the
+ * same condition as a warning while editing, but a persisted candidate cannot
+ * violate an asserted spatial membership.
+ */
+export function enforceSpatialIntegrity(
+  diagnostics: readonly ProjectionDiagnostic[],
+): ProjectionDiagnostic[] {
+  return diagnostics.map((diagnostic) => (
+    BLOCKING_SPATIAL_CODES.has(diagnostic.code)
+      ? { ...diagnostic, severity: "error" as const }
+      : { ...diagnostic }
+  ));
+}
+
+export function isSpatialIntegrityDiagnostic(diagnostic: ProjectionDiagnostic): boolean {
+  return BLOCKING_SPATIAL_CODES.has(diagnostic.code);
+}
+
 /** Matches both direct semantic identity and every statement recorded by projection provenance. */
 export function diagnosticTargetsSceneElement(
   diagnostic: ProjectionDiagnostic,

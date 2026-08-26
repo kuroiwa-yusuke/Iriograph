@@ -77,6 +77,9 @@ function safeStyleOverride(
   if (value.strokeWidth !== undefined && (
     !Number.isFinite(value.strokeWidth) || value.strokeWidth < 0 || value.strokeWidth > 20
   )) return undefined;
+  if (value.labelFontSize !== undefined && (
+    !Number.isFinite(value.labelFontSize) || value.labelFontSize < 8 || value.labelFontSize > 72
+  )) return undefined;
   if (value.dash !== undefined && (
     value.dash.length > 64 || !SAFE_DASH.test(value.dash)
   )) return undefined;

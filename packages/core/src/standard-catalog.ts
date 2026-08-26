@@ -69,7 +69,7 @@ const baseRdfRdfsCatalog: ProjectionCatalogV1 = {
         ordinalPredicatePrefix: `${RDF}_`,
         defaultOrdinal: 1,
       },
-      templateRef: "urn:iriograph:template:node:choice:1",
+      templateRef: "urn:iriograph:template:container:alternative:1",
     },
     {
       ruleId: "rdfs-class",
@@ -158,6 +158,20 @@ const baseRdfRdfsCatalog: ProjectionCatalogV1 = {
         dash: "5 5",
       },
       defaultSize: { width: 360, height: 160 },
+    },
+    "urn:iriograph:template:container:alternative:1": {
+      templateRef: "urn:iriograph:template:container:alternative:1",
+      structuralKind: "container",
+      headerPosition: "top",
+      style: {
+        fill: "#fff7ed",
+        stroke: "#c2410c",
+        text: "#7c2d12",
+        fillOpacity: 0.12,
+        strokeWidth: 1,
+        dash: "4 4",
+      },
+      defaultSize: { width: 360, height: 180 },
     },
     "urn:iriograph:template:node:class:1": {
       templateRef: "urn:iriograph:template:node:class:1",
