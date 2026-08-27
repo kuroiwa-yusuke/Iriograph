@@ -246,7 +246,7 @@ catalogのprojection部分は、現行prototypeの`nodeRules`、`relationRules`�
 | `instance-flow` | `urn:iriograph:profile:rdf-rdfs:instance-flow:1` / `urn:iriograph:catalog:rdf-rdfs-instance-flow@1` | `rdfs:Class`・`rdf:Property`として自己宣言された語彙resourceとschema定義edgeを抑止し、instance、Bag/Seq/Alt、domain predicateの利用edgeを表示する |
 | `classification-region` | `urn:iriograph:profile:rdf-rdfs:classification-region:1` / `urn:iriograph:catalog:rdf-rdfs-classification-region@1` | region viewでclassを領域、`rdf:type`をmembershipとして維持し、property resourceとschema定義edgeを抑止する |
 
-`classification-region`は`kind: "region"`のnamed viewで使用します。Class領域を必要としないregion viewは`instance-flow`を使い、Bag等のmembershipだけを領域へ投影します。語彙roleの判定をlabel、namespace、IRIの単語へ依存させず、v1 authoring profileが要求する`a rdfs:Class` / `a rdf:Property`の自己宣言と限定RDFS closureだけを使います。
+`classification-region`は既存documentが明示した`kind: "region"`のnamed viewに限って使用します。標準Editorと新規documentは`instance-flow`を使い、Classと`rdf:type`は図の領域ではなくTurtleから導出する型一覧・代表直接型tagで扱い、Bag等の業務membershipだけを領域へ投影します。語彙roleの判定をlabel、namespace、IRIの単語へ依存させず、v1 authoring profileが要求する`a rdfs:Class` / `a rdf:Property`の自己宣言と限定RDFS closureだけを使います。
 
 Coreは`createStandardRdfRdfsCatalog(preset)`、`standardRdfRdfsCatalog`、`standardRdfRdfsInstanceFlowCatalog`、`standardRdfRdfsClassificationRegionCatalog`を公開します。既存の`standardRdfRdfsCatalog`は`full`のidentityと投影を維持します。
 

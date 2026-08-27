@@ -49,7 +49,7 @@ describe("display reconciliation", () => {
       pinned: true,
       placement: "user",
     });
-    expect(mainA?.appearance).toBeUndefined();
+    expect(mainA?.appearance).toEqual({ iconRef: "urn:test:asset:a" });
 
     expect(overlayFor(main.overlay, `${NS}d`)).toMatchObject({
       geometry: expect.any(Object),
@@ -339,7 +339,11 @@ describe("display reconciliation", () => {
           appearance: {
             templateRef: "urn:iriograph:template:container:sequence:1",
             groupLabelAnchor: .4,
+            groupLabelOffset: .5,
             groupLabelWritingDirection: "vertical-down",
+            groupIconOffset: { x: 4, y: -2 },
+            groupIconScale: 1.25,
+            iconRef: "urn:test:group-icon",
             groupZOrder: 2,
           },
         },
@@ -357,12 +361,47 @@ describe("display reconciliation", () => {
     expect(reconciled?.appearance).toEqual({
       templateRef: "urn:iriograph:template:container:sequence:1",
       groupLabelAnchor: .4,
+      groupLabelOffset: .5,
       groupLabelWritingDirection: "vertical-down",
+      groupIconOffset: { x: 4, y: -2 },
+      groupIconScale: 1.25,
+      iconRef: "urn:test:group-icon",
       groupZOrder: 2,
     });
     expect(result.diagnostics.some((diagnostic) => (
       diagnostic.code === "reconcile-edge-endpoints-changed"
     ))).toBe(false);
+  });
+
+  it("group frame専用presentationをnodeとedgeから除去する", async () => {
+    const previous = documentFor(oldSource);
+    for (const view of previous.views) {
+      view.overlay.nodeWithGroupPresentation = {
+        semanticRef: `${NS}b`,
+        appearance: {
+          groupLabelOffset: .5,
+          groupIconOffset: { x: 4, y: -2 },
+          groupIconScale: 1.25,
+        },
+      };
+      const edge = overlayFor(view.overlay, directEdgeRef)!;
+      edge.appearance = {
+        ...edge.appearance,
+        groupLabelOffset: -.5,
+        groupIconOffset: { x: -3, y: 1 },
+        groupIconScale: .75,
+      };
+    }
+
+    const result = await applySemanticSource(previous, oldSource, runtimeContext());
+
+    expect(result.accepted).toBe(true);
+    for (const view of result.document.views) {
+      expect(overlayFor(view.overlay, `${NS}b`)?.appearance).toBeUndefined();
+      expect(overlayFor(view.overlay, directEdgeRef)?.appearance).toEqual({
+        templateRef: "urn:iriograph:template:edge:reference:1",
+      });
+    }
   });
 
   it("legacy styleTokenをcatalog styleRefへ移行しsparse overrideを維持する", async () => {

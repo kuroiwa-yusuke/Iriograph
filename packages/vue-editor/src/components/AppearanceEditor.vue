@@ -7,6 +7,8 @@ import {
   type VisualStyleOverride,
 } from "@iriograph/core";
 
+import CommitNumberInput from "./CommitNumberInput.vue";
+
 export type AppearanceEditorValue = {
   styleRef?: string;
   style?: VisualStyleOverride;
@@ -84,8 +86,12 @@ function updateColor(field: "fill" | "stroke" | "text" | "accent", event: Event)
 
 function updateNumber(field: "fillOpacity" | "strokeWidth" | "labelFontSize", event: Event): void {
   const requested = Number((event.target as HTMLInputElement).value);
-  const value = field === "labelFontSize" ? Math.min(72, Math.max(8, requested)) : requested;
-  style.value = { ...style.value, [field]: value };
+  style.value = { ...style.value, [field]: requested };
+}
+
+function commitFontSize(value: number): void {
+  style.value = { ...style.value, labelFontSize: value };
+  commitInline();
 }
 
 function updateDash(event: Event): void {
@@ -127,7 +133,7 @@ function commitInline(): void {
       <label v-for="field in colorFields" :key="field"><input type="checkbox" :checked="style[field] !== undefined" @change="toggleField(field, ($event.target as HTMLInputElement).checked)" /><span>{{ colorFieldLabels[field] }}</span><input type="color" :aria-label="colorFieldLabels[field]" :value="style[field] ?? currentStyle[field] ?? '#000000'" :disabled="style[field] === undefined" @input="updateColor(field, $event)" @change="commitInline" /></label>
       <label v-if="fields.includes('fillOpacity')"><input type="checkbox" :checked="style.fillOpacity !== undefined" @change="toggleField('fillOpacity', ($event.target as HTMLInputElement).checked)" /><span>領域の透明度</span><input type="range" min="0" max="1" step="0.05" :value="style.fillOpacity ?? currentStyle.fillOpacity ?? 1" :disabled="style.fillOpacity === undefined" @input="updateNumber('fillOpacity', $event)" @change="commitInline" /></label>
       <label v-if="fields.includes('strokeWidth')"><input type="checkbox" :checked="style.strokeWidth !== undefined" @change="toggleField('strokeWidth', ($event.target as HTMLInputElement).checked)" /><span>線の太さ</span><input type="number" min="0" max="20" step="0.5" :value="style.strokeWidth ?? currentStyle.strokeWidth ?? 1" :disabled="style.strokeWidth === undefined" @input="updateNumber('strokeWidth', $event)" @change="commitInline" /></label>
-      <label><input type="checkbox" :checked="style.labelFontSize !== undefined" @change="toggleField('labelFontSize', ($event.target as HTMLInputElement).checked)" /><span>文字サイズ</span><input aria-label="文字サイズ" type="number" min="8" max="72" step="1" :value="style.labelFontSize ?? currentStyle.labelFontSize ?? DEFAULT_LABEL_FONT_SIZE" :disabled="style.labelFontSize === undefined" @input="updateNumber('labelFontSize', $event)" @change="commitInline" /></label>
+      <label><input type="checkbox" :checked="style.labelFontSize !== undefined" @change="toggleField('labelFontSize', ($event.target as HTMLInputElement).checked)" /><span>文字サイズ</span><CommitNumberInput label="文字サイズ" :value="style.labelFontSize ?? currentStyle.labelFontSize ?? DEFAULT_LABEL_FONT_SIZE" :minimum="8" :maximum="72" :step="1" :disabled="style.labelFontSize === undefined" @commit="commitFontSize" /></label>
       <label v-if="fields.includes('dash')"><input type="checkbox" :checked="style.dash !== undefined" @change="toggleField('dash', ($event.target as HTMLInputElement).checked)" /><span>線種</span><select :value="style.dash ?? currentStyle.dash ?? '6 4'" :disabled="style.dash === undefined" @change="updateDash"><option value="0">実線</option><option value="6 4">破線</option><option value="2 3">点線</option><option value="10 4 2 4">一点鎖線</option></select></label>
     </div>
     <footer><button type="button" @click="reset">カタログ既定へ戻す</button><template v-if="!inline"><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" @click="emit('apply', value())">適用</button></template></footer>

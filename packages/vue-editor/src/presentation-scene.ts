@@ -48,6 +48,13 @@ export function reconcilePresentationScene(
     return {
       ...container,
       geometry: copyGeometry(container.geometry ?? previous?.geometry ?? defaultGeometry(container.defaultSize)),
+      groupIconOffset: copyPoint(container.groupIconOffset),
+      iconUrl: previous?.structuralKind === "container" && previous.iconRef === container.iconRef
+        ? previous.iconUrl
+        : container.iconUrl,
+      iconIntrinsicSize: previous?.structuralKind === "container" && previous.iconRef === container.iconRef
+        ? previous.iconIntrinsicSize
+        : container.iconIntrinsicSize,
       provenance: previous?.provenance ?? container.provenance,
     };
   });
@@ -56,6 +63,13 @@ export function reconcilePresentationScene(
     return {
       ...region,
       geometry: copyGeometry(region.geometry ?? previous?.geometry ?? defaultGeometry(region.defaultSize)),
+      groupIconOffset: copyPoint(region.groupIconOffset),
+      iconUrl: previous?.structuralKind === "region" && previous.iconRef === region.iconRef
+        ? previous.iconUrl
+        : region.iconUrl,
+      iconIntrinsicSize: previous?.structuralKind === "region" && previous.iconRef === region.iconRef
+        ? previous.iconIntrinsicSize
+        : region.iconIntrinsicSize,
       provenance: previous?.provenance ?? region.provenance,
     };
   });

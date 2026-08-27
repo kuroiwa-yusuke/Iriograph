@@ -164,7 +164,11 @@ describe("Iriograph document v1 schema", () => {
           dash: "6 4",
         },
         groupLabelAnchor: .25,
+        groupLabelOffset: .75,
         groupLabelWritingDirection: "horizontal-right",
+        groupIconOffset: { x: 8, y: -3 },
+        groupIconScale: 1.5,
+        iconRef: "urn:test:asset:group-icon",
         groupZOrder: 3,
         regionLabelAnchor: .375,
         regionLabelWritingDirection: "vertical-down",
@@ -185,7 +189,10 @@ describe("Iriograph document v1 schema", () => {
 
   it.each([
     ["groupLabelAnchor", 1],
+    ["groupLabelOffset", 1.1],
     ["groupLabelWritingDirection", "vertical-up"],
+    ["groupIconScale", 8.1],
+    ["groupIconOffset", { x: Number.POSITIVE_INFINITY, y: 0 }],
     ["groupZOrder", 1.5],
     ["regionLabelAnchor", 1],
     ["regionLabelWritingDirection", "vertical-up"],

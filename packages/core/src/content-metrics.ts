@@ -1,6 +1,7 @@
 import type { AssetIntrinsicSize, VisualStyle } from "./model.js";
 
 export const DEFAULT_LABEL_FONT_SIZE = 14;
+export const DEFAULT_GROUP_FRAME_LABEL_FONT_SIZE = 21;
 export const DEFAULT_ICON_BOX_SIZE = 24;
 export const LABEL_FONT_SIZE_RANGE = Object.freeze({ minimum: 8, maximum: 72 });
 

@@ -549,6 +549,55 @@ describe("StandardLightweightLayoutAdapter", () => {
     },
   );
 
+  it.each(["LR", "TB"] as const)(
+    "chooses a valid one-bend orthogonal route before a viable curve in %s",
+    async (direction) => {
+      const scene: LayoutProjectedScene = {
+        elements: [
+          {
+            elementId: "source",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 0, y: 0, width: 100, height: 60 },
+          },
+          {
+            elementId: "blocker",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 170, y: 105, width: 60, height: 50 },
+          },
+          {
+            elementId: "target",
+            structuralKind: "node",
+            placement: "user",
+            geometry: { x: 300, y: 200, width: 100, height: 60 },
+          },
+        ],
+        edges: [{ elementId: "edge", sourceElementId: "source", targetElementId: "target" }],
+      };
+      const adapter = new StandardLightweightLayoutAdapter(
+        `urn:test:layout:auto-orthogonal-${direction}`,
+        direction,
+      );
+
+      const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+      const route = result.routes.edge!;
+
+      expect(route).toHaveLength(3);
+      expect(result.derivedRouteChoices?.edge).toEqual({
+        family: "orthogonal",
+        source: "auto",
+        reason: "auto-orthogonal-safe",
+        rejected: [{ family: "straight", reason: "obstacle" }],
+      });
+      expect(
+        (route[0]!.y === route[1]!.y && route[1]!.x === route[2]!.x)
+        || (route[0]!.x === route[1]!.x && route[1]!.y === route[2]!.y),
+      ).toBe(true);
+      expect(polylineCrossesBox(route, scene.elements[1]!.geometry!)).toBe(false);
+    },
+  );
+
   it("routes around fixed node and annotation obstacles without creating manual waypoints", async () => {
     const scene: LayoutProjectedScene = {
       elements: [
@@ -600,7 +649,10 @@ describe("StandardLightweightLayoutAdapter", () => {
       source: "auto",
       reason: "auto-curve-safe",
       curve: { guideAngleDegrees: expect.any(Number) },
-      rejected: [{ family: "straight", reason: "obstacle" }],
+      rejected: [
+        { family: "straight", reason: "obstacle" },
+        { family: "orthogonal", reason: "obstacle" },
+      ],
     });
     expect(choice!.curve!.guideAngleDegrees).toBeGreaterThanOrEqual(90);
     expect(renderedRoute.length).toBeGreaterThan(2);
@@ -1017,8 +1069,8 @@ describe("StandardLightweightLayoutAdapter", () => {
       ? flattenLayoutDerivedCurve(result.routes.reference!, referenceChoice.curve)
       : result.routes.reference!;
     expect(relatedRendered).not.toEqual(referenceRendered);
-    expect(relatedChoice?.family).toMatch(/^(straight|curve|polyline)$/);
-    expect(referenceChoice?.family).toMatch(/^(straight|curve|polyline)$/);
+    expect(relatedChoice?.family).toMatch(/^(straight|orthogonal|curve|polyline)$/);
+    expect(referenceChoice?.family).toMatch(/^(straight|orthogonal|curve|polyline)$/);
     expect([relatedChoice?.family, referenceChoice?.family].filter((family) => family === "straight"))
       .toHaveLength(1);
     expect(result.routes.related!.length).toBeLessThanOrEqual(3);
@@ -1820,6 +1872,78 @@ describe("LayoutAdapterRegistry", () => {
       expect(overlaps(first.geometries["free-2"]!, first.geometries["region-a"]!)).toBe(false);
       expect(overlaps(first.geometries["free-2"]!, first.geometries["region-b"]!)).toBe(false);
       expect(overlaps(first.geometries.free!, first.geometries["free-2"]!)).toBe(false);
+    },
+  );
+
+  it.each(["LR", "TB"] as const)(
+    "keeps nonmembers outside every Group Frame content bound without moving a shared member for %s",
+    (direction) => {
+      const layoutRef = `urn:test:group-nonmember:${direction}`;
+      const groups = [
+        { elementId: "bag", structuralKind: "container" as const, groupRole: "membership" as const },
+        { elementId: "class", structuralKind: "region" as const, groupRole: "classification" as const },
+        { elementId: "seq", structuralKind: "container" as const, groupRole: "sequence" as const },
+        { elementId: "alt", structuralKind: "container" as const, groupRole: "alternative" as const },
+      ];
+      const scene: LayoutProjectedScene = {
+        elements: [
+          ...groups,
+          { elementId: "shared", structuralKind: "node", placement: "generated" },
+          { elementId: "free", structuralKind: "node", placement: "generated" },
+        ],
+        memberships: [
+          { semanticRef: "bag-shared", containerElementId: "bag", memberElementId: "shared", role: "membership" },
+          { semanticRef: "class-shared", containerElementId: "class", regionElementId: "class", memberElementId: "shared", role: "membership" },
+          { semanticRef: "seq-shared", containerElementId: "seq", memberElementId: "shared", role: "sequence-member", ordinal: 1 },
+          { semanticRef: "alt-shared", containerElementId: "alt", memberElementId: "shared", role: "alternative-member", ordinal: 1 },
+        ],
+        edges: [],
+      };
+      const frame = { x: 0, y: 0, width: 360, height: 220 };
+      const candidate = {
+        layoutRef,
+        geometries: {
+          bag: frame,
+          class: frame,
+          seq: frame,
+          alt: frame,
+          shared: { x: 120, y: 100, width: 80, height: 40 },
+          free: { x: 140, y: 110, width: 60, height: 30 },
+        },
+        routes: {},
+        width: 360,
+        height: 220,
+        diagnostics: [],
+      };
+
+      const first = completeRegionLayout({ layoutRef, scene }, candidate, direction);
+      const reversed = completeRegionLayout({
+        layoutRef,
+        scene: {
+          ...scene,
+          elements: [...scene.elements].reverse(),
+          memberships: [...scene.memberships!].reverse(),
+        },
+      }, candidate, direction);
+      const contentBounds = Object.fromEntries(groups.map((group) => {
+        const geometry = first.geometries[group.elementId]!;
+        return [group.elementId, group.structuralKind === "region"
+          ? geometry
+          : {
+              x: geometry.x + 28,
+              y: geometry.y + 64,
+              width: geometry.width - 56,
+              height: geometry.height - 92,
+            }];
+      }));
+
+      expect(first.geometries).toEqual(reversed.geometries);
+      expect(first.geometries.shared).toEqual(candidate.geometries.shared);
+      for (const group of groups) {
+        expect(overlaps(first.geometries.free!, contentBounds[group.elementId]!)).toBe(false);
+        expect(isInside(first.geometries.shared!, first.geometries[group.elementId]!)).toBe(true);
+      }
+      expect(first.diagnostics).toEqual([]);
     },
   );
 

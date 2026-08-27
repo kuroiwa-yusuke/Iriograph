@@ -313,6 +313,12 @@ export function validateResolvedAuthoringContext(
           `Node role label/description must be non-empty: ${role.roleId}`,
         ));
       }
+      if (role.displayPriority !== undefined && !Number.isFinite(role.displayPriority)) {
+        diagnostics.push(error(
+          "authoring-context-invalid",
+          `Node role display priority must be finite: ${role.roleId}`,
+        ));
+      }
       const term = context.terms.find((candidate) => candidate.iri === role.classIri);
       if (!term || term.kind !== "class" || !authoringTermRolesFromResolved(term).includes("type-object")) {
         diagnostics.push(error(
@@ -544,6 +550,7 @@ function hasAuthoringContextShape(context: unknown): context is ResolvedAuthorin
           && typeof role.roleId === "string"
           && typeof role.classIri === "string"
           && typeof role.label === "string"
+          && (role.displayPriority === undefined || typeof role.displayPriority === "number")
         ))
       )
     )

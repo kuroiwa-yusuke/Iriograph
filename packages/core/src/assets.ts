@@ -94,23 +94,28 @@ export async function resolveDiagramSceneAssets(
   signal: AbortSignal,
 ): Promise<SceneAssetBatch> {
   const output = cloneScene(scene);
-  for (const node of output.nodes) {
-    const trustedPackageUrl = node.iconRef ? packageDefaultIconDataUrl(node.iconRef) : undefined;
+  const iconElements = [
+    ...output.nodes,
+    ...output.containers.filter((element) => Boolean(element.groupFrame)),
+    ...(output.regions ?? []).filter((element) => Boolean(element.groupFrame)),
+  ];
+  for (const element of iconElements) {
+    const trustedPackageUrl = element.iconRef ? packageDefaultIconDataUrl(element.iconRef) : undefined;
     if (trustedPackageUrl) {
-      node.iconUrl = trustedPackageUrl;
-      node.iconIntrinsicSize = packageDefaultIconIntrinsicSize(node.iconRef!);
+      element.iconUrl = trustedPackageUrl;
+      element.iconIntrinsicSize = packageDefaultIconIntrinsicSize(element.iconRef!);
     } else {
-      delete node.iconUrl;
-      delete node.iconIntrinsicSize;
+      delete element.iconUrl;
+      delete element.iconIntrinsicSize;
     }
   }
 
   const semanticRefsByAsset = new Map<string, string[]>();
-  for (const node of output.nodes) {
-    if (!node.iconRef || node.iconUrl) continue;
-    const semanticRefs = semanticRefsByAsset.get(node.iconRef) ?? [];
-    semanticRefs.push(node.semanticRef);
-    semanticRefsByAsset.set(node.iconRef, semanticRefs);
+  for (const element of iconElements) {
+    if (!element.iconRef || element.iconUrl) continue;
+    const semanticRefs = semanticRefsByAsset.get(element.iconRef) ?? [];
+    semanticRefs.push(element.semanticRef);
+    semanticRefsByAsset.set(element.iconRef, semanticRefs);
   }
 
   const assetRefs = [...semanticRefsByAsset.keys()].sort(compareText);
@@ -145,10 +150,10 @@ export async function resolveDiagramSceneAssets(
     leases.set(resolution.assetRef, resolution.lease);
     if (resolution.intrinsicSize) intrinsicSizes.set(resolution.assetRef, resolution.intrinsicSize);
   }
-  for (const node of output.nodes) {
-    if (!node.iconRef || node.iconUrl) continue;
-    node.iconUrl = leases.get(node.iconRef)?.url;
-    node.iconIntrinsicSize = intrinsicSizes.get(node.iconRef);
+  for (const element of iconElements) {
+    if (!element.iconRef || element.iconUrl) continue;
+    element.iconUrl = leases.get(element.iconRef)?.url;
+    element.iconIntrinsicSize = intrinsicSizes.get(element.iconRef);
   }
 
   const sortedDiagnostics = sortDiagnostics(diagnostics);

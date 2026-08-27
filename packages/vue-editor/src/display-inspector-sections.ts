@@ -29,6 +29,7 @@ export function displayInspectorSectionsFor(
       : ["appearance", "icon"];
   }
   const sections: DisplayInspectorSection[] = ["appearance"];
+  if (subject.groupFrame) sections.push("icon");
   if (subject.structuralKind === "region" || subject.groupFrame) sections.push("region-label");
   if (subject.hasGeometry) sections.push("geometry");
   return sections;

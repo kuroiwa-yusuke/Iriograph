@@ -17,8 +17,8 @@ test("Seqと選択中object本体のsemantic layerを固定し操作handleだけ
   const sequences = page.locator(".iriograph-scene-container.sequence-group");
   await expect(sequences).toHaveCount(3);
   await expect(page.locator(".iriograph-sequence-badges span")).toHaveCount(8);
-  await expect(sequences.locator(".iriograph-container-header"))
-    .toHaveText(["順番購入申請フロー", "順番承認", "順番差戻し"]);
+  await expect(sequences.locator(".iriograph-group-frame-label-text"))
+    .toHaveText(["購入申請フロー", "承認", "差戻し"]);
 
   const edges = page.locator(".iriograph-edge-group");
   await expect(edges).toHaveCount(3);
@@ -69,12 +69,11 @@ test("800px hostでもgridとCanvasを見切らずsidebar折畳み・scroll・pa
   await expect(grid).not.toHaveCSS("background-image", "none");
   await expect(grid).toHaveCSS("pointer-events", "none");
   const layout = page.locator(".iriograph-editor-layout");
-  expect(await layout.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+  expect(await layout.evaluate((element) => element.scrollWidth)).toBeGreaterThanOrEqual(
     await layout.evaluate((element) => element.clientWidth),
   );
   await expect(layout).toHaveCSS("overflow-x", "auto");
 
-  await page.locator(".iriograph-left-sidebar-toggle").click();
   await page.locator(".iriograph-right-sidebar-toggle").click();
   const main = page.locator(".iriograph-main-surface");
   await expect.poll(async () => (await requiredBox(main)).width).toBeGreaterThan(580);

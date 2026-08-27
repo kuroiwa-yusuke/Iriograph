@@ -28,6 +28,47 @@ const POLICY: AssetPolicy = {
 };
 
 describe("resolveDiagramSceneAssets", () => {
+  it("Group Frame iconをnodeと同じasset policy・natural aspect契約で解決する", async () => {
+    const input = sceneWithIcons(ICON_REF);
+    input.containers = [{
+      elementId: "group:1",
+      semanticRef: "urn:test:group:1",
+      structuralKind: "container",
+      groupRole: "sequence",
+      groupFrame: {
+        kind: "sequence",
+        semanticRef: "urn:test:group:1",
+        provenance: { operator: "ordinal-sequence", derivation: "resource", sourceStatementRefs: [] },
+      },
+      label: "手順",
+      templateRef: "urn:test:template:group",
+      iconRef: ICON_REF,
+      groupIconScale: 1.5,
+      geometry: { x: 0, y: 0, width: 240, height: 160 },
+      headerPosition: "top",
+      style: { fill: "white", stroke: "black", text: "black", labelFontSize: 21 },
+      pinned: false,
+      placement: "generated",
+    }];
+    const resolve = vi.fn(async (): Promise<AssetResolveResult> => resolvedLease(() => {}));
+
+    const batch = await resolveDiagramSceneAssets(
+      input,
+      {},
+      { resolver: { resolve }, policy: POLICY, revision: "group-1" },
+      new AbortController().signal,
+    );
+
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(batch.scene.containers[0]).toMatchObject({
+      iconUrl: "https://assets.example/icon.svg",
+      iconIntrinsicSize: { width: 24, height: 12, aspectRatio: 2, source: "decoded" },
+      groupIconScale: 1.5,
+    });
+    expect(input.containers[0]?.iconUrl).toBeUndefined();
+    batch.release();
+  });
+
   it("catalog外assetをunique refごとに解決し、入力Sceneを変更しない", async () => {
     const input = sceneWithIcons(ICON_REF, ICON_REF);
     const before = structuredClone(input);

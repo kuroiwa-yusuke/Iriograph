@@ -2,10 +2,13 @@ import type { DiagramScene } from "@iriograph/core";
 
 import type { DiagramViewportState } from "./viewport";
 
+export type CanvasDragMode = "select" | "pan";
+
 export type DiagramViewSession = {
   selectedElementIds: string[];
   primaryElementId: string;
   viewport: DiagramViewportState;
+  dragMode: CanvasDragMode;
   temporaryHiddenElementIds: Set<string>;
 };
 
@@ -14,6 +17,7 @@ export function createDiagramViewSession(): DiagramViewSession {
     selectedElementIds: [],
     primaryElementId: "",
     viewport: { zoom: 1, scrollLeft: 0, scrollTop: 0 },
+    dragMode: "select",
     temporaryHiddenElementIds: new Set(),
   };
 }

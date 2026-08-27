@@ -11,7 +11,7 @@ import {
   type IriographDocumentV1,
 } from "@iriograph/core";
 
-import { mockClassificationRegionProjectionCatalog } from "./catalog";
+import { mockInstanceFlowProjectionCatalog } from "./catalog";
 import { mockProjectionRuntimeContext } from "./authoring";
 
 const PIZZA_FILES = [
@@ -35,7 +35,7 @@ describe("Pizza canonical fixture", () => {
 
     const projected = projectSemanticView(
       canonical,
-      mockClassificationRegionProjectionCatalog,
+      mockInstanceFlowProjectionCatalog,
       "main",
     );
     expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);

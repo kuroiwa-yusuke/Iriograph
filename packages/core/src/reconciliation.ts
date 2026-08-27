@@ -565,6 +565,8 @@ function compatibleAppearance(
   const appearance = previous.appearance;
   if (!appearance) return undefined;
   const result = clone(appearance);
+  const isGroupFrame = (next.structuralKind === "container" || next.structuralKind === "region")
+    && Boolean(next.groupFrame);
   if (result.templateRef) {
     const template = catalog.templates[result.templateRef];
     if (!template || template.structuralKind !== next.structuralKind) {
@@ -577,7 +579,7 @@ function compatibleAppearance(
       delete result.templateRef;
     }
   }
-  if (result.iconRef && next.structuralKind !== "node") {
+  if (result.iconRef && next.structuralKind !== "node" && !isGroupFrame) {
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
@@ -635,7 +637,10 @@ function compatibleAppearance(
   }
   if (next.structuralKind !== "container" && next.structuralKind !== "region" && (
     result.groupLabelAnchor !== undefined
+    || result.groupLabelOffset !== undefined
     || result.groupLabelWritingDirection
+    || result.groupIconOffset
+    || result.groupIconScale !== undefined
     || result.groupZOrder !== undefined
   )) {
     diagnostics.push({
@@ -645,8 +650,47 @@ function compatibleAppearance(
       semanticRef: next.semanticRef,
     });
     delete result.groupLabelAnchor;
+    delete result.groupLabelOffset;
     delete result.groupLabelWritingDirection;
+    delete result.groupIconOffset;
+    delete result.groupIconScale;
     delete result.groupZOrder;
+  }
+  if (!isGroupFrame && (result.groupIconOffset || result.groupIconScale !== undefined)) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}と互換性のないgroup icon presentationを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.groupIconOffset;
+    delete result.groupIconScale;
+  }
+  if (isGroupFrame && (
+    (result.groupLabelOffset !== undefined && (
+      !Number.isFinite(result.groupLabelOffset)
+      || result.groupLabelOffset < -1
+      || result.groupLabelOffset > 1
+    ))
+    || (result.groupIconScale !== undefined && (
+      !Number.isFinite(result.groupIconScale)
+      || result.groupIconScale < 0.1
+      || result.groupIconScale > 8
+    ))
+    || (result.groupIconOffset !== undefined && (
+      !Number.isFinite(result.groupIconOffset.x)
+      || !Number.isFinite(result.groupIconOffset.y)
+    ))
+  )) {
+    diagnostics.push({
+      severity: "warning",
+      code: "reconcile-appearance-dropped",
+      message: `${next.semanticRef}の安全でないgroup frame presentationを除去しました。`,
+      semanticRef: next.semanticRef,
+    });
+    delete result.groupLabelOffset;
+    delete result.groupIconOffset;
+    delete result.groupIconScale;
   }
   if (!result.styleRef && result.styleToken && catalog.styles?.[result.styleToken]) {
     result.styleRef = result.styleToken;

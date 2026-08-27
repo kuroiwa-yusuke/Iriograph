@@ -22,6 +22,7 @@ export type DiagramCanvasNavigationApi = {
   panBy(deltaX: number, deltaY: number): void;
   zoomTo(zoom: number): Promise<void>;
   fitToView(): Promise<void>;
+  fitToSelection(elementIds: readonly string[]): Promise<boolean>;
   revealElement(elementId: string): Promise<boolean>;
   centerOn(point: Point): void;
   getViewportState(): DiagramViewportState;

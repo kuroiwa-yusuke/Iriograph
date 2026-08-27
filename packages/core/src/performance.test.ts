@@ -8,6 +8,8 @@ import type { AuthoringCommand, ResolvedAuthoringContext } from "./authoring-mod
 import { statementIdentityForNamedStatement } from "./identity";
 
 import {
+  completeRegionLayout,
+  containerContentBounds,
   createStandardLayoutRegistry,
   flattenLayoutDerivedCurve,
   layoutProjectedDiagramScene,
@@ -17,9 +19,11 @@ import {
   StandardLightweightLayoutAdapter,
   standardRdfRdfsCatalog,
   standardRdfRdfsClassificationRegionCatalog,
+  standardRdfRdfsInstanceFlowCatalog,
   type DiagramScene,
   type ElementGeometry,
   type IriographDocumentV1,
+  type LayoutRequest,
   type Point,
   type ProjectionCatalogV1,
   type StandardLayoutPerformanceSample,
@@ -88,7 +92,7 @@ describe("P1-08 fixed graph performance", () => {
     const fixtures = [{
       name: "pizza",
       document: pizzaFixture(),
-      catalog: standardRdfRdfsClassificationRegionCatalog,
+      catalog: standardRdfRdfsInstanceFlowCatalog,
       maximumStrictCrossings: 9,
     }, {
       name: "sparse-small",
@@ -121,6 +125,11 @@ describe("P1-08 fixed graph performance", () => {
       expect(quality.maximumRoutePoints).toBeLessThanOrEqual(3);
       expect(quality.strictCrossings).toBeLessThanOrEqual(fixture.maximumStrictCrossings);
       expect(quality.overlapLength).toBe(0);
+      if (fixture.name === "pizza") {
+        const nonmemberGroups = nonmemberGroupContentQuality(last.scene);
+        expect(nonmemberGroups.nonmembers).toBeGreaterThan(0);
+        expect(nonmemberGroups.contentOverlaps).toBe(0);
+      }
       expect(samples.map((sample) => sample.totalMs).sort((left, right) => left - right)
         .at(percentileIndex(samples.length, .95)))
         .toBeLessThan(SMALL_INITIAL_PIPELINE_BUDGET_MS);
@@ -159,6 +168,61 @@ describe("P1-08 fixed graph performance", () => {
     expect(opaqueQuality).toEqual(baselineQuality);
     expect(containment[0]!.scene.containers).toHaveLength(2);
     expect(containment[0]!.totalMs).toBeLessThan(SMALL_INITIAL_PIPELINE_BUDGET_MS);
+  }, 10_000);
+
+  it("keeps bounded Group Frame nonmember evacuation within the small-layout budget", async () => {
+    const nonmemberCount = 160;
+    const frame = { x: 0, y: 0, width: 360, height: 220 };
+    const request: LayoutRequest = {
+      layoutRef: "urn:test:performance:group-nonmembers",
+      scene: {
+        elements: [
+          { elementId: "group", structuralKind: "container", groupRole: "membership" },
+          { elementId: "member", structuralKind: "node", placement: "generated" },
+          ...Array.from({ length: nonmemberCount }, (_, index) => ({
+            elementId: `free-${String(index).padStart(3, "0")}`,
+            structuralKind: "node" as const,
+            placement: "generated" as const,
+          })),
+        ],
+        memberships: [{
+          semanticRef: "group-member",
+          containerElementId: "group",
+          memberElementId: "member",
+          role: "membership",
+        }],
+        edges: [],
+      },
+    };
+    const candidate = {
+      layoutRef: request.layoutRef,
+      geometries: {
+        group: frame,
+        member: { x: 120, y: 100, width: 80, height: 40 },
+        ...Object.fromEntries(Array.from({ length: nonmemberCount }, (_, index) => [
+          `free-${String(index).padStart(3, "0")}`,
+          { x: 140, y: 110, width: 60, height: 30 },
+        ])),
+      },
+      routes: {},
+      width: frame.width,
+      height: frame.height,
+      diagnostics: [],
+    };
+    const measurement = await measure(() => completeRegionLayout(request, candidate, "LR"));
+    const content = { x: 28, y: 64, width: 304, height: 128 };
+    const free = Array.from({ length: nonmemberCount }, (_, index) => (
+      measurement.value.geometries[`free-${String(index).padStart(3, "0")}`]!
+    ));
+
+    reportMeasurement(
+      "group-nonmember-completion",
+      measurement,
+      SMALL_INITIAL_PIPELINE_BUDGET_MS,
+    );
+    expect(free.every((geometry) => !rectanglesOverlap(geometry, content))).toBe(true);
+    expect(pairwiseRectangleOverlapCount(free)).toBe(0);
+    expect(measurement.medianMs).toBeLessThan(SMALL_INITIAL_PIPELINE_BUDGET_MS);
   }, 10_000);
 
   it("keeps prepared relation add, predicate change, and endpoint change core p95 under 150ms", async () => {
@@ -362,10 +426,14 @@ function performanceAuthoringContext(document: IriographDocumentV1): ResolvedAut
     documentRevision: "1",
     authoringProfileRef: document.semantic.authoringProfileRef,
     runtime: {
-      catalogsByProfile: new Map([[
-        standardRdfRdfsClassificationRegionCatalog.profileRef,
-        { catalog: standardRdfRdfsClassificationRegionCatalog },
-      ]]),
+      catalogsByProfile: new Map([
+        [standardRdfRdfsClassificationRegionCatalog.profileRef, {
+          catalog: standardRdfRdfsClassificationRegionCatalog,
+        }],
+        [standardRdfRdfsInstanceFlowCatalog.profileRef, {
+          catalog: standardRdfRdfsInstanceFlowCatalog,
+        }],
+      ]),
       layouts: createStandardLayoutRegistry(),
     },
     resourcePolicy: { allowedMintNamespaces: [document.semantic.baseIri] },
@@ -569,6 +637,45 @@ function routeQuality(scene: DiagramScene): RouteQuality {
     overlapLength: Math.round(overlapLength * 1_000) / 1_000,
     maximumRoutePoints,
   };
+}
+
+function nonmemberGroupContentQuality(scene: DiagramScene): {
+  nonmembers: number;
+  contentOverlaps: number;
+} {
+  const assigned = new Set((scene.memberships ?? []).map((membership) => membership.memberElementId));
+  const nonmembers = scene.nodes.filter((node) => !assigned.has(node.elementId));
+  const groupContent = [
+    ...scene.containers
+      .filter((container) => container.groupFrame)
+      .map((container) => containerContentBounds(container.geometry, container.headerPosition)),
+    ...(scene.regions ?? [])
+      .filter((region) => region.groupFrame)
+      .map((region) => region.geometry),
+  ];
+  return {
+    nonmembers: nonmembers.length,
+    contentOverlaps: nonmembers.reduce((count, node) => (
+      count + groupContent.filter((content) => rectanglesOverlap(node.geometry, content)).length
+    ), 0),
+  };
+}
+
+function pairwiseRectangleOverlapCount(geometries: readonly ElementGeometry[]): number {
+  let count = 0;
+  for (let left = 0; left < geometries.length; left += 1) {
+    for (let right = left + 1; right < geometries.length; right += 1) {
+      if (rectanglesOverlap(geometries[left]!, geometries[right]!)) count += 1;
+    }
+  }
+  return count;
+}
+
+function rectanglesOverlap(left: ElementGeometry, right: ElementGeometry): boolean {
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
 }
 
 function endpointLegLeaves(endpoint: Point, next: Point, geometry: ElementGeometry): boolean {

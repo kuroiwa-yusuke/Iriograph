@@ -116,6 +116,19 @@ describe("normalized RDF/RDFS mock", () => {
         expect.objectContaining({ predicate: "urn:iriograph:demo:p-03" }),
       ]));
 
+    const standardRegions = projectSemanticView(
+      document,
+      mockInstanceFlowProjectionCatalog,
+      regionView.viewId,
+    );
+    expect(standardRegions.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(standardRegions.regions ?? []).toHaveLength(3);
+    expect(standardRegions.regions?.some((item) => (
+      item.semanticRef === "urn:iriograph:demo:HumanStep"
+      || item.semanticRef === "urn:iriograph:demo:AuditedStep"
+    ))).toBe(false);
+
+    regionView.profileRef = mockClassificationRegionProjectionCatalog.profileRef;
     const regions = projectSemanticView(
       document,
       mockClassificationRegionProjectionCatalog,

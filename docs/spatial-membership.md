@@ -36,6 +36,10 @@ Viewは意味graphを変更せず、次のどちらかの空間文法を選び�
 
 Geometryからmembershipを推論してはなりません。要素を領域へdragする操作はpresentation editであり、明示したsemantic commandなしにTurtleを変更してはなりません。逆にTurtleのmembershipは、表示上の位置が一時的に不整合でも消してはなりません。
 
+標準の`instance-flow`では、この表のBag/domain membershipをGroup Frameとして扱いますが、`rdfs:Class`は
+Group Frameへ投影しません。Classと`rdf:type`は`型一覧`と要素上の一件の代表型tagで確認します。Classをregionへ
+投影する空間文法は、明示的な旧`classification-region` viewだけの互換機能です。
+
 ## 3. Domain membership predicate
 
 業務上の関係名が必要な場合、利用domainのpredicateを`rdfs:member`のsubpropertyとして自己記述できます。CatalogやCoreへ個別のpredicate分岐を追加する必要はありません。
@@ -103,14 +107,15 @@ type SceneMembership = {
 - `placement: "user"`またはpinnedなregion geometryはhard constraintです。Coreとlayout adapterは警告を消すために勝手に移動してはなりません。
 - Regionの既定appearanceは半透明で、背面のregion、node、edgeを判別できる必要があります。具体値はcatalog template/style presetが所有し、semantic Turtleへ保存しません。
 - Region overlap自体に新しい意味を付与してはなりません。交差領域は、共通memberを読み取るための表示です。
+- どのGroup Frameにも意味上所属しない生成resourceは、初期layoutでいずれの枠のcontent bounds内にも置いてはなりません。見た目上の偶然の包含をmembershipとして読ませず、固定位置や親containerのhard constraintで退避できない場合だけwarningを返します。
 - Classification-constrainedな操作では、memberの中心点だけでなく全boundsを所属regionの共通intersection内に保たなければなりません。通常dragはこの許容領域へclampし、intersection外へ出すことでmembershipを黙って外してはなりません。
 - Regionのmove/resizeは意味上の全member boundsとtemplate paddingを包含し、複数region memberに必要な共通intersectionを空またはmemberより小さくしてはなりません。制約に達したhandleはその位置で止め、意味関係を変えずに理由を表示します。
 
 固定geometryで所属regionの共通交差が空なら`region-membership-intersection-empty`、交差はあるがmember中心が外なら`region-member-outside-intersection`をwarningとして返します。単一regionのmemberが外なら`region-member-outside`を返せます。これらはpresentation診断であり、Turtleを変更せず、Scene生成をblockingしてはなりません。
 
-### 4.3 Concept class region
+### 4.3 Concept class region（明示的な旧profile互換）
 
-分類を空間表示するregion viewは、`rdfs:Class` resourceをregion、`member rdf:type class`を向きの異なるmembershipとしてcatalogで宣言的にbindできます。これはClassを`rdf:Bag`として扱うことを意味しません。意味の正本は`rdf:type`のまま、同一Scene membership契約へ投影します。
+既存文書が`classification-region` profileを明示した場合に限り、分類を空間表示するregion viewは、`rdfs:Class` resourceをregion、`member rdf:type class`を向きの異なるmembershipとしてcatalogで宣言的にbindできます。これはClassを`rdf:Bag`として扱うことを意味しません。意味の正本は`rdf:type`のまま、同一Scene membership契約へ投影します。標準Editorは通常文書をこのprofileへ自動変換せず、読込時に意味tripleや既存overlayを書き換えません。
 
 ```turtle
 :review a :HumanTask, :AuditedStep .

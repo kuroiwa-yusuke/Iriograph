@@ -92,6 +92,8 @@ export type ResolvedNodeRole = {
   classIri: string;
   label: string;
   description?: string;
+  /** Higher values win when incomparable direct types compete for one display tag. */
+  displayPriority?: number;
 };
 
 export type ResolvedStructuredAuthoringProfile = {

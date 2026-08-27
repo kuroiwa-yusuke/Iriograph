@@ -73,10 +73,10 @@ describe("AppearanceEditor", () => {
     expect(wrapper.text()).not.toContain("領域の透明度");
   });
 
-  it("label文字サイズを8〜72へ制約しrange同様changeで一度だけcommitする", async () => {
+  it.each(["node", "container", "region", "edge"] as const)("%sの文字サイズを入力途中はdraftに保ち確定時に一度だけcommitする", async (elementKind) => {
     const wrapper = mount(AppearanceEditor, {
       props: {
-        elementKind: "edge",
+        elementKind,
         selectionCount: 1,
         currentStyle: { fill: "none", stroke: "#000000", text: "#000000", labelFontSize: 10 },
         presets: {},
@@ -87,12 +87,18 @@ describe("AppearanceEditor", () => {
     const fontSizeRow = wrapper.findAll("label").find((label) => label.text().includes("文字サイズ"))!;
     await fontSizeRow.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
     const commits = wrapper.emitted("commit")!.length;
-    fontSize.element.value = "96";
+    const previews = wrapper.emitted("preview")!.length;
+    fontSize.element.value = "2";
     await fontSize.trigger("input");
+    expect(fontSize.element.value).toBe("2");
     expect(wrapper.emitted("commit")).toHaveLength(commits);
-    expect(wrapper.emitted("preview")?.at(-1)?.[0]).toEqual({ style: { labelFontSize: 72 } });
+    expect(wrapper.emitted("preview")).toHaveLength(previews);
+    fontSize.element.value = "21";
+    await fontSize.trigger("input");
     await fontSize.trigger("change");
-    expect(wrapper.emitted("commit")?.at(-1)?.[0]).toEqual({ style: { labelFontSize: 72 } });
+    expect(wrapper.emitted("commit")?.at(-1)?.[0]).toEqual({ style: { labelFontSize: 21 } });
+    await fontSize.trigger("blur");
+    expect(wrapper.emitted("commit")).toHaveLength(commits + 1);
   });
 
   it("label文字サイズの有効化とresetはCore既定値を共有してsparse overrideを保つ", async () => {

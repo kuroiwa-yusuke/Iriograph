@@ -95,9 +95,7 @@ test.describe("P1-46 production-browser performance", () => {
     const samples: BrowserPhaseSample[] = [];
 
     for (let iteration = 0; iteration < WARMUP_COUNT + SAMPLE_COUNT; iteration += 1) {
-      await stageRelationAddition(page);
-      const create = page.locator(".iriograph-inspector")
-        .getByRole("button", { name: "関係を作成" });
+      const create = await stageRelationAddition(page);
       const sample = await measureClickOperation(
         page,
         cdp,
@@ -128,18 +126,29 @@ test.describe("P1-46 production-browser performance", () => {
     await openPizzaSample(page);
     const cdp = await enableBrowserMetrics(page);
     const samples: BrowserPhaseSample[] = [];
-    const predicates = [
-      "http://www.w3.org/2000/01/rdf-schema#seeAlso",
-      "urn:iriograph:sample:pizza:next",
+    const predicateLabels = [
+      "A（関連情報を参照）B",
+      "A（次の工程）B",
     ] as const;
 
     for (let iteration = 0; iteration < WARMUP_COUNT + SAMPLE_COUNT; iteration += 1) {
       const edge = pizzaEdge(page, "おなかがすいた", "ピザを選ぶ");
       await edge.click();
       const inspector = page.locator(".iriograph-inspector");
-      await inspector.getByRole("button", { name: "関係の意味を編集" }).click();
+      const wizard = inspector.locator(".structured-wizard");
+      const relationChangeEntry = wizard.getByRole("button", { name: /^関係を変更する/u });
+      if (await relationChangeEntry.isVisible()) {
+        await relationChangeEntry.click();
+        await wizard.getByRole("button", { name: "関係の意味を変更", exact: true }).click();
+      } else {
+        await inspector.getByRole("button", { name: "関係の意味を編集" }).click();
+      }
       const predicate = inspector.locator('.iriograph-intent-fields label:has-text("関係") select');
-      await predicate.selectOption(predicates[iteration % predicates.length]!);
+      const predicateValue = await predicate.locator("option")
+        .filter({ hasText: predicateLabels[iteration % predicateLabels.length]! })
+        .getAttribute("value");
+      if (!predicateValue) throw new Error("predicate option is unavailable");
+      await predicate.selectOption(predicateValue);
       const update = inspector.getByRole("button", { name: "関係を更新" });
       const sample = await measureClickOperation(
         page,
@@ -148,7 +157,7 @@ test.describe("P1-46 production-browser performance", () => {
         {
           nodes: PIZZA_NODE_COUNT,
           edges: PIZZA_EDGE_COUNT,
-          edgeAriaIncludes: `おなかがすいたからピザを選ぶへの${iteration % predicates.length === 0 ? "seeAlso" : "次の工程"}`,
+          edgeAriaIncludes: `おなかがすいたからピザを選ぶへの${iteration % predicateLabels.length === 0 ? "seeAlso" : "次の工程"}`,
         },
       );
       await expect(pizzaEdge(page, "おなかがすいた", "ピザを選ぶ")).toHaveCount(1);
@@ -364,17 +373,25 @@ async function collectInitialSceneSample(
   }, browserPhases);
 }
 
-async function stageRelationAddition(page: Page): Promise<void> {
+async function stageRelationAddition(page: Page): Promise<Locator> {
   const inspector = page.locator(".iriograph-inspector");
+  const wizard = inspector.locator(".structured-wizard");
   const source = page.locator(".iriograph-scene-node").filter({ hasText: "おなかがすいた" });
   const target = page.locator(".iriograph-scene-node").filter({ hasText: "注文完了" });
   await source.click();
-  await inspector.getByRole("button", { name: "関係を追加" }).click();
+  await wizard.getByRole("button", { name: /^関係を作る/u }).click();
+  await wizard.getByRole("button", { name: /^線でつなぐ/u }).click();
+  await expect(wizard.locator(".canvas-chip")).toContainText("おなかがすいた");
+  await wizard.getByRole("button", { name: "次へ", exact: true }).click();
+  await wizard.getByRole("button", { name: "Canvasから接続先を選ぶ", exact: true }).click();
   await target.click();
-  await inspector.locator(
-    '.iriograph-predicate-cards input[type="radio"][value="http://www.w3.org/2000/01/rdf-schema#seeAlso"]',
-  ).check();
-  await expect(inspector.getByRole("button", { name: "関係を作成" })).toBeEnabled();
+  await wizard.getByRole("button", { name: "次へ", exact: true }).click();
+  await wizard.locator(".predicate-card")
+    .filter({ hasText: "追加情報として別のresourceを案内します" })
+    .click();
+  const create = wizard.getByRole("button", { name: "次へ", exact: true });
+  await expect(create).toBeEnabled();
+  return create;
 }
 
 async function measureClickOperation(

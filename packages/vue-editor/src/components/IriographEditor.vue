@@ -101,6 +101,7 @@ import StructuredElementDetailsDialog, {
   type StructuredElementDetailsSave,
 } from "./StructuredElementDetailsDialog.vue";
 import DiagramCanvas from "./DiagramCanvas.vue";
+import TypeListPanel from "./TypeListPanel.vue";
 import AppearanceEditor, { type AppearanceEditorValue } from "./AppearanceEditor.vue";
 import {
   authoringDraftHasInput,
@@ -143,6 +144,7 @@ import {
 import {
   createDiagramViewSession,
   sceneWithTemporaryHiddenElements,
+  type CanvasDragMode,
   type DiagramViewSession,
 } from "../view-session";
 import {
@@ -208,8 +210,15 @@ import type {
   PredicateInferencePolicy,
   StructuredAuthoringClipboard,
 } from "../editor-host-contracts";
+import {
+  deriveTypeSystem,
+  type DiagramNodeTypeTagPresentation,
+  type TypeSystemAction,
+  type TypeSystemFocus,
+  type TypeSystemShowInDiagramRequest,
+} from "../type-system";
 
-type Panel = "diagram" | "turtle" | "document";
+type Panel = "diagram" | "types" | "turtle" | "document";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 type GroupFrameElement = SceneContainer | SceneRegion;
 type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
@@ -220,11 +229,12 @@ type SemanticDestination = "relation-meaning" | "relation-reconnect" | "group-me
 type DeletionImpact = {
   key: string;
   label: string;
-  kind: "relation" | "membership" | "sequence" | "alternative";
+  kind: "relation" | "membership" | "sequence" | "alternative" | "type-reference";
 };
 type PendingDeletion = {
   preview: AuthoringPreview;
   impacts: DeletionImpact[];
+  clearSelection: boolean;
 };
 type OverlayEditorIssue = {
   path: string;
@@ -248,6 +258,8 @@ const props = withDefaults(defineProps<{
   canSave?: boolean;
   readOnly?: boolean;
   hideHeader?: boolean;
+  /** Initial left workspace sidebar state; later toggles stay session-local. */
+  initialLeftSidebarCollapsed?: boolean;
   /** Fit the first completed Scene for each document/view; later edits preserve the user's viewport. */
   fitOnInitialLoad?: boolean;
   assetAccess?: AssetAccess;
@@ -275,6 +287,7 @@ const props = withDefaults(defineProps<{
   canSave: true,
   readOnly: false,
   hideHeader: false,
+  initialLeftSidebarCollapsed: true,
   fitOnInitialLoad: false,
   assetAccess: undefined,
   assetOptions: () => [],
@@ -331,6 +344,7 @@ const selectedElementId = ref("");
 const selectedElementIds = ref<string[]>([]);
 const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
 const zoom = ref(1);
+const zoomPresets = [.25, .5, .75, 1, 1.25, 1.5, 2] as const;
 const diagramCanvas = ref<DiagramCanvasNavigationApi>();
 const semanticIntentPanel = ref<{
   focusPendingIntent(): void;
@@ -382,8 +396,9 @@ const rightSidebarId = `${useId()}-right-sidebar`;
 const assetSuggestionsListId = `${useId()}-asset-suggestions`;
 const iconPathInputId = `${useId()}-icon-path`;
 const displayInspectorSectionIdPrefix = `${useId()}-view-section`;
-const leftSidebarCollapsed = ref(false);
+const leftSidebarCollapsed = ref(props.initialLeftSidebarCollapsed);
 const rightSidebarCollapsed = ref(false);
+const canvasDragMode = ref<CanvasDragMode>("select");
 const displayInspectorAction = ref<DisplayInspectorAction>();
 const openDisplayInspectorSections = ref<DisplayInspectorSection[]>([]);
 const inspectorMode = ref<InspectorMode>("semantic");
@@ -405,6 +420,8 @@ const appearancePreviewValue = ref<AppearanceEditorValue>();
 const showAllComments = ref(false);
 const showCanvasGrid = ref(true);
 const growNodeWithIcon = ref(true);
+const typeListFocus = ref<TypeSystemFocus>();
+const typeHighlightElementIds = ref<string[]>([]);
 let viewDialogReturnFocus: HTMLElement | undefined;
 let deletionDialogReturnFocus: HTMLElement | undefined;
 const defaultLayoutRegistry = createStandardLayoutRegistry();
@@ -465,6 +482,10 @@ const portableDocumentPending = computed(() => (
   portableDocumentDraftTouched.value
   && portableDocumentDraft.value !== JSON.stringify(draft.value, null, 2)
 ));
+const zoomListValue = computed(() => {
+  const preset = zoomPresets.find((value) => Math.abs(value - zoom.value) < .001);
+  return preset === undefined ? `current:${zoom.value}` : `zoom:${preset}`;
+});
 const scene = computed(() => {
   viewSessionRevision.value;
   return sceneWithTemporaryHiddenElements(
@@ -713,6 +734,33 @@ const structuredPresentation = computed<StructuredAuthoringPresentation>(() => (
     ? structuredAuthoringPresentation(authoringContext.value)
     : EMPTY_STRUCTURED_AUTHORING_PRESENTATION
 ));
+const typeSystemIndex = computed(() => deriveTypeSystem(draft.value, {
+  authoringProfile: authoringContext.value?.structuredAuthoring,
+  locale: activeView.value?.locale ?? authoringContext.value?.defaultLocale,
+  resourceIris: scene.value.nodes.map((node) => node.semanticRef),
+}));
+const typeSystemTypeById = computed(() => new Map(
+  typeSystemIndex.value.presentation.types.map((item) => [item.typeId, item]),
+));
+const typeSystemResourceByIri = computed(() => new Map(
+  typeSystemIndex.value.presentation.resources.flatMap((item) => {
+    const iri = typeSystemIndex.value.resolveResourceId(item.resourceId);
+    return iri ? [[iri, item] as const] : [];
+  }),
+));
+const nodeTypeTags = computed<Record<string, DiagramNodeTypeTagPresentation>>(() => Object.fromEntries(scene.value.nodes.flatMap((node) => {
+  const resource = typeSystemResourceByIri.value.get(node.semanticRef);
+  if (!resource?.primaryDirectTypeId) return [];
+  const type = typeSystemTypeById.value.get(resource.primaryDirectTypeId);
+  if (!type) return [];
+  return [[node.elementId, {
+    typeId: type.typeId,
+    resourceId: resource.resourceId,
+    label: type.label,
+    additionalDirectCount: Math.max(0, resource.directTypeIds.length - 1),
+    inheritedCount: resource.inheritedTypeIds.length,
+  }]];
+})));
 const structuredRequestId = computed(() => (
   `editor:${draft.value.documentId}:${localDocumentRevision}:${structuredRequestSequence + 1}`
 ));
@@ -1563,7 +1611,8 @@ const assetOptions = computed<EditorAssetOption[]>(() => {
 });
 const iconInputValue = computed(() => {
   const element = selectedElement.value;
-  if (element?.structuralKind !== "node" || !element.iconRef) return "";
+  if (!element || element.structuralKind === "edge" || !element.iconRef) return "";
+  if (element.structuralKind !== "node" && !element.groupFrame) return "";
   const option = assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef);
   return option?.path ?? "";
 });
@@ -1579,7 +1628,7 @@ const workspaceAssetBreadcrumbs = computed(() => (
 ));
 const selectedIconLabel = computed(() => {
   const element = selectedElement.value;
-  if (element?.structuralKind !== "node" || !element.iconRef) return "アイコンなし";
+  if (!element || element.structuralKind === "edge" || !element.iconRef) return "アイコンなし";
   return assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef)?.label
     ?? "カタログで設定されたアイコン";
 });
@@ -1652,6 +1701,7 @@ watch(
     cancelSemanticRequest();
     cancelPortableDocumentRequest();
     cancelDocumentIdentityRequest();
+    typeHighlightElementIds.value = [];
     saveActiveViewSession();
     const previous = clone(draft.value);
     draft.value = clone(value);
@@ -2088,6 +2138,7 @@ function restoreActiveViewSession(): void {
   selectedElementIds.value = [...session.selectedElementIds];
   selectedElementId.value = session.primaryElementId;
   zoom.value = normalizeDiagramZoom(session.viewport.zoom);
+  canvasDragMode.value = session.dragMode;
   emit("selectionChanged", selectedElementId.value);
   emit("selectionSetChanged", [...selectedElementIds.value]);
 }
@@ -2099,6 +2150,7 @@ async function activateView(viewId: string): Promise<void> {
   cancelAssetPicker();
   cancelSemanticRequest();
   cancelViewCommandRequest();
+  typeHighlightElementIds.value = [];
   invalidateAuthoringPreview();
   sceneValidationAbortController?.abort();
   currentActiveViewId.value = nextViewId;
@@ -2691,26 +2743,47 @@ function updateRegionAppearance(
   }, recordHistory);
 }
 
-function updateRegionLabelAnchor(payload: { elementId: string; anchor: number }): void {
+function updateRegionLabelAnchor(payload: { elementId: string; anchor: number; offset?: number }): void {
   const region = (scene.value.regions ?? []).find((candidate) => candidate.elementId === payload.elementId);
   if (!region || props.readOnly || !Number.isFinite(payload.anchor)) return;
   if (region.groupFrame) {
-    updateGroupAppearance(region, "groupLabelAnchor", clamp(payload.anchor, 0, .999999), false);
+    updateGroupLabelPlacement(region, payload.anchor, payload.offset);
     return;
   }
   updateRegionAppearance(region, "regionLabelAnchor", clamp(payload.anchor, 0, .999999), false);
 }
 
-function updateGroupLabelAnchor(payload: { elementId: string; anchor: number }): void {
+function updateGroupLabelAnchor(payload: { elementId: string; anchor: number; offset?: number }): void {
   const element = groupFrameElement(payload.elementId);
   if (!element || props.readOnly || !Number.isFinite(payload.anchor)) return;
-  updateGroupAppearance(element, "groupLabelAnchor", clamp(payload.anchor, 0, .999999), false);
+  updateGroupLabelPlacement(element, payload.anchor, payload.offset);
+}
+
+function updateGroupLabelPlacement(
+  element: GroupFrameElement,
+  anchor: number,
+  offset: number | undefined,
+): void {
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
+    const appearance = { ...current.appearance };
+    appearance.groupLabelAnchor = clamp(anchor, 0, .999999);
+    if (offset === undefined || !Number.isFinite(offset) || Math.abs(offset) < .000001) {
+      delete appearance.groupLabelOffset;
+    } else {
+      appearance.groupLabelOffset = clamp(offset, -1, 1);
+    }
+    current.appearance = appearance;
+    view.overlay[element.elementId] = current;
+  }, false);
 }
 
 function updateGroupAppearance(
   element: GroupFrameElement,
-  key: "groupLabelAnchor" | "groupLabelWritingDirection" | "groupZOrder",
-  value: RegionLabelWritingDirection | number | undefined,
+  key: "groupLabelAnchor" | "groupLabelOffset" | "groupLabelWritingDirection" | "groupIconOffset" | "groupIconScale" | "groupZOrder",
+  value: RegionLabelWritingDirection | Point | number | undefined,
   recordHistory: boolean,
 ): void {
   mutateDocument((document) => {
@@ -2720,12 +2793,72 @@ function updateGroupAppearance(
     const appearance = { ...current.appearance };
     if (value === undefined) delete appearance[key];
     else if (key === "groupLabelWritingDirection") appearance[key] = value as RegionLabelWritingDirection;
+    else if (key === "groupIconOffset") appearance[key] = value as Point;
     else appearance[key] = value as number;
     if (Object.keys(appearance).length) current.appearance = appearance;
     else delete current.appearance;
     if (!current.geometry && !current.pinned && !current.placement && !current.appearance && !current.routing && !current.extensions) delete view.overlay[element.elementId];
     else view.overlay[element.elementId] = current;
   }, recordHistory);
+}
+
+function changeGroupIconOffset(payload: { elementId: string; offset?: Point }): void {
+  const element = groupFrameElement(payload.elementId);
+  if (!element || props.readOnly) return;
+  updateGroupAppearance(element, "groupIconOffset", payload.offset, false);
+}
+
+function updateSelectedGroupIconScale(event: Event): void {
+  const element = selectedElement.value;
+  const value = Number((event.target as HTMLInputElement).value);
+  if (
+    !element
+    || (element.structuralKind !== "container" && element.structuralKind !== "region")
+    || !element.groupFrame
+    || !Number.isFinite(value)
+  ) return;
+  updateGroupAppearance(element, "groupIconScale", clamp(value, .1, 8), true);
+}
+
+function updateSelectedGroupIconOffset(axis: "x" | "y", event: Event): void {
+  const element = selectedElement.value;
+  const value = Number((event.target as HTMLInputElement).value);
+  if (
+    !element
+    || (element.structuralKind !== "container" && element.structuralKind !== "region")
+    || !element.groupFrame
+    || !Number.isFinite(value)
+  ) return;
+  const offset = {
+    x: axis === "x" ? clamp(value, -128, 128) : element.groupIconOffset?.x ?? 0,
+    y: axis === "y" ? clamp(value, -128, 128) : element.groupIconOffset?.y ?? 0,
+  };
+  updateGroupAppearance(
+    element,
+    "groupIconOffset",
+    offset.x === 0 && offset.y === 0 ? undefined : offset,
+    true,
+  );
+}
+
+function resetSelectedGroupIconPresentation(): void {
+  const element = selectedElement.value;
+  if (
+    !element
+    || (element.structuralKind !== "container" && element.structuralKind !== "region")
+    || !element.groupFrame
+    || props.readOnly
+  ) return;
+  mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    const current = view?.overlay[element.elementId];
+    if (!view || !current?.appearance) return;
+    const appearance = { ...current.appearance };
+    delete appearance.groupIconOffset;
+    delete appearance.groupIconScale;
+    current.appearance = Object.keys(appearance).length ? appearance : undefined;
+    view.overlay[element.elementId] = current;
+  }, true);
 }
 
 function updateSelectedGroupLabelWritingDirection(event: Event): void {
@@ -2810,7 +2943,10 @@ function resetSelectedGroupFrameView(): void {
     if (!view || !current) return;
     const appearance = { ...current.appearance };
     delete appearance.groupLabelAnchor;
+    delete appearance.groupLabelOffset;
     delete appearance.groupLabelWritingDirection;
+    delete appearance.groupIconOffset;
+    delete appearance.groupIconScale;
     delete appearance.groupZOrder;
     if (Object.keys(appearance).length) current.appearance = appearance;
     else delete current.appearance;
@@ -3015,7 +3151,7 @@ function updateIcon(event: Event): void {
     return;
   }
   {
-    input.value = element?.structuralKind === "node" ? iconInputValue.value : "";
+    input.value = iconInputValue.value;
     iconPathDraft.value = input.value;
     iconPathIssue.value = located?.message ?? "候補にある画像pathを選択してください。";
     rejectInvalidAssetRef(iconPathIssue.value);
@@ -3037,7 +3173,13 @@ function chooseWorkspacePath(input: string): void {
 async function chooseAssetIcon(): Promise<void> {
   const picker = props.pickAsset;
   const element = selectedElement.value;
-  if (!picker || !element || element.structuralKind !== "node" || props.readOnly) return;
+  if (
+    !picker
+    || !element
+    || element.structuralKind === "edge"
+    || element.structuralKind !== "node" && !element.groupFrame
+    || props.readOnly
+  ) return;
   cancelAssetPicker();
   const requestToken = ++pickerRequestToken;
   const controller = new AbortController();
@@ -3536,6 +3678,142 @@ async function executeIntentCommands(
   }
 }
 
+async function handleTypeSystemAction(action: TypeSystemAction): Promise<void> {
+  const compiled = typeSystemIndex.value.compileAction(action, {
+    commandId: `${structuredRequestId.value}:type-list`,
+    defaultLocale: authoringContext.value?.defaultLocale ?? activeView.value?.locale,
+  });
+  if (!compiled.ok) {
+    applyDiagnostics.value = [{
+      severity: "error",
+      category: "structure",
+      code: `type-list-${compiled.code}`,
+      message: compiled.message,
+    }];
+    return;
+  }
+  if (action.type === "delete-class") {
+    await requestTypeSystemDeletion(
+      [...compiled.batch.commands],
+      action.typeId,
+    );
+    return;
+  }
+  await executeIntentCommands([...compiled.batch.commands], "型一覧", []);
+}
+
+async function requestTypeSystemDeletion(
+  commands: AuthoringCommand[],
+  typeId: string,
+): Promise<void> {
+  const context = authoringContext.value;
+  if (!context || !authoringEnabled.value || authoringBusy.value || props.readOnly) return;
+  cancelAuthoringRequest();
+  const requestToken = ++authoringRequestToken;
+  const controller = new AbortController();
+  authoringAbortController = controller;
+  const previous = clone(draft.value);
+  const previousJson = JSON.stringify(previous);
+  authoringBusy.value = true;
+  try {
+    const preview = await previewAuthoringCommands(previous, commands, context, {
+      allocator: props.resourceIriAllocator ?? context.allocator,
+      signal: controller.signal,
+    });
+    if (
+      requestToken !== authoringRequestToken
+      || controller.signal.aborted
+      || props.readOnly
+      || JSON.stringify(draft.value) !== previousJson
+    ) return;
+    applyDiagnostics.value = userFacingTransactionDiagnostics(preview.diagnostics);
+    if (!preview.valid) return;
+    const impacts = typeSystemDeletionImpacts(preview, typeId);
+    if (impacts.length > 0) {
+      deletionDialogReturnFocus = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : undefined;
+      pendingDeletion.value = { preview, impacts, clearSelection: false };
+      return;
+    }
+    await applyDeletionPreview(previous, preview, requestToken, controller, false);
+  } catch (cause) {
+    if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
+    applyDiagnostics.value = [authoringFailureDiagnostic("type-list-delete-failed", cause)];
+  } finally {
+    if (requestToken === authoringRequestToken) {
+      authoringAbortController = undefined;
+      authoringBusy.value = false;
+      if (pendingDeletion.value) {
+        await nextTick();
+        deletionConfirmButton.value?.focus();
+      }
+    }
+  }
+}
+
+function typeSystemDeletionImpacts(preview: AuthoringPreview, typeId: string): DeletionImpact[] {
+  const typeIri = typeSystemIndex.value.resolveTypeId(typeId);
+  if (!typeIri) return [];
+  const typeByIri = new Map(typeSystemIndex.value.presentation.types.flatMap((item) => {
+    const iri = typeSystemIndex.value.resolveTypeId(item.typeId);
+    return iri ? [[iri, item] as const] : [];
+  }));
+  return preview.patch.removed.flatMap((change): DeletionImpact[] => {
+    if (
+      change.subject.termType !== "NamedNode"
+      || change.subject.value === typeIri
+      || change.object.termType !== "NamedNode"
+      || change.object.value !== typeIri
+    ) return [];
+    const subjectIri = change.subject.value;
+    const label = typeSystemResourceByIri.value.get(subjectIri)?.label
+      ?? typeByIri.get(subjectIri)?.label
+      ?? semanticMetadata.value[subjectIri]?.labels[0]?.value
+      ?? "名前のない要素";
+    return [{
+      key: `type-reference:${change.statementRef}`,
+      kind: "type-reference",
+      label: `${label}からの型参照`,
+    }];
+  }).filter((impact, index, impacts) => (
+    impacts.findIndex((candidate) => candidate.key === impact.key) === index
+  ));
+}
+
+function openTypeListFromTag(payload: {
+  elementId: string;
+  typeId: string;
+  resourceId: string;
+}): void {
+  typeListFocus.value = { typeId: payload.typeId, resourceId: payload.resourceId };
+  typeHighlightElementIds.value = [payload.elementId];
+  panel.value = "types";
+}
+
+async function showTypeResourcesInDiagram(request: TypeSystemShowInDiagramRequest): Promise<void> {
+  const resourceIris = new Set(request.resourceIds.flatMap((resourceId) => {
+    const iri = typeSystemIndex.value.resolveResourceId(resourceId);
+    return iri ? [iri] : [];
+  }));
+  typeHighlightElementIds.value = [
+    ...scene.value.nodes,
+    ...scene.value.containers,
+    ...(scene.value.regions ?? []),
+  ].filter((element) => resourceIris.has(element.semanticRef)).map((element) => element.elementId);
+  panel.value = "diagram";
+  await nextTick();
+  const focusResourceIri = request.focusResourceId
+    ? typeSystemIndex.value.resolveResourceId(request.focusResourceId)
+    : undefined;
+  const focusElement = focusResourceIri
+    ? [...scene.value.nodes, ...scene.value.containers, ...(scene.value.regions ?? [])]
+      .find((element) => element.semanticRef === focusResourceIri)
+    : undefined;
+  const firstElementId = focusElement?.elementId ?? typeHighlightElementIds.value[0];
+  if (firstElementId) await diagramCanvas.value?.revealElement(firstElementId);
+}
+
 function beginIntentResourcePicking(field: "sourceIri" | "targetIri"): void {
   const edge = intentEdgeDetails.value;
   if (edge && authoringDraft.value.kind !== "connect-resources") {
@@ -3735,10 +4013,10 @@ async function requestSemanticDeletion(elementId?: string): Promise<void> {
       deletionDialogReturnFocus = document.activeElement instanceof HTMLElement
         ? document.activeElement
         : undefined;
-      pendingDeletion.value = { preview, impacts };
+      pendingDeletion.value = { preview, impacts, clearSelection: true };
       return;
     }
-    await applyDeletionPreview(previous, preview, requestToken, controller);
+    await applyDeletionPreview(previous, preview, requestToken, controller, true);
   } catch (cause) {
     if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
     applyDiagnostics.value = [authoringFailureDiagnostic("selection-delete-failed", cause)];
@@ -3765,7 +4043,13 @@ async function confirmPendingDeletion(): Promise<void> {
   const previous = clone(draft.value);
   authoringBusy.value = true;
   try {
-    await applyDeletionPreview(previous, pending.preview, requestToken, controller);
+    await applyDeletionPreview(
+      previous,
+      pending.preview,
+      requestToken,
+      controller,
+      pending.clearSelection,
+    );
   } catch (cause) {
     if (requestToken !== authoringRequestToken || controller.signal.aborted) return;
     applyDiagnostics.value = [authoringFailureDiagnostic("selection-delete-apply-failed", cause)];
@@ -3782,6 +4066,7 @@ async function applyDeletionPreview(
   preview: AuthoringPreview,
   requestToken: number,
   controller: AbortController,
+  clearCurrentSelection: boolean,
 ): Promise<void> {
   const context = authoringContext.value;
   if (!context) return;
@@ -3801,7 +4086,7 @@ async function applyDeletionPreview(
   pendingDeletion.value = undefined;
   resetAuthoringDraft();
   semanticIntentPanel.value?.resetIntent();
-  clearSelection();
+  if (clearCurrentSelection) clearSelection();
   publish(result.document, true, "semantic", preparedSceneFor(result));
   turtleDraft.value = result.document.semantic.source;
   restoreDeletionDialogFocus();
@@ -5847,6 +6132,7 @@ function publish(
   preparedScene?: DiagramScene,
 ): Promise<void> {
   invalidateAuthoringPreview();
+  if (refreshKind === "semantic") typeHighlightElementIds.value = [];
   if (recordHistory) {
     history.value.push(clone(draft.value));
     trimHistory();
@@ -5866,6 +6152,7 @@ function replaceDraft(next: IriographDocument, preserveTurtleDraft = false): voi
   saveActiveViewSession();
   const pendingTurtle = turtleDraft.value;
   const refreshKind = documentRefreshKind(draft.value, next);
+  if (refreshKind === "semantic") typeHighlightElementIds.value = [];
   localDocumentRevision += 1;
   draft.value = clone(next);
   const nextViewId = resolveActiveViewId(draft.value, currentActiveViewId.value);
@@ -6007,6 +6294,11 @@ function toggleRightSidebar(): void {
   rightSidebarCollapsed.value = !rightSidebarCollapsed.value;
 }
 
+function setCanvasDragMode(mode: CanvasDragMode): void {
+  canvasDragMode.value = mode;
+  sessionFor(currentActiveViewId.value).dragMode = mode;
+}
+
 async function zoomTo(value: number): Promise<void> {
   if (panel.value !== "diagram") {
     panel.value = "diagram";
@@ -6031,6 +6323,28 @@ async function fitToView(): Promise<void> {
     await nextTick();
   }
   await diagramCanvas.value?.fitToView();
+}
+
+async function fitToSelection(): Promise<boolean> {
+  if (selectedElementIds.value.length === 0) return false;
+  if (panel.value !== "diagram") {
+    panel.value = "diagram";
+    await nextTick();
+  }
+  return await diagramCanvas.value?.fitToSelection(selectedElementIds.value) ?? false;
+}
+
+async function handleZoomListChange(event: Event): Promise<void> {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value === "fit:view") {
+    await fitToView();
+    return;
+  }
+  if (value === "fit:selection") {
+    await fitToSelection();
+    return;
+  }
+  if (value.startsWith("zoom:")) await zoomTo(Number(value.slice(5)));
 }
 
 async function revealSelection(): Promise<boolean> {
@@ -6348,8 +6662,9 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </aside>
 
       <main class="iriograph-main-surface">
-        <nav class="iriograph-view-tabs" aria-label="Canvasとsource表示を切り替え" role="group">
-          <button type="button" :class="{ active: panel === 'diagram' }" :aria-pressed="panel === 'diagram'" @click="panel = 'diagram'">◇ Diagram</button>
+        <nav class="iriograph-view-tabs" aria-label="図と型・source表示を切り替え" role="group">
+          <button type="button" :class="{ active: panel === 'diagram' }" :aria-pressed="panel === 'diagram'" @click="panel = 'diagram'">図</button>
+          <button type="button" :class="{ active: panel === 'types' }" :aria-pressed="panel === 'types'" @click="panel = 'types'">型一覧</button>
           <button type="button" :class="{ active: panel === 'turtle' }" :aria-pressed="panel === 'turtle'" @click="panel = 'turtle'">≡ Turtle</button>
           <button type="button" :class="{ active: panel === 'document' }" :aria-pressed="panel === 'document'" @click="panel = 'document'">{ } Document</button>
         </nav>
@@ -6361,6 +6676,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <button type="button" :disabled="!canRedo || readOnly" title="Redo (Ctrl/Cmd+Y)" @click="redo">↷</button>
               <span />
               <small>{{ layoutPurposeLabel(activeView?.layoutRef) }}</small>
+            </div>
+            <div class="iriograph-drag-mode-actions" role="group" aria-label="Canvasドラッグモード">
+              <button type="button" :aria-pressed="canvasDragMode === 'select'" title="空白や枠内をドラッグして範囲選択" @click="setCanvasDragMode('select')">範囲選択</button>
+              <button type="button" :aria-pressed="canvasDragMode === 'pan'" title="空白や枠内をドラッグしてCanvasを移動" @click="setCanvasDragMode('pan')">移動</button>
             </div>
             <div class="iriograph-navigation-actions">
               <button
@@ -6384,6 +6703,12 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <button type="button" aria-label="縮小" @click="zoomTo(zoom - 0.1)">−</button>
               <button type="button" class="zoom-value" @click="zoomTo(1)">{{ Math.round(zoom * 100) }}%</button>
               <button type="button" aria-label="拡大" @click="zoomTo(zoom + 0.1)">＋</button>
+              <select aria-label="Canvas倍率" :value="zoomListValue" @change="handleZoomListChange">
+                <option v-if="zoomListValue.startsWith('current:')" :value="zoomListValue">{{ Math.round(zoom * 100) }}%</option>
+                <option v-for="preset in zoomPresets" :key="preset" :value="`zoom:${preset}`">{{ Math.round(preset * 100) }}%</option>
+                <option value="fit:view">全体を表示</option>
+                <option value="fit:selection" :disabled="selectedElementIds.length === 0">選択へfit</option>
+              </select>
             </div>
           </div>
           <div class="iriograph-selection-toolbar" aria-label="選択・配置ツール">
@@ -6458,12 +6783,15 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :semantic-metadata="semanticMetadata"
             :show-all-comments="showAllComments"
             :show-grid="showCanvasGrid"
+            :drag-mode="canvasDragMode"
             :edge-route-modes="edgeRouteModes"
             :node-content-editing="inspectorMode === 'appearance' && selectedElement?.structuralKind === 'node' && (isDisplayInspectorSectionOpen('appearance') || isDisplayInspectorSectionOpen('icon'))"
             :node-icon-grow-node="growNodeWithIcon"
             :semantic-endpoint-reconnect="inspectorMode === 'semantic' && Boolean(intentEdgeDetails && !intentEdgeDetails.derivedReason)"
             :deletion-preview-resource-refs="authoringDeletionPreview?.resourceSemanticRefs"
             :deletion-preview-statement-refs="authoringDeletionPreview?.statementRefs"
+            :node-type-tags="nodeTypeTags"
+            :type-highlight-element-ids="typeHighlightElementIds"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
             @selection-set-request="selectElements"
@@ -6476,18 +6804,30 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @node-icon-presentation-update="changeNodeIconPresentation"
             @region-label-update="updateRegionLabelAnchor"
             @group-label-update="updateGroupLabelAnchor"
+            @group-icon-offset-update="changeGroupIconOffset"
             @semantic-position-request="seedDraftPosition"
             @semantic-resource-request="seedDraftResource"
             @structured-selection-request="pickStructuredCanvasElement"
             @structured-selection-set-request="pickStructuredCanvasElements"
             @semantic-endpoint-reconnect-request="seedSemanticEdgeEndpoint"
             @semantic-edit-request="requestSemanticDeletion"
+            @type-tag-request="openTypeListFromTag"
             @semantic-pick-cancel="cancelAuthoringPicking"
             @context-menu-request="openContextMenu"
           />
         </section>
 
-        <section v-if="panel !== 'diagram'" class="iriograph-source-panel">
+        <section v-if="panel === 'types'" class="iriograph-type-list-surface">
+          <TypeListPanel
+            :presentation="typeSystemIndex.presentation"
+            :focus="typeListFocus"
+            :readonly="readOnly || !authoringEnabled || authoringBusy"
+            @action="handleTypeSystemAction"
+            @show-in-diagram="showTypeResourcesInDiagram"
+          />
+        </section>
+
+        <section v-if="panel === 'turtle' || panel === 'document'" class="iriograph-source-panel">
           <header>
             <div>
               <small>{{ panel.toUpperCase() }}</small>
@@ -6701,13 +7041,13 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             </template>
           </details>
           <details
-            v-if="displayInspectorSections.includes('icon') && selectedElement.structuralKind === 'node'"
+            v-if="displayInspectorSections.includes('icon') && (selectedElement.structuralKind === 'node' || (selectedElement.structuralKind === 'container' || selectedElement.structuralKind === 'region') && selectedElement.groupFrame)"
             class="iriograph-inspector-section"
             :class="{ active: displayInspectorAction === 'icon' }"
             :open="isDisplayInspectorSectionOpen('icon')"
             @toggle="handleDisplayInspectorSectionToggle('icon', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('icon')"><span><strong>アイコンと内容</strong><small>{{ selectedIconLabel }}・要素内の配置</small></span></summary>
+            <summary :id="displayInspectorSectionDomId('icon')"><span><strong>アイコンと内容</strong><small>{{ selectedIconLabel }}・{{ selectedElement.structuralKind === 'node' ? '要素内' : '名称band内' }}の配置</small></span></summary>
             <div class="iriograph-package-icon-choices" role="radiogroup" aria-label="同梱アイコン">
               <button type="button" :aria-pressed="!selectedElement.iconRef" :disabled="readOnly" @click="updateAppearance('iconRef', undefined)"><span>なし</span></button>
               <button
@@ -6751,7 +7091,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             >
               {{ pickingAsset ? "画像を選択中…" : "Workspace画像を選択" }}
             </button>
-            <details v-if="selectedElement.iconRef" class="iriograph-view-disclosure" open>
+            <details v-if="selectedElement.structuralKind === 'node' && selectedElement.iconRef" class="iriograph-view-disclosure" open>
               <summary>アイコンのサイズと収まり</summary>
               <label><span>サイズ指定</span><select aria-label="アイコンのサイズ指定" :value="selectedIconSizingMode" :disabled="readOnly" @change="updateSelectedNodeIconSizingMode"><option value="scale">自然比率で倍率</option><option value="size">幅と高さを指定</option></select></label>
               <label v-if="selectedIconSizingMode === 'scale'"><span>倍率</span><input aria-label="アイコンの倍率" type="number" min="0.1" max="8" step="0.1" :value="selectedElement.nodeIconScale ?? 1" :disabled="readOnly" @change="updateSelectedNodeIconScale" /></label>
@@ -6765,7 +7105,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <small v-if="selectedIconFrameWarning" class="iriograph-field-error" role="alert">{{ selectedIconFrameWarning }}</small>
               <button type="button" class="iriograph-wide-button" :disabled="readOnly || (!selectedElement.nodeIconScale && !selectedElement.nodeIconSize && !selectedElement.nodeIconFit)" @click="resetSelectedNodeIconPresentation">サイズと収まりを既定へ戻す</button>
             </details>
-            <div class="iriograph-node-content-placement">
+            <div v-if="selectedElement.structuralKind === 'node'" class="iriograph-node-content-placement">
               <label>要素内の配置</label>
               <small class="iriograph-node-content-guidance">Canvas上のラベルやアイコンをドラッグして、この要素の中で位置を調整できます。</small>
               <label>ラベルの文字方向</label>
@@ -6790,6 +7130,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                   @click="resetSelectedNodeContentOffset('icon')"
                 >アイコン位置を戻す</button>
               </div>
+            </div>
+            <div v-else-if="selectedElement.iconRef" class="iriograph-node-content-placement">
+              <label>名称band内の配置</label>
+              <small class="iriograph-node-content-guidance">自然比率を保ったまま、Canvas上のアイコンをドラッグするか数値で位置を調整できます。</small>
+              <label><span>倍率</span><input aria-label="グループアイコンの倍率" type="number" min="0.1" max="8" step="0.1" :value="selectedElement.groupIconScale ?? 1" :disabled="readOnly" @change="updateSelectedGroupIconScale" /></label>
+              <div class="iriograph-icon-size-grid">
+                <label><span>横位置</span><input aria-label="グループアイコンの横位置" type="number" min="-128" max="128" step="1" :value="selectedElement.groupIconOffset?.x ?? 0" :disabled="readOnly" @change="updateSelectedGroupIconOffset('x', $event)" /></label>
+                <label><span>縦位置</span><input aria-label="グループアイコンの縦位置" type="number" min="-128" max="128" step="1" :value="selectedElement.groupIconOffset?.y ?? 0" :disabled="readOnly" @change="updateSelectedGroupIconOffset('y', $event)" /></label>
+              </div>
+              <small v-if="selectedElement.groupIconOffset && selectedElement.groupIconOffset.x > 12 && Math.abs(selectedElement.groupIconOffset.y) < 24" class="iriograph-field-error" role="status">アイコンと名称が重なる可能性があります。</small>
+              <button type="button" class="iriograph-wide-button" :disabled="readOnly || (!selectedElement.groupIconOffset && !selectedElement.groupIconScale)" @click="resetSelectedGroupIconPresentation">位置と倍率を既定へ戻す</button>
             </div>
           </details>
           <details
@@ -6820,7 +7171,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @toggle="handleDisplayInspectorSectionToggle('region-label', $event)"
           >
             <summary :id="displayInspectorSectionDomId('region-label')"><span><strong>名称と層</strong><small>枠上の名前・文字方向・前後</small></span></summary>
-            <p>Canvas上の{{ selectedElement.groupFrame.kind === 'sequence' ? '並び順' : selectedElement.groupFrame.kind === 'alternative' ? '分岐' : selectedElement.groupFrame.kind === 'classification' ? '分類領域' : '所属グループ' }}名をドラッグすると、枠線に沿って移動できます。</p>
+            <p>Canvas上の名称をドラッグすると、枠の内側と必要最小限の外側を含むband内で移動できます。</p>
             <label>文字方向</label>
             <select aria-label="グループ名の文字方向" :value="selectedElement.groupLabelWritingDirection ?? 'horizontal-right'" :disabled="readOnly" @change="updateSelectedGroupLabelWritingDirection">
               <option value="horizontal-right">横書き（左から右）</option>
@@ -7117,13 +7468,13 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         @keydown="handleDeletionDialogKeydown"
       >
         <header>
-          <strong :id="deletionDialogTitleId">選択外の情報も削除されます</strong>
+          <strong :id="deletionDialogTitleId">関連する情報も削除されます</strong>
           <button type="button" aria-label="削除をキャンセル" :disabled="authoringBusy" @click="cancelPendingDeletion">×</button>
         </header>
-        <p>選択した要素を削除すると、次の関係・所属・並び順も同じ操作で削除されます。</p>
+        <p>削除すると、次の参照・関係・所属・並び順も同じ操作で削除されます。</p>
         <ul aria-label="削除の影響一覧">
           <li v-for="impact in pendingDeletion.impacts" :key="impact.key">
-            <small>{{ impact.kind === 'relation' ? '関係' : impact.kind === 'sequence' ? '並び順' : impact.kind === 'alternative' ? '選択肢' : '所属' }}</small>
+            <small>{{ impact.kind === 'type-reference' ? '型参照' : impact.kind === 'relation' ? '関係' : impact.kind === 'sequence' ? '並び順' : impact.kind === 'alternative' ? '選択肢' : '所属' }}</small>
             <span>{{ impact.label }}</span>
           </li>
         </ul>

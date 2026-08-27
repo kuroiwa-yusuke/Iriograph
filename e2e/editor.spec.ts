@@ -63,7 +63,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   await textarea.fill("@prefix : <urn:iriograph:e2e:> .\n:a :rel .");
   await page.getByRole("button", { name: "検証して適用" }).click();
   await expect(page.locator(".iriograph-diagnostics .error")).toBeVisible();
-  await page.getByRole("button", { name: /Diagram/ }).click();
+  await page.getByRole("button", { name: "図", exact: true }).click();
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(initialNodeCount + 1);
 
   await page.getByRole("button", { name: /Turtle/ }).click();
@@ -79,7 +79,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   await expect.poll(() => textarea.evaluate((element) => (
     (element as HTMLTextAreaElement).selectionStart
   ))).toBe(domainInvalidSource.indexOf("<urn:iriograph:demo:e2e-invalid>"));
-  await page.getByRole("button", { name: /Diagram/ }).click();
+  await page.getByRole("button", { name: "図", exact: true }).click();
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(initialNodeCount + 1);
 
   expect(consoleErrors).toEqual([]);
@@ -88,6 +88,8 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
 test("左右サイドバーを折りたたむとCanvasが空いた領域まで拡張する", async ({ page }) => {
   await openPurchaseSample(page);
   const viewport = page.locator(".iriograph-canvas-scroll");
+  await expect(page.getByLabel("左サイドバーを開く")).toBeVisible();
+  await page.getByLabel("左サイドバーを開く").click();
   const before = await requiredBox(viewport, "canvas viewport");
 
   await page.getByLabel("左サイドバーを閉じる").click();
@@ -95,7 +97,7 @@ test("左右サイドバーを折りたたむとCanvasが空いた領域まで�
   await expect(page.getByLabel("左サイドバーを開く")).toBeVisible();
   await expect(page.getByLabel("右サイドバーを開く")).toBeVisible();
   await expect.poll(async () => (await requiredBox(viewport, "expanded canvas viewport")).width)
-    .toBeGreaterThan(before.width + 400);
+    .toBeGreaterThan(before.width + 200);
 
   await page.getByLabel("全体を表示").click();
   await expect(page.locator(".iriograph-scene-node").first()).toBeInViewport();
@@ -138,7 +140,7 @@ test("Documentタブでactive view overlayをTurtle不変の一履歴としてso
   await expect(source).toHaveValue(JSON.stringify(changedOverlay, null, 2));
   expect(await readTurtle(page)).toBe(turtleBefore);
 
-  await page.getByRole("button", { name: /Diagram/u }).click();
+  await page.getByRole("button", { name: "図", exact: true }).click();
   await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
   await page.getByRole("button", { name: /Document/u }).click();
   await expect(source).toHaveValue(JSON.stringify(originalOverlay, null, 2));
@@ -154,7 +156,7 @@ test("Documentタブでactive view overlayをTurtle不変の一履歴としてso
   await page.locator(".iriograph-document-boundary")
     .getByRole("button", { name: "文書全体を検証して適用", exact: true }).click();
   await expect(portableSource).toHaveValue(/"documentId": "purchase-approval-e2e-source-replace"/u);
-  await page.getByRole("button", { name: /Diagram/u }).click();
+  await page.getByRole("button", { name: "図", exact: true }).click();
   await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
   await page.getByRole("button", { name: /Document/u }).click();
   await expect(portableSource).toHaveValue(new RegExp(`"documentId": "${originalPortableDocument.documentId}"`, "u"));
@@ -253,6 +255,7 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(initialNodeCount - 1);
   await expect(page.getByRole("button", { name: /再表示/ })).toContainText("(1)");
 
+  await page.locator(".iriograph-left-sidebar-toggle").click();
   await page.getByRole("button", { name: "ビューを管理" }).click();
   const manager = page.locator(".iriograph-view-dialog");
   await manager.getByRole("button", { name: "このビューを複製" }).click();
@@ -290,7 +293,7 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   expect(consoleErrors).toEqual([]);
 });
 
-test("structured authoringは初期4入口から種類必須の要素と4種類のグループを作る", async ({ page }) => {
+test("structured authoringは初期4入口から種類必須の要素と3種類のグループを作る", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -334,7 +337,6 @@ test("structured authoringは初期4入口から種類必須の要素と4種類�
   expect(turtleAfter).not.toBe(turtleBefore);
 
   const groups = [
-    { label: "E2E 分類グループ", kind: "分類グループ", className: "classification-group" },
     { label: "E2E 包含グループ", kind: "包含グループ", className: "iriograph-scene-region" },
     { label: "E2E 順序グループ", kind: "順序付きグループ", className: "sequence-group" },
     { label: "E2E 候補グループ", kind: "候補グループ", className: "alternative-group" },
@@ -414,7 +416,7 @@ test("predicate階層はlabelだけで説明し、通常presentation DOMへ生IR
   );
   await source.fill(sourceWithHierarchy);
   await page.getByRole("button", { name: "検証して適用", exact: true }).click();
-  await page.getByRole("button", { name: /Diagram/u }).click();
+  await page.getByRole("button", { name: "図", exact: true }).click();
 
   const inspector = page.locator(".iriograph-inspector");
   const wizard = inspector.locator(".structured-wizard");
@@ -860,17 +862,17 @@ test("region viewで領域交差・複数包含・説明・8方向resizeを扱�
     x: reviewBox.x + reviewBox.width / 2,
     y: reviewBox.y + reviewBox.height / 2,
   }, overlap!)).toBe(true);
-  const humanStep = page.locator(".iriograph-scene-region").filter({ hasText: "人が行う工程" });
-  const auditedStep = page.locator(".iriograph-scene-region").filter({ hasText: "監査対象工程" });
-  const classOverlap = intersectionBox(
-    await requiredBox(humanStep, "human step class region"),
-    await requiredBox(auditedStep, "audited step class region"),
-  );
-  expect(classOverlap).toBeDefined();
-  expect(pointInsideBox({
-    x: reviewBox.x + reviewBox.width / 2,
-    y: reviewBox.y + reviewBox.height / 2,
-  }, classOverlap!)).toBe(true);
+  await expect(page.locator(".iriograph-scene-region").filter({ hasText: "人が行う工程" })).toHaveCount(0);
+  await expect(page.locator(".iriograph-scene-region").filter({ hasText: "監査対象工程" })).toHaveCount(0);
+  const typeTag = review.locator(".iriograph-node-type-tag");
+  await expect(typeTag).toHaveText("監査対象工程");
+  await typeTag.click();
+  const typeSurface = page.locator(".iriograph-type-list-surface");
+  await expect(typeSurface.getByRole("heading", { name: "型一覧" })).toBeVisible();
+  await expect(typeSurface.getByRole("heading", { name: "監査対象工程" })).toBeVisible();
+  expect(await typeSurface.innerHTML()).not.toMatch(/urn:|https?:\/\/|IRI/u);
+  await typeSurface.getByRole("button", { name: "図で表示", exact: true }).click();
+  await expect(review).toHaveClass(/type-highlight/u);
 
   await audit.dispatchEvent("contextmenu", { clientX: 680, clientY: 420 });
   await page.getByRole("menu", { name: "選択対象の操作" })
@@ -908,7 +910,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   expect(await nodes.count()).toBeGreaterThanOrEqual(3);
   await page.getByRole("button", { name: /Turtle/ }).click();
   const semanticSource = await page.getByLabel("Turtle source").inputValue();
-  await page.getByRole("button", { name: /Diagram/ }).click();
+  await page.getByRole("button", { name: "図", exact: true }).click();
 
   // Region viewは単一parentを持たないため、同じ業務領域内の既知nodeを
   // semantic labelで選び、multi-selectionのpresentation操作を検証する。
@@ -1187,6 +1189,7 @@ test("viewport navigationをmouse/keyboard、fit、minimap、selection revealで
   const minimapPosition = await scrollPosition(viewport);
   expect(minimapPosition.left).toBeGreaterThan(300);
 
+  await page.getByLabel("左サイドバーを開く").click();
   await page.locator(".iriograph-element-list button").filter({ hasText: "開始" }).first().click();
   const viewportBox = await requiredBox(viewport, "viewport");
   const selectedBox = await requiredBox(page.locator(".iriograph-scene-node.selected"), "selected node");
@@ -1265,6 +1268,7 @@ test("既存viewを縦方向へ切り替えてもTurtleとユーザー配置を�
     top: await numericSceneCoordinate(start, "y"),
   };
 
+  await page.locator(".iriograph-left-sidebar-toggle").click();
   await page.getByRole("button", { name: "ビューを管理" }).click();
   await page.locator(".iriograph-view-dialog").getByRole("button", { name: "このビューを設定" }).click();
   const dialog = page.locator(".iriograph-view-dialog");
@@ -1363,7 +1367,7 @@ async function readTurtle(page: Page): Promise<string> {
   const sourceTabs = page.locator(".iriograph-view-tabs");
   await sourceTabs.getByRole("button", { name: /Turtle/ }).click();
   const source = await page.getByLabel("Turtle source").inputValue();
-  await sourceTabs.getByRole("button", { name: /Diagram/ }).click();
+  await sourceTabs.getByRole("button", { name: "図", exact: true }).click();
   return source;
 }
 

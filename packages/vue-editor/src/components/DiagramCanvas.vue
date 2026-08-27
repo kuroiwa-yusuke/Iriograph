@@ -110,6 +110,8 @@ import {
   constrainIconPresentationResize,
   constrainMembershipRegionMovement,
 } from "../region-membership-constraints";
+import type { CanvasDragMode } from "../view-session";
+import type { DiagramNodeTypeTagPresentation } from "../type-system";
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;
@@ -134,6 +136,12 @@ const props = withDefaults(defineProps<{
   semanticMetadata?: Readonly<Record<string, SemanticDisplayMetadata>>;
   showAllComments?: boolean;
   showGrid?: boolean;
+  /** DOM-safe derived type tags keyed by Scene node identity. */
+  nodeTypeTags?: Readonly<Record<string, DiagramNodeTypeTagPresentation>>;
+  /** Session-only highlight; never copied into Scene or view overlay. */
+  typeHighlightElementIds?: readonly string[];
+  /** Session-only meaning of primary blank/group-interior drag. */
+  dragMode?: CanvasDragMode;
   /** Ephemeral semantic preview only; never part of Scene or the document. */
   deletionPreviewResourceRefs?: readonly string[];
   /** Exact statement identities removed by the pending semantic patch. */
@@ -159,6 +167,9 @@ const props = withDefaults(defineProps<{
   semanticMetadata: () => ({}),
   showAllComments: false,
   showGrid: true,
+  nodeTypeTags: () => ({}),
+  typeHighlightElementIds: () => [],
+  dragMode: "select",
   deletionPreviewResourceRefs: () => [],
   deletionPreviewStatementRefs: () => [],
   edgeRouteModes: () => ({}),
@@ -186,8 +197,9 @@ const emit = defineEmits<{
     size: { width: number; height: number };
     geometry?: ElementGeometry;
   }];
-  regionLabelUpdate: [payload: { elementId: string; anchor: number }];
-  groupLabelUpdate: [payload: { elementId: string; anchor: number }];
+  regionLabelUpdate: [payload: { elementId: string; anchor: number; offset?: number }];
+  groupLabelUpdate: [payload: { elementId: string; anchor: number; offset?: number }];
+  groupIconOffsetUpdate: [payload: { elementId: string; offset?: Point }];
   /** Requests atomic deletion of the active semantic selection. */
   semanticEditRequest: [elementId: string];
   /** Seeds draft coordinates only; it never mutates the graph or history. */
@@ -207,6 +219,11 @@ const emit = defineEmits<{
   }];
   semanticPickCancel: [];
   contextMenuRequest: [request: DiagramContextMenuRequest];
+  typeTagRequest: [payload: {
+    elementId: string;
+    typeId: string;
+    resourceId: string;
+  }];
   /** @deprecated Use routingUpdate for the complete sparse routing value. */
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
@@ -246,6 +263,7 @@ const previewGeometries = ref<Record<string, ElementGeometry>>({});
 const previewRouting = ref<Record<string, EditableEdgeRouting | null>>({});
 const previewNodeContentOffsets = ref<Record<string, { label?: Point; icon?: Point }>>({});
 const previewNodeIconSizes = ref<Record<string, { width: number; height: number }>>({});
+const previewGroupIconOffsets = ref<Record<string, Point>>({});
 const semanticReconnectPreview = ref<{
   edgeElementId: string;
   endpoint: "source" | "target";
@@ -294,6 +312,7 @@ const selectedElementIdsSet = computed(() => new Set([
 const containmentWarningElementIdsSet = computed(() => new Set(
   props.containmentWarningElementIds,
 ));
+const typeHighlightElementIdsSet = computed(() => new Set(props.typeHighlightElementIds));
 const deletionPreviewResourceRefsSet = computed(() => new Set(
   props.deletionPreviewResourceRefs,
 ));
@@ -318,6 +337,14 @@ const orderedRegions = computed(() => [...(props.scene.regions ?? [])].sort((lef
 )));
 const orderedContainers = computed(() => [...props.scene.containers].sort((left, right) => (
   (left.groupZOrder ?? 0) - (right.groupZOrder ?? 0)
+  || left.elementId.localeCompare(right.elementId)
+)));
+const orderedGroupFrames = computed(() => [
+  ...props.scene.containers.filter((element) => Boolean(element.groupFrame)),
+  ...(props.scene.regions ?? []).filter((element) => Boolean(element.groupFrame)),
+].sort((left, right) => (
+  (left.groupZOrder ?? 0) - (right.groupZOrder ?? 0)
+  || left.structuralKind.localeCompare(right.structuralKind)
   || left.elementId.localeCompare(right.elementId)
 )));
 const minimapViewport = computed(() => {
@@ -373,6 +400,14 @@ function additionalLabels(semanticRef: string, primary: string): string[] {
 
 function commentsFor(semanticRef: string): string {
   return metadataFor(semanticRef).comments.map(semanticTextLabel).join("\n\n");
+}
+
+function typeTagTitle(tag: DiagramNodeTypeTagPresentation): string {
+  const remaining = [
+    tag.additionalDirectCount ? `他の直接の型 ${tag.additionalDirectCount}件` : "",
+    tag.inheritedCount ? `継承する型 ${tag.inheritedCount}件` : "",
+  ].filter(Boolean).join("、");
+  return remaining ? `${tag.label}。${remaining}は型一覧で確認` : `${tag.label}。型一覧で確認`;
 }
 
 function diagnosticsForElement(element: DiagnosticElement): ProjectionDiagnostic[] {
@@ -763,7 +798,11 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
     && structureInteriorTarget(event)
   ) {
     event.stopPropagation();
-    startSelectionMarquee(event, element);
+    if (props.dragMode === "pan" && !props.structuredSelectionPicking) {
+      startViewportPan(event, element, true);
+    } else {
+      startSelectionMarquee(event, element);
+    }
     return;
   }
   if (props.structuredSelectionPicking) {
@@ -1227,7 +1266,14 @@ function regionLabelStyle(region: SceneRegion): Record<string, string> {
     ? { fontSize: `${region.style.labelFontSize}px` }
     : {};
   if (!Number.isFinite(anchor)) return typography;
-  const point = pointAtRegionPerimeter(region.geometry, anchor!);
+  const point = region.groupFrame
+    ? pointAtGroupLabelBand(
+        region.geometry,
+        anchor!,
+        region.groupLabelOffset,
+        region.style.labelFontSize,
+      )
+    : pointAtRegionPerimeter(region.geometry, anchor!);
   return {
     ...typography,
     left: `${point.x - region.geometry.x}px`,
@@ -1244,10 +1290,15 @@ function groupFrameLabelStyle(container: SceneContainer): Record<string, string>
   const anchor = Number.isFinite(container.groupLabelAnchor)
     ? container.groupLabelAnchor!
     : geometry.width / 2 / perimeter;
-  const point = pointAtRegionPerimeter(geometry, anchor);
+  const bandPoint = pointAtGroupLabelBand(
+    geometry,
+    anchor,
+    container.groupLabelOffset,
+    container.style.labelFontSize,
+  );
   return {
-    left: `${point.x - geometry.x}px`,
-    top: `${point.y - geometry.y}px`,
+    left: `${bandPoint.x - geometry.x}px`,
+    top: `${bandPoint.y - geometry.y}px`,
     right: "auto",
     bottom: "auto",
     transform: "translate(-50%, -50%)",
@@ -1266,6 +1317,113 @@ function groupFrameKindLabel(kind: GroupFrameKind): string {
     default:
       return "所属";
   }
+}
+
+function groupFrameDescription(kind: GroupFrameKind): string {
+  return `${groupFrameKindLabel(kind)}グループの枠。名称へフォーカスすると種類を確認できます。`;
+}
+
+function groupFrameTooltip(element: SceneContainer | SceneRegion): string {
+  return `${element.label}（${groupFrameKindLabel(element.groupFrame!.kind)}グループ）`;
+}
+
+function groupFrameZIndex(element: SceneContainer | SceneRegion): number {
+  if (selectedElementIdsSet.value.has(element.elementId)) return 19;
+  const rank = orderedGroupFrames.value.findIndex((candidate) => candidate.elementId === element.elementId);
+  if (rank < 0) return 10;
+  if (rank === orderedGroupFrames.value.length - 1) return 18;
+  return 10 + Math.min(7, rank);
+}
+
+function groupIconStyle(element: SceneContainer | SceneRegion): Record<string, string> {
+  const metrics = resolveIconContentMetrics(element.iconIntrinsicSize, {
+    scale: element.groupIconScale,
+  });
+  const offset = previewGroupIconOffsets.value[element.elementId] ?? element.groupIconOffset ?? { x: 0, y: 0 };
+  return {
+    width: `${metrics?.width ?? 24}px`,
+    height: `${metrics?.height ?? 24}px`,
+    transform: `translate(${offset.x}px, ${offset.y}px)`,
+  };
+}
+
+function groupIconMayOverlapLabel(element: SceneContainer | SceneRegion): boolean {
+  if (!element.iconRef) return false;
+  const metrics = resolveIconContentMetrics(element.iconIntrinsicSize, { scale: element.groupIconScale });
+  const offset = previewGroupIconOffsets.value[element.elementId] ?? element.groupIconOffset;
+  if (!metrics || !offset) return false;
+  return offset.x > Math.max(8, metrics.width * .4) && Math.abs(offset.y) < metrics.height;
+}
+
+function groupLabelMayOverlapMember(element: SceneContainer | SceneRegion): boolean {
+  const memberIds = new Set((props.scene.memberships ?? []).flatMap((membership) => (
+    (membership.regionElementId ?? membership.containerElementId) === element.elementId
+      ? [membership.memberElementId]
+      : []
+  )));
+  for (const candidate of [...props.scene.nodes, ...props.scene.containers]) {
+    if (candidate.parentElementId === element.elementId) memberIds.add(candidate.elementId);
+  }
+  if (memberIds.size === 0) return false;
+  const geometry = geometryFor(element);
+  const anchor = Number.isFinite(element.groupLabelAnchor)
+    ? element.groupLabelAnchor!
+    : geometry.width / 2 / Math.max(1, 2 * (geometry.width + geometry.height));
+  const center = pointAtGroupLabelBand(
+    geometry,
+    anchor,
+    element.groupLabelOffset,
+    element.style.labelFontSize,
+  );
+  const fontSize = element.style.labelFontSize ?? 21;
+  const icon = element.iconRef
+    ? resolveIconContentMetrics(element.iconIntrinsicSize, { scale: element.groupIconScale })
+    : undefined;
+  const horizontalWidth = Math.min(280, Math.max(24, [...element.label].length * fontSize * .62 + 16))
+    + (icon ? icon.width + 8 : 0);
+  const horizontalHeight = Math.max(fontSize * 1.4 + 8, icon?.height ?? 0);
+  const vertical = element.groupLabelWritingDirection === "vertical-down";
+  const labelBounds = {
+    x: center.x - (vertical ? horizontalHeight : horizontalWidth) / 2,
+    y: center.y - (vertical ? horizontalWidth : horizontalHeight) / 2,
+    width: vertical ? horizontalHeight : horizontalWidth,
+    height: vertical ? horizontalWidth : horizontalHeight,
+  };
+  return [...props.scene.nodes, ...props.scene.containers, ...(props.scene.regions ?? [])]
+    .some((candidate) => memberIds.has(candidate.elementId) && boundsIntersect(
+      labelBounds,
+      geometryFor(candidate),
+    ));
+}
+
+function startGroupIconMove(event: PointerEvent, element: SceneContainer | SceneRegion): void {
+  if (props.readOnly || event.button !== 0 || !element.groupFrame || !element.iconRef) return;
+  event.preventDefault();
+  event.stopPropagation();
+  requestSelection({ elementId: element.elementId, mode: "replace" });
+  emit("gestureStart");
+  const origin = { x: event.clientX, y: event.clientY };
+  const initial = element.groupIconOffset ?? { x: 0, y: 0 };
+  let pending = initial;
+  trackPointer((moveEvent) => {
+    pending = {
+      x: clamp(initial.x + (moveEvent.clientX - origin.x) / props.zoom, -128, 128),
+      y: clamp(initial.y + (moveEvent.clientY - origin.y) / props.zoom, -128, 128),
+    };
+    previewGroupIconOffsets.value = {
+      ...previewGroupIconOffsets.value,
+      [element.elementId]: pending,
+    };
+  }, (cancelled) => {
+    const next = { ...previewGroupIconOffsets.value };
+    delete next[element.elementId];
+    previewGroupIconOffsets.value = next;
+    if (cancelled || pending.x === initial.x && pending.y === initial.y) return;
+    emit("groupIconOffsetUpdate", {
+      elementId: element.elementId,
+      offset: pending.x === 0 && pending.y === 0 ? undefined : pending,
+    });
+  });
 }
 
 function resizeHandleStyle(element: GeometryElement, handle: ResizeHandle): Record<string, string> {
@@ -1291,10 +1449,10 @@ function startRegionLabelMove(event: PointerEvent, region: SceneRegion): void {
   trackPointer((moveEvent) => {
     const point = semanticPositionAt(moveEvent);
     if (!point) return;
-    emit("regionLabelUpdate", {
-      elementId: region.elementId,
-      anchor: nearestRegionPerimeterAnchor(region.geometry, point),
-    });
+    const placement = region.groupFrame
+      ? nearestGroupLabelBandPlacement(region.geometry, point, region.style.labelFontSize)
+      : { anchor: nearestRegionPerimeterAnchor(region.geometry, point) };
+    emit("regionLabelUpdate", { elementId: region.elementId, ...placement });
   });
 }
 
@@ -1309,7 +1467,11 @@ function startGroupFrameLabelMove(event: PointerEvent, container: SceneContainer
     if (!point) return;
     emit("groupLabelUpdate", {
       elementId: container.elementId,
-      anchor: nearestRegionPerimeterAnchor(geometryFor(container), point),
+      ...nearestGroupLabelBandPlacement(
+        geometryFor(container),
+        point,
+        container.style.labelFontSize,
+      ),
     });
   });
 }
@@ -1326,6 +1488,53 @@ function pointAtRegionPerimeter(geometry: ElementGeometry, anchor: number): Poin
   if (distance <= width) return { x: geometry.x + width - distance, y: geometry.y + height };
   distance -= width;
   return { x: geometry.x, y: geometry.y + height - Math.min(height, distance) };
+}
+
+function pointAtGroupLabelBand(
+  geometry: ElementGeometry,
+  anchor: number,
+  offset = 0,
+  fontSize = 21,
+): Point {
+  const perimeterPoint = pointAtRegionPerimeter(geometry, anchor);
+  const inward = inwardNormalAtAnchor(geometry, anchor);
+  const safeOffset = clamp(Number.isFinite(offset) ? offset : 0, -1, 1);
+  const distance = safeOffset < 0
+    ? safeOffset * Math.max(6, fontSize * .4)
+    : safeOffset * Math.max(18, fontSize * 1.4);
+  return {
+    x: perimeterPoint.x + inward.x * distance,
+    y: perimeterPoint.y + inward.y * distance,
+  };
+}
+
+function inwardNormalAtAnchor(geometry: ElementGeometry, anchor: number): Point {
+  const perimeter = Math.max(1, 2 * (geometry.width + geometry.height));
+  const distance = clamp(anchor, 0, .999999) * perimeter;
+  if (distance <= geometry.width) return { x: 0, y: 1 };
+  if (distance <= geometry.width + geometry.height) return { x: -1, y: 0 };
+  if (distance <= geometry.width * 2 + geometry.height) return { x: 0, y: -1 };
+  return { x: 1, y: 0 };
+}
+
+function nearestGroupLabelBandPlacement(
+  geometry: ElementGeometry,
+  point: Point,
+  fontSize = 21,
+): { anchor: number; offset?: number } {
+  const anchor = nearestRegionPerimeterAnchor(geometry, point);
+  const perimeterPoint = pointAtRegionPerimeter(geometry, anchor);
+  const inward = inwardNormalAtAnchor(geometry, anchor);
+  const signedDistance = (point.x - perimeterPoint.x) * inward.x
+    + (point.y - perimeterPoint.y) * inward.y;
+  const limit = signedDistance < 0
+    ? Math.max(6, fontSize * .4)
+    : Math.max(18, fontSize * 1.4);
+  const offset = clamp(signedDistance / limit, -1, 1);
+  return {
+    anchor,
+    ...(Math.abs(offset) > .000001 ? { offset } : {}),
+  };
 }
 
 function nearestRegionPerimeterAnchor(geometry: ElementGeometry, point: Point): number {
@@ -1916,17 +2125,24 @@ function clampPointToScene(point: Point): Point {
   };
 }
 
-function startViewportPan(event: PointerEvent): void {
+function startViewportPan(
+  event: PointerEvent,
+  clickElement?: GeometryElement,
+  forcePrimary = false,
+): void {
   const primaryOnBlank = event.button === 0 && isBlankCanvasTarget(event.target);
+  const hitGroup = primaryOnBlank ? topGroupFrameAtEvent(event) : undefined;
+  const selectionTarget = clickElement ?? hitGroup;
   const middleButton = event.button === 1;
-  if (!primaryOnBlank && !middleButton) return;
+  if (!primaryOnBlank && !middleButton && !forcePrimary) return;
   const primaryPan = primaryOnBlank && (
     event.altKey
     || props.semanticPositionPicking
     || props.semanticResourcePicking
+    || props.dragMode === "pan" && !props.structuredSelectionPicking
   );
-  if (!middleButton && !primaryPan) {
-    startSelectionMarquee(event);
+  if (!middleButton && !primaryPan && !forcePrimary) {
+    startSelectionMarquee(event, selectionTarget);
     return;
   }
   const element = scrollElement.value;
@@ -1960,6 +2176,22 @@ function startViewportPan(event: PointerEvent): void {
     ) {
       const position = semanticPositionAt(upEvent);
       if (position) emit("semanticPositionRequest", position);
+      return;
+    }
+    if (upEvent?.type === "pointerup" && !moved && selectionTarget) {
+      if (props.structuredSelectionPicking) {
+        if (!props.readOnly) emit("structuredSelectionRequest", selectionRequest(
+          event,
+          selectionTarget.elementId,
+          selectedElementIdsSet.value.has(selectionTarget.elementId),
+        ));
+      } else {
+        requestSelection(selectionRequest(
+          event,
+          selectionTarget.elementId,
+          selectedElementIdsSet.value.has(selectionTarget.elementId),
+        ));
+      }
     }
   };
   stopViewportTracking?.();
@@ -1967,6 +2199,18 @@ function startViewportPan(event: PointerEvent): void {
   window.addEventListener("pointermove", handleMove);
   window.addEventListener("pointerup", cleanup, { once: true });
   window.addEventListener("pointercancel", cleanup, { once: true });
+}
+
+function topGroupFrameAtEvent(event: PointerEvent | MouseEvent): GeometryElement | undefined {
+  const point = canvasPositionAt(event as PointerEvent);
+  if (!point) return undefined;
+  return [...orderedGroupFrames.value].reverse().find((element) => {
+    const geometry = geometryFor(element);
+    return point.x >= geometry.x
+      && point.x <= geometry.x + geometry.width
+      && point.y >= geometry.y
+      && point.y <= geometry.y + geometry.height;
+  });
 }
 
 function startSelectionMarquee(event: PointerEvent, clickElement?: GeometryElement): void {
@@ -2773,6 +3017,33 @@ async function fitToView(): Promise<void> {
   });
 }
 
+async function fitToSelection(elementIds: readonly string[]): Promise<boolean> {
+  await nextTick();
+  updateViewportMetrics();
+  const bounds = elementIds
+    .map(elementBounds)
+    .filter((value): value is ElementGeometry => Boolean(value));
+  if (bounds.length === 0) return false;
+  const left = Math.min(...bounds.map((value) => value.x));
+  const top = Math.min(...bounds.map((value) => value.y));
+  const right = Math.max(...bounds.map((value) => value.x + value.width));
+  const bottom = Math.max(...bounds.map((value) => value.y + value.height));
+  const selectionBounds = {
+    x: left,
+    y: top,
+    width: Math.max(1, right - left),
+    height: Math.max(1, bottom - top),
+  };
+  emit("zoomChange", diagramFitZoom(selectionBounds, viewport));
+  await nextTick();
+  updateViewportMetrics();
+  centerOn({
+    x: selectionBounds.x + selectionBounds.width / 2,
+    y: selectionBounds.y + selectionBounds.height / 2,
+  });
+  return true;
+}
+
 function centerOn(point: Point): void {
   const offset = stageOffset();
   setViewportScroll(
@@ -2859,6 +3130,11 @@ function requestPointerContextMenu(
 
 function requestBlankContextMenu(event: MouseEvent): void {
   if (!isBlankCanvasTarget(event.target)) return;
+  const group = topGroupFrameAtEvent(event);
+  if (group) {
+    requestPointerContextMenu(event, group.structuralKind, group.elementId);
+    return;
+  }
   requestPointerContextMenu(event, "blank");
 }
 
@@ -3035,6 +3311,7 @@ defineExpose<DiagramCanvasNavigationApi>({
   panBy,
   zoomTo,
   fitToView,
+  fitToSelection,
   revealElement,
   centerOn,
   getViewportState,
@@ -3043,7 +3320,7 @@ defineExpose<DiagramCanvasNavigationApi>({
 </script>
 
 <template>
-  <div class="iriograph-canvas-shell" :class="{ panning: viewportPanning, 'marquee-selecting': Boolean(selectionMarquee), 'semantic-picking': semanticPositionPicking || semanticResourcePicking || structuredSelectionPicking }">
+  <div class="iriograph-canvas-shell" :class="{ panning: viewportPanning, 'marquee-selecting': Boolean(selectionMarquee), 'drag-mode-pan': dragMode === 'pan', 'semantic-picking': semanticPositionPicking || semanticResourcePicking || structuredSelectionPicking }">
     <div
       ref="scrollElement"
       class="iriograph-canvas-scroll"
@@ -3085,6 +3362,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             zoom,
             previewGeometries,
             previewRouting,
+            previewGroupIconOffsets,
             selectedElementId,
             selectedElementIds,
             activeNavigatorElementId,
@@ -3102,6 +3380,8 @@ defineExpose<DiagramCanvasNavigationApi>({
             selectionMarqueeGeometry,
             deletionPreviewResourceRefs,
             deletionPreviewStatementRefs,
+            nodeTypeTags,
+            typeHighlightElementIds,
           ]"
           :style="{
             width: `${workArea.width}px`,
@@ -3141,11 +3421,13 @@ defineExpose<DiagramCanvasNavigationApi>({
             :key="region.elementId"
             :id="navigatorDomId(region.elementId)"
             class="iriograph-scene-region"
-            :class="[{ selected: selectedElementIdsSet.has(region.elementId), 'interaction-front': selectedElementIdsSet.has(region.elementId), 'group-frame': Boolean(region.groupFrame), 'classification-group': region.groupFrame?.kind === 'classification', 'navigator-active': activeNavigatorElementId === region.elementId, 'deletion-preview': isDeletionPreviewResource(region) }, diagnosticClass(region)]"
+            :class="[{ selected: selectedElementIdsSet.has(region.elementId), 'interaction-front': selectedElementIdsSet.has(region.elementId), 'group-frame': Boolean(region.groupFrame), 'classification-group': region.groupFrame?.kind === 'classification', 'navigator-active': activeNavigatorElementId === region.elementId, 'deletion-preview': isDeletionPreviewResource(region), 'type-highlight': typeHighlightElementIdsSet.has(region.elementId) }, diagnosticClass(region)]"
             role="option"
             tabindex="-1"
             :data-element-id="region.elementId"
             :aria-label="`${navigatorAriaLabel(region.elementId, region.label, 'region')}${diagnosticAriaSuffix(region)}`"
+            :aria-description="region.groupFrame ? groupFrameDescription(region.groupFrame.kind) : undefined"
+            :aria-describedby="region.groupFrame ? `${navigatorDomId(region.elementId)}-group-description` : undefined"
             :aria-selected="selectedElementIdsSet.has(region.elementId)"
             :aria-posinset="navigatorPosition(region.elementId)"
             :aria-setsize="navigatorItems.length"
@@ -3158,25 +3440,33 @@ defineExpose<DiagramCanvasNavigationApi>({
               borderWidth: `${region.style.strokeWidth ?? 1}px`,
               borderStyle: region.style.dash && region.style.dash !== '0' ? 'dashed' : 'solid',
               color: region.style.text,
+              zIndex: region.groupFrame ? groupFrameZIndex(region) : undefined,
             }"
             @pointerdown="startMove($event, region)"
             @keydown="handleGeometrySemanticKeydown($event, region.elementId)"
             @contextmenu="requestPointerContextMenu($event, 'region', region.elementId)"
           >
+            <span v-if="region.groupFrame" :id="`${navigatorDomId(region.elementId)}-group-description`" class="iriograph-visually-hidden">{{ groupFrameDescription(region.groupFrame.kind) }}</span>
             <span class="iriograph-region-fill" :style="{ background: region.style.fill, opacity: region.style.fillOpacity ?? 0.28 }" />
             <span
               class="iriograph-region-label"
               :class="[
                 { 'iriograph-group-frame-label': Boolean(region.groupFrame) },
+                { 'icon-label-collision': Boolean(region.groupFrame) && groupIconMayOverlapLabel(region) },
+                { 'member-label-collision': Boolean(region.groupFrame) && groupLabelMayOverlapMember(region) },
                 `label-${region.labelPlacement ?? 'top'}`,
                 `writing-${region.regionLabelWritingDirection === 'vertical-down' || (!region.regionLabelWritingDirection && (region.labelPlacement === 'left' || region.labelPlacement === 'right')) ? 'vertical' : 'horizontal'}`,
               ]"
               :style="regionLabelStyle(region)"
-              :title="region.groupFrame ? region.label : 'ドラッグしてラベルを領域の枠上で移動'"
+              :title="region.groupFrame ? groupFrameTooltip(region) : 'ドラッグしてラベルを領域の枠上で移動'"
               @pointerdown="startRegionLabelMove($event, region)"
             >
-              <small v-if="region.groupFrame" class="iriograph-group-kind-label">{{ groupFrameKindLabel(region.groupFrame.kind) }}</small>
+              <img v-if="region.groupFrame && region.iconUrl" class="iriograph-group-frame-icon" :src="region.iconUrl" alt="" loading="lazy" draggable="false" :style="groupIconStyle(region)" @pointerdown="startGroupIconMove($event, region)" />
+              <span v-else-if="region.groupFrame && region.iconRef" class="iriograph-group-frame-icon-fallback" aria-hidden="true" :style="groupIconStyle(region)" @pointerdown="startGroupIconMove($event, region)">◇</span>
               <span :class="{ 'iriograph-group-frame-label-text': Boolean(region.groupFrame) }">{{ region.label }}</span>
+              <span v-if="region.groupFrame && groupIconMayOverlapLabel(region)" class="iriograph-visually-hidden">アイコンと名称が重なる可能性があります</span>
+              <span v-if="region.groupFrame && groupLabelMayOverlapMember(region)" class="iriograph-group-label-collision" role="img" aria-label="名称が要素と重なっています" title="名称が要素と重なっています">!</span>
+              <span v-if="region.groupFrame" class="iriograph-group-structure-tooltip" role="tooltip" aria-hidden="true">{{ groupFrameKindLabel(region.groupFrame.kind) }}グループ</span>
             </span>
             <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(' ／ ') }}</span>
             <span v-if="commentsFor(region.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: region.style.labelFontSize ? `${region.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(region.semanticRef) }}</span>
@@ -3188,6 +3478,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             v-memo="[
               container,
               previewGeometries[container.elementId],
+              previewGroupIconOffsets[container.elementId],
               selectedElementIdsSet.has(container.elementId),
               activeNavigatorElementId === container.elementId,
               containmentWarningElementIdsSet.has(container.elementId),
@@ -3196,16 +3487,19 @@ defineExpose<DiagramCanvasNavigationApi>({
               semanticMetadata[container.semanticRef],
               showAllComments,
               isDeletionPreviewResource(container),
+              typeHighlightElementIdsSet.has(container.elementId),
             ]"
             :id="navigatorDomId(container.elementId)"
             class="iriograph-scene-container"
-            :class="[{ selected: selectedElementIdsSet.has(container.elementId), 'interaction-front': Boolean(container.groupFrame ?? container.groupRole) && selectedElementIdsSet.has(container.elementId), 'group-frame': Boolean(container.groupFrame ?? container.groupRole), 'membership-group': container.groupRole === 'membership', 'classification-group': container.groupRole === 'classification', 'navigator-active': activeNavigatorElementId === container.elementId, 'containment-warning': containmentWarningElementIdsSet.has(container.elementId), 'deletion-preview': isDeletionPreviewResource(container), 'sequence-group': container.groupRole === 'sequence', 'alternative-group': container.groupRole === 'alternative' }, diagnosticClass(container)]"
+            :class="[{ selected: selectedElementIdsSet.has(container.elementId), 'interaction-front': Boolean(container.groupFrame ?? container.groupRole) && selectedElementIdsSet.has(container.elementId), 'group-frame': Boolean(container.groupFrame ?? container.groupRole), 'membership-group': container.groupRole === 'membership', 'classification-group': container.groupRole === 'classification', 'navigator-active': activeNavigatorElementId === container.elementId, 'containment-warning': containmentWarningElementIdsSet.has(container.elementId), 'deletion-preview': isDeletionPreviewResource(container), 'type-highlight': typeHighlightElementIdsSet.has(container.elementId), 'sequence-group': container.groupRole === 'sequence', 'alternative-group': container.groupRole === 'alternative' }, diagnosticClass(container)]"
             role="option"
             tabindex="-1"
             :data-element-id="container.elementId"
             :data-parent-element-id="container.parentElementId ?? ''"
             :data-header-position="container.headerPosition"
             :aria-label="`${navigatorAriaLabel(container.elementId, container.label, 'container')}${diagnosticAriaSuffix(container)}`"
+            :aria-description="container.groupFrame ? groupFrameDescription(container.groupFrame.kind) : undefined"
+            :aria-describedby="container.groupFrame ? `${navigatorDomId(container.elementId)}-group-description` : undefined"
             :aria-selected="selectedElementIdsSet.has(container.elementId)"
             :aria-posinset="navigatorPosition(container.elementId)"
             :aria-setsize="navigatorItems.length"
@@ -3219,21 +3513,27 @@ defineExpose<DiagramCanvasNavigationApi>({
               borderWidth: `${container.style.strokeWidth ?? 1}px`,
               borderStyle: container.style.dash && container.style.dash !== '0' ? 'dashed' : 'solid',
               color: container.style.text,
+              zIndex: container.groupFrame ? groupFrameZIndex(container) : undefined,
             }"
             @pointerdown="startMove($event, container)"
             @keydown="handleGeometrySemanticKeydown($event, container.elementId)"
             @contextmenu="requestPointerContextMenu($event, 'container', container.elementId)"
           >
+            <span v-if="container.groupFrame" :id="`${navigatorDomId(container.elementId)}-group-description`" class="iriograph-visually-hidden">{{ groupFrameDescription(container.groupFrame.kind) }}</span>
             <span
               v-if="container.groupFrame"
               class="iriograph-container-header iriograph-group-frame-label"
-              :class="`writing-${container.groupLabelWritingDirection === 'vertical-down' ? 'vertical' : 'horizontal'}`"
+              :class="[`writing-${container.groupLabelWritingDirection === 'vertical-down' ? 'vertical' : 'horizontal'}`, { 'icon-label-collision': groupIconMayOverlapLabel(container), 'member-label-collision': groupLabelMayOverlapMember(container) }]"
               :style="groupFrameLabelStyle(container)"
-              :title="container.label"
+              :title="groupFrameTooltip(container)"
               @pointerdown="startGroupFrameLabelMove($event, container)"
             >
-              <small class="iriograph-group-kind-label">{{ groupFrameKindLabel(container.groupFrame.kind) }}</small>
+              <img v-if="container.iconUrl" class="iriograph-group-frame-icon" :src="container.iconUrl" alt="" loading="lazy" draggable="false" :style="groupIconStyle(container)" @pointerdown="startGroupIconMove($event, container)" />
+              <span v-else-if="container.iconRef" class="iriograph-group-frame-icon-fallback" aria-hidden="true" :style="groupIconStyle(container)" @pointerdown="startGroupIconMove($event, container)">◇</span>
               <span class="iriograph-group-frame-label-text">{{ container.label }}</span>
+              <span v-if="groupIconMayOverlapLabel(container)" class="iriograph-visually-hidden">アイコンと名称が重なる可能性があります</span>
+              <span v-if="groupLabelMayOverlapMember(container)" class="iriograph-group-label-collision" role="img" aria-label="名称が要素と重なっています" title="名称が要素と重なっています">!</span>
+              <span class="iriograph-group-structure-tooltip" role="tooltip" aria-hidden="true">{{ groupFrameKindLabel(container.groupFrame.kind) }}グループ</span>
             </span>
             <span
               v-else
@@ -3401,6 +3701,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               scene.diagnostics,
               readOnly,
               semanticMetadata[node.semanticRef],
+              nodeTypeTags[node.elementId],
+              typeHighlightElementIdsSet.has(node.elementId),
               showAllComments,
               isDeletionPreviewResource(node),
               semanticReconnectPreview?.targetElementId === node.elementId,
@@ -3425,6 +3727,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 'containment-warning': containmentWarningElementIdsSet.has(node.elementId),
                 'deletion-preview': isDeletionPreviewResource(node),
                 'semantic-reconnect-target': semanticReconnectPreview?.targetElementId === node.elementId,
+                'type-highlight': typeHighlightElementIdsSet.has(node.elementId),
                 ...diagnosticClass(node),
               },
             ]"
@@ -3496,6 +3799,19 @@ defineExpose<DiagramCanvasNavigationApi>({
                 @pointerdown="startNodeContentMove($event, node, 'label')"
               ><span class="iriograph-node-label" :style="{ fontSize: node.style.labelFontSize ? `${node.style.labelFontSize}px` : undefined }">{{ node.label }}</span><small v-if="additionalLabels(node.semanticRef, node.label).length" class="iriograph-additional-labels">{{ additionalLabels(node.semanticRef, node.label).join(' ／ ') }}</small></span>
             </span>
+            <button
+              v-if="nodeTypeTags[node.elementId]"
+              type="button"
+              class="iriograph-node-type-tag"
+              :title="typeTagTitle(nodeTypeTags[node.elementId]!)"
+              :aria-label="`${nodeTypeTags[node.elementId]!.label}の型一覧を開く`"
+              @pointerdown.stop
+              @click.stop="emit('typeTagRequest', {
+                elementId: node.elementId,
+                typeId: nodeTypeTags[node.elementId]!.typeId,
+                resourceId: nodeTypeTags[node.elementId]!.resourceId,
+              })"
+            >{{ nodeTypeTags[node.elementId]!.label }}</button>
             <span v-if="commentsFor(node.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: node.style.labelFontSize ? `${node.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(node.semanticRef) }}</span>
             <span v-if="node.shape === 'diamond'" class="iriograph-gateway-mark">×</span>
             <span v-if="node.placement === 'user'" class="iriograph-pin-indicator" title="ユーザー調整済み">●</span>

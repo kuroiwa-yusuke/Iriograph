@@ -178,31 +178,35 @@ export function createMockAuthoringContext(
     capabilities: [],
     structuredAuthoring: {
       allowUntypedNodes: false,
-      allowClassificationGroups: true,
+      allowClassificationGroups: false,
       nodeRoles: [
         {
           roleId: "role-01",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.process,
           label: "処理",
           description: "作業や判断など、業務の中で実行する内容です。",
+          displayPriority: 10,
         },
         {
           roleId: "role-02",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.event,
           label: "出来事",
           description: "開始、待機、受信、完了など、状態が変わる時点です。",
+          displayPriority: 10,
         },
         {
           roleId: "role-03",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.gateway,
           label: "分岐・合流",
           description: "流れを複数に分ける、または複数の流れをまとめる地点です。",
+          displayPriority: 10,
         },
         {
           roleId: "role-04",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.information,
           label: "情報",
           description: "注文、料金、帳票など、業務で受け渡す情報です。",
+          displayPriority: 10,
         },
       ],
     },

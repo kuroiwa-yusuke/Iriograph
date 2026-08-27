@@ -10,6 +10,7 @@ import {
   structuredAuthoringPresentation,
   type IriographDocumentV1,
 } from "@iriograph/core";
+import { deriveTypeSystem } from "@iriograph/vue-editor";
 
 import {
   createMockAuthoringContext,
@@ -18,24 +19,24 @@ import {
 } from "./authoring";
 
 describe("mock authoring host", () => {
-  it("opaqueな4 roleと4 group kindを日本語だけで公開する", () => {
+  it("opaqueな4 roleと構造groupだけを日本語で公開し、通常Wizardに分類groupを出さない", () => {
     const context = createMockAuthoringContext(fixture());
     const presentation = structuredAuthoringPresentation(context);
 
     expect(context.defaultLocale).toBe("ja");
     expect(context.structuredAuthoring).toMatchObject({
       allowUntypedNodes: false,
-      allowClassificationGroups: true,
+      allowClassificationGroups: false,
     });
     expect(presentation.profile.nodeRoles).toEqual([
-      expect.objectContaining({ roleId: "role-01", label: "処理" }),
-      expect.objectContaining({ roleId: "role-02", label: "出来事" }),
-      expect.objectContaining({ roleId: "role-03", label: "分岐・合流" }),
-      expect.objectContaining({ roleId: "role-04", label: "情報" }),
+      expect.objectContaining({ roleId: "role-01", label: "処理", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-02", label: "出来事", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-03", label: "分岐・合流", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-04", label: "情報", displayPriority: 10 }),
     ]);
     expect(presentation.groupKinds.map(({ groupKind, enabled }) => ({ groupKind, enabled })))
       .toEqual([
-        { groupKind: "classification", enabled: true },
+        { groupKind: "classification", enabled: false },
         { groupKind: "membership", enabled: true },
         { groupKind: "sequence", enabled: true },
         { groupKind: "alternative", enabled: true },
@@ -72,8 +73,8 @@ describe("mock authoring host", () => {
     expect(untyped.diagnostics).toContainEqual(expect.objectContaining({ code: "node-role-required" }));
   });
 
-  it("分類を含む4種類のgroupを作成できる", async () => {
-    for (const groupKind of ["classification", "membership", "sequence", "alternative"] as const) {
+  it("Bag/Seq/Altの3種類だけをgroupとして作成する", async () => {
+    for (const groupKind of ["membership", "sequence", "alternative"] as const) {
       const document = fixture();
       const result = await previewStructuredAuthoringRequest(document, {
         type: "create-element",
@@ -82,6 +83,16 @@ describe("mock authoring host", () => {
       }, createMockAuthoringContext(document));
       expect(result.valid, `${groupKind}: ${JSON.stringify(result.diagnostics)}`).toBe(true);
     }
+    const document = fixture();
+    const classification = await previewStructuredAuthoringRequest(document, {
+      type: "create-element",
+      requestId: "group-classification",
+      element: { kind: "group", groupKind: "classification", label: "分類は型一覧で作る" },
+    }, createMockAuthoringContext(document));
+    expect(classification.valid).toBe(false);
+    expect(classification.diagnostics).toContainEqual(expect.objectContaining({
+      code: "classification-group-creation-denied",
+    }));
   });
 
   it("allocatorのnamespace外発行と既存resource衝突をfail closedにする", async () => {
@@ -159,6 +170,24 @@ describe("mock authoring host", () => {
       element: { kind: "node", label: "支払う", nodeRoleIds: ["role-01"] },
     }, context);
     expect(created.valid).toBe(true);
+  });
+
+  it("一般workflow roleよりdocument固有の競合direct型を代表tagに選ぶ", () => {
+    const purchase = JSON.parse(readFileSync(
+      new URL("../../public/workspace/models/purchase-approval.iriograph", import.meta.url),
+      "utf8",
+    )) as IriographDocumentV1;
+    const context = createMockAuthoringContext(purchase);
+    const index = deriveTypeSystem(purchase, {
+      authoringProfile: context.structuredAuthoring,
+      locale: "ja",
+    });
+    const review = index.presentation.resources.find((resource) => resource.label === "内容を審査")!;
+    const primary = index.presentation.types.find((type) => type.typeId === review.primaryDirectTypeId)!;
+    expect(primary.label).toBe("監査対象工程");
+    expect(review.directTypeIds.map((typeId) => (
+      index.presentation.types.find((type) => type.typeId === typeId)?.label
+    ))).toEqual(expect.arrayContaining(["処理", "人が行う工程", "監査対象工程"]));
   });
 
   it("static contextとallocatorでallowed namespaceのresourceを決定的にPreviewする", async () => {

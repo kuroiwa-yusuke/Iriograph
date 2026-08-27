@@ -76,7 +76,7 @@ Top-levelの`imports`はTurtle/RDF graph importではなく、表示規則を持
 |---|---|---|
 | `standardRdfRdfsCatalog` | `urn:iriograph:profile:rdf-rdfs:1` | 既存互換のfull ontology/instance view |
 | `standardRdfRdfsInstanceFlowCatalog` | `urn:iriograph:profile:rdf-rdfs:instance-flow:1` | 語彙定義を除いた業務instance・flow view |
-| `standardRdfRdfsClassificationRegionCatalog` | `urn:iriograph:profile:rdf-rdfs:classification-region:1` | class membershipを領域で示すregion view |
+| `standardRdfRdfsClassificationRegionCatalog` | `urn:iriograph:profile:rdf-rdfs:classification-region:1` | 既存文書が明示したclass-region表示の読込・編集互換 |
 
 `createStandardRdfRdfsCatalog("full" | "instance-flow" | "classification-region")`でも同じcatalogを生成できます。Hostはdocumentのimport参照を解決し、viewの`profileRef`と一致するcatalogをruntime contextへ登録します。Presetによる非表示はprojection結果だけへ作用し、`semantic.source`と語彙索引は完全なまま保持します。
 
@@ -98,7 +98,7 @@ overlayには次を保持できます。
 
 - `geometry`: x、y、width、height
 - `pinned`と`placement`: 自動配置かユーザー固定か
-- `appearance`: template、icon、catalog style preset、sparse styleの明示override、node内の`nodeLabelOffset`/`nodeLabelWritingDirection`/`nodeIconOffset`、`regionLabelAnchor`、`regionLabelWritingDirection`、`regionZOrder`、edgeごとの`edgeCaption`
+- `appearance`: template、icon、catalog style preset、sparse styleの明示override、node内の`nodeLabelOffset`/`nodeLabelWritingDirection`/`nodeIconOffset`、Group Frame共通の`groupLabelAnchor`/`groupLabelOffset`/`groupLabelWritingDirection`/`groupIconOffset`/`groupIconScale`/`groupZOrder`、旧region alias、edgeごとの`edgeCaption`
 - `routing`: edgeの`routeMode`、manual waypoint、label offset、source/target anchor、terminal override、curveのsparse curvature
 
 `routing.waypoints`はsource/target attachmentを含まない、ユーザーが確定したmanual中間点だけです。
@@ -120,6 +120,12 @@ Region labelの`regionLabelAnchor`は外周上の0以上1未満の正規化位�
 通常時と選択時の双方で`region/sequence group < edge < node`を固定し、同種内のselection frontや
 z-orderが別層を越えません。Edgeの`appearance.edgeCaption`はview overlayだけに保存し、predicate label、
 semantic search、LLM contextへ昇格しません。
+
+新規保存はcontainer/regionをまたぐGroup Frame共通fieldを使います。`groupLabelAnchor`は枠周上の位置、
+`groupLabelOffset`は名称を内外周bandへ動かす-1以上1以下の正規化変位で、文字方向とは独立です。
+`groupIconOffset`はheader/band内の有限な相対位置、`groupIconScale`は0.1以上8以下の倍率です。
+`groupZOrder`は同じ構造層のGroup Frame間だけに作用します。旧`regionLabel*`/`regionZOrder`は読取互換として
+解釈しますが、新しいGroup Frame操作が意味membership、Turtle、他のz bandを変更することはありません。
 
 `appearance.iconRef`はassetの安定したIRIだけを保持します。workspace path、取得URL、
 認証情報、画像bytesはportable documentへ保存しません。Catalogの`iconRef`は意味から
@@ -152,7 +158,7 @@ v1 target catalogは次の宣言を持ちます。
 `membership-container.membershipPredicate`は限定RDFS `subPropertyOf` closureで照合し、sourceで使った
 exact predicateはmembership provenanceと`set-membership`逆編集へ保持します。
 
-`instance-flow`は`rdfs:Class` / `rdf:Property` resourceとschema定義edgeをcatalog ruleで`suppress`しますが、非表示property IRIを可視instance間のpredicateとして使うdirect edgeは保持します。`classification-region`はclassの`membership-region` ruleを維持し、property resourceとschema定義edgeだけを`suppress`します。個別IRI、namespace、labelに依存するfilterではありません。
+`instance-flow`は標準編集の既定で、`rdfs:Class` / `rdf:Property` resourceとschema定義edgeをcatalog ruleで`suppress`しますが、非表示property IRIを可視instance間のpredicateとして使うdirect edgeは保持します。Class、subclass、type assignmentはTurtleから導出する型一覧で失わず扱います。`classification-region`は既存文書が明示した場合だけclassの`membership-region` ruleを維持し、property resourceとschema定義edgeだけを`suppress`します。Presetは個別IRI、namespace、labelに依存せず、Editorは読込時にprofileや意味sourceを暗黙変換しません。
 
 現行の正規化contractは上記`rules`です。`nodeRules`、`relationRules`、`containmentRules`を持つ`DiagramCatalog`は既存hostの移行だけに残す互換APIであり、stable APIとはしません。
 
@@ -176,6 +182,13 @@ subjectをmemberとして投影します。複数membershipの交差cellはScene
 semantic resourceやoverlay identityを作りません。各elementの`semanticText`は全label/commentと
 localeで選択したprimary labelを保持し、language、datatype、元statement identityを失いません。
 Edgeの`labelProvenance`はpredicateまたはAlt branchのどこから表示名を得たかを区別します。Seqの名前と説明はgroupの`semanticText`、順序はordinal membershipのprovenanceに保持します。
+
+`@iriograph/vue-editor`の`deriveTypeSystem(document, options)`はSceneとは別に、型、親子DAG、直接・継承別の
+resource、cycleをlabel-firstな`TypeSystemPresentation`へ導出します。完全IRIは`TypeSystemIndex`の
+resolver/command compile境界だけに保持し、通常DOMにはstable opaque `typeId`/`resourceId`を渡します。
+構造制御用の`rdf:Property`、`rdf:Bag`、`rdf:Seq`、`rdf:Alt`等は通常の利用者型一覧から除きます。
+代表型tagは直接型だけを対象に、subclass上のspecificity、resolved node roleの高い`displayPriority`、
+最後にIRI code-point順で一件へ決定します。これはderived presentationでありoverlayへ保存しません。
 
 Direct edgeの`semanticText`はpredicate resource自体のlabel/commentです。これとは別に、
 `ProjectedEdge.statementComments` / `SceneEdge.statementComments`はそのexact S/P/Oに対する
@@ -328,7 +341,7 @@ Rich editorがtargetとするcommandは少なくとも次を含みます。Comma
 predicateIri, objectIri })`でexact identityを得られます。同一command列で先に新statementを接続し、
 続けてその説明を設定できます。
 
-Standard editorの`新しい要素を作る`は、最初にnodeまたはgroupを選びます。Nodeは名前とresolved profileが公開するnode-roleを一件以上（`allowUntypedNodes`のときだけ0件）、groupは名前と分類・包含・順序付き・候補の構造kind一件を要求します。Host allocatorが返すopaque named IRIへ`rdfs:label`と選択済みの全`rdf:type`を一つの`create-resource`へcompileします。空label、未許可role、allocator失敗、IRI衝突、namespace違反は一件も保存せず作成を拒否します。Comment、上位概念、既存resourceとのedge、membership、初期位置は作成formに含めず、作成確定後の対象別意味編集と`ビュー`で別transactionとして追加します。Catalog projectionと標準layoutが初期displayを補完します。
+Standard editorの`新しい要素を作る`は、最初にnodeまたはgroupを選びます。Nodeは名前とresolved profileが公開するnode-roleを一件以上（`allowUntypedNodes`のときだけ0件）、通常profileのgroupは名前と包含・順序付き・候補等の業務構造kind一件を要求します。Classの作成・編集・複数上位型・一括型付与は独立した`型一覧`へ集約し、標準flowでclassをGroup Frameとして作りません。旧`classification-region`互換を明示するhost/profileだけは従来の分類groupを許可できます。Host allocatorが返すopaque named IRIへ`rdfs:label`と選択済みの全`rdf:type`を一つの`create-resource`へcompileします。空label、未許可role、allocator失敗、IRI衝突、namespace違反は一件も保存せず作成を拒否します。Comment、上位概念、既存resourceとのedge、membership、初期位置は作成formに含めず、作成確定後の対象別意味編集、`型一覧`、`ビュー`で別transactionとして追加します。Catalog projectionと標準layoutが初期displayを補完します。
 
 Coreの一般`create-resource.initialStatements` contractはhost/LLM adapter向けに複数statementを扱えますが、standard editorが複合作成formを公開する理由にしません。構造predicateを一般initial statementで迂回できず、ordinal predicate等は専用commandを使います。Edgeはsource/targetに加えpredicateまたはsemantic capabilityの選択を必須にします。Container内へのplain dragはgeometryのpresentation transactionのみで、所属を暗黙変更しません。
 
@@ -411,9 +424,10 @@ const editor = ref<InstanceType<typeof IriographEditor>>();
 - `documentIdentityAllocator`: 「新しい図として複製」用にhost内で一意なopaque `documentId`と、現在と異なるabsolute base IRIを発行するhost port。CoreはID形式を固定せず、Mock/CloudはUUIDを採用できる。requestの`requestId`と`documentRevision`を応答へそのまま返し、stale responseをEditorが拒否できるようにする
 - `duplicatedAsNew(handoff)`: parsed term単位のIRI rebaseと全view検証を終えたcopyをhostへ渡す。現在の`modelValue`、history、dirty stateは変更しないため、hostが別fileへ保存して開く
 - `predicateInferencePolicy`: `query`と`validation`がexact predicateだけか限定`rdfs:subPropertyOf`推論を使うかをInspectorへ説明するpolicy。Projection ruleやasserted edge数を変更しない
+- `initialLeftSidebarCollapsed`: 新しいEditor sessionの左sidebar初期値。既定`true`で、以後の開閉はsession-only
 - `fitOnInitialLoad`: 各document/viewで最初に完成したSceneだけを、負座標とrouteを含む実content boundsへfitするhost opt-in。session-only作業余白はfit対象に含めず、後続のsemantic/presentation編集では利用者のviewportを維持する
 - `flushPendingEdits()`: Turtle、View overlay、全文Document sourceの未適用draftをそれぞれのatomic pipelineで検証し、保存前に正本へ反映する。入力途中または未実行のstructured draftは自動適用せず保存を拒否する
-- `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()`: hostからsession viewportを操作
+- `panBy(x, y)` / `zoomTo(zoom)` / `fitToView()` / `fitToSelection()`: hostからsession viewportを操作。Toolbarのpreset/listと同じzoom stateを共有する
 - `revealSelection()` / `focusElement(elementId)`: 現在の選択またはstable Scene element IDをviewportへ表示
 - `selectElement(elementId)` / `selectElements(elementIds)` / `selectAll()` / `clearSelection()`: hostからsession selectionを操作
 - `setSnapSettings(settings)`: grid、対象要素へのsnapをsession内で設定

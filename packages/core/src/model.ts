@@ -87,8 +87,14 @@ export type ViewElementOverlay = {
     nodeIconFit?: "contain" | "cover";
     /** Common group-frame label position; supersedes the region-only alias. */
     groupLabelAnchor?: number;
+    /** Signed normalized inward/outward displacement within the group header band. */
+    groupLabelOffset?: number;
     /** Common group-frame label glyph flow. */
     groupLabelWritingDirection?: RegionLabelWritingDirection;
+    /** Group-header-local icon displacement; never semantic membership. */
+    groupIconOffset?: Point;
+    /** Sparse multiplier applied to a group icon's natural header size. */
+    groupIconScale?: number;
     /** View-local stacking order among group frames of the same layer. */
     groupZOrder?: number;
     /** Normalized clockwise position on a region perimeter: 0 is top-left. */
@@ -595,9 +601,16 @@ export type ProjectedContainer = {
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
   groupLabelAnchor?: number;
+  groupLabelOffset?: number;
   groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupIconOffset?: Point;
+  groupIconScale?: number;
   groupZOrder?: number;
   templateRef: string;
+  iconRef?: string;
+  iconUrl?: string;
+  /** Transient verified dimensions; never persisted in an overlay or catalog. */
+  iconIntrinsicSize?: AssetIntrinsicSize;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
   parentElementId?: string;
@@ -618,12 +631,19 @@ export type ProjectedRegion = {
   labelPlacement?: LabelPlacement;
   groupFrame?: GroupFrame;
   groupLabelAnchor?: number;
+  groupLabelOffset?: number;
   groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupIconOffset?: Point;
+  groupIconScale?: number;
   groupZOrder?: number;
   regionLabelAnchor?: number;
   regionLabelWritingDirection?: RegionLabelWritingDirection;
   regionZOrder?: number;
   templateRef: string;
+  iconRef?: string;
+  iconUrl?: string;
+  /** Transient verified dimensions; never persisted in an overlay or catalog. */
+  iconIntrinsicSize?: AssetIntrinsicSize;
   defaultSize: { width: number; height: number };
   geometry?: ElementGeometry;
   style: VisualStyle;
@@ -717,9 +737,15 @@ export type SceneContainer = {
   semanticText?: SceneSemanticText;
   labelPlacement?: LabelPlacement;
   groupLabelAnchor?: number;
+  groupLabelOffset?: number;
   groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupIconOffset?: Point;
+  groupIconScale?: number;
   groupZOrder?: number;
   templateRef: string;
+  iconRef?: string;
+  iconUrl?: string;
+  iconIntrinsicSize?: AssetIntrinsicSize;
   geometry: ElementGeometry;
   headerPosition: NonNullable<VisualTemplate["headerPosition"]>;
   style: VisualTemplate["style"];
@@ -740,12 +766,18 @@ export type SceneRegion = {
   labelPlacement?: LabelPlacement;
   groupFrame?: GroupFrame;
   groupLabelAnchor?: number;
+  groupLabelOffset?: number;
   groupLabelWritingDirection?: RegionLabelWritingDirection;
+  groupIconOffset?: Point;
+  groupIconScale?: number;
   groupZOrder?: number;
   regionLabelAnchor?: number;
   regionLabelWritingDirection?: RegionLabelWritingDirection;
   regionZOrder?: number;
   templateRef: string;
+  iconRef?: string;
+  iconUrl?: string;
+  iconIntrinsicSize?: AssetIntrinsicSize;
   geometry: ElementGeometry;
   style: VisualStyle;
   pinned: boolean;
@@ -794,6 +826,7 @@ export type SceneDerivedRouteChoice = {
   source: "auto" | "explicit" | "fixed";
   reason:
     | "auto-straight-safe"
+    | "auto-orthogonal-safe"
     | "auto-curve-safe"
     | "auto-polyline-fallback"
     | "auto-self-loop-preserved"
@@ -806,7 +839,7 @@ export type SceneDerivedRouteChoice = {
     guideAngleDegrees: number;
   };
   rejected?: Array<{
-    family: "straight" | "curve";
+    family: "straight" | "orthogonal" | "curve";
     reason:
       | "obstacle"
       | "interaction"

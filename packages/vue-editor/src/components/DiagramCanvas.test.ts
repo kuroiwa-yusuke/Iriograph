@@ -37,6 +37,46 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
   });
 
+  it("nodeごとに最もspecificな型tagを1件だけ表示し、残りは型一覧へ案内してsession highlightする", async () => {
+    const scene = sceneFixture();
+    const original = structuredClone(scene);
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene,
+        nodeTypeTags: {
+          "node-a": {
+            typeId: "type-opaque-child",
+            resourceId: "resource-opaque-a",
+            label: "審査工程",
+            additionalDirectCount: 2,
+            inheritedCount: 3,
+          },
+        },
+        typeHighlightElementIds: ["node-a"],
+      },
+    });
+    const tags = wrapper.findAll(".iriograph-node-type-tag");
+    expect(tags).toHaveLength(1);
+    expect(tags[0]!.text()).toBe("審査工程");
+    expect(tags[0]!.attributes("title")).toContain("他の直接の型 2件");
+    expect(tags[0]!.attributes("title")).toContain("継承する型 3件");
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').classes()).toContain("type-highlight");
+    expect(wrapper.html()).not.toMatch(/urn:|https?:\/\//u);
+
+    await wrapper.setProps({ typeHighlightElementIds: [] });
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').classes()).not.toContain("type-highlight");
+    await wrapper.setProps({ typeHighlightElementIds: ["node-a"] });
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').classes()).toContain("type-highlight");
+
+    await tags[0]!.trigger("click");
+    expect(wrapper.emitted("typeTagRequest")).toEqual([[
+      { elementId: "node-a", typeId: "type-opaque-child", resourceId: "resource-opaque-a" },
+    ]]);
+    expect(scene).toEqual(original);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+    expect(wrapper.emitted("routingUpdate")).toBeUndefined();
+  });
+
   it("削除previewはresourceとexact provenanceの影響edge・membershipを一時表示する", async () => {
     const scene = sceneFixture();
     const directProvenance = (statementRef: string) => ({
@@ -1387,6 +1427,41 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(viewport.element.scrollTop).toBeGreaterThan(40);
   });
 
+  it("明示drag modeでprimary blank/group interiorをpanへ切替えpicker時はmarqueeを優先する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture(), dragMode: "pan" },
+    });
+    configureViewport(wrapper, 260, 180);
+    configureCanvasCoordinates(wrapper);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: 600,
+      clientY: 500,
+    });
+    dispatchPointer("pointermove", 540, 450);
+    dispatchPointer("pointerup", 540, 450);
+    expect(viewport.element.scrollLeft).toBe(60);
+    expect(viewport.element.scrollTop).toBe(50);
+    expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(false);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    await wrapper.setProps({ structuredSelectionPicking: true });
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: 330,
+      clientY: 350,
+    });
+    dispatchPointer("pointermove", 760, 560);
+    await flushPreview();
+    expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(true);
+    dispatchPointer("pointerup", 760, 560);
+    expect(lastPayload<{ elementIds: string[] }>(wrapper, "structuredSelectionSetRequest")?.elementIds)
+      .toEqual(expect.arrayContaining(["node-a", "node-b"]));
+  });
+
   it("primary node gestureをpanから分離し、middle dragはreadOnlyでもnavigationに使う", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
@@ -1428,6 +1503,10 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(await api.revealElement("node-b")).toBe(true);
     expect(viewport.element.scrollLeft).toBeGreaterThan(0);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
+
+    expect(await api.fitToSelection(["node-a", "node-b"])).toBe(true);
+    expect(wrapper.emitted("zoomChange")?.at(-1)?.[0]).toBeGreaterThan(0);
+    expect(await api.fitToSelection(["missing"])).toBe(false);
 
     await api.fitToView();
     expect(wrapper.emitted("zoomChange")?.at(-1)?.[0]).toBe(.22);
@@ -2151,7 +2230,7 @@ describe("DiagramCanvas pointer gestures", () => {
       label: "審査手順",
       templateRef: "urn:test:template:sequence",
       headerPosition: "top",
-      style: { fill: "#fff", stroke: "#64748b", text: "#334155", dash: "5 5" },
+      style: { fill: "#fff", stroke: "#64748b", text: "#334155", dash: "5 5", labelFontSize: 21 },
       geometry: { x: 8, y: 8, width: 480, height: 180 },
       pinned: false,
       placement: "generated",
@@ -2206,10 +2285,13 @@ describe("DiagramCanvas pointer gestures", () => {
       "sequence-group",
       "interaction-front",
     ]));
-    expect(wrapper.get(".iriograph-container-header .iriograph-group-kind-label").text())
-      .toBe("順番");
+    expect(wrapper.find(".iriograph-container-header .iriograph-group-kind-label").exists())
+      .toBe(false);
     expect(wrapper.get(".iriograph-container-header .iriograph-group-frame-label-text").text())
       .toBe("審査手順");
+    expect(wrapper.get(".iriograph-container-header").attributes("title")).toContain("順番グループ");
+    expect(wrapper.get(".iriograph-container-header").attributes("style")).toContain("font-size: 21px");
+    expect(wrapper.get('[role="tooltip"]').text()).toBe("順番グループ");
     expect(wrapper.get('.iriograph-scene-node .iriograph-sequence-badges').text()).toBe("1");
     expect(wrapper.findAll('.iriograph-scene-node .iriograph-sequence-badges')[1]!.text()).toBe("2");
     expect(wrapper.get(".iriograph-group-guide-path").attributes("d")).toMatch(/^M /u);
@@ -2263,11 +2345,11 @@ describe("DiagramCanvas pointer gestures", () => {
     }));
     wrapper = mount(DiagramCanvas, { props: { scene } });
 
-    expect(wrapper.get(".iriograph-group-kind-label").text()).toBe("分岐");
+    expect(wrapper.find(".iriograph-group-kind-label").exists()).toBe(false);
     expect(wrapper.get(".iriograph-group-frame-label-text").text())
       .toBe("非常に長い配送方法の選択肢グループ名称");
     expect(wrapper.get(".iriograph-container-header").attributes("title"))
-      .toBe("非常に長い配送方法の選択肢グループ名称");
+      .toContain("分岐グループ");
     expect(wrapper.findAll(".iriograph-group-guide")).toHaveLength(2);
     expect(wrapper.findAll(".iriograph-alternative-hub")).toHaveLength(1);
     expect(wrapper.get('[data-element-id="node-a"] .iriograph-alternative-default-badges').text())
@@ -2338,7 +2420,155 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(selected.classes()).toContain("interaction-front");
     expect(selected.attributes("role")).toBe("option");
     expect(selected.attributes("aria-label")).toContain("空の分類");
+    expect(selected.attributes("aria-description")).toContain("分類グループ");
+    expect(selected.attributes("aria-describedby")).toContain("group-description");
     expect(wrapper.findAll(".iriograph-resize-handle")).toHaveLength(8);
+  });
+
+  it("Group Frame内部click/right clickは前面z-orderを選びnode/edge hitを奪わない", async () => {
+    const scene = sceneFixture();
+    const frame = {
+      elementId: "frame-back",
+      semanticRef: "urn:test:frame:back",
+      structuralKind: "container" as const,
+      groupRole: "membership" as const,
+      groupFrame: {
+        kind: "membership" as const,
+        semanticRef: "urn:test:frame:back",
+        provenance: { operator: "membership-container" as const, derivation: "resource" as const, sourceStatementRefs: [] },
+      },
+      label: "背面",
+      templateRef: "urn:test:group",
+      headerPosition: "top" as const,
+      style: { fill: "transparent", stroke: "#555", text: "#222" },
+      geometry: { x: 0, y: 0, width: 500, height: 300 },
+      pinned: false,
+      placement: "generated" as const,
+      groupZOrder: 1,
+    };
+    scene.containers = [frame];
+    scene.regions = [{
+      ...frame,
+      elementId: "frame-front",
+      semanticRef: "urn:test:frame:front",
+      structuralKind: "region",
+      label: "前面",
+      groupFrame: {
+        kind: "classification",
+        semanticRef: "urn:test:frame:front",
+        provenance: { operator: "membership-region", derivation: "resource", sourceStatementRefs: [] },
+      },
+      groupZOrder: 2,
+    }];
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+    configureCanvasCoordinates(wrapper);
+
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: 520,
+      clientY: 410,
+    });
+    dispatchPointer("pointerup", 520, 410);
+    expect(lastPayload(wrapper, "selectionRequest")).toEqual({
+      elementId: "frame-front",
+      mode: "replace",
+    });
+
+    await wrapper.get(".iriograph-canvas-grid").trigger("contextmenu", {
+      button: 2,
+      clientX: 520,
+      clientY: 410,
+    });
+    expect(lastPayload<{ kind: string; elementId: string }>(wrapper, "contextMenuRequest"))
+      .toMatchObject({ kind: "region", elementId: "frame-front" });
+
+    await wrapper.get('[data-element-id="node-a"]').trigger("pointerdown", { button: 0, clientX: 350, clientY: 370 });
+    dispatchPointer("pointerup", 350, 370);
+    expect(lastPayload(wrapper, "selectionRequest")).toMatchObject({ elementId: "node-a" });
+  });
+
+  it("Group Frame名称dragを内外bandへ正規化しmember衝突を警告してmembershipを変えない", async () => {
+    const scene = sceneFixture();
+    scene.edges = [];
+    scene.containers = [{
+      elementId: "frame",
+      semanticRef: "urn:test:frame",
+      structuralKind: "container",
+      groupRole: "membership",
+      groupFrame: {
+        kind: "membership",
+        semanticRef: "urn:test:frame",
+        provenance: { operator: "membership-container", derivation: "resource", sourceStatementRefs: [] },
+      },
+      label: "担当領域",
+      templateRef: "urn:test:group",
+      headerPosition: "top",
+      style: { fill: "transparent", stroke: "#555", text: "#222", labelFontSize: 21 },
+      geometry: { x: 0, y: 0, width: 500, height: 300 },
+      pinned: false,
+      placement: "generated",
+    }];
+    scene.nodes[0]!.parentElementId = "frame";
+    const originalMemberships = structuredClone(scene.memberships);
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+    configureCanvasCoordinates(wrapper);
+    const label = wrapper.get(".iriograph-group-frame-label");
+    await label.trigger("pointerdown", { button: 0, clientX: 570, clientY: 320 });
+    dispatchPointer("pointermove", 350, 370);
+    dispatchPointer("pointerup", 350, 370);
+    const placement = lastPayload<{ anchor: number; offset?: number }>(wrapper, "groupLabelUpdate")!;
+    expect(placement.offset).toBeGreaterThan(0);
+    expect(placement.offset).toBeLessThanOrEqual(1);
+    expect(scene.memberships).toEqual(originalMemberships);
+
+    scene.containers[0]!.groupLabelAnchor = placement.anchor;
+    scene.containers[0]!.groupLabelOffset = placement.offset;
+    await wrapper.setProps({ scene: structuredClone(scene) });
+    expect(wrapper.get(".iriograph-group-frame-label").attributes("style")).toContain("top:");
+    expect(wrapper.find(".iriograph-group-label-collision").exists()).toBe(true);
+  });
+
+  it("Group Frame iconをnatural aspect・scale・fallbackで描画しheader内dragだけを通知する", async () => {
+    const scene = sceneFixture();
+    scene.containers = [{
+      elementId: "frame",
+      semanticRef: "urn:test:frame",
+      structuralKind: "container",
+      groupRole: "sequence",
+      groupFrame: {
+        kind: "sequence",
+        semanticRef: "urn:test:frame",
+        provenance: { operator: "ordinal-sequence", derivation: "resource", sourceStatementRefs: [] },
+      },
+      label: "手順",
+      templateRef: "urn:test:group",
+      headerPosition: "top",
+      iconRef: "urn:test:icon",
+      iconUrl: "data:image/svg+xml,%3Csvg/%3E",
+      iconIntrinsicSize: { width: 48, height: 24, aspectRatio: 2, source: "svg-view-box" },
+      groupIconScale: 1.5,
+      style: { fill: "transparent", stroke: "#555", text: "#222", labelFontSize: 21 },
+      geometry: { x: 0, y: 0, width: 500, height: 300 },
+      pinned: false,
+      placement: "generated",
+    }];
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene, zoom: 2 } });
+    const icon = wrapper.get(".iriograph-group-frame-icon");
+    expect(icon.attributes("style")).toContain("width: 36px");
+    expect(icon.attributes("style")).toContain("height: 18px");
+    await icon.trigger("pointerdown", { button: 0, clientX: 100, clientY: 80 });
+    dispatchPointer("pointermove", 120, 100);
+    dispatchPointer("pointerup", 120, 100);
+    expect(lastPayload(wrapper, "groupIconOffsetUpdate")).toEqual({
+      elementId: "frame",
+      offset: { x: 10, y: 10 },
+    });
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    delete scene.containers[0]!.iconUrl;
+    await wrapper.setProps({ scene: structuredClone(scene) });
+    expect(wrapper.find(".iriograph-group-frame-icon").exists()).toBe(false);
+    expect(wrapper.get(".iriograph-group-frame-icon-fallback").text()).toBe("◇");
   });
 });
 

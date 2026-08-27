@@ -7,6 +7,7 @@ import {
   statementIdentityFromQuad,
 } from "./identity.js";
 import { resolveAppearance } from "./appearance.js";
+import { DEFAULT_GROUP_FRAME_LABEL_FONT_SIZE } from "./content-metrics.js";
 import type {
   DiagramView,
   EdgeCurveRouting,
@@ -337,6 +338,20 @@ function projectResource(
     vocabulary.commentPredicate,
     view.locale,
   );
+  const groupRole = groupFrameKind(operator?.operator);
+  const appearance = overlayEntry?.overlay.appearance;
+  const resolvedStyle = resolveAppearance(
+    template.style,
+    appearance,
+    catalog,
+    plan.semanticRef,
+    diagnostics,
+  ).style;
+  const groupFrameStyle = groupRole
+    && (structuralKind === "container" || structuralKind === "region")
+    && resolvedStyle.labelFontSize === undefined
+    ? { ...resolvedStyle, labelFontSize: DEFAULT_GROUP_FRAME_LABEL_FONT_SIZE }
+    : resolvedStyle;
   const common = {
     elementId,
     semanticRef: plan.semanticRef,
@@ -348,21 +363,14 @@ function projectResource(
       ? { width: 360, height: 220 }
       : { width: 164, height: 72 }),
     geometry: overlayEntry?.overlay.geometry,
-    style: resolveAppearance(
-      template.style,
-      overlayEntry?.overlay.appearance,
-      catalog,
-      plan.semanticRef,
-      diagnostics,
-    ).style,
+    style: groupFrameStyle,
     pinned: overlayEntry?.overlay.pinned ?? false,
     placement: overlayEntry?.overlay.placement ?? "generated",
     provenance: resourceProvenance(graph, plan, vocabulary),
   };
 
   if (structuralKind === "container") {
-    const groupRole = groupFrameKind(operator?.operator);
-    const appearance = overlayEntry?.overlay.appearance;
+    const iconRef = groupRole ? appearance?.iconRef ?? template.iconRef : undefined;
     return {
       ...common,
       structuralKind,
@@ -382,15 +390,18 @@ function projectResource(
         },
       } : {}),
       groupLabelAnchor: groupLabelAnchor(appearance),
+      groupLabelOffset: groupLabelOffset(appearance),
       groupLabelWritingDirection: groupLabelWritingDirection(appearance),
+      groupIconOffset: safePoint(appearance?.groupIconOffset),
+      groupIconScale: safeGroupIconScale(appearance),
       groupZOrder: groupZOrder(appearance),
+      iconRef,
       headerPosition: template.headerPosition ?? "top",
     };
   }
 
   if (structuralKind === "region") {
-    const appearance = overlayEntry?.overlay.appearance;
-    const groupRole = groupFrameKind(operator?.operator);
+    const iconRef = groupRole ? appearance?.iconRef ?? template.iconRef : undefined;
     return {
       ...common,
       structuralKind,
@@ -403,11 +414,15 @@ function projectResource(
         },
       } : {}),
       groupLabelAnchor: groupLabelAnchor(appearance),
+      groupLabelOffset: groupLabelOffset(appearance),
       groupLabelWritingDirection: groupLabelWritingDirection(appearance),
+      groupIconOffset: safePoint(appearance?.groupIconOffset),
+      groupIconScale: safeGroupIconScale(appearance),
       groupZOrder: groupZOrder(appearance),
       regionLabelAnchor: groupLabelAnchor(appearance),
       regionLabelWritingDirection: groupLabelWritingDirection(appearance),
       regionZOrder: groupZOrder(appearance),
+      iconRef,
     };
   }
 
@@ -871,6 +886,30 @@ function groupLabelWritingDirection(
   if (legacy === "horizontal") return "horizontal-right";
   if (legacy === "vertical") return "vertical-down";
   return undefined;
+}
+
+function groupLabelOffset(
+  appearance: ViewElementOverlay["appearance"] | undefined,
+): number | undefined {
+  const value = appearance?.groupLabelOffset;
+  return typeof value === "number" && Number.isFinite(value) && value >= -1 && value <= 1
+    ? value
+    : undefined;
+}
+
+function safeGroupIconScale(
+  appearance: ViewElementOverlay["appearance"] | undefined,
+): number | undefined {
+  const value = appearance?.groupIconScale;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0.1 && value <= 8
+    ? value
+    : undefined;
+}
+
+function safePoint(value: Point | undefined): Point | undefined {
+  return value && Number.isFinite(value.x) && Number.isFinite(value.y)
+    ? { x: value.x, y: value.y }
+    : undefined;
 }
 
 function groupZOrder(

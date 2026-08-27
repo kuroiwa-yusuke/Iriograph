@@ -346,6 +346,43 @@ describe("ElkLayeredLayoutAdapter", () => {
     });
   });
 
+  test.each([
+    ["LR", "urn:test:elk-auto-orthogonal-lr"],
+    ["TB", "urn:test:elk-auto-orthogonal-tb"],
+  ] as const)("propagates one-bend orthogonal priority for %s", async (direction, layoutRef) => {
+    const engine: ElkLayoutEngine = {
+      layout: async (input) => {
+        const graph = structuredClone(input);
+        const positions: Record<string, { x: number; y: number }> = {
+          source: { x: 0, y: 0 },
+          blocker: { x: 170, y: 105 },
+          target: { x: 300, y: 200 },
+        };
+        for (const child of graph.children ?? []) Object.assign(child, positions[child.id]);
+        return graph;
+      },
+    };
+    const adapter = new ElkLayeredLayoutAdapter(layoutRef, direction, { engine });
+    const result = await adapter.layout(request([
+      { ...element("source"), size: { width: 100, height: 60 } },
+      { ...element("blocker"), size: { width: 60, height: 50 } },
+      { ...element("target"), size: { width: 100, height: 60 } },
+    ], [edge("flow", "source", "target")], layoutRef));
+    const route = result.routes.flow!;
+
+    expect(route).toHaveLength(3);
+    expect(result.derivedRouteChoices?.flow).toEqual({
+      family: "orthogonal",
+      source: "auto",
+      reason: "auto-orthogonal-safe",
+      rejected: [{ family: "straight", reason: "obstacle" }],
+    });
+    expect(
+      (route[0]!.y === route[1]!.y && route[1]!.x === route[2]!.x)
+      || (route[0]!.x === route[1]!.x && route[1]!.y === route[2]!.y),
+    ).toBe(true);
+  });
+
   test("never invokes ELK for fixed geometry and returns a Core-valid result", async () => {
     const layout = vi.fn<ElkLayoutEngine["layout"]>();
     const adapter = new ElkLayeredLayoutAdapter("urn:test:fixed", "LR", {
@@ -581,6 +618,66 @@ describe("ElkLayeredLayoutAdapter", () => {
     expect(rectanglesOverlap(result.geometries.free!, result.geometries["region-b"]!)).toBe(false);
     expect(containsCenter(result.geometries["region-a"]!, result.geometries.a!)).toBe(true);
     expect(containsCenter(result.geometries["region-b"]!, result.geometries.b!)).toBe(true);
+  });
+
+  test.each([
+    ["LR", "urn:test:elk-group-nonmember-lr"],
+    ["TB", "urn:test:elk-group-nonmember-tb"],
+  ] as const)("keeps nonmembers outside generated container Group Frame content for %s", async (
+    direction,
+    layoutRef,
+  ) => {
+    const engine: ElkLayoutEngine = {
+      layout: async (input) => {
+        const graph = structuredClone(input);
+        for (const child of graph.children ?? []) {
+          child.x = 0;
+          child.y = 0;
+          if (child.id === "bag") {
+            child.width = 360;
+            child.height = 220;
+          } else if (child.id === "member") {
+            child.x = 120;
+            child.y = 100;
+          } else if (child.id === "free") {
+            child.x = 140;
+            child.y = 110;
+          }
+        }
+        return graph;
+      },
+    };
+    const adapter = new ElkLayeredLayoutAdapter(layoutRef, direction, { engine });
+    const layoutRequest = request([
+      {
+        ...element("bag", "container", undefined, { width: 360, height: 220 }),
+        groupRole: "membership",
+      },
+      { ...element("member"), size: { width: 80, height: 40 } },
+      { ...element("free"), size: { width: 60, height: 30 } },
+    ], [], layoutRef);
+    layoutRequest.scene.memberships = [{
+      semanticRef: "bag-member",
+      containerElementId: "bag",
+      memberElementId: "member",
+      role: "membership",
+    }];
+
+    const result = await layoutProjectedScene(
+      layoutRequest,
+      new LayoutAdapterRegistry([adapter]),
+    );
+    const bag = result.geometries.bag!;
+    const content = {
+      x: bag.x + 28,
+      y: bag.y + 64,
+      width: bag.width - 56,
+      height: bag.height - 92,
+    };
+
+    expect(rectanglesOverlap(result.geometries.free!, content)).toBe(false);
+    expect(containsCenter(bag, result.geometries.member!)).toBe(true);
+    expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   });
 
   test("defers regions and adds deterministic membership-only ordering edges to ELK", async () => {

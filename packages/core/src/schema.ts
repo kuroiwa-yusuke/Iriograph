@@ -243,7 +243,10 @@ export const iriographDocumentSchema = {
         },
         nodeIconFit: { enum: ["contain", "cover"] },
         groupLabelAnchor: { type: "number", minimum: 0, exclusiveMaximum: 1 },
+        groupLabelOffset: { type: "number", minimum: -1, maximum: 1 },
         groupLabelWritingDirection: { enum: ["horizontal-right", "vertical-down"] },
+        groupIconOffset: { $ref: "#/$defs/point" },
+        groupIconScale: { type: "number", minimum: 0.1, maximum: 8 },
         groupZOrder: {
           type: "integer",
           minimum: -9007199254740991,

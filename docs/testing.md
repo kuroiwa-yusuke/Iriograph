@@ -8,12 +8,12 @@ Iriographはpureなgraph処理、DOM event contract、editor transaction、実br
 
 - Coreのparse、validation、projection、layout、reconciliation、serializer、asset policyのunit test
 - Semantic validation portのsnapshot/fingerprint、adapter fail-closed、warning confirmation、abort、全write入口共通化のunit test
-- Vue editorのasset lease session test
+- Vue editorのasset lease session、入力途中をclampしない共通font-size draft、型DAG・代表直接型・atomic型編集のtest
 - RDF semantic textの全label/comment、locale primary、language/datatype、predicate/Alt edge labelとSeq ordinal membership provenance test
 - happy-dom上の`DiagramCanvas` pointer/keyboard component test。dragのzoom換算とviewport端auto-pan、実content外周320 unitの初期作業余白、drop前の正負方向160 unit単位の連続拡張・scroll補正と負座標確定、multi-selection、group preview/batch、全Seq/region/container membership intersection clamp、resize minimum、node内label/icon dragと文字方向、endpoint込みroute、全route modeの排他描画、ビュー上のsource/target anchor、意味上のdirect edge端子node drop、invalid drop拒否、generated bend seed、waypoint追加・削除・移動、0/1/複数knotの単一cubic path、Bezier knot/handle drag・Canvas単一tab stopからのkeyboard cycle/reset・zoom逆補正hit target、curve弧長label、parallel/self-loop curve、label offset、parallel/self-loop選択、single-tab-stop navigator、`aria-activedescendant`、決定的focus/range、key repeat previewとkeyup/blur commit、Escape cancel、readOnly/IME除外、pan競合、automatic/manual curve control hullを含む実content boundsへのfitと個別edge reveal、minimap、gesture境界を確認する
 - happy-dom上の`IriographEditor` integration component test。単体/batch overlay transaction、sparse routing/appearanceとlegacy event非二重適用、gesture・整列・等間隔単位のundo/redo、Turtle不変、全route mode切替、template実preview、package/workspace icon path候補、node内label/icon offset/resetとlabel文字方向、4入口からの段階Inspector、node-role/group kind付きresource作成、対象別context menuから意味/ビュー各入口への遷移、右Inspector内styleのinput preview/change直接commitとpreset/reset直接commit、意味/ビューtabの排他表示、details dialog、label-first semantic authoring、Canvas resource picker、direct/membership family、inline新規member、作成後のedge・複数membership/分類編集、direct edge endpointのatomic再接続、条件付きcascade削除確認、class交差cell seed、display/semantic containment警告と明示修正、Turtleのaccept/rollback、保存前flush、session selection/navigationとread-only境界を確認する
 - 標準predicate pickerのIRI一意性、日本語label/comment/category/example、A/Bを含む`sentencePattern`、個体IRI非混入、`rdf:type`分類と`rdfs:subClassOf`通常編集、`rdfs:member`系だけのstructure command強制を確認する
-- Core/ELK layout testでnodeとcomment reservationの障害物回避、edge交差・重複cost、自動生成routeの中間点最大1個、manual hard gate、straight 2点、curve用derived bend、固定geometryのroute-only refinementを確認する
+- Core/ELK layout testでnodeとcomment reservationの障害物回避、非member resourceの全Group Frame content外配置、edge交差・重複cost、自動生成routeの中間点最大1個、manual hard gate、安全なstraight→一直角orthogonal→Bezier→その他polylineの優先、固定geometryのroute-only refinementを確認する
 - Core/View editorのnamed view test。target-only atomic command、immutable/unique ID、locale-only exact overlay、invalid view delete、last-view guard、controlled/uncontrolled active view、view別selection/viewport/temporary hideを確認する
 - 全workspaceのtypecheck/buildと、packed tarballを使う外部consumer検証
 
@@ -63,6 +63,8 @@ E2Eは初期workspaceが空overlayのピザ注文・配送semantic seedを単一
 
 矩形選択は空白またはGroup Frame interiorからの実pointer dragで枠を表示し、nodeのbounds交差、straight/orthogonal/Bezierの実描画経路交差、背景frameの全体包含を確認します。通常選択はreplace、Shift add、Ctrl/Cmd toggleを固定し、structured authoringの対象pickerでは同じ集合をaccepted kindとsingle/multiple規則へ通して、関係の接続先やgroup memberへ反映することをcomponentと実browserで検証します。
 
+標準EditorのP1回帰では`図` / `型一覧` / `Turtle` / `Document`を同格tabとして確認します。型一覧は未使用型、複数親DAG、直接・継承別の要素、作成・編集・削除・一括付与を扱い、図上は代表直接型tag一件だけを表示します。Tagからのfocusと型選択highlightはsession-onlyで、Turtle、overlay、history、dirty stateを変更しません。既存の`classification-region` fixtureは互換試験に残しますが、標準seedへclass領域を生成しません。
+
 Canvasのhost埋込み回帰は通常幅と800px狭幅、左右sidebar折り畳み状態を通し、document横overflowなし、薄いgridの可視性、内部scroll、中ボタンまたはAlt+空白dragのpan、primary空白dragの矩形選択、node drag中auto-pan、外周handleへの到達を実Chromiumで確認します。Computed styleではsemantic object本体が選択中も`region/Seq < edge < node`を満たし、選択frontは同じ構造層内に留まることを検証します。Waypoint、endpoint halo、resize handleだけは最上位transient interaction layerでnode重なり時もhit testでき、通常edge線とterminal markerがそこへ複製されないことをDOM構造でも確認します。Seq fixtureは「承認」を枠headerへ一度だけ表示し、`rdf:_n`由来edgeを0件とします。AltからSeqへのbranchはSeq group境界をtargetとし、Seq labelをedgeへ転記しません。
 
 ### ピザ参照図の100点構造評価
@@ -84,7 +86,7 @@ Canvasのhost埋込み回帰は通常幅と800px狭幅、左右sidebar折り畳�
 
 各比率点は小数第1位へ丸め、合計も100点満点で小数第1位へ丸めます。E2E artifactには各内訳、membership件数、主flow対、5つの3者spread、overlap pair、route-node交差、edge交差、generated中間点最大数、content aspect、fit zoom、最小font sizeとscreenshotを残します。標準layoutとoptional ELK adapterを比較する場合は、同じProjectedSceneと同じrubricで測ります。この比較は一般layoutの選択・改善に使う検証証拠であり、ピザseedのIRI、label、件数を検出して配置を変える規則にはしません。
 
-0.8.1の標準layout基準値は91.1/100です。内訳はLane 15、containment 15、LR flow 15、branch/loop 12、cross-lane message 10.1、overlap 12、routing 6、compact/readability 6です。25 node、5 region、32 edgeに対してnode overlap 0、route-node交差0、共有endpointを除くedge交差8、edge overlap 0、generated中間点最大1、message列spread最大139/平均78.8、fit 47%、content aspect 1.8029、最小実表示font 7.52pxでした。旧基準よりlane比と全体aspectは参照図へ近づき、非endpoint node交差を解消しました。一方、縮尺低下とedge交差が残るため可読性とroutingの改善余地を独立して残します。
+0.9.0の標準layout基準値は91.1/100です。内訳はLane 15、containment 15、LR flow 15、branch/loop 12、cross-lane message 10.1、overlap 12、routing 6、compact/readability 6です。25 node、5 Group Frame、32 edgeに対してnode overlap 0、route-node交差1、共有endpointを除くedge交差7、edge overlap 0、generated中間点最大1、message列spread最大139/平均78.8、fit 47%、content aspect 1.8029、最小実表示font 7.52pxでした。0.8.1からroute family優先を直線→安全な一直角直交→Bezier→その他折線へ変更し、総合点、包含、主flowを維持したままedge交差を一件減らしました。縮尺と一件の非endpoint交差は汎用layoutの改善余地として残します。
 
 この91.1点は構造・geometryの一致度であり、参照画像とのpixel一致度ではありません。実screenshotの目視では、レーン階層・幅・順序と主フローは対応しますが、参照図のBPMN event/gateway/message icon、色付き縦header、顧客lane内のbranch別rowは再現していません。Shape/icon/headerはcatalog/profileとrendererの視覚文法差、branch rowは汎用layout品質差として点数と分けて記録します。
 
@@ -103,7 +105,7 @@ Canvasのhost埋込み回帰は通常幅と800px狭幅、左右sidebar折り畳�
 
 画像一致点は、参照bboxの手動markingと目視による対応付けを含む主観値です。評価者、対象screenshot、内訳と差分理由をartifactへ残し、5点程度の揺れを許容します。自動CI gateや構造評価91.1点の代用にはせず、構造点と画像一致点を必ず併記します。
 
-0.8.1のempty-overlay screenshotを会話添付の参照図へ照らした画像一致基準値は42±5/100です。旧基準よりcontent aspectが約3.025から1.8029へ改善し、lane全体の比率と主flowのまとまりは参照図へ近づきました。一方、顧客laneのbranch別row、cross-lane messageの縦列、短い直交connectorはまだ一致せず、event/gateway/message icon、色付き縦header、message dashも標準catalogだけでは再現していません。構造点が高くてもこの視覚文法差を画像一致点から減点します。
+0.9.0のempty-overlay screenshotを会話添付の参照図へ照らした画像一致基準値は42±5/100です。Content aspect 1.8029とlane全体の比率、主flowのまとまりは維持しています。一方、顧客laneのbranch別row、cross-lane messageの縦列、短い直交connectorはまだ一致せず、event/gateway/message icon、色付き縦header、message dashも標準catalogだけでは再現していません。構造点が高くてもこの視覚文法差を画像一致点から減点します。
 
 Macro比率、相対配置、branch row、edge corridorと交差の改善は、特定seedのIRIやlabelへ分岐しない汎用layoutの責務です。BPMN shape、icon、色、線種はcatalog/profileとrendererの視覚文法で解き、標準layoutへ業務固有styleを埋め込みません。個別documentを参照図へ最終調整する座標・size・route・styleはoverlayの責務ですが、初期seedは空overlayという検証条件を維持し、手動overlayで自動layoutの画像一致点を水増ししません。
 

@@ -11,7 +11,7 @@ import {
   type LayoutMode,
 } from "./layout.js";
 import { containerContentInsets } from "./container-content.js";
-import { measureNodeContent, measureTextContent } from "./content-metrics.js";
+import { measureNodeContent, measureTextContent, resolveIconContentMetrics } from "./content-metrics.js";
 import type {
   DiagramScene,
   EdgeCurveRouting,
@@ -209,9 +209,15 @@ export async function layoutProjectedDiagramScene(
     semanticText: container.semanticText,
     labelPlacement: container.labelPlacement,
     groupLabelAnchor: container.groupLabelAnchor,
+    groupLabelOffset: container.groupLabelOffset,
     groupLabelWritingDirection: container.groupLabelWritingDirection,
+    groupIconOffset: container.groupIconOffset ? { ...container.groupIconOffset } : undefined,
+    groupIconScale: container.groupIconScale,
     groupZOrder: container.groupZOrder,
     templateRef: container.templateRef,
+    iconRef: container.iconRef,
+    iconUrl: container.iconUrl,
+    iconIntrinsicSize: container.iconIntrinsicSize ? { ...container.iconIntrinsicSize } : undefined,
     geometry: layout.geometries[container.elementId]!,
     headerPosition: container.headerPosition,
     style: container.style,
@@ -230,12 +236,18 @@ export async function layoutProjectedDiagramScene(
     labelPlacement: region.labelPlacement,
     groupFrame: region.groupFrame ? structuredClone(region.groupFrame) : undefined,
     groupLabelAnchor: region.groupLabelAnchor,
+    groupLabelOffset: region.groupLabelOffset,
     groupLabelWritingDirection: region.groupLabelWritingDirection,
+    groupIconOffset: region.groupIconOffset ? { ...region.groupIconOffset } : undefined,
+    groupIconScale: region.groupIconScale,
     groupZOrder: region.groupZOrder,
     regionLabelAnchor: region.regionLabelAnchor,
     regionLabelWritingDirection: region.regionLabelWritingDirection,
     regionZOrder: region.regionZOrder,
     templateRef: region.templateRef,
+    iconRef: region.iconRef,
+    iconUrl: region.iconUrl,
+    iconIntrinsicSize: region.iconIntrinsicSize ? { ...region.iconIntrinsicSize } : undefined,
     geometry: layout.geometries[region.elementId]!,
     style: region.style,
     pinned: region.pinned,
@@ -345,9 +357,12 @@ function minimumContentSize(
     maxWidth: 320,
     writingDirection: element.groupLabelWritingDirection,
   });
+  const icon = element.iconRef
+    ? resolveIconContentMetrics(element.iconIntrinsicSize, { scale: element.groupIconScale })
+    : undefined;
   return {
-    width: text.width + 32,
-    height: text.height + 24,
+    width: text.width + (icon ? icon.width + 8 : 0) + 32,
+    height: Math.max(text.height, icon?.height ?? 0) + 24,
   };
 }
 

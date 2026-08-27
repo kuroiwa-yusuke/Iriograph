@@ -34,7 +34,7 @@ test("pizza注文配送Turtleをoverlayなしで店舗領域と4 laneの自動la
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(25, { timeout: 20_000 });
   await expect(page.locator(".iriograph-scene-region")).toHaveCount(5, { timeout: 20_000 });
   await expect(page.locator(".iriograph-edge-group")).toHaveCount(32, { timeout: 20_000 });
-  await page.getByLabel("左サイドバーを閉じる").click();
+  await expect(page.getByLabel("左サイドバーを開く")).toBeVisible();
   await page.getByLabel("右サイドバーを閉じる").click();
   await page.getByLabel("全体を表示").click();
   await page.screenshot({ path: ".tmp/pizza-layout.png", fullPage: true });

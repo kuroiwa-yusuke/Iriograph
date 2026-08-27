@@ -1720,11 +1720,18 @@
 }
 
 .iriograph-diagram-panel,
-.iriograph-source-panel {
+.iriograph-source-panel,
+.iriograph-type-list-surface {
   min-height: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
+}
+
+.iriograph-type-list-surface {
+  overflow: auto;
+  padding: 16px;
+  background: #f4f6f4;
 }
 
 .iriograph-canvas-toolbar {
@@ -1736,6 +1743,8 @@
   padding: 0 13px;
   border-bottom: 1px solid #d6dfdc;
   background: #fff;
+  gap: 8px;
+  overflow-x: auto;
 }
 
 .iriograph-selection-toolbar {
@@ -1820,6 +1829,7 @@
 
 .iriograph-history-actions,
 .iriograph-navigation-actions,
+.iriograph-drag-mode-actions,
 .iriograph-zoom-actions {
   display: flex;
   align-items: center;
@@ -1828,6 +1838,7 @@
 
 .iriograph-history-actions button,
 .iriograph-navigation-actions button,
+.iriograph-drag-mode-actions button,
 .iriograph-zoom-actions button {
   min-width: 27px;
   height: 27px;
@@ -1835,6 +1846,22 @@
   border: 1px solid #d0d9d6;
   border-radius: 4px;
   background: #f9fbfa;
+}
+
+.iriograph-drag-mode-actions button[aria-pressed="true"] {
+  border-color: #7b5a14;
+  color: #6e4b08;
+  background: #fff1c9;
+}
+
+.iriograph-zoom-actions select {
+  height: 27px;
+  max-width: 112px;
+  border: 1px solid #d0d9d6;
+  border-radius: 4px;
+  color: #375b58;
+  background: #fff;
+  font-size: 9px;
 }
 
 .iriograph-history-actions > span {
@@ -1915,6 +1942,11 @@
 .iriograph-canvas-shell.marquee-selecting .iriograph-canvas-scroll,
 .iriograph-canvas-shell.marquee-selecting .iriograph-diagram-canvas {
   cursor: crosshair;
+}
+
+.iriograph-canvas-shell.drag-mode-pan .iriograph-canvas-scroll,
+.iriograph-canvas-shell.drag-mode-pan .iriograph-diagram-canvas {
+  cursor: grab;
 }
 
 .iriograph-canvas-stage {
@@ -2111,7 +2143,6 @@
   color: #475569;
   background: transparent !important;
   font-family: Inter, "Yu Gothic", sans-serif;
-  font-size: 10px;
 }
 
 .iriograph-scene-container.alternative-group {
@@ -2122,20 +2153,6 @@
   content: "◇";
   margin-inline-end: 5px;
   color: #2563eb;
-}
-
-.iriograph-group-kind-label {
-  flex: 0 0 auto;
-  margin-inline-end: 6px;
-  padding: 2px 5px;
-  border-radius: 999px;
-  color: #1d4ed8;
-  background: rgb(219 234 254 / 82%);
-  font-family: Inter, "Yu Gothic", sans-serif;
-  font-size: .72em;
-  font-weight: 700;
-  letter-spacing: .02em;
-  white-space: nowrap;
 }
 
 .iriograph-group-frame-label {
@@ -2155,6 +2172,7 @@
   box-shadow: 0 1px 4px rgb(15 23 42 / 12%);
   cursor: move;
   font-family: Inter, "Yu Gothic", sans-serif;
+  font-size: 21px;
   line-height: 1.2;
   white-space: nowrap;
   touch-action: none;
@@ -2186,6 +2204,72 @@
 .iriograph-group-frame-label:hover {
   border-color: #0b5cab;
   box-shadow: 0 0 0 3px rgb(11 92 171 / 12%);
+}
+
+.iriograph-group-structure-tooltip {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: calc(100% + 7px);
+  padding: 4px 7px;
+  border: 1px solid #8da6a0;
+  border-radius: 4px;
+  color: #284b48;
+  background: #fffefb;
+  box-shadow: 0 3px 10px rgb(24 52 50 / 18%);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 2px);
+  transition: opacity .12s ease, transform .12s ease;
+  writing-mode: horizontal-tb;
+}
+
+.iriograph-group-frame-label:hover > .iriograph-group-structure-tooltip,
+.iriograph-scene-container.navigator-active > .iriograph-group-frame-label > .iriograph-group-structure-tooltip,
+.iriograph-scene-region.navigator-active > .iriograph-group-frame-label > .iriograph-group-structure-tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.iriograph-group-frame-icon,
+.iriograph-group-frame-icon-fallback {
+  flex: 0 0 auto;
+  object-fit: contain;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.iriograph-group-frame-icon-fallback {
+  display: grid;
+  place-items: center;
+  color: currentColor;
+  font-size: 18px;
+}
+
+.iriograph-group-frame-label.icon-label-collision {
+  border-color: #c47b12;
+  box-shadow: 0 0 0 3px rgb(196 123 18 / 16%);
+}
+
+.iriograph-group-frame-label.member-label-collision {
+  border-style: dashed;
+  border-color: #b56516;
+}
+
+.iriograph-group-label-collision {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #b56516;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .iriograph-sequence-badges {
@@ -2349,6 +2433,12 @@
 .iriograph-scene-container.containment-warning,
 .iriograph-scene-node.containment-warning {
   box-shadow: 0 0 0 3px #d98025, 0 0 0 7px rgb(217 128 37 / 18%);
+}
+
+.iriograph-scene-container.type-highlight,
+.iriograph-scene-region.type-highlight,
+.iriograph-scene-node.type-highlight {
+  box-shadow: 0 0 0 4px #7c3aed, 0 0 0 9px rgb(124 58 237 / 20%);
 }
 
 .iriograph-scene-container.deletion-preview,
@@ -2757,6 +2847,32 @@
   align-items: center;
   justify-content: center;
   gap: 9px;
+}
+
+.iriograph-node-type-tag {
+  position: absolute;
+  right: 5px;
+  top: 4px;
+  z-index: 3;
+  max-width: min(46%, calc(100% - 10px));
+  min-height: 16px;
+  overflow: hidden;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--iriograph-node-accent) 55%, #fff);
+  border-radius: 999px;
+  color: #24324a;
+  background: rgb(255 255 255 / 90%);
+  font-size: 8px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.iriograph-node-type-tag:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
 }
 
 .iriograph-node-content.editable {

@@ -2,9 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import type { DiagramScene } from "@iriograph/core";
 
-import { sceneWithTemporaryHiddenElements } from "./view-session";
+import { createDiagramViewSession, sceneWithTemporaryHiddenElements } from "./view-session";
 
 describe("temporary view hiding", () => {
+  it("creates session-only selection/viewport/drag defaults", () => {
+    expect(createDiagramViewSession()).toMatchObject({
+      selectedElementIds: [],
+      primaryElementId: "",
+      viewport: { zoom: 1, scrollLeft: 0, scrollTop: 0 },
+      dragMode: "select",
+    });
+  });
+
   it("uses exact IDs and hides container descendants plus incident edges", () => {
     const source = sceneFixture();
 

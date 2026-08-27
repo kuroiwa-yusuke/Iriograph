@@ -151,6 +151,7 @@ export type StructuredAuthoringPresentation = {
       roleId: string;
       label: string;
       description?: string;
+      displayPriority?: number;
     }[];
   };
   groupKinds: readonly {
@@ -333,10 +334,11 @@ export function structuredAuthoringPresentation(
   return {
     profile: {
       allowUntypedNodes: profile?.allowUntypedNodes === true,
-      nodeRoles: (profile?.nodeRoles ?? []).map(({ roleId, label, description }) => ({
+      nodeRoles: (profile?.nodeRoles ?? []).map(({ roleId, label, description, displayPriority }) => ({
         roleId,
         label,
         description,
+        displayPriority,
       })),
     },
     groupKinds: GROUP_KIND_INFO.map((item) => ({

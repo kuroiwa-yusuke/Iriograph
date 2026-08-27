@@ -5,7 +5,7 @@
 ## 操作の基本
 
 - Node、container、region、edgeをclickすると選択し、右Inspectorで対象を確認できます。Ctrl/Cmd clickは選択のtoggle、Shift clickは追加、空白clickまたはEscapeは選択解除です。
-- 空白またはGroup Frame内側からprimary pointerをdragすると矩形内をまとめて選択します。Nodeは矩形との交差、edgeは実際の線との交差、背景Group Frameは枠全体が入った場合に選択し、Shiftは追加、Ctrl/Cmdは反転です。関係の接続先やGroup member等をCanvasから選ぶ段階でも同じ操作を使えますが、その段階で受け付ける種類と単一／複数件数だけに絞ります。中ボタンまたはAlt+空白dragはpanです。
+- Toolbarの`範囲選択`と`移動`でprimary pointerによる空白・Group Frame内側dragを切り替えます。既定の`範囲選択`では、Nodeは矩形との交差、edgeは実際の線との交差、背景Group Frameは枠全体が入った場合にまとめて選択し、Shiftは追加、Ctrl/Cmdは反転です。関係の接続先やGroup member等をCanvasから選ぶ段階でも同じ集合選択を使えますが、その段階で受け付ける種類と単一／複数件数だけに絞ります。`移動`ではviewportをpanし、中ボタンまたはAltによる一時panはどちらのmodeでも利用できます。Modeはsession-onlyです。
 - 操作名、resource、class、predicateは人が読めるlabel/commentを主表示にします。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやread-onlyの`Advanced`詳細へ渡しません。完全IRIはHost/Core内部transaction・監査logとeditableなTurtle/Document sourceに保持し、label文字列をidentityやcatalog ruleの判定には使いません。
 - `意味`の作成・変更は、利用者が実行buttonを一度押すと内部でcandidate graphのvalidationとsemantic transactionを続けて行い、一つのrevisionへ確定します。Validation error時は確定せず、対象fieldの近くに次の行動を示します。通常変更に別のPreview/Apply確認画面は挟みません。
 - `ビュー`の変更は現在のnamed viewだけへ作用します。位置、size、template、icon、edge routingを変更してもTurtleは変わりません。
@@ -21,7 +21,7 @@
 3. `要素を変更する`
 4. `関係を変更する`
 
-入口の後は一段に一つの判断だけを表示します。`新しい要素を作る`では最初にpreview付きの`要素` / `グループ`を選び、要素ならprofileが許可する種類を一件以上選んでから名前、グループなら分類・包含・順序付き・候補グループから一つ選んでから名前へ進みます。`要素を変更する`と`関係を変更する`は対象をCanvasから選び、対象に適用できる操作だけを次段に表示します。前段で選んだ種類、predicate、resource、Scene provenanceにより次段の候補を絞ります。通常UIとAdvanced DOMにIRI、`rdf:type`、`rdf:_1`、内部command名、capability patchを表示・入力させません。Presentationはopaque option/statement IDを使い、完全IRIとexact statementはHost/Core内部transaction・監査logとeditable sourceに保持します。
+入口の後は一段に一つの判断だけを表示します。`新しい要素を作る`では最初にpreview付きの`要素` / `グループ`を選び、要素ならprofileが許可する種類を一件以上選んでから名前、グループなら包含・順序付き・候補等の業務グループから一つ選んでから名前へ進みます。Classの作成はこのflowへ混ぜず`型一覧`から行います。`要素を変更する`と`関係を変更する`は対象をCanvasから選び、対象に適用できる操作だけを次段に表示します。前段で選んだ種類、predicate、resource、Scene provenanceにより次段の候補を絞ります。通常UIとAdvanced DOMにIRI、`rdf:type`、`rdf:_1`、内部command名、capability patchを表示・入力させません。Presentationはopaque option/statement IDを使い、完全IRIとexact statementはHost/Core内部transaction・監査logとeditable sourceに保持します。
 
 Resource、region、container、Seqを一つ選択した初期概要には、`属する領域`と`含む要素`を
 件数付きのlabel-first一覧で示します。一覧はSceneのexact membershipとprovenanceだけから作り、
@@ -35,9 +35,9 @@ container positionを保ったままそのmembershipだけを直接解除でき�
 Seq/Alt membershipは個別・一括解除のcheckboxへ混ぜず、ordinal/default slotを一括検証する専用の
 順序・選択editorへ委譲します。一覧の展開やfocusはsession操作でありdocumentやoverlayへ複製しません。
 
-InspectorはCanvasを圧迫しないcompactな密度を標準とし、4つの意味編集入口だけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳めます。
+InspectorはCanvasを圧迫しないcompactな密度を標準とし、4つの意味編集入口だけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳め、左sidebarは新しいsessionで既定を閉じます。Hostは初期値だけをpropで変更でき、利用者の開閉はdocumentへ保存しません。倍率は`−`/`＋`に加えてpreset、全体表示、選択へfitを同じlistから選べ、いずれもsession-onlyです。
 
-`新しい要素を作る`ではhost allocatorがopaque IRIを生成し、選んだ要素種類またはグループ種類と名前を一つのatomic semantic transactionで保存します。説明、既存要素との関係、位置、iconは作成後の意味編集または`ビュー`で追加します。`関係を作る`は最初に大きなicon cardで`線でつなぐ` / `グループへ所属させる`を選びます。前者はCanvasで一つの始点と一件以上の接続先を選び、category別の日本語predicate catalogから共通関係を選択します。必要な場合だけ接続先ごとの関係を上書きできます。後者は既存Group Frame一件とmemberを複数選び、順序付きでは並べ替え、候補グループでは既定候補を指定します。Member一覧では既存要素と、名前・種類だけを持つ未確定の新規要素chipを混在でき、確定時に全要素と所属を一つのtransactionへまとめます。
+`新しい要素を作る`ではhost allocatorがopaque IRIを生成し、選んだ要素種類または業務グループ種類と名前を一つのatomic semantic transactionで保存します。通常profileのグループ候補は包含、順序、候補等のGroup Frameであり、`rdfs:Class`はここで領域として作りません。型は後述する`型一覧`で作成・編集します。説明、既存要素との関係、位置、iconは作成後の意味編集または`ビュー`で追加します。`関係を作る`は最初に大きなicon cardで`線でつなぐ` / `グループへ所属させる`を選びます。前者はCanvasで一つの始点と一件以上の接続先を選び、category別の日本語predicate catalogから共通関係を選択します。必要な場合だけ接続先ごとの関係を上書きできます。後者は既存Group Frame一件とmemberを複数選び、順序付きでは並べ替え、候補グループでは既定候補を指定します。Member一覧では既存要素と、名前・種類だけを持つ未確定の新規要素chipを混在でき、確定時に全要素と所属を一つのtransactionへまとめます。
 
 Canvas事前選択が0件なら各roleは未選択、1件ならdirectの始点または選択対象、複数件ならdirectの先頭を始点・残りを接続先としてlabel付きでseedします。Membershipでは、事前選択に既存Group Frameがちょうど一件あるときだけ所属先にし、選択nodeをmemberにします。`線でつなぐ`と`グループへ所属させる`をBackで切り替えた場合は一方のdraftを他方へ変換せず、元のCanvas事前選択から作り直します。必要なauthoring context、provenance、書込権限が不足するactionは推測で実行せず、無効理由と次に必要な操作を日本語で示します。
 
@@ -69,6 +69,27 @@ Sceneへ表示するdiagnosticは操作のscopeに合わせます。Edge端点�
 diagnosticは全viewで保持し、同一identityの通知は一件へまとめます。Overlay-only変更は以前のlayout
 warningを次のSceneへ持ち越しません。
 
+## 型一覧と図上の型tag
+
+標準Editorは`図`、`型一覧`、`Turtle`、`Document`を同格のtabとして提供します。`型一覧`はnamed viewや
+display overlayではなく、Turtleの`rdfs:Class`、`rdfs:subClassOf`、`rdf:type`と限定RDFS closureから毎回
+導出します。通常の`instance-flow`ではclass resourceをGroup Frameへ投影せず、Bag、Seq、Alt、domain
+membership等の業務上のまとまりだけを図上の領域として扱います。既存文書が明示的に選んだ
+`classification-region` profileは読込・編集互換として維持しますが、標準操作が暗黙にそのprofileへ変更したり、
+class領域を通常profileへ移植したりはしません。
+
+型一覧は名前・説明を主表示にしたtree/DAGです。複数の上位型を持つ型は同一identityへの参照として表示し、
+未使用の型も消しません。型を選ぶと直接付与された要素と子孫型から継承した要素を区別して確認でき、全Scene
+要素から複数選択してその型を一括付与・解除できます。型の作成、名前・説明・複数上位型の編集、削除はいずれも
+通常UIへIRIやRDF用語を出さず、共通validationを通るatomic semantic transactionです。新しい上位関係がcycleを
+作る場合は保存せず、参照中の型削除だけは影響する要素・下位型を既存の削除dialogに日本語名で示します。
+
+図上の各要素には、直接付与された型のうち代表一件だけをcompactなtagとして表示します。代表型は最もspecificな
+型、profileの高い`displayPriority`、最後にopaque IRIのcode-point順で決定し、labelやTurtleの記述順へ依存しません。
+残る直接型と継承型は型一覧で確認します。Tagを選ぶとexactな型と要素へfocusした型一覧を開き、型一覧の
+`図で表示`は該当要素をsession-onlyでhighlightしてviewportへ移します。これらのnavigationはgeometry、overlay、
+history、dirty stateを変更しません。型の専用geometry、Euler/Venn表示、永続highlightは標準Editorへ持ちません。
+
 ## 対象別context menu
 
 Pointerの右click、Canvasのactive itemに対するContext Menu keyまたはShift+F10は同じ対象別menuを開きます。空白には要素追加とpaste、nodeには詳細・ビュー・icon・関係作成・所属・削除、direct edgeには関係詳細・線・再接続・route reset・削除を示します。Derived順序ガイドと候補線は線単体を編集させず、所有する順序付きグループまたは候補グループの構造編集へ委譲します。Group Frameには詳細、member/順序/候補、枠、fit、許可層内の前後移動、削除を示します。
@@ -77,7 +98,7 @@ Menu項目の選択は右Inspectorの意味flow、ビューInspector、または
 
 ## Resourceの作成
 
-`新しい要素を作る`は`要素` / `グループ`を最初に選びます。要素はactive authoring profileが許可するnode-roleを一件以上（未分類を明示許可するprofileだけ0件）とactive localeの名前を要求します。グループは分類・包含・順序付き・候補のいずれかと名前を要求します。空文字列は拒否し、hostのresource IRI allocatorが許可namespace内の衝突しないopaque IRIを発行します。要素の内部patchは名前と選択済みの全種類を、グループは名前と対応する標準構造typeを同時に作ります。例えば一種類の要素は次の形です。
+`新しい要素を作る`は`要素` / `グループ`を最初に選びます。要素はactive authoring profileが許可するnode-roleを一件以上（未分類を明示許可するprofileだけ0件）とactive localeの名前を要求します。通常profileのグループは包含・順序付き・候補等の業務構造と名前を要求し、型の作成は`型一覧`へ分離します。旧`classification-region`互換を明示するprofileだけは分類Groupを従来どおり扱えます。空文字列は拒否し、hostのresource IRI allocatorが許可namespace内の衝突しないopaque IRIを発行します。要素の内部patchは名前と選択済みの全種類を、グループは名前と対応する標準構造typeを同時に作ります。例えば一種類の要素は次の形です。
 
 ```turtle
 <allocated-opaque-iri> rdfs:label "入力した名前"@ja ;
@@ -88,7 +109,7 @@ Menu項目の選択は右Inspectorの意味flow、ビューInspector、または
 
 Allocatorが失敗、衝突、許可namespace外のIRIを返した場合は確定せず、「要素を作れませんでした。再試行してください」等のaction付きerrorを示します。該当IRIはHost/Core内部diagnosticと監査logに保持し、通常UIやAdvanced DOMへ表示しません。Canvas上のghostは確定前の一時表示であり、Cancel、Escape、失敗時に消え、documentやoverlayへ保存しません。
 
-作成時の種類はresolved profileが公開する既存node-roleだけから選び、新しいclassや関係種別をこのflowで定義しません。Human vocabulary definitionを許すprofileでは、作成済みresourceを対象にした別の高度な編集を一回のvalidationとtransactionとして提供できます。禁止profileではその編集候補を出しません。Templateやiconを正当化するためだけの種類は生成しません。
+作成時の種類はresolved profileが公開する既存node-roleだけから選び、新しいclassや関係種別をこのflowで定義しません。新しいclassと型階層は`型一覧`、predicate定義は語彙編集の別境界で扱います。Human vocabulary definitionを禁止するprofileではその編集候補を出しません。Templateやiconを正当化するためだけの種類は生成しません。
 
 ## Detailsとproperty編集
 
@@ -146,6 +167,14 @@ Template、icon、style、geometry等のdisplay項目は、右Inspectorの`ビ�
 Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Template/shapeはIRI文字列のselectでなく、実shape・style・iconの小previewから選びます。Workspace assetはhost pickerがabsolute asset IRIだけを返すか、hostがmetadata-onlyのworkspace locatorを注入します。Locatorは現在のdocument pathと入力segmentから候補とbreadcrumbを返し、workspace-root相対、`/`始まりのroot絶対、`./` / `../`のdocument相対を解決します。利用者はpathをsegment単位で辿れますが、Editorは最終解決した安定`assetRef`だけを保存します。Assetまたはdocumentをrenameした場合、hostは同じ`assetRef`へ新しいpathと取得先を対応付け、既存overlayを変更しません。Workspace外へのescape、folder、曖昧な同一path、未解決pathはinlineに拒否し、URL、認証情報、画像bytes、手入力されたIRIはdocumentへ保存しません。
 
 Nodeの`ビュー`は少なくとも色、透明度、線、template、package同梱またはhost workspaceから選ぶicon、位置、sizeを扱います。選択中はCanvas上のlabelとiconを個別にdragでき、node中心からの相対offsetだけをsparse appearanceへ保存します。Drag中はCanvasでpreviewし、node外へ完全に失われない範囲へclampします。右Inspectorからlabel/icon位置を別々にresetでき、一gestureを一つのundo itemにし、Turtleとnode geometryは変更しません。Resize可能なnode、container、regionは四隅と四辺中央の8 handleだけをtransient interaction layerへ表示し、背面要素と重なっても操作できます。選択中のobject本体は元のsemantic層を越えません。Regionのresize制約は後述のmembershipを優先します。
+
+Group Frameは名称だけを常時表示し、`所属`等の構造種別を名称へ足しません。構造種別はhover/focusの
+tooltipとaccessible descriptionで確認でき、新規枠の名称は既定21pxです。枠の前面objectがない内側をclickすると
+重なり順で最前面のGroup Frameを選択でき、node、edge、handleのhit targetを背景枠が奪いません。名称は上下左右の
+anchor、横書き／縦書きと独立して、枠の内側から必要最小限の外側までのband内をdragできます。Memberを覆う位置も
+明示操作として保持しますが衝突表示を出し、membershipは変更しません。各Group Frameにはnodeと同じpackage/workspace
+asset pickerからiconを設定でき、header/band内の位置とscaleだけをsparse appearanceへ保存します。IconはTurtleの型、
+membership、asset byteを生成しません。
 
 Edgeは線、色、太さ、経路modeに加え、source/targetそれぞれのterminal shapeを閉じた候補から選べます。候補は`none`、arrow、open arrow、triangle、diamond、circle等をpreview付きで示し、catalog既定へ戻せます。Terminalとrouteはpresentation情報であり、predicate identityやRDFS/OWL上の型を変更しません。Exact edgeの意味説明はこの`ビュー`段階へ混ぜず、`意味`tabの関係変更から編集します。
 

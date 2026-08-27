@@ -41,7 +41,7 @@ describe("structured authoring facade", () => {
     const presentation = structuredAuthoringPresentation(contextFor("revision-1"));
     expect(presentation.profile).toEqual({
       allowUntypedNodes: false,
-      nodeRoles: [{ roleId: "task", label: "タスク", description: "実行する作業" }],
+      nodeRoles: [{ roleId: "task", label: "タスク", description: "実行する作業", displayPriority: 7 }],
     });
     expect(presentation.groupKinds.map((item) => item.groupKind)).toEqual([
       "classification",
@@ -886,7 +886,13 @@ function contextFor(documentRevision: string): ResolvedAuthoringContext {
     structuredAuthoring: {
       allowUntypedNodes: false,
       allowClassificationGroups: true,
-      nodeRoles: [{ roleId: "task", classIri: TASK, label: "タスク", description: "実行する作業" }],
+      nodeRoles: [{
+        roleId: "task",
+        classIri: TASK,
+        label: "タスク",
+        description: "実行する作業",
+        displayPriority: 7,
+      }],
     },
     capabilities: [],
   };

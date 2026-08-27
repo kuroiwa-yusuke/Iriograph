@@ -10,6 +10,7 @@ import {
   catalogRef,
   createProjectionRuntimeContext,
   createStandardLayoutRegistry,
+  parseSemanticGraph,
   STANDARD_LAYOUT_REFS,
   standardRdfRdfsCatalog,
   validateIriographDocumentV1,
@@ -33,6 +34,7 @@ import {
 
 import DiagramCanvas from "./DiagramCanvas.vue";
 import IriographEditor from "./IriographEditor.vue";
+import TypeListPanel from "./TypeListPanel.vue";
 import {
   diagramFitZoom,
   type IriographEditorNavigationApi,
@@ -59,15 +61,71 @@ describe("IriographEditor transaction regression", () => {
     vi.restoreAllMocks();
   });
 
-  it("Canvas/source selectorを押下状態が分かるbutton groupとして公開する", async () => {
+  it("図/型一覧/Turtle/Documentを押下状態が分かるbutton groupとして公開する", async () => {
     wrapper = await mountEditor();
     const selector = wrapper.get('.iriograph-view-tabs[role="group"]');
     const buttons = selector.findAll("button");
-    expect(selector.attributes("aria-label")).toContain("Canvas");
+    expect(selector.attributes("aria-label")).toBe("図と型・source表示を切り替え");
+    expect(buttons.map((button) => button.text())).toEqual(["図", "型一覧", "≡ Turtle", "{ } Document"]);
     expect(buttons[0]?.attributes("aria-pressed")).toBe("true");
     await buttons[1]!.trigger("click");
     expect(buttons[0]?.attributes("aria-pressed")).toBe("false");
     expect(buttons[1]?.attributes("aria-pressed")).toBe("true");
+  });
+
+  it("型tagからexact型・要素へfocusし、一括付与/reload/解除と図highlightをsemantic transactionで行う", async () => {
+    const fixture = typeSystemDocumentFixture();
+    const context = typeSystemAuthoringContext(fixture);
+    wrapper = await mountEditor({ modelValue: fixture, authoringContext: context }, -1);
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").nodes.some(
+      (node) => node.semanticRef === `${NS}a`,
+    ));
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const nodeA = (canvas.props("scene") as DiagramScene).nodes.find((node) => node.semanticRef === `${NS}a`)!;
+    const tag = (canvas.props("nodeTypeTags") as Record<string, {
+      typeId: string;
+      resourceId: string;
+      label: string;
+      inheritedCount: number;
+    }>)[nodeA.elementId]!;
+    expect(tag).toMatchObject({ label: "作業", inheritedCount: 1 });
+    expect(Object.keys(canvas.props("nodeTypeTags") ?? {})).toHaveLength(3);
+
+    emitCanvas(canvas, "typeTagRequest", {
+      elementId: nodeA.elementId,
+      typeId: tag.typeId,
+      resourceId: tag.resourceId,
+    });
+    await nextTick();
+    const panel = wrapper.getComponent(TypeListPanel);
+    expect(panel.props("focus")).toEqual({ typeId: tag.typeId, resourceId: tag.resourceId });
+    expect(wrapper.get(".iriograph-type-list-surface").text()).toContain("作業");
+    expect(wrapper.get(".iriograph-type-list-surface").html()).not.toMatch(/urn:|https?:\/\/|IRI/u);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await buttonWithText(panel, "図で表示").trigger("click");
+    await settle();
+    expect(wrapper.getComponent(DiagramCanvas).props("typeHighlightElementIds")).toEqual([nodeA.elementId]);
+    expect(wrapper.get(`.iriograph-scene-node[data-element-id="${nodeA.elementId}"]`).classes())
+      .toContain("type-highlight");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await buttonWithExactText(wrapper, "型一覧").trigger("click");
+    await buttonWithExactText(wrapper.getComponent(TypeListPanel), "仕事").trigger("click");
+    const assignmentRows = wrapper.getComponent(TypeListPanel).findAll(".assignment-resource-row")
+      .filter((row) => row.text().includes("未付与"));
+    expect(assignmentRows).toHaveLength(2);
+    for (const row of assignmentRows) await row.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
+    await buttonWithText(wrapper.getComponent(TypeListPanel), "選択要素へ型を付与").trigger("click");
+    await waitUntil(() => hasDirectType(latestDocument(wrapper!), `${NS}b`, `${NS}Work`)
+      && hasDirectType(latestDocument(wrapper!), `${NS}c`, `${NS}Work`));
+
+    await waitUntil(() => !buttonWithText(wrapper!.getComponent(TypeListPanel), "選択要素から型を解除")
+      .attributes("disabled"));
+    await buttonWithText(wrapper.getComponent(TypeListPanel), "選択要素から型を解除").trigger("click");
+    await waitUntil(() => !hasDirectType(latestDocument(wrapper!), `${NS}b`, `${NS}Work`)
+      && !hasDirectType(latestDocument(wrapper!), `${NS}c`, `${NS}Work`));
+    expect(wrapper.getComponent(DiagramCanvas).props("typeHighlightElementIds")).toEqual([]);
   });
 
   it("Documentタブでactive view overlayだけをschema検証して適用しTurtle不変・undoを保つ", async () => {
@@ -322,7 +380,7 @@ describe("IriographEditor transaction regression", () => {
     const canvas = wrapper.getComponent(DiagramCanvas);
     const region = (canvas.props("scene") as DiagramScene).regions![0]!;
 
-    emitCanvas(canvas, "regionLabelUpdate", { elementId: region.elementId, anchor: .4 });
+    emitCanvas(canvas, "regionLabelUpdate", { elementId: region.elementId, anchor: .4, offset: .5 });
     await settle();
     exposedSelectionApi(wrapper).selectElement(region.elementId);
     await openAppearanceInspector(wrapper);
@@ -334,6 +392,7 @@ describe("IriographEditor transaction regression", () => {
 
     expect(overlayFor(latestDocument(wrapper), region.semanticRef)?.appearance).toMatchObject({
       groupLabelAnchor: .4,
+      groupLabelOffset: .5,
       groupLabelWritingDirection: "vertical-down",
       groupZOrder: 1,
     });
@@ -990,6 +1049,48 @@ describe("IriographEditor transaction regression", () => {
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.iconRef).toBe(workspaceAssetRef);
   });
 
+  it("Group Frame iconの設定・解除・scale/positionを共通appearance transactionへ保存する", async () => {
+    const fixture = sequenceDocumentFixture();
+    const turtle = fixture.semantic.source;
+    wrapper = await mountEditor({ modelValue: fixture }, 4);
+    let canvas = wrapper.getComponent(DiagramCanvas);
+    const frame = (canvas.props("scene") as DiagramScene).containers.find((candidate) => candidate.groupFrame)!;
+    exposedSelectionApi(wrapper).selectElement(frame.elementId);
+    await nextTick();
+    await openAppearanceInspector(wrapper);
+    await openDisplayInspectorSection(wrapper, "アイコンと内容");
+
+    const packageButtons = wrapper.findAll(".iriograph-package-icon-choices button");
+    await packageButtons[1]!.trigger("click");
+    await waitUntil(() => Boolean(
+      (wrapper!.getComponent(DiagramCanvas).props("scene") as DiagramScene)
+        .containers.find((candidate) => candidate.elementId === frame.elementId)?.iconUrl,
+    ));
+    canvas = wrapper.getComponent(DiagramCanvas);
+    expect((canvas.props("scene") as DiagramScene).containers.find((candidate) => (
+      candidate.elementId === frame.elementId
+    ))?.iconUrl).toMatch(/^data:image\/svg\+xml/u);
+
+    await wrapper.get<HTMLInputElement>('input[aria-label="グループアイコンの倍率"]').setValue("1.5");
+    await settle();
+    await wrapper.get<HTMLInputElement>('input[aria-label="グループアイコンの横位置"]').setValue("8");
+    await settle();
+    await wrapper.get<HTMLInputElement>('input[aria-label="グループアイコンの縦位置"]').setValue("-4");
+    await settle();
+    const appearance = overlayFor(latestDocument(wrapper), frame.semanticRef)?.appearance;
+    expect(appearance).toMatchObject({
+      iconRef: expect.stringMatching(/^urn:iriograph:icon:lucide:/u),
+      groupIconScale: 1.5,
+      groupIconOffset: { x: 8, y: -4 },
+    });
+    expect(latestDocument(wrapper).semantic.source).toBe(turtle);
+
+    await wrapper.findAll(".iriograph-package-icon-choices button")[0]!.trigger("click");
+    await settle();
+    expect(overlayFor(latestDocument(wrapper), frame.semanticRef)?.appearance?.iconRef).toBeUndefined();
+    expect(latestDocument(wrapper).semantic.source).toBe(turtle);
+  });
+
   it("Workspace locatorでsegmentを辿り相対pathをstable assetRefへ確定する", async () => {
     const assetRef = "urn:test:workspace:icons:approval";
     wrapper = await mountEditor({
@@ -1360,6 +1461,49 @@ describe("IriographEditor transaction regression", () => {
     expect(await api.focusElement("missing-element")).toBe(false);
   });
 
+  it("左sidebarを既定で畳みhostは初期値だけを上書きできる", async () => {
+    wrapper = await mountEditor();
+    expect(wrapper.get(".iriograph-editor-layout").classes()).toContain("left-sidebar-collapsed");
+    expect(wrapper.get<HTMLButtonElement>('button[aria-label="左サイドバーを開く"]')
+      .attributes("aria-expanded")).toBe("false");
+    await wrapper.get('button[aria-label="左サイドバーを開く"]').trigger("click");
+    expect(wrapper.get(".iriograph-editor-layout").classes()).not.toContain("left-sidebar-collapsed");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    wrapper.unmount();
+    wrapper = await mountEditor({ initialLeftSidebarCollapsed: false });
+    expect(wrapper.get(".iriograph-editor-layout").classes()).not.toContain("left-sidebar-collapsed");
+  });
+
+  it("drag modeとzoom list/preset/fitをsession-only toolbar操作として同期する", async () => {
+    wrapper = await mountEditor();
+    configureEditorViewport(wrapper, 240, 180);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const selection = exposedSelectionApi(wrapper);
+    selection.selectElement((canvas.props("scene") as DiagramScene).nodes[0]!.elementId);
+    await nextTick();
+
+    const modeButtons = wrapper.findAll('.iriograph-drag-mode-actions button');
+    expect(modeButtons.map((button) => button.attributes("aria-pressed"))).toEqual(["true", "false"]);
+    await modeButtons[1]!.trigger("click");
+    expect(wrapper.getComponent(DiagramCanvas).props("dragMode")).toBe("pan");
+    expect(modeButtons[1]!.attributes("aria-pressed")).toBe("true");
+
+    const zoomList = wrapper.get<HTMLSelectElement>('select[aria-label="Canvas倍率"]');
+    expect(zoomList.findAll("option").map((option) => option.text())).toEqual(expect.arrayContaining([
+      "25%", "50%", "75%", "100%", "125%", "150%", "200%", "全体を表示", "選択へfit",
+    ]));
+    await zoomList.setValue("zoom:0.5");
+    await settle();
+    expect(wrapper.get(".zoom-value").text()).toBe("50%");
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="Canvas倍率"]').element.value).toBe("zoom:0.5");
+    await wrapper.get<HTMLSelectElement>('select[aria-label="Canvas倍率"]').setValue("fit:selection");
+    await settle();
+    expect(Number.parseInt(wrapper.get(".zoom-value").text(), 10)).toBeGreaterThan(0);
+    expect(wrapper.getComponent(DiagramCanvas).props("dragMode")).toBe("pan");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+  });
+
   it("Canvas選択中Arrowをnudge、Nをobject navigationとして分離する", async () => {
     wrapper = await mountEditor();
     configureEditorViewport(wrapper, 180, 140);
@@ -1452,7 +1596,7 @@ describe("IriographEditor transaction regression", () => {
     };
 
     await openTurtlePanel(wrapper);
-    await buttonWithText(wrapper, "Diagram").trigger("click");
+    await buttonWithExactText(wrapper, "図").trigger("click");
     await settle();
 
     expect(wrapper.get<HTMLElement>(".iriograph-canvas-scroll").element.scrollLeft).toBe(before.left);
@@ -2701,7 +2845,8 @@ function buttonExists(wrapper: ButtonQueryRoot, text: string): boolean {
 
 function buttonWithExactText(wrapper: ButtonQueryRoot, text: string) {
   const button = wrapper.findAll("button").find((candidate) => (
-    candidate.text().trim() === text || candidate.find("strong").text().trim() === text
+    candidate.text().trim() === text
+      || (candidate.find("strong").exists() && candidate.find("strong").text().trim() === text)
   ));
   if (!button) throw new Error(`button ${text} was not found: ${wrapper.findAll("button").map((candidate) => candidate.text().trim()).join(" | ")}`);
   return button;
@@ -2794,6 +2939,24 @@ function documentFixture(): IriographDocumentV1 {
       overlay: {},
     }],
   };
+}
+
+function typeSystemDocumentFixture(): IriographDocumentV1 {
+  const document = documentFixture();
+  document.documentId = "editor-type-system";
+  document.views[0]!.locale = "ja";
+  document.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:Work a rdfs:Class ; rdfs:label "仕事"@ja .
+:Task a rdfs:Class ; rdfs:label "作業"@ja ; rdfs:subClassOf :Work .
+:Other a rdfs:Class ; rdfs:label "別の型"@ja .
+:Unused a rdfs:Class ; rdfs:label "未使用の型"@ja .
+:a a :Task ; rdfs:label "A"@ja .
+:b a :Other ; rdfs:label "未付与 B"@ja .
+:c a :Other ; rdfs:label "未付与 C"@ja .
+`;
+  return document;
 }
 
 function multiViewDocumentFixture(): IriographDocumentV1 {
@@ -2952,6 +3115,28 @@ function testAuthoringContext(document: IriographDocumentV1): ResolvedAuthoringC
     ],
     capabilities: [],
   };
+}
+
+function typeSystemAuthoringContext(document: IriographDocumentV1): ResolvedAuthoringContext {
+  const context = testAuthoringContext(document);
+  return {
+    ...context,
+    terms: [
+      ...context.terms,
+      { iri: `${NS}Work`, kind: "class", label: "仕事" },
+      { iri: `${NS}Other`, kind: "class", label: "別の型" },
+      { iri: `${NS}Unused`, kind: "class", label: "未使用の型" },
+    ],
+  };
+}
+
+function hasDirectType(document: IriographDocument, resourceIri: string, typeIri: string): boolean {
+  return parseSemanticGraph(document).store.getQuads(
+    resourceIri,
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+    typeIri,
+    null,
+  ).length > 0;
 }
 
 function validationContext(

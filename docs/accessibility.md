@@ -39,7 +39,7 @@ Command判定はVue、DOM、Sceneの操作から分離したpure resolverで行�
 
 Presentation keyの最初の`keydown`でgestureを開始し、key repeat中はlocal previewだけを更新する。`keyup`またはCanvasの`blur`で一度だけdocumentへcommitし、一つのundo history itemにする。`Escape`はdocumentを変更せずpreviewを破棄する。Pointer操作と同じoverlay更新、projection、history境界を使う。
 
-Primary pointerの空白またはGroup Frame interior dragは矩形複数選択で、選択枠は視覚表示だけでなく終了時に件数をlive regionへ通知する。Shiftは既存選択へ追加、Ctrl/Cmdはtoggleとし、structured authoringの対象picker中も同じgestureをaccepted kindと件数制約へ通す。中ボタンまたはAlt+空白dragはviewport pan専用とし、矩形選択と競合させない。
+Toolbarの`Canvasドラッグモード`は`範囲選択`と`移動`を排他的な押下状態として公開する。Primary pointerの空白またはGroup Frame interior dragは選択中modeに従い、既定の範囲選択では選択枠と終了件数をlive regionへ通知する。Shiftは既存選択へ追加、Ctrl/Cmdはtoggleとし、structured authoringの対象picker中も同じgestureをaccepted kindと件数制約へ通す。移動modeはviewport panだけを行う。中ボタンまたはAltによる一時panは両modeで利用でき、mode自体はdocument、history、dirty stateへ入れない。
 
 `input`、`textarea`、`select`、有効な`contenteditable`内のkey eventとIME composition中のeventはCanvas/global shortcutへ渡さない。`readOnly`ではArrowによる位置変更を発行せずpanとして扱い、focus移動、選択、pan、zoom、revealを許可する。
 
@@ -63,6 +63,12 @@ overlay対応件数、diagnosticを読み上げ、確定しても現在の文書
 Document sourceのView overlayと全文Document JSONは通常の`details`で個別に開閉でき、summaryからtextarea、
 整形、元に戻す、検証して適用の順にfocusできる。JSON errorはJSON Pointerと日本語の修正行動を該当section内の
 `role="alert"`へ出し、別tabのread-only Turtle全文をkeyboard利用者へ重複して読ませない。
+
+標準tabは`図`、`型一覧`、`Turtle`、`Document`を押下状態付きbutton groupとして読み上げる。型一覧のtree/DAGは
+各行へ階層level、選択状態、直接・継承別件数を持たせ、複数親による再出現を「同じ型への参照」と明示する。
+図上の代表型tagは要素名と型名をaccessible nameへ含め、起動するとそのexactな型と要素へfocusした型一覧を開く。
+型の作成・編集は名前、説明、上位の型をlabel付きcontrolで扱い、生IRI、`rdf:type`、`rdfs:subClassOf`を
+通常DOMへ出さない。Cycle errorと参照中削除の影響は対象名と修正行動をalert/dialogで通知し、focus returnを保つ。
 
 Canvas focusとactive itemは色だけに依存しない3pxのringを持つ。Edge hit area、waypoint、resize handleはpointerで扱えるtargetを拡張する。Catalog由来の任意色はIriographが一律にcontrast保証できないため、catalog authorはnode/label/backgroundのWCAG contrastを検証しなければならない。標準editor chromeとfocus indicatorはWCAG AA相当のcontrastを維持する。
 

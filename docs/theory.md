@@ -18,7 +18,7 @@ Turtleへ置くdomain resourceとdomain vocabularyも区別します。`rdf:type
 
 リッチエディタでnode、属性、edge、包含を作る操作は、Sceneへの図形追加ではなくsemantic graphの編集です。Editorは操作をTurtleのgraph delta候補へ変換し、semantic transactionの検証に成功した場合だけ正本とSceneを更新します。Sceneに仮nodeを作り、後から意味を付けて保存する状態をdocumentには許容しません。
 
-- Standard editorの作成ではallocatorがopaque named IRIを決め、nodeは利用者が入力した`rdfs:label`とresolved profileから選んだnode-role type、groupは名前と分類・包含・順序付き・候補の標準構造typeを同じtransactionで作る。Comment、domain property、既存resourceとの関係、位置は作成後の別操作で追加し、template選択だけを目的とするtypeは作らない。
+- Standard editorの作成ではallocatorがopaque named IRIを決め、nodeは利用者が入力した`rdfs:label`とresolved profileから選んだnode-role type、groupは名前と包含・順序付き・候補等の業務構造typeを同じtransactionで作る。ClassはGroup Frame作成へ混ぜず型一覧で作成・編集する。Comment、domain property、既存resourceとの関係、位置は作成後の別操作で追加し、template選択だけを目的とするtypeは作らない。
 - 属性編集はpredicateとIRI/literal valueを持つtripleの追加、置換、削除として行う。
 - edge作成ではpredicateを必須とし、直接IRI-object tripleまたはprojection capabilityが定義するgraph patchを作る。便宜的な`:relation`のような語彙を暗黙に生成しない。
 - 包含編集では`rdf:Bag`resourceと`rdfs:member`等、選択したcapabilityの意味構造を書く。nodeをcontainer内へdragするだけの操作はpresentationであり、意味的所属を暗黙に追加しない。

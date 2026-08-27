@@ -25,7 +25,7 @@ describe("display inspector progressive disclosure", () => {
     for (const structuralKind of ["container", "region"] as const) {
       const subject = { structuralKind, hasGeometry: true, groupFrame: true };
       expect(displayInspectorSectionsFor(subject)).toEqual([
-        "appearance", "region-label", "geometry",
+        "appearance", "icon", "region-label", "geometry",
       ]);
     }
   });

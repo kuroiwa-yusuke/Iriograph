@@ -319,7 +319,11 @@ describe("ProjectedScene conversion", () => {
       semanticRef: "urn:test:scene:left",
       appearance: {
         groupLabelAnchor: .3,
+        groupLabelOffset: .6,
         groupLabelWritingDirection: "vertical-down",
+        groupIconOffset: { x: 7, y: -2 },
+        groupIconScale: 1.4,
+        iconRef: "urn:test:group-icon",
         groupZOrder: 7,
       },
     };
@@ -346,11 +350,16 @@ describe("ProjectedScene conversion", () => {
     expect(scene.regions?.find((region) => region.semanticRef.endsWith(":left"))).toMatchObject({
       groupFrame: { kind: "membership" },
       groupLabelAnchor: .3,
+      groupLabelOffset: .6,
       groupLabelWritingDirection: "vertical-down",
+      groupIconOffset: { x: 7, y: -2 },
+      groupIconScale: 1.4,
+      iconRef: "urn:test:group-icon",
       groupZOrder: 7,
       regionLabelAnchor: .3,
       regionLabelWritingDirection: "vertical-down",
       regionZOrder: 7,
+      style: { labelFontSize: 21 },
     });
     expect(scene.containers).toEqual([]);
     expect(scene.memberships).toHaveLength(4);
