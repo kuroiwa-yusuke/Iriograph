@@ -199,6 +199,26 @@ event/timer/envelope iconと色付き縦header不在、狭いevent labelが減�
 `validate → project → render`の閉じたtoolを渡さない一回生成では、正しいTurtleと正しい見た目を同時に保証できません。
 成果物は比較用`.tmp` artifactに留め、seed、catalog、Core ruleへ逆輸入しません。
 
+P1-83で標準Class表示をGroup Frameから`型一覧`へ分離した後、同じreference imageだけを主要な業務根拠として
+再構成を再実行しました。Agentには既存pizza fixture、過去の再構成document/screenshot、git履歴を禁止し、
+document contractとpackage APIだけを許可しました。利用modelは`gpt-5.6-terra`、reasoning effortは`medium`です。
+初期指示1回に加え、root reviewから可視Group Frame 5件、標準`instance-flow + region`、Core full projectionで判明した
+containment warningの解消を各一回、合計3回追加指示しました。これは無人一回生成の結果ではなく、独立agent作成と
+root validationを往復した結果です。
+
+最終`.tmp/pizza-image-reconstruction-p1-final.iriograph`は79 quad、21 node、24 edge、5 business region、
+24 membershipを持ち、Core full projectionとMock browserでerror 0、warning 0でした。前回の余分なClass regionは
+9件から画像上の5 business regionへ、layout warningは16件から0件へ減り、information resource identityは0/5から
+4/5へ改善しました。一方、画像上の顧客側gatewayと問い合わせ情報resourceを取りこぼし、問い合わせloopを前進edgeへ
+誤認し、見えている23要素のうち21要素だけを復元しました。構造忠実度は約87/100、上記画像rubricによるroot目視は
+61±5/100です。画像一致の内訳はMacro 18、relative placement 15、branch rows 8、cross-lane alignment 9、
+connector geometry 7、BPMN visual language 4です。Lane比と主要配置は近い一方、色付きlane header、event/message icon、
+message点線、短い直交connectorは現行catalogと生成overlayで再現できていません。
+
+計測は初期指示1回、追加指示3回、tool call約29回、Playwright render 6回、画像確認3回、wall time約22分です。
+Agent runtimeはinput、cached/non-cached input、output、reasoning tokenと内部model cycleを公開しなかったため推測しません。
+この再実験も一画像一回の証拠に留まり、P2-12の完了条件である3資料以上を各3回には達していません。
+
 ## Test追加規則
 
 - CoreにDOMやbrowser mockを持ち込まない
