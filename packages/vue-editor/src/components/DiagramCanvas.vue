@@ -195,6 +195,10 @@ const emit = defineEmits<{
   /** Explicit picker mode only; normal selection and drag never emit this. */
   semanticResourceRequest: [semanticRef: string];
   structuredSelectionRequest: [request: DiagramSelectionRequest];
+  structuredSelectionSetRequest: [request: {
+    elementIds: string[];
+    mode: "replace" | "add" | "toggle";
+  }];
   /** Seeds a direct-edge replacement draft; it never mutates semantic or view state. */
   semanticEndpointReconnectRequest: [payload: {
     edgeElementId: string;
@@ -233,6 +237,11 @@ const viewport = reactive<DiagramViewportMetrics>({
 });
 const workArea = ref<DiagramWorkAreaBounds>(diagramWorkAreaBounds(props.scene));
 const viewportPanning = ref(false);
+const selectionMarquee = ref<{
+  origin: Point;
+  current: Point;
+  mode: "replace" | "add" | "toggle";
+}>();
 const previewGeometries = ref<Record<string, ElementGeometry>>({});
 const previewRouting = ref<Record<string, EditableEdgeRouting | null>>({});
 const previewNodeContentOffsets = ref<Record<string, { label?: Point; icon?: Point }>>({});
@@ -337,6 +346,18 @@ const viewportLabel = computed(() => [
   `x ${Math.round(minimapViewport.value.x)}`,
   `y ${Math.round(minimapViewport.value.y)}`,
 ].join(" · "));
+const selectionMarqueeGeometry = computed<ElementGeometry | undefined>(() => {
+  const marquee = selectionMarquee.value;
+  if (!marquee) return undefined;
+  const x = Math.min(marquee.origin.x, marquee.current.x);
+  const y = Math.min(marquee.origin.y, marquee.current.y);
+  return {
+    x,
+    y,
+    width: Math.abs(marquee.current.x - marquee.origin.x),
+    height: Math.abs(marquee.current.y - marquee.origin.y),
+  };
+});
 
 type DiagnosticElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
 
@@ -734,6 +755,17 @@ function centerOf(geometry: ElementGeometry): Point {
 
 function startMove(event: PointerEvent, element: GeometryElement): void {
   if (event.button !== 0 || resizeHandleTarget(event)) return;
+  if (
+    !props.semanticPositionPicking
+    && !props.semanticResourcePicking
+    && !event.altKey
+    && (element.structuralKind === "container" || element.structuralKind === "region")
+    && structureInteriorTarget(event)
+  ) {
+    event.stopPropagation();
+    startSelectionMarquee(event, element);
+    return;
+  }
   if (props.structuredSelectionPicking) {
     event.preventDefault();
     event.stopPropagation();
@@ -1888,10 +1920,18 @@ function startViewportPan(event: PointerEvent): void {
   const primaryOnBlank = event.button === 0 && isBlankCanvasTarget(event.target);
   const middleButton = event.button === 1;
   if (!primaryOnBlank && !middleButton) return;
+  const primaryPan = primaryOnBlank && (
+    event.altKey
+    || props.semanticPositionPicking
+    || props.semanticResourcePicking
+  );
+  if (!middleButton && !primaryPan) {
+    startSelectionMarquee(event);
+    return;
+  }
   const element = scrollElement.value;
   if (!element) return;
   event.preventDefault();
-  if (primaryOnBlank) requestSelection({ elementId: "", mode: "replace" });
   element.focus({ preventScroll: true });
   viewportPanning.value = true;
   const origin = { x: event.clientX, y: event.clientY };
@@ -1929,13 +1969,219 @@ function startViewportPan(event: PointerEvent): void {
   window.addEventListener("pointercancel", cleanup, { once: true });
 }
 
-function semanticPositionAt(event: PointerEvent): Point | undefined {
+function startSelectionMarquee(event: PointerEvent, clickElement?: GeometryElement): void {
+  const element = scrollElement.value;
+  const origin = canvasPositionAt(event);
+  if (!element || !origin) return;
+  event.preventDefault();
+  element.focus({ preventScroll: true });
+  const mode = event.shiftKey ? "add" : event.ctrlKey || event.metaKey ? "toggle" : "replace";
+  let moved = false;
+  let current = origin;
+
+  const handleMove = (moveEvent: PointerEvent): void => {
+    const point = canvasPositionAt(moveEvent);
+    if (!point) return;
+    current = point;
+    if (!moved && Math.hypot(point.x - origin.x, point.y - origin.y) <= 4 / props.zoom) return;
+    moved = true;
+    selectionMarquee.value = { origin, current, mode };
+    autoPanForPointer(moveEvent);
+  };
+  const cleanup = (upEvent?: PointerEvent): void => {
+    window.removeEventListener("pointermove", handleMove);
+    window.removeEventListener("pointerup", cleanup);
+    window.removeEventListener("pointercancel", cleanup);
+    selectionMarquee.value = undefined;
+    if (stopViewportTracking === cleanup) stopViewportTracking = undefined;
+    if (upEvent?.type !== "pointerup") return;
+    if (!moved) {
+      if (clickElement && props.structuredSelectionPicking) {
+        if (!props.readOnly) emit("structuredSelectionRequest", selectionRequest(
+          event,
+          clickElement.elementId,
+          selectedElementIdsSet.value.has(clickElement.elementId),
+        ));
+        return;
+      }
+      if (clickElement) {
+        requestSelection(selectionRequest(
+          event,
+          clickElement.elementId,
+          selectedElementIdsSet.value.has(clickElement.elementId),
+        ));
+        return;
+      }
+      if (mode === "replace") requestSelection({ elementId: "", mode: "replace" });
+      return;
+    }
+    const geometry = normalizedBounds(origin, current);
+    const elementIds = marqueeElementIds(geometry);
+    if (props.structuredSelectionPicking) {
+      if (!props.readOnly) emit("structuredSelectionSetRequest", { elementIds, mode });
+      return;
+    }
+    requestSelectionSet(combineMarqueeSelection(elementIds, mode));
+    announce(`${elementIds.length}件を範囲選択`);
+  };
+  stopViewportTracking?.();
+  stopViewportTracking = cleanup;
+  window.addEventListener("pointermove", handleMove);
+  window.addEventListener("pointerup", cleanup, { once: true });
+  window.addEventListener("pointercancel", cleanup, { once: true });
+}
+
+function structureInteriorTarget(event: PointerEvent): boolean {
+  if (event.target !== event.currentTarget) return false;
+  const target = event.currentTarget;
+  if (!(target instanceof HTMLElement)) return false;
+  const bounds = target.getBoundingClientRect();
+  const inset = 10;
+  return bounds.width > inset * 2
+    && bounds.height > inset * 2
+    && event.clientX > bounds.left + inset
+    && event.clientX < bounds.right - inset
+    && event.clientY > bounds.top + inset
+    && event.clientY < bounds.bottom - inset;
+}
+
+function canvasPositionAt(event: PointerEvent): Point | undefined {
   const bounds = stageElement.value?.getBoundingClientRect();
-  if (!bounds) return undefined;
-  return clampPointToScene({
+  if (!bounds || props.zoom <= 0) return undefined;
+  return {
     x: workArea.value.x + (event.clientX - bounds.left) / props.zoom,
     y: workArea.value.y + (event.clientY - bounds.top) / props.zoom,
-  });
+  };
+}
+
+function normalizedBounds(start: Point, end: Point): ElementGeometry {
+  return {
+    x: Math.min(start.x, end.x),
+    y: Math.min(start.y, end.y),
+    width: Math.abs(end.x - start.x),
+    height: Math.abs(end.y - start.y),
+  };
+}
+
+function marqueeElementIds(bounds: ElementGeometry): string[] {
+  const matches = new Set<string>();
+  for (const element of [...props.scene.containers, ...(props.scene.regions ?? [])]) {
+    if (boundsContains(bounds, geometryFor(element))) matches.add(element.elementId);
+  }
+  for (const node of props.scene.nodes) {
+    if (boundsIntersect(bounds, geometryFor(node))) matches.add(node.elementId);
+  }
+  for (const edge of props.scene.edges) {
+    if (edgeIntersectsBounds(edge, bounds)) matches.add(edge.elementId);
+  }
+  return navigatorItems.value
+    .map((item) => item.elementId)
+    .filter((elementId) => matches.has(elementId));
+}
+
+function combineMarqueeSelection(
+  matches: readonly string[],
+  mode: "replace" | "add" | "toggle",
+): string[] {
+  if (mode === "replace") return [...matches];
+  const result = [...props.selectedElementIds];
+  if (props.selectedElementId && !result.includes(props.selectedElementId)) {
+    result.push(props.selectedElementId);
+  }
+  for (const elementId of matches) {
+    const index = result.indexOf(elementId);
+    if (mode === "toggle" && index >= 0) result.splice(index, 1);
+    else if (index < 0) result.push(elementId);
+  }
+  return result;
+}
+
+function boundsContains(outer: ElementGeometry, inner: ElementGeometry): boolean {
+  return inner.x >= outer.x
+    && inner.y >= outer.y
+    && inner.x + inner.width <= outer.x + outer.width
+    && inner.y + inner.height <= outer.y + outer.height;
+}
+
+function boundsIntersect(left: ElementGeometry, right: ElementGeometry): boolean {
+  return left.x <= right.x + right.width
+    && left.x + left.width >= right.x
+    && left.y <= right.y + right.height
+    && left.y + left.height >= right.y;
+}
+
+function edgeIntersectsBounds(edge: SceneEdge, bounds: ElementGeometry): boolean {
+  const route = marqueeRoutePoints(edge);
+  if (route.some((point) => pointInsideBounds(point, bounds))) return true;
+  for (let index = 1; index < route.length; index += 1) {
+    if (segmentIntersectsBounds(route[index - 1]!, route[index]!, bounds)) return true;
+  }
+  return false;
+}
+
+function marqueeRoutePoints(edge: SceneEdge): Point[] {
+  const route = renderedRoute(edge);
+  const family = renderedEdgeRouteFamily(edge, edgeRouteMode(edge));
+  if (family === "curve") {
+    return Array.from({ length: 25 }, (_, index) => (
+      pointAtCurveFraction(route, renderedCurve(edge), index / 24)
+    ));
+  }
+  if (family !== "orthogonal") return route;
+  const result: Point[] = [];
+  for (const point of route) {
+    const previous = result.at(-1);
+    if (previous && previous.x !== point.x && previous.y !== point.y) {
+      result.push({ x: point.x, y: previous.y });
+    }
+    result.push(point);
+  }
+  return result;
+}
+
+function pointInsideBounds(point: Point, bounds: ElementGeometry): boolean {
+  return point.x >= bounds.x
+    && point.x <= bounds.x + bounds.width
+    && point.y >= bounds.y
+    && point.y <= bounds.y + bounds.height;
+}
+
+function segmentIntersectsBounds(start: Point, end: Point, bounds: ElementGeometry): boolean {
+  const edges: readonly [Point, Point][] = [
+    [{ x: bounds.x, y: bounds.y }, { x: bounds.x + bounds.width, y: bounds.y }],
+    [{ x: bounds.x + bounds.width, y: bounds.y }, { x: bounds.x + bounds.width, y: bounds.y + bounds.height }],
+    [{ x: bounds.x + bounds.width, y: bounds.y + bounds.height }, { x: bounds.x, y: bounds.y + bounds.height }],
+    [{ x: bounds.x, y: bounds.y + bounds.height }, { x: bounds.x, y: bounds.y }],
+  ];
+  return edges.some(([left, right]) => segmentsIntersect(start, end, left, right));
+}
+
+function segmentsIntersect(a: Point, b: Point, c: Point, d: Point): boolean {
+  const cross = (left: Point, middle: Point, right: Point): number => (
+    (middle.x - left.x) * (right.y - left.y)
+      - (middle.y - left.y) * (right.x - left.x)
+  );
+  const abC = cross(a, b, c);
+  const abD = cross(a, b, d);
+  const cdA = cross(c, d, a);
+  const cdB = cross(c, d, b);
+  if (abC === 0 && pointOnSegment(c, a, b)) return true;
+  if (abD === 0 && pointOnSegment(d, a, b)) return true;
+  if (cdA === 0 && pointOnSegment(a, c, d)) return true;
+  if (cdB === 0 && pointOnSegment(b, c, d)) return true;
+  return (abC > 0) !== (abD > 0) && (cdA > 0) !== (cdB > 0);
+}
+
+function pointOnSegment(point: Point, start: Point, end: Point): boolean {
+  return point.x >= Math.min(start.x, end.x)
+    && point.x <= Math.max(start.x, end.x)
+    && point.y >= Math.min(start.y, end.y)
+    && point.y <= Math.max(start.y, end.y);
+}
+
+function semanticPositionAt(event: PointerEvent): Point | undefined {
+  const position = canvasPositionAt(event);
+  return position ? clampPointToScene(position) : undefined;
 }
 
 function handleViewportKeydown(event: KeyboardEvent): void {
@@ -2797,7 +3043,7 @@ defineExpose<DiagramCanvasNavigationApi>({
 </script>
 
 <template>
-  <div class="iriograph-canvas-shell" :class="{ panning: viewportPanning, 'semantic-picking': semanticPositionPicking || semanticResourcePicking || structuredSelectionPicking }">
+  <div class="iriograph-canvas-shell" :class="{ panning: viewportPanning, 'marquee-selecting': Boolean(selectionMarquee), 'semantic-picking': semanticPositionPicking || semanticResourcePicking || structuredSelectionPicking }">
     <div
       ref="scrollElement"
       class="iriograph-canvas-scroll"
@@ -2853,6 +3099,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             showGrid,
             snap.grid.size,
             edgeRouteModes,
+            selectionMarqueeGeometry,
             deletionPreviewResourceRefs,
             deletionPreviewStatementRefs,
           ]"
@@ -2869,6 +3116,17 @@ defineExpose<DiagramCanvasNavigationApi>({
             class="iriograph-canvas-grid"
             aria-hidden="true"
             :style="{ backgroundPosition: `${-workArea.x}px ${-workArea.y}px` }"
+          />
+          <span
+            v-if="selectionMarqueeGeometry"
+            class="iriograph-selection-marquee"
+            aria-hidden="true"
+            :style="{
+              left: `${selectionMarqueeGeometry.x - workArea.x}px`,
+              top: `${selectionMarqueeGeometry.y - workArea.y}px`,
+              width: `${selectionMarqueeGeometry.width}px`,
+              height: `${selectionMarqueeGeometry.height}px`,
+            }"
           />
           <p v-if="regionConstraintMessage" class="iriograph-region-constraint-warning" role="alert">{{ regionConstraintMessage }}</p>
           <span

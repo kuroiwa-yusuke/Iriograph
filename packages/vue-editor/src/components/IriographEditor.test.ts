@@ -1651,7 +1651,7 @@ describe("IriographEditor transaction regression", () => {
     expect(targets).toEqual(["B"]);
   });
 
-  it("SeqへのCanvas追加は既存complete listを保持し新memberだけをmergeする", async () => {
+  it("Seqへの矩形Canvas追加は既存complete listを保持し新memberだけをmergeする", async () => {
     const fixture = sequenceDocumentFixture();
     fixture.semantic.source += `\n:c rdfs:label "C" .\n`;
     const context = testAuthoringContext(fixture);
@@ -1667,7 +1667,10 @@ describe("IriographEditor transaction regression", () => {
     await buttonWithText(wrapper, "次へ").trigger("click");
     expect(wrapper.findAll(".structured-wizard .chip-list .canvas-chip")).toHaveLength(3);
     await buttonWithText(wrapper, "Canvasから要素を選ぶ").trigger("click");
-    emitCanvas(canvas, "structuredSelectionRequest", { elementId: c.elementId, mode: "replace" });
+    emitCanvas(canvas, "structuredSelectionSetRequest", {
+      elementIds: [c.elementId, canvas.props("scene").edges[0]!.elementId],
+      mode: "add",
+    });
     await nextTick();
     const members = wrapper.findAll(".structured-wizard .chip-list .canvas-chip strong").map((item) => item.text());
     expect(members).toEqual(["A", "B", "A", "C"]);

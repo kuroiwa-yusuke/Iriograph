@@ -39,6 +39,8 @@ Command判定はVue、DOM、Sceneの操作から分離したpure resolverで行�
 
 Presentation keyの最初の`keydown`でgestureを開始し、key repeat中はlocal previewだけを更新する。`keyup`またはCanvasの`blur`で一度だけdocumentへcommitし、一つのundo history itemにする。`Escape`はdocumentを変更せずpreviewを破棄する。Pointer操作と同じoverlay更新、projection、history境界を使う。
 
+Primary pointerの空白またはGroup Frame interior dragは矩形複数選択で、選択枠は視覚表示だけでなく終了時に件数をlive regionへ通知する。Shiftは既存選択へ追加、Ctrl/Cmdはtoggleとし、structured authoringの対象picker中も同じgestureをaccepted kindと件数制約へ通す。中ボタンまたはAlt+空白dragはviewport pan専用とし、矩形選択と競合させない。
+
 `input`、`textarea`、`select`、有効な`contenteditable`内のkey eventとIME composition中のeventはCanvas/global shortcutへ渡さない。`readOnly`ではArrowによる位置変更を発行せずpanとして扱い、focus移動、選択、pan、zoom、revealを許可する。
 
 ## 対象別context menu

@@ -3967,6 +3967,32 @@ function pickStructuredCanvasElement(request: DiagramSelectionRequest): void {
   if (picked.length > 0) applyStructuredCanvasChoices(picked, picker);
 }
 
+function pickStructuredCanvasElements(request: {
+  elementIds: string[];
+  mode: "replace" | "add" | "toggle";
+}): void {
+  const picker = structuredCanvasPicker.value;
+  if (!picker) return;
+  const current = request.mode === "replace" ? [] : [...selectedElementIds.value];
+  for (const elementId of request.elementIds) {
+    const index = current.indexOf(elementId);
+    if (request.mode === "toggle" && index >= 0) current.splice(index, 1);
+    else if (index < 0) current.push(elementId);
+  }
+  selectElements(current);
+  const selected = selectedElementIds.value
+    .flatMap((elementId) => {
+      const option = structuredChoice(elementId);
+      return option ? [option] : [];
+    })
+    .filter((choice) => picker.acceptedKinds.includes(choice.kind));
+  const eligible = picker.role === "direct-targets"
+    ? withoutStructuredDirectSource(selected)
+    : selected;
+  const picked = picker.multiple ? eligible : eligible.slice(-1);
+  if (picked.length > 0) applyStructuredCanvasChoices(picked, picker);
+}
+
 function applyStructuredCanvasChoices(
   choices: readonly StructuredAuthoringCanvasOption[],
   request: StructuredAuthoringCanvasSelectionRequest,
@@ -6453,6 +6479,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @semantic-position-request="seedDraftPosition"
             @semantic-resource-request="seedDraftResource"
             @structured-selection-request="pickStructuredCanvasElement"
+            @structured-selection-set-request="pickStructuredCanvasElements"
             @semantic-endpoint-reconnect-request="seedSemanticEdgeEndpoint"
             @semantic-edit-request="requestSemanticDeletion"
             @semantic-pick-cancel="cancelAuthoringPicking"

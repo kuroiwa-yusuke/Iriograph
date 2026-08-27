@@ -36,6 +36,12 @@ describe("edge endpoint anchors", () => {
     expect(edgeEndpointAnchorFromPoint(geometry, { x: 60, y: 0 })).toEqual({ position: 0 });
     expect(edgeEndpointAnchorFromPoint(geometry, { x: 130, y: 60 })).toEqual({ position: .25 });
     expect(edgeEndpointAnchorFromPoint(geometry, { x: 0, y: 60 })).toEqual({ position: .75 });
+    const almostTop = edgeEndpointAnchorFromPoint(
+      { x: 0, y: 0, width: 1_440, height: 1_140 },
+      { x: 719.9999999999999, y: -320 },
+    );
+    expect(almostTop.position).toBeGreaterThanOrEqual(0);
+    expect(almostTop.position).toBeLessThan(1);
   });
 
   it("accepts only finite positions in the half-open unit interval", () => {

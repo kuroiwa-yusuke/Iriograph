@@ -4,8 +4,8 @@ async function openPurchaseSample(page: Page): Promise<void> {
   await page.goto("/");
   await page.getByRole("button", { name: /purchase-approval\.iriograph/u }).click();
   await expect(page.locator(".document-heading")).toContainText("purchase-approval");
-  await expect(page.locator(".iriograph-scene-node")).toHaveCount(8);
-  await expect(page.locator(".iriograph-edge-group")).toHaveCount(5);
+  await expect(page.locator(".iriograph-scene-node")).toHaveCount(7);
+  await expect(page.locator(".iriograph-edge-group")).toHaveCount(3);
   await expect(page.locator(".iriograph-scene-container.sequence-group")).toHaveCount(3);
   await expect(page.locator(".iriograph-canvas-scroll")).toHaveAttribute("aria-busy", "false");
 }
@@ -18,12 +18,14 @@ test("Seqと選択中object本体のsemantic layerを固定し操作handleだけ
   await expect(sequences).toHaveCount(3);
   await expect(page.locator(".iriograph-sequence-badges span")).toHaveCount(8);
   await expect(sequences.locator(".iriograph-container-header"))
-    .toHaveText(["購入申請フロー", "承認", "差戻し"]);
+    .toHaveText(["順番購入申請フロー", "順番承認", "順番差戻し"]);
 
   const edges = page.locator(".iriograph-edge-group");
-  await expect(edges).toHaveCount(5);
+  await expect(edges).toHaveCount(3);
   await expect(edges.filter({ hasText: "購入申請フロー" })).toHaveCount(0);
-  await expect(page.getByRole("option", { name: /承認？から承認へのedge/ })).toHaveCount(1);
+  await expect(page.locator(".iriograph-group-guide.guide-sequence-order")).toHaveCount(5);
+  await expect(page.locator(".iriograph-group-guide.guide-alternative-candidate")).toHaveCount(2);
+  await expect(page.locator(".iriograph-alternative-hub")).toHaveCount(1);
   await expect(page.locator(".iriograph-edge-arrow-overlay")).toHaveCount(0);
 
   const baseLayers = await semanticLayerValues(page);
@@ -103,13 +105,16 @@ test("800px hostでもgridとCanvasを見切らずsidebar折畳み・scroll・pa
     element.dispatchEvent(new Event("scroll"));
   });
   const startNode = page.locator(".iriograph-scene-node").filter({ hasText: "開始" });
+  await startNode.scrollIntoViewIfNeeded();
   const startBox = await requiredBox(startNode);
+  const beforeAutoPan = await viewport.evaluate((element) => element.scrollLeft);
   await page.mouse.move(startBox.x + startBox.width / 2, startBox.y + startBox.height / 2);
   await page.mouse.down();
   await page.mouse.move(viewportBox.x + viewportBox.width - 2, startBox.y + startBox.height / 2, {
     steps: 5,
   });
-  expect(await viewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+  await expect.poll(async () => viewport.evaluate((element) => element.scrollLeft))
+    .toBeGreaterThan(beforeAutoPan);
   await page.mouse.up();
   expect(errors).toEqual([]);
 });

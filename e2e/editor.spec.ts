@@ -919,6 +919,35 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   ];
   for (const selected of selectedNodes) await expect(selected).toHaveCount(1);
 
+  const firstBox = await requiredBox(selectedNodes[0]!, "marquee target");
+  const firstCenter = {
+    x: firstBox.x + firstBox.width / 2,
+    y: firstBox.y + firstBox.height / 2,
+  };
+  const marqueeOrigin = await page.evaluate((target) => {
+    const viewport = document.querySelector<HTMLElement>(".iriograph-canvas-scroll")
+      ?.getBoundingClientRect();
+    if (!viewport) return undefined;
+    for (let y = viewport.top + 12; y < viewport.bottom - 12; y += 12) {
+      for (let x = viewport.left + 12; x < viewport.right - 12; x += 12) {
+        if (Math.hypot(x - target.x, y - target.y) < 80) continue;
+        const hit = document.elementFromPoint(x, y);
+        if (hit?.matches(".iriograph-diagram-canvas, .iriograph-scene-region")) return { x, y };
+      }
+    }
+    return undefined;
+  }, firstCenter);
+  expect(marqueeOrigin).toBeTruthy();
+  await page.mouse.move(marqueeOrigin!.x, marqueeOrigin!.y);
+  await page.mouse.down();
+  await page.mouse.move(firstCenter.x + 8, firstCenter.y + 8, { steps: 4 });
+  await expect(page.locator(".iriograph-selection-marquee")).toBeVisible();
+  await page.mouse.up();
+  await expect(selectedNodes[0]!).toHaveClass(/selected/u);
+  await expect(page.locator(".iriograph-selection-marquee")).toHaveCount(0);
+
+  await page.mouse.click(marqueeOrigin!.x, marqueeOrigin!.y);
+  await expect(page.locator(".iriograph-scene-node.selected")).toHaveCount(0);
   await selectedNodes[0]!.click();
   await selectedNodes[1]!.click({ modifiers: ["Control"] });
   await selectedNodes[2]!.click({ modifiers: ["Control"] });

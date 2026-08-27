@@ -1882,7 +1882,7 @@
   overflow: auto;
   padding: 20px;
   background: #e7edeb;
-  cursor: grab;
+  cursor: crosshair;
   outline: 0;
 }
 
@@ -1912,6 +1912,11 @@
   cursor: grabbing;
 }
 
+.iriograph-canvas-shell.marquee-selecting .iriograph-canvas-scroll,
+.iriograph-canvas-shell.marquee-selecting .iriograph-diagram-canvas {
+  cursor: crosshair;
+}
+
 .iriograph-canvas-stage {
   position: relative;
   flex: 0 0 auto;
@@ -1939,6 +1944,16 @@
     linear-gradient(to right, #9fb3ad 1px, transparent 1px),
     linear-gradient(to bottom, #9fb3ad 1px, transparent 1px);
   background-size: var(--iriograph-grid-size, 8px) var(--iriograph-grid-size, 8px);
+  pointer-events: none;
+}
+
+.iriograph-selection-marquee {
+  position: absolute;
+  z-index: var(--iriograph-canvas-transient-interaction-layer);
+  box-sizing: border-box;
+  border: 1px solid #0b72c4;
+  background: rgb(11 114 196 / 12%);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 72%) inset;
   pointer-events: none;
 }
 

@@ -5,6 +5,7 @@
 ## 操作の基本
 
 - Node、container、region、edgeをclickすると選択し、右Inspectorで対象を確認できます。Ctrl/Cmd clickは選択のtoggle、Shift clickは追加、空白clickまたはEscapeは選択解除です。
+- 空白またはGroup Frame内側からprimary pointerをdragすると矩形内をまとめて選択します。Nodeは矩形との交差、edgeは実際の線との交差、背景Group Frameは枠全体が入った場合に選択し、Shiftは追加、Ctrl/Cmdは反転です。関係の接続先やGroup member等をCanvasから選ぶ段階でも同じ操作を使えますが、その段階で受け付ける種類と単一／複数件数だけに絞ります。中ボタンまたはAlt+空白dragはpanです。
 - 操作名、resource、class、predicateは人が読めるlabel/commentを主表示にします。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやread-onlyの`Advanced`詳細へ渡しません。完全IRIはHost/Core内部transaction・監査logとeditableなTurtle/Document sourceに保持し、label文字列をidentityやcatalog ruleの判定には使いません。
 - `意味`の作成・変更は、利用者が実行buttonを一度押すと内部でcandidate graphのvalidationとsemantic transactionを続けて行い、一つのrevisionへ確定します。Validation error時は確定せず、対象fieldの近くに次の行動を示します。通常変更に別のPreview/Apply確認画面は挟みません。
 - `ビュー`の変更は現在のnamed viewだけへ作用します。位置、size、template、icon、edge routingを変更してもTurtleは変わりません。

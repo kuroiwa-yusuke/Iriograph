@@ -1228,7 +1228,123 @@ describe("DiagramCanvas pointer gestures", () => {
     }).routing.curve.knots).toHaveLength(3);
   });
 
-  it("blank canvasのmouse drag、Arrow/Page pan、N scene navigationを分離する", async () => {
+  it("blank canvas dragで矩形内を選択し、Shift追加とstructured複数pickerへ渡す", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture() },
+    });
+    configureViewport(wrapper, 260, 180);
+    configureCanvasCoordinates(wrapper);
+    const nodeA = wrapper.get<HTMLElement>('[data-element-id="node-a"]');
+    const nodeB = wrapper.get<HTMLElement>('[data-element-id="node-b"]');
+    const a = elementClientGeometry(nodeA);
+    const b = elementClientGeometry(nodeB);
+
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: a.x + 20,
+      clientY: a.y + 20,
+    });
+    dispatchPointer("pointermove", a.x + 60, a.y + 45);
+    await flushPreview();
+    expect(wrapper.get(".iriograph-selection-marquee").attributes("aria-hidden")).toBe("true");
+    dispatchPointer("pointerup", a.x + 60, a.y + 45);
+    await flushPreview();
+    expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(false);
+    expect(lastPayload<string[]>(wrapper, "selectionSetRequest")).toEqual(["node-a"]);
+
+    await wrapper.setProps({ selectedElementId: "node-a", selectedElementIds: ["node-a"] });
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      shiftKey: true,
+      clientX: b.x + 20,
+      clientY: b.y + 20,
+    });
+    dispatchPointer("pointermove", b.x + 60, b.y + 45);
+    dispatchPointer("pointerup", b.x + 60, b.y + 45);
+    await flushPreview();
+    expect(lastPayload<string[]>(wrapper, "selectionSetRequest")).toEqual(["node-a", "node-b"]);
+
+    await wrapper.setProps({ structuredSelectionPicking: true });
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: a.x + 20,
+      clientY: a.y + 20,
+    });
+    dispatchPointer("pointermove", b.x + 60, b.y + 45);
+    dispatchPointer("pointerup", b.x + 60, b.y + 45);
+    await flushPreview();
+    const structured = lastPayload<{
+      elementIds: string[];
+      mode: string;
+    }>(wrapper, "structuredSelectionSetRequest");
+    expect(structured?.mode).toBe("replace");
+    expect(structured?.elementIds).toEqual(expect.arrayContaining(["node-a", "node-b"]));
+  });
+
+  it("領域の内側余白からも枠移動ではなく矩形選択を開始する", async () => {
+    const scene = sceneFixture();
+    scene.regions = [{
+      elementId: "region-a",
+      semanticRef: "urn:test:canvas:region-a",
+      structuralKind: "region",
+      label: "領域A",
+      templateRef: "urn:test:template:region",
+      style: { fill: "#fff", stroke: "#000", text: "#000" },
+      geometry: { x: 0, y: 0, width: 480, height: 280 },
+      pinned: false,
+      placement: "generated",
+    }];
+    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+    configureViewport(wrapper, 600, 420);
+    configureCanvasCoordinates(wrapper);
+    const region = wrapper.get<HTMLElement>('[data-element-id="region-a"]');
+    Object.defineProperty(region.element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 320,
+        top: 320,
+        right: 800,
+        bottom: 600,
+        width: 480,
+        height: 280,
+        x: 320,
+        y: 320,
+        toJSON: () => ({}),
+      }),
+    });
+    await region.trigger("pointerdown", { button: 0, clientX: 335, clientY: 335 });
+    dispatchPointer("pointermove", 380, 390);
+    await flushPreview();
+    expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(true);
+    dispatchPointer("pointerup", 380, 390);
+    await flushPreview();
+    expect(lastPayload<string[]>(wrapper, "selectionSetRequest")).toContain("node-a");
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+  });
+
+  it("node本体のdragは矩形選択へ奪わず従来の移動gestureを維持する", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: sceneFixture() },
+    });
+    configureViewport(wrapper, 600, 420);
+    configureCanvasCoordinates(wrapper);
+    const node = wrapper.get<HTMLElement>('[data-element-id="node-a"]');
+    const geometry = elementClientGeometry(node);
+    await node.trigger("pointerdown", {
+      button: 0,
+      clientX: geometry.x + geometry.width - 14,
+      clientY: geometry.y + geometry.height - 14,
+    });
+    dispatchPointer("pointermove", geometry.x + geometry.width + 20, geometry.y + geometry.height + 20);
+    dispatchPointer("pointerup", geometry.x + geometry.width + 20, geometry.y + geometry.height + 20);
+    await flushPreview();
+    expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(false);
+    expect(wrapper.emitted("geometryBatchChange")).toHaveLength(1);
+  });
+
+  it("middleまたはAlt+blank drag、Arrow/Page pan、N scene navigationを分離する", async () => {
     wrapper = mount(DiagramCanvas, {
       attachTo: document.body,
       props: { scene: sceneFixture() },
@@ -1237,7 +1353,7 @@ describe("DiagramCanvas pointer gestures", () => {
     const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
 
     await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
-      button: 0,
+      button: 1,
       clientX: 120,
       clientY: 90,
     });
@@ -1248,6 +1364,19 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(viewport.element.scrollTop).toBe(40);
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
     expect(wrapper.emitted("gestureStart")).toBeUndefined();
+
+    viewport.element.scrollLeft = 0;
+    viewport.element.scrollTop = 0;
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      altKey: true,
+      clientX: 120,
+      clientY: 90,
+    });
+    dispatchPointer("pointermove", 70, 50);
+    dispatchPointer("pointerup", 70, 50);
+    expect(viewport.element.scrollLeft).toBe(50);
+    expect(viewport.element.scrollTop).toBe(40);
 
     await viewport.trigger("keydown", { key: "ArrowRight" });
     expect(viewport.element.scrollLeft).toBeGreaterThan(50);
@@ -2248,6 +2377,33 @@ function configureViewport(wrapper: VueWrapper, width: number, height: number): 
     offsetTop: { configurable: true, value: 20 },
   });
   window.dispatchEvent(new Event("resize"));
+}
+
+function configureCanvasCoordinates(wrapper: VueWrapper): void {
+  const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage").element;
+  Object.defineProperty(stage, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      left: 0,
+      top: 0,
+      right: 1400,
+      bottom: 1000,
+      width: 1400,
+      height: 1000,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  });
+}
+
+function elementClientGeometry(element: { element: HTMLElement }): ElementGeometry {
+  return {
+    x: Number.parseFloat(element.element.style.left),
+    y: Number.parseFloat(element.element.style.top),
+    width: Number.parseFloat(element.element.style.width),
+    height: Number.parseFloat(element.element.style.height),
+  };
 }
 
 function sceneFixture(): DiagramScene {

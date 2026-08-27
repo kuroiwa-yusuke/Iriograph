@@ -36,7 +36,11 @@ export function edgeEndpointAnchorFromPoint(
   const dy = point.y - center.y;
   if (Math.abs(dx) < EPSILON && Math.abs(dy) < EPSILON) return { position: 0 };
   const raw = (Math.atan2(dy, dx) + Math.PI / 2) / FULL_TURN;
-  return { position: raw < 0 ? raw + 1 : raw >= 1 ? raw - 1 : raw };
+  const wrapped = raw < 0 ? raw + 1 : raw >= 1 ? raw - 1 : raw;
+  // A direction infinitesimally to the left of 12 o'clock can produce a
+  // negative sub-ULP value. Adding one then rounds to exactly 1, even though
+  // the normalized endpoint contract is half-open [0, 1).
+  return { position: wrapped >= 1 || Object.is(wrapped, -0) ? 0 : wrapped };
 }
 
 /** Resolves a normalized direction to the real boundary of the rendered shape. */
@@ -45,8 +49,11 @@ export function edgeEndpointAnchorPoint(
   shape: EdgeEndpointShape,
   anchor: EdgeEndpointAnchor,
 ): Point {
+  const position = anchor.position;
   if (!isValidEdgeEndpointAnchor(anchor)) {
-    throw new RangeError("edge endpoint anchor position must be finite and in [0, 1)");
+    throw new RangeError(
+      `edge endpoint anchor position must be finite and in [0, 1); received ${String(position)}`,
+    );
   }
   const angle = anchor.position * FULL_TURN - Math.PI / 2;
   const direction = {

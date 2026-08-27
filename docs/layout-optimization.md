@@ -138,7 +138,7 @@ Engine名ではなくview要求でadapterを選びます。単純flowとfallback
 
 最初の実用UIでは標準adapterを常時利用可能なbaselineとし、hostが`@iriograph/layout-elk`を導入した場合は階層flowと直交routeの高品質actionで明示選択します。Engine選択をportable document内の細かなoptionへ展開せず、stableな`layoutRef`からversioned adapter policyを解決します。自動配置のUIは採用engine名より、移動対象、pin保持、交差・重なりの改善見込み、失敗時のdiagnosticを利用者へ説明します。
 
-0.7.0のピザ注文・配送fixtureでは、同一ProjectedSceneを固定1920×1080で比較し、標準adapterを採用しました。Optional ELKの既存比較値はnode overlap 0、edge交差6、route-node交差3、fit 24%、aspect 3.18、lane順不成立でした。現在の標準adapterはnode overlap 0、route-node交差1、edge交差6、fit 57%、aspect 3.025、lane順成立です。この結果はadapter選択の検証証拠であり、fixtureのIRIやlabelを検出するruntime分岐には使いません。
+0.8.1のピザ注文・配送fixtureでは、同一ProjectedSceneを固定1920×1080で比較し、標準adapterを採用しました。Optional ELKの既存比較値はnode overlap 0、edge交差6、route-node交差3、fit 24%、aspect 3.18、lane順不成立でした。現在の標準adapterはnode overlap 0、route-node交差0、共有endpointを除くedge交差8、edge overlap 0、fit 47%、aspect 1.8029、lane順成立です。この結果はadapter選択の検証証拠であり、fixtureのIRIやlabelを検出するruntime分岐には使いません。
 
 ## 4. 品質指標
 
