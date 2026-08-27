@@ -26,9 +26,9 @@ Semantic object本体は選択中も`region/Seq < edge < node`の固定層を越
 
 Predicate全体の説明と個別edgeの説明は分離されています。個別説明はexact S/P/Oに対するRDF標準reificationと`rdfs:comment`としてTurtleへ保存し、Scene、関係編集、semantic-accessの検索・subgraphへ伝播します。ビュー専用captionは`ビュー上の補足`としてoverlayだけに保持します。
 
-Core/editorは0.9.0 release candidateの配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、矩形を含むmulti-selection、整列、snap、manual/Bezier routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gate、production buildの初期表示・関係transaction gateも独立package/CI jobとして用意されています。APIはまだ安定版としません。
+Core/editorは公開済み0.9.0の配布contract、tarball consumer検証、component/Playwright回帰testを持ち、keyboard、矩形を含むmulti-selection、整列、snap、manual/Bezier routing、外側endpoint anchor、parallel edge、self-loopを接続済みです。Optional ELK adapter、固定normal/stress Core性能gate、実Chromium pan/drag gate、production buildの初期表示・関係transaction gateも独立package/CI jobとして用意されています。APIはまだ安定版としません。
 
-kuroxiom-cloudのhost adapterはworkspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続します。Workspace画像はpath、basename、stable asset IRI、MIMEだけをeditor候補へ渡し、byteと解決URLは認証付きAssetAccess内に留めます。0.8.1 exact packageを対象に、800px幅を含む実Chromium監査、初期seed、grid、矩形選択、内部scroll、treeと左右sidebarの折り畳み、asset path候補とicon表示をproduction conformanceで確認します。
+kuroxiom-cloudのhost adapterはworkspaceの`.iriograph` load/save、permission/revision境界、pending edit flush、binary workspace assetの分離保存を接続します。Workspace画像はpath、basename、stable asset IRI、MIMEだけをeditor候補へ渡し、byteと解決URLは認証付きAssetAccess内に留めます。0.9.0 exact packageを対象に、800px幅を含む実Chromium監査、初期seed、grid、矩形選択、4 tab、型一覧、drag mode、zoom preset、内部scroll、treeと左右sidebarの折り畳み、asset path候補とnode/Group Frame icon表示をproduction conformanceで確認します。
 
 Local mockの初期ファイルは、顧客、店員、調理担当、配達担当のlaneと、注文から完了までの主フロー、問い合わせbranch/loop、注文・問い合わせ内容・ピザ・料金・領収書のcross-lane連携をlabel/comment付きTurtleで表すピザ注文・配送例です。View overlayは空で、個別座標やmanual routeを保存せず標準projection/layoutだけから初期displayを補完します。Node-link viewは既存documentと明示追加の互換機能として維持します。Workspace treeの別画像asset IRIをicon overlayから参照する例も維持します。標準layoutとoptional ELKの同一入力比較はlayout品質の検証証拠であり、seed IRIやlabelに特化した分岐・adapter選択規則にはしません。
 
@@ -47,22 +47,7 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 
 ## P1 — Editor・layoutの実用性
 
-P1-53〜P1-71およびCanvas矩形選択の実装済み契約は「現在の基準点」と各規範文書へ統合しました。次の項目は2026-08-27の実利用確認で追加した未実装要求です。
-
-| ID | 項目 | 依存 | 完了条件 |
-|---|---|---|---|
-| P1-72 | Group Frameラベルの簡素化と既定可読性 | Group Frame label appearance、tooltip/accessibility | Region・分類・包含等の枠ラベルへ常時「所属」を併記せず、構造種別はhover/focus時のtooltipとaccessible descriptionで確認できる。新規Group Frameラベルの既定font sizeは21px相当とし、既存documentの明示overrideは変更しない。狭い枠、重なり枠、縦横ラベルでも名称を種別表示が圧迫しない |
-| P1-73 | Font size数値入力の安定化 | inline presentation draft、number field共通部品 | `21`を入力する途中の`2`をmin/maxへ即時clampしたり、選択中の桁とwheel/key repeatを合成して`72`等へ飛ばしたりしない。IME、全選択置換、Backspaceによる一時空欄、小数、Arrow stepをsession draftとして扱い、blur/Enter/changeで一度だけ範囲検証・presentation commitする。Node、Group Frame、edge label/commentの全font size入力で同じ回帰testを通す |
-| P1-74 | 自動route familyの優先規則 | standard/ELK共通route completion、obstacle/edge crossing cost | Hard constraintと非endpoint node回避を満たす候補間では直線を最優先する。直線不可時は原則Bezier曲線を選ぶが、中間点最大1個で「水平・垂直の2線分と直角1回」になる直交折線を作れる場合は、その折線を曲線より優先する。それ以外の折線は曲線より後順位とする。既存の包含、固定geometry、最大中間点1、route-node交差0優先、edge交差・重複最小化、LR/TB、parallel/self-loop、overlay-only変更時に自動layoutしない契約を崩さず、採用family/reasonをderived route choiceで観測できる |
-| P1-75 | Canvas drag modeの明示切替 | marquee selection、viewport pan、toolbar/session state | Toolbarに「範囲選択」と「移動」の排他的mode buttonを置き、primary blank/interior dragの意味を選択中modeへ切り替える。既定mode、現在mode、keyboard focusを明示し、範囲選択は意味編集pickerでも同じ集合を返す。中ボタン・Altによる一時pan、Shift追加、Ctrl/Cmd反転、node/group操作はmodeと競合させず、modeはsession-onlyでdocument/undo/dirtyへ入れない |
-| P1-76 | Cloudでのgrid表示conformance | package CSS、P2-11 host conformance | Mockとkuroxiom-cloudが同じpublished package/CSSで、通常幅・800px狭幅・zoom変更・sidebar開閉後にもCanvas座標へ追従する薄い8-unit gridを視認できる。Host背景色、CSS cascade、overflow、stale assetで消失しないことをcomputed styleとproduction screenshotで検証し、gridは引き続きsession-onlyとする |
-| P1-77 | Group Frame内部click選択 | Scene hit testing、z-band、multi-membership | Node、edge、label、handle等の前面対象がないGroup Frame内部のclickで枠を選択でき、ラベルだけを狭いhit targetにしない。重なる枠では描画z-order上の最前面候補を決定的に選び、選択済み枠の操作部品を使える。Node/edgeの選択を背景枠が奪わず、右click、keyboard、矩形選択の既存規則も維持する |
-| P1-78 | Group Frameラベルの内外周drag band | region label anchor/offset、containment | ラベルdragは外周線上の一点だけへclampせず、枠の内側へラベル高さを含む調整可能なbandと必要最小限の外側bandを持つ。上下左右のanchorと文字方向は独立し、resize、zoom、z-order、重なり後も正規化位置を維持する。ラベルがmemberを覆う場合は明示的に許容しつつ警告/衝突表示で判別でき、意味membershipは変更しない |
-| P1-79 | 左sidebarの初期折り畳み | editor session、host embed contract | 新規Editor sessionでは左workspace/view sidebarを初期折り畳みにし、Canvas幅を優先する。利用者が開閉した後は同sessionの選択を維持し、MockとCloudで同じ初期値にする。Hostは明示propで初期値だけを上書きできるが、package版とCloud版に別実装を作らない |
-| P1-80 | Canvas zoomのlist/preset操作 | viewport session、toolbar | 現在の`−`/`＋`を残し、現在倍率を確認して候補倍率、全体表示、選択へfitをlist/comboboxから一回で選べる。選択値は実zoomと同期し、keyboard操作、狭幅、sidebar開閉で到達可能とする。Zoomはsession-onlyでgeometry、overlay、historyを変更しない |
-| P1-81 | 非member resourceの領域外配置 | projection membership provenance、layout hard constraints、pizza fixture | どのGroup Frameにも意味上所属しないresourceは、初期layoutで枠のcontent bounds内へ偶然配置しない。複数枠の重なりも全membershipの有無で判定し、見た目だけの包含をsemantic membershipと誤認させない。Pizza seedの`問い合わせ内容`には`rdfs:member`がないため、現在のTurtle生成ミスではなくlayout上の曖昧な重なりとして回帰fixture化し、意味正本を変更せず枠外へ配置する。既存のmember containment、cross-lane alignment、route品質を維持する |
-| P1-82 | Group Frame icon | asset/template contract、Group Frame appearance、layout content metric | Region、包含、順序、候補を含む各Group Frameへpackage iconまたはhost workspace assetを設定・解除でき、ラベルと同じheader/band内で位置・scaleをビュー編集できる。Iconはappearance overlayだけに保持し、Turtleの型やmembershipを生成しない。Asset policy、natural aspect、失敗fallback、resize、label衝突、z-band、Mock/Cloud parityをnode iconと共通contractで検証する |
-| P1-83 | 型一覧・型表示と領域編集の分離 | RDFS closure、structured authoring、editor tab/session、Canvas selection、`classification-region`互換方針 | 通常編集を`図`、`型一覧`、`Turtle`、`Document`へ分け、`型一覧`はnamed viewやdisplay overlayではなく`semantic.source`から導出するeditor UIとする。`rdfs:Class`を通常の図のGroup Frameへ投影せず、Bag、Seq、Alt、domain membership等の業務上のまとまりだけを領域編集の対象にする。既存の明示的な`classification-region` document/profileにはread/migration互換を定義し、読込み時に意味tripleやoverlayを暗黙変換しない。図上の各要素には直接付与された直上位の型を一つだけ日本語labelのcompactな型tagとして表示し、継承型と残りの直接型は図へ並べず`型一覧`で確認する。複数の直接型がある場合は、最もspecificな型、resolved profileの表示優先度、opaque IRI順の順に一つを決定し、labelやtriple記述順へ依存させずoverlayにも複製しない。型tag選択はそのexact typeと要素へfocusした`型一覧`を開く。`型一覧`は`rdfs:subClassOf`をlabel-firstなtree/DAGとして表示し、複数親を同一identityへの参照として扱い、未使用の0要素型、直接・継承別の要素数、親子、説明、検索を確認できる。IRIやRDF用語を通常UIへ出さず、型の作成、名前・説明・複数上位型の変更、複数要素への型付与・解除、参照影響を示した型削除をatomic semantic transactionで行い、新規cycleを拒否する。型選択は直接型と子孫closureを区別して該当要素をCanvas上でsession-only highlightし、geometry、layout、overlay、history、dirtyを変更しない。P1ではclassを領域、Euler/Venn図、永続する型専用geometryとして表示しない。Mock/Cloudが同一packageから、型tagからのfocus、未使用型編集、複数継承、複数要素の一括型編集、reload、Turtle exactnessを同じE2Eで満たす |
+P1-53〜P1-83およびCanvas矩形選択の実装済み契約は「現在の基準点」と各規範文書へ統合しました。P1 backlogは現在空です。
 
 ## P2 — Cloud・LLM・運用
 | ID | 項目 | 依存 | 完了条件 |
@@ -91,4 +76,4 @@ P1-53〜P1-71およびCanvas矩形選択の実装済み契約は「現在の基�
 
 ## MVP判定
 
-P0とP1-71までの基準点で実用MVPは成立しています。P1-72〜P1-83は実利用上の改善として次の実装対象にし、完了までは未実装として管理します。P2はcloud/LLM/運用、P3は表現拡張としてcore/editorの成立判定から分けます。新しいP1要求は実装・回帰確認後に完了行を残さず、再利用する契約を基準点と規範文書へ統合します。
+P0とP1-83までの基準点で実用MVPは成立しています。P2はcloud/LLM/運用、P3は表現拡張としてcore/editorの成立判定から分けます。新しいP1要求は実装・回帰確認後に完了行を残さず、再利用する契約を基準点と規範文書へ統合します。
