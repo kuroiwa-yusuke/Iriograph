@@ -62,6 +62,7 @@ P1-53〜P1-71およびCanvas矩形選択の実装済み契約は「現在の基�
 | P1-80 | Canvas zoomのlist/preset操作 | viewport session、toolbar | 現在の`−`/`＋`を残し、現在倍率を確認して候補倍率、全体表示、選択へfitをlist/comboboxから一回で選べる。選択値は実zoomと同期し、keyboard操作、狭幅、sidebar開閉で到達可能とする。Zoomはsession-onlyでgeometry、overlay、historyを変更しない |
 | P1-81 | 非member resourceの領域外配置 | projection membership provenance、layout hard constraints、pizza fixture | どのGroup Frameにも意味上所属しないresourceは、初期layoutで枠のcontent bounds内へ偶然配置しない。複数枠の重なりも全membershipの有無で判定し、見た目だけの包含をsemantic membershipと誤認させない。Pizza seedの`問い合わせ内容`には`rdfs:member`がないため、現在のTurtle生成ミスではなくlayout上の曖昧な重なりとして回帰fixture化し、意味正本を変更せず枠外へ配置する。既存のmember containment、cross-lane alignment、route品質を維持する |
 | P1-82 | Group Frame icon | asset/template contract、Group Frame appearance、layout content metric | Region、包含、順序、候補を含む各Group Frameへpackage iconまたはhost workspace assetを設定・解除でき、ラベルと同じheader/band内で位置・scaleをビュー編集できる。Iconはappearance overlayだけに保持し、Turtleの型やmembershipを生成しない。Asset policy、natural aspect、失敗fallback、resize、label衝突、z-band、Mock/Cloud parityをnode iconと共通contractで検証する |
+| P1-83 | 型一覧・型表示と領域編集の分離 | RDFS closure、structured authoring、editor tab/session、Canvas selection、`classification-region`互換方針 | 通常編集を`図`、`型一覧`、`Turtle`、`Document`へ分け、`型一覧`はnamed viewやdisplay overlayではなく`semantic.source`から導出するeditor UIとする。`rdfs:Class`を通常の図のGroup Frameへ投影せず、Bag、Seq、Alt、domain membership等の業務上のまとまりだけを領域編集の対象にする。既存の明示的な`classification-region` document/profileにはread/migration互換を定義し、読込み時に意味tripleやoverlayを暗黙変換しない。図上の各要素には直接付与された直上位の型を一つだけ日本語labelのcompactな型tagとして表示し、継承型と残りの直接型は図へ並べず`型一覧`で確認する。複数の直接型がある場合は、最もspecificな型、resolved profileの表示優先度、opaque IRI順の順に一つを決定し、labelやtriple記述順へ依存させずoverlayにも複製しない。型tag選択はそのexact typeと要素へfocusした`型一覧`を開く。`型一覧`は`rdfs:subClassOf`をlabel-firstなtree/DAGとして表示し、複数親を同一identityへの参照として扱い、未使用の0要素型、直接・継承別の要素数、親子、説明、検索を確認できる。IRIやRDF用語を通常UIへ出さず、型の作成、名前・説明・複数上位型の変更、複数要素への型付与・解除、参照影響を示した型削除をatomic semantic transactionで行い、新規cycleを拒否する。型選択は直接型と子孫closureを区別して該当要素をCanvas上でsession-only highlightし、geometry、layout、overlay、history、dirtyを変更しない。P1ではclassを領域、Euler/Venn図、永続する型専用geometryとして表示しない。Mock/Cloudが同一packageから、型tagからのfocus、未使用型編集、複数継承、複数要素の一括型編集、reload、Turtle exactnessを同じE2Eで満たす |
 
 ## P2 — Cloud・LLM・運用
 | ID | 項目 | 依存 | 完了条件 |
@@ -90,4 +91,4 @@ P1-53〜P1-71およびCanvas矩形選択の実装済み契約は「現在の基�
 
 ## MVP判定
 
-P0とP1-71までの基準点で実用MVPは成立しています。P1-72〜P1-82は実利用上の改善として次の実装対象にし、完了までは未実装として管理します。P2はcloud/LLM/運用、P3は表現拡張としてcore/editorの成立判定から分けます。新しいP1要求は実装・回帰確認後に完了行を残さず、再利用する契約を基準点と規範文書へ統合します。
+P0とP1-71までの基準点で実用MVPは成立しています。P1-72〜P1-83は実利用上の改善として次の実装対象にし、完了までは未実装として管理します。P2はcloud/LLM/運用、P3は表現拡張としてcore/editorの成立判定から分けます。新しいP1要求は実装・回帰確認後に完了行を残さず、再利用する契約を基準点と規範文書へ統合します。
