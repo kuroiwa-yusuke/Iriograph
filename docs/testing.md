@@ -143,6 +143,60 @@ header・message dash・timer/envelope iconの表現上限が残りました。�
 
 残差のうち、封筒・timerの専用icon、色付き縦lane header、semantic predicate由来edge labelのview単位hideは、現行catalog/template・renderer契約だけでは参照図どおりに指定できません。これらを座標調整で偽装せず、catalog/profile/rendererの表現上限としてBPMN visual languageとconnector geometryから減点しています。P2-09の完了条件である3種類以上の参照図を各3回評価する検証は未達であり、この1図3反復の結果だけでbacklogを完了扱いにしません。
 
+#### 画像だけからTurtleとviewを作る独立再構成実験
+
+P2-12の初回baselineとして、既存Turtle、既存overlay、空overlayのrender結果、過去のLLM成果物を
+一切見せず、`pizza-reference.webp`一枚を唯一のdomain/visual evidenceにした独立agent実験を行いました。
+Referenceは1940×1120、39,404 bytes、SHA-256
+`54aae4e142508961253d211aac9a6e2cd90e4aa6cf8e403690281b73e87303dc`です。Agentに許可した
+repository情報は`AGENTS.md`と、出力contractを読むためのCore model/schema/document/standard catalogだけです。
+既存pizza file、fixture、test、`docs/testing.md`、変換後screenshotの検索を明示的に禁止しました。
+
+初期指示は一回で、追加指示は0回です。指示内容は次の境界へ固定しました。
+
+```text
+元画像を唯一の意味・表示上の証拠として、新規Iriograph v1 documentを一から作る。
+既存pizza Turtle/.iriograph/screenshot/fixture/test/過去成果物を読まない・検索しない。
+出力は新しいdocumentId/base IRI、Turtle semantic.source、region view、sparse overlayを持つ。
+標準RDF/RDFSを優先し、領域/laneはrdf:Bag+rdfs:member、domain predicateは
+rdf:Property+rdfs:label/commentで自己記述する。全visible resourceへlabelを付ける。
+画像の制御・message関係を近接だけからgeneric edgeへ置換しない。
+Overlayは有限でschema-validなgeometry/routing/appearanceだけを持ち、Turtleの意味を代替しない。
+指定したignored .tmp file以外を変更せず、可能な範囲で検証し、曖昧さと計測値を報告する。
+```
+
+指定modelは利用可能なSonnet 4.6相当の代替として`gpt-5.6-terra`、reasoning effort `medium`です。
+Task telemetryは235.010秒、12 model cycle、tool call 11回（画像確認1、shell 10）、browser反復0です。
+Input 451,372 tokens（cached 404,480、non-cached 46,892、cache再利用89.61%）、output
+13,067 tokens（reasoning 3,985を含む）、合計464,439 tokensでした。前回の約190万tokenに対し、
+既存成果物の探索、browser反復、追加指示を外すことで総量は約24.4%、non-cached inputは約48.3%へ
+減りました。ただし、schema型定義を各cycleで保持するため、画像と出力12,102 bytesだけに比例する量ではありません。
+
+生成物`pizza-image-reconstruction-r3.iriograph`はSHA-256
+`c5b2c6ae4d8cc99f6e86d19f4d5ef03edfa5f6d72775976168b1c6fdaf4d4031`です。Root reviewでは
+Core schemaとRDF 119 quadのparseに成功し、projection errorは0でした。画像上の5 lane/groupを
+`rdf:Bag`として5/5、visibleな業務/event/gateway要素を18/18、その正しいlane membershipを18/18、
+店舗配下の3 laneを3/3復元しました。Direct relationは23件中22件を対応付けられ、顧客の
+`問い合わせる`から注文後gatewayへ戻るloopだけを`ピザを受け取る`への前進edgeとして誤認しました。
+5種類のmessage関係と名称は復元しましたが、注文・問い合わせ内容・ピザ・料金・領収書を再利用可能な
+information resourceにせずpredicate edgeへ畳み込んだため、期待するinformation resource identityは0/5です。
+
+構造忠実度は74/100と評価します。内訳はvisible要素25/25、lane/group/membership 20/20、direct relation
+24/25、information resource identity 0/15、profile/runtime互換5/15です。最後の互換性減点は、Agentが
+`:Task`、`:Event`、`:Gateway`等を`rdfs:Class`として型付けし、classification-region profileがそれらも
+領域へ正しく投影した結果、意図した5 regionが実Sceneでは9 region、39 membershipになり、非共有領域の
+重なりと店舗子lane paddingについて16 layout warningを生じたためです。これは画像認識の失敗というより、
+「意味上の型」と「このprofileで領域に投影するclass」の区別を最小contractから選べなかった失敗です。
+
+同じ画像rubricの実browser目視は55±5/100です。内訳はMacro 15、relative placement 17、branch rows 11、
+cross-lane alignment 0、connector geometry 7、BPMN visual language 5です。Lane比、主要node位置、青いtask、
+gatewayは近い一方、余分な4 class region、message resource node不在、edge routing overlay 0件による斜線、
+event/timer/envelope iconと色付き縦header不在、狭いevent labelが減点理由です。Cross-laneは5関係を
+意味上復元していても、既定rubricが要求するproducer/resource/consumerの3点列を作っていないため0点です。
+この結果から、画像だけでも要素・lane・大半の関係は中程度agentで復元可能ですが、Iriograph profile summaryと
+`validate → project → render`の閉じたtoolを渡さない一回生成では、正しいTurtleと正しい見た目を同時に保証できません。
+成果物は比較用`.tmp` artifactに留め、seed、catalog、Core ruleへ逆輸入しません。
+
 ## Test追加規則
 
 - CoreにDOMやbrowser mockを持ち込まない

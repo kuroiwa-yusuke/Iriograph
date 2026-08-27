@@ -47,7 +47,21 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 
 ## P1 — Editor・layoutの実用性
 
-現時点で未実装のP1項目はありません。P1-53〜P1-71およびCanvas矩形選択の実装済み契約は「現在の基準点」と各規範文書へ統合しました。
+P1-53〜P1-71およびCanvas矩形選択の実装済み契約は「現在の基準点」と各規範文書へ統合しました。次の項目は2026-08-27の実利用確認で追加した未実装要求です。
+
+| ID | 項目 | 依存 | 完了条件 |
+|---|---|---|---|
+| P1-72 | Group Frameラベルの簡素化と既定可読性 | Group Frame label appearance、tooltip/accessibility | Region・分類・包含等の枠ラベルへ常時「所属」を併記せず、構造種別はhover/focus時のtooltipとaccessible descriptionで確認できる。新規Group Frameラベルの既定font sizeは21px相当とし、既存documentの明示overrideは変更しない。狭い枠、重なり枠、縦横ラベルでも名称を種別表示が圧迫しない |
+| P1-73 | Font size数値入力の安定化 | inline presentation draft、number field共通部品 | `21`を入力する途中の`2`をmin/maxへ即時clampしたり、選択中の桁とwheel/key repeatを合成して`72`等へ飛ばしたりしない。IME、全選択置換、Backspaceによる一時空欄、小数、Arrow stepをsession draftとして扱い、blur/Enter/changeで一度だけ範囲検証・presentation commitする。Node、Group Frame、edge label/commentの全font size入力で同じ回帰testを通す |
+| P1-74 | 自動route familyの優先規則 | standard/ELK共通route completion、obstacle/edge crossing cost | Hard constraintと非endpoint node回避を満たす候補間では直線を最優先する。直線不可時は原則Bezier曲線を選ぶが、中間点最大1個で「水平・垂直の2線分と直角1回」になる直交折線を作れる場合は、その折線を曲線より優先する。それ以外の折線は曲線より後順位とする。既存の包含、固定geometry、最大中間点1、route-node交差0優先、edge交差・重複最小化、LR/TB、parallel/self-loop、overlay-only変更時に自動layoutしない契約を崩さず、採用family/reasonをderived route choiceで観測できる |
+| P1-75 | Canvas drag modeの明示切替 | marquee selection、viewport pan、toolbar/session state | Toolbarに「範囲選択」と「移動」の排他的mode buttonを置き、primary blank/interior dragの意味を選択中modeへ切り替える。既定mode、現在mode、keyboard focusを明示し、範囲選択は意味編集pickerでも同じ集合を返す。中ボタン・Altによる一時pan、Shift追加、Ctrl/Cmd反転、node/group操作はmodeと競合させず、modeはsession-onlyでdocument/undo/dirtyへ入れない |
+| P1-76 | Cloudでのgrid表示conformance | package CSS、P2-11 host conformance | Mockとkuroxiom-cloudが同じpublished package/CSSで、通常幅・800px狭幅・zoom変更・sidebar開閉後にもCanvas座標へ追従する薄い8-unit gridを視認できる。Host背景色、CSS cascade、overflow、stale assetで消失しないことをcomputed styleとproduction screenshotで検証し、gridは引き続きsession-onlyとする |
+| P1-77 | Group Frame内部click選択 | Scene hit testing、z-band、multi-membership | Node、edge、label、handle等の前面対象がないGroup Frame内部のclickで枠を選択でき、ラベルだけを狭いhit targetにしない。重なる枠では描画z-order上の最前面候補を決定的に選び、選択済み枠の操作部品を使える。Node/edgeの選択を背景枠が奪わず、右click、keyboard、矩形選択の既存規則も維持する |
+| P1-78 | Group Frameラベルの内外周drag band | region label anchor/offset、containment | ラベルdragは外周線上の一点だけへclampせず、枠の内側へラベル高さを含む調整可能なbandと必要最小限の外側bandを持つ。上下左右のanchorと文字方向は独立し、resize、zoom、z-order、重なり後も正規化位置を維持する。ラベルがmemberを覆う場合は明示的に許容しつつ警告/衝突表示で判別でき、意味membershipは変更しない |
+| P1-79 | 左sidebarの初期折り畳み | editor session、host embed contract | 新規Editor sessionでは左workspace/view sidebarを初期折り畳みにし、Canvas幅を優先する。利用者が開閉した後は同sessionの選択を維持し、MockとCloudで同じ初期値にする。Hostは明示propで初期値だけを上書きできるが、package版とCloud版に別実装を作らない |
+| P1-80 | Canvas zoomのlist/preset操作 | viewport session、toolbar | 現在の`−`/`＋`を残し、現在倍率を確認して候補倍率、全体表示、選択へfitをlist/comboboxから一回で選べる。選択値は実zoomと同期し、keyboard操作、狭幅、sidebar開閉で到達可能とする。Zoomはsession-onlyでgeometry、overlay、historyを変更しない |
+| P1-81 | 非member resourceの領域外配置 | projection membership provenance、layout hard constraints、pizza fixture | どのGroup Frameにも意味上所属しないresourceは、初期layoutで枠のcontent bounds内へ偶然配置しない。複数枠の重なりも全membershipの有無で判定し、見た目だけの包含をsemantic membershipと誤認させない。Pizza seedの`問い合わせ内容`には`rdfs:member`がないため、現在のTurtle生成ミスではなくlayout上の曖昧な重なりとして回帰fixture化し、意味正本を変更せず枠外へ配置する。既存のmember containment、cross-lane alignment、route品質を維持する |
+| P1-82 | Group Frame icon | asset/template contract、Group Frame appearance、layout content metric | Region、包含、順序、候補を含む各Group Frameへpackage iconまたはhost workspace assetを設定・解除でき、ラベルと同じheader/band内で位置・scaleをビュー編集できる。Iconはappearance overlayだけに保持し、Turtleの型やmembershipを生成しない。Asset policy、natural aspect、失敗fallback、resize、label衝突、z-band、Mock/Cloud parityをnode iconと共通contractで検証する |
 
 ## P2 — Cloud・LLM・運用
 | ID | 項目 | 依存 | 完了条件 |
@@ -61,6 +75,7 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 | P2-09 | Reference-image presentation patch実験 | P2-06、P2-10、host image input policy、presentation capability contract | Defaultのsemantic LLMとは分離したopt-in host実験として、reference image、read-only Scene、利用可能template/icon/style/routing capabilityから閉じたpresentation candidateだけを生成する。画像bytesと取得URLはsession入力に留め、任意CSS/URL、未登録asset、非finite・範囲外geometry、包含違反をrejectし、P2-06のreview後にだけsparse overlayを適用する。Pizzaを含む構造の異なる3資料以上を各3回実行し、自動layoutとの画像一致差、構造制約、overlay field差、モデル・effort、指示回数、cycle、browser反復、cached/non-cached token、時間を同じ計測手順で残す。未達も失敗分類を残せば実験完了とし、seed固有promptや生成overlayをCore、layout、catalogの既定規則へ昇格しない |
 | P2-10 | Closed presentation candidate toolとbudget | presentation transaction/schema、host revision/auth contract | Revision-boundなScene索引、対象要素、利用可能presentation capabilityの短いsummary、sparse patchのvalidate、candidate render/screenshot、diff/scoreを閉じたtool contractとして提供する。ToolはTurtle、semantic write、任意CSS/URL、asset byte・認証URLを扱わず、patch field・件数・座標範囲、request/response size、時間・token budgetをhost policyで制限する。各call/cycleのinput cache区分、output、latency、patch件数を監査し、上限超過、stale revision、validation失敗では候補を破棄して正本を変更しない。Semantic LLMの既定経路へ混ぜず、適用はP2-06の外部候補reviewを通す |
 | P2-11 | Mock・Cloud product deploy conformance gate | package tarball consumer、host adapter、production E2E | 公開候補packageからversioned host-conformance manifestと共通fixture参照を作り、Local mockを参照host、Kuroxiom Cloudをproduct hostとして同じpublished tarball・CSS entry・package baseline catalogで実Chromium検証する。P1の各機能要件をこの行で再定義せず、そのcomponent/E2E test IDとcapabilityをdeploy gateから再実行する。Cloud固有のdomain catalog、permission、workspace asset、layout engineは宣言済みextensionとして差分を許容し、package/CSS version不一致、stale cache、host override、container/focus/event統合、共通fixtureの機能欠落、service health不良をrelease/deploy failureにする |
+| P2-12 | Reference imageからのsemantic document再構成実験 | semantic parser/validator、presentation schema、P2-06、P2-09、P2-10 | 既存Turtle、既存overlay、変換後screenshotを見せず、reference imageを唯一のdomain evidenceとして、独立agentがTurtleとsparse view overlayを持つ新規document候補を一から生成する。Agentには出力contract、許可標準語彙・catalog/profile、validate/render/score toolだけを最小提示し、既存pizza fixtureやseed固有ruleを参照させない。元画像に対する要素・label、lane/membership、関係方向・線種、resource連携、geometry/styleのprecision/recall、構造100点、画像一致100点、schema/semantic diagnostic、モデル・effort、初期/追加指示全文、turn/cycle、tool/browser回数、cached/non-cached input、output/reasoning token、時間を記録する。対応modelを直接指定できない場合は利用可能な最も近い中程度modelを明記する。一回の成功を一般化せず、P2-09と同じ3資料×3回へ拡張するまで未完了とする |
 
 ## P3 — 表現拡張
 
@@ -75,4 +90,4 @@ Edge-only semantic reconciliationは変更edgeと旧新endpointに関係するla
 
 ## MVP判定
 
-P0とP1の現在の基準点を満たした状態で実用MVPは成立しています。以後の未実装項目はP2のcloud/LLM/運用とP3の表現拡張としてcore/editorの成立判定から分けます。新しいP1要求は実装・回帰確認後に完了行を残さず、再利用する契約を基準点と規範文書へ統合します。
+P0とP1-71までの基準点で実用MVPは成立しています。P1-72〜P1-82は実利用上の改善として次の実装対象にし、完了までは未実装として管理します。P2はcloud/LLM/運用、P3は表現拡張としてcore/editorの成立判定から分けます。新しいP1要求は実装・回帰確認後に完了行を残さず、再利用する契約を基準点と規範文書へ統合します。
