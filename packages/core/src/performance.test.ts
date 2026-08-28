@@ -36,7 +36,9 @@ const STRESS_SCALE = { nodes: 2_000, edges: 4_000 } as const;
 // absorb startup noise without weakening the completion criterion.
 const INITIAL_PIPELINE_BUDGET_MS = 2_000;
 const EDIT_REPROJECTION_BUDGET_MS = 100;
-const SMALL_INITIAL_PIPELINE_BUDGET_MS = 300;
+const SMALL_INITIAL_PIPELINE_BUDGET_MS = Number(
+  process.env.IRIOGRAPH_SMALL_INITIAL_PIPELINE_BUDGET_MS ?? "300",
+);
 const SAMPLE_COUNT = 3;
 const SMALL_SAMPLE_COUNT = 5;
 const AUTHORING_WARM_COUNT = 20;
@@ -96,7 +98,7 @@ describe("P1-08 fixed graph performance", () => {
     expect(result.medianMs).toBeLessThan(EDIT_REPROJECTION_BUDGET_MS);
   }, 10_000);
 
-  it("keeps pizza, sparse-small, and dense-small initial projection/layout p95 under 300ms", async () => {
+  it("keeps pizza, sparse-small, and dense-small initial projection/layout p95 under the configured budget", async () => {
     const fixtures = [{
       name: "pizza",
       document: pizzaFixture(),

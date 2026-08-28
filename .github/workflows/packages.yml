@@ -86,6 +86,10 @@ jobs:
       - name: Test core workspace
         id: verify_test_core
         shell: bash
+        env:
+          # Temporary shared-runner allowance. The normal product/verify gate
+          # keeps the fixed 300 ms budget.
+          IRIOGRAPH_SMALL_INITIAL_PIPELINE_BUDGET_MS: "400"
         run: |
           set -o pipefail
           # Core contains fixed wall-clock performance gates. Run files in one
