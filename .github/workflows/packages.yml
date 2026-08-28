@@ -88,7 +88,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npm run test --workspace @iriograph/core 2>&1 | tee /tmp/iriograph-workspace-verify.log
+          # Core contains fixed wall-clock performance gates. Run files in one
+          # worker so shared-runner test-file contention is not measured as
+          # product latency; the budgets themselves remain absolute.
+          npm run test --workspace @iriograph/core -- --maxWorkers=1 --no-file-parallelism 2>&1 \
+            | tee /tmp/iriograph-workspace-verify.log
       - name: Test ELK workspace
         id: verify_test_layout_elk
         shell: bash

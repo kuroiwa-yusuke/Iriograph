@@ -30,6 +30,42 @@ export type MockWorkspaceTreeRow = {
 export const MOCK_WORKSPACE_INDEX_SCHEMA_VERSION = "1";
 export const MOCK_WORKSPACE_INDEX_KIND = "iriograph.mock.workspace-index";
 
+type LegacyCatalogImportMigration = {
+  legacyCatalogRefs: readonly [string, string];
+  currentCatalogRef: string;
+};
+
+/**
+ * Mock 0.9 and earlier composed the RDF/RDFS base catalog and its mock
+ * workflow extension as two imports.  0.10 resolves the equivalent Workflow
+ * catalog as one exact source ref.  Keep this intentionally closed: an import
+ * set containing an unknown catalog must reach Core unchanged and be
+ * diagnosed there.
+ */
+const LEGACY_CATALOG_IMPORT_MIGRATIONS: readonly LegacyCatalogImportMigration[] = [
+  {
+    legacyCatalogRefs: [
+      "urn:iriograph:catalog:rdf-rdfs-instance-flow@1",
+      "urn:iriograph:catalog:workflow-mock-instance-flow@1",
+    ],
+    currentCatalogRef: "urn:iriograph:catalog:workflow-instance-flow@1",
+  },
+  {
+    legacyCatalogRefs: [
+      "urn:iriograph:catalog:rdf-rdfs-classification-region@1",
+      "urn:iriograph:catalog:workflow-mock-classification-region@1",
+    ],
+    currentCatalogRef: "urn:iriograph:catalog:workflow-classification-region@1",
+  },
+  {
+    legacyCatalogRefs: [
+      "urn:iriograph:catalog:rdf-rdfs@1",
+      "urn:iriograph:catalog:workflow-mock@1",
+    ],
+    currentCatalogRef: "urn:iriograph:catalog:workflow@1",
+  },
+];
+
 export type MockPersistedWorkspaceIndexV1 = {
   schemaVersion: "1";
   kind: typeof MOCK_WORKSPACE_INDEX_KIND;
@@ -83,10 +119,29 @@ export function parseMockWorkingCopy(
 ): IriographDocumentV1 | undefined {
   if (!source) return undefined;
   try {
-    return parseIriographDocumentV1(JSON.parse(source) as unknown);
+    return migrateLegacyMockCatalogImports(
+      parseIriographDocumentV1(JSON.parse(source) as unknown),
+    );
   } catch {
     return undefined;
   }
+}
+
+function migrateLegacyMockCatalogImports(
+  document: IriographDocumentV1,
+): IriographDocumentV1 {
+  const catalogRefs = document.imports?.map((entry) => entry.catalogRef);
+  if (!catalogRefs) return document;
+  const migration = LEGACY_CATALOG_IMPORT_MIGRATIONS.find((candidate) => (
+    catalogRefs.length === candidate.legacyCatalogRefs.length
+    && new Set(catalogRefs).size === candidate.legacyCatalogRefs.length
+    && candidate.legacyCatalogRefs.every((catalogRef) => catalogRefs.includes(catalogRef))
+  ));
+  if (!migration) return document;
+  return {
+    ...document,
+    imports: [{ catalogRef: migration.currentCatalogRef }],
+  };
 }
 
 /** Dynamic copies use one canonical path shape so a persisted index cannot escape the workspace. */

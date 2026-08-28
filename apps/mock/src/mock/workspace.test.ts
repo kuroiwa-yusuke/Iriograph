@@ -70,6 +70,59 @@ describe("parseMockWorkingCopy", () => {
     expect(parseMockWorkingCopy(JSON.stringify(current))).toEqual(current);
   });
 
+  it.each([
+    {
+      name: "instance-flow",
+      legacyCatalogRefs: [
+        "urn:iriograph:catalog:rdf-rdfs-instance-flow@1",
+        "urn:iriograph:catalog:workflow-mock-instance-flow@1",
+      ],
+      currentCatalogRef: "urn:iriograph:catalog:workflow-instance-flow@1",
+    },
+    {
+      name: "classification-region",
+      legacyCatalogRefs: [
+        "urn:iriograph:catalog:rdf-rdfs-classification-region@1",
+        "urn:iriograph:catalog:workflow-mock-classification-region@1",
+      ],
+      currentCatalogRef: "urn:iriograph:catalog:workflow-classification-region@1",
+    },
+    {
+      name: "full profile",
+      legacyCatalogRefs: [
+        "urn:iriograph:catalog:rdf-rdfs@1",
+        "urn:iriograph:catalog:workflow-mock@1",
+      ],
+      currentCatalogRef: "urn:iriograph:catalog:workflow@1",
+    },
+  ])("既知の旧$name import組を現行Workflow catalogへ移行する", ({
+    legacyCatalogRefs,
+    currentCatalogRef,
+  }) => {
+    const legacy = {
+      ...documentFixture("legacy-catalog"),
+      imports: legacyCatalogRefs.map((catalogRef) => ({ catalogRef })),
+    };
+
+    expect(parseMockWorkingCopy(JSON.stringify(legacy))).toEqual({
+      ...legacy,
+      imports: [{ catalogRef: currentCatalogRef }],
+    });
+  });
+
+  it("未知catalogを含むworking copyのimportsは変更しない", () => {
+    const unknownCatalog = "urn:example:catalog:unknown@1";
+    const legacy = {
+      ...documentFixture("unknown-catalog"),
+      imports: [
+        { catalogRef: "urn:iriograph:catalog:rdf-rdfs-instance-flow@1" },
+        { catalogRef: unknownCatalog },
+      ],
+    };
+
+    expect(parseMockWorkingCopy(JSON.stringify(legacy))).toEqual(legacy);
+  });
+
   it("authoringProfileRefのない旧working copyと壊れたJSONを無視する", () => {
     const legacy = {
       schemaVersion: "1",
