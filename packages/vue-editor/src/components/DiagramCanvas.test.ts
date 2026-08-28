@@ -2425,7 +2425,7 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.findAll(".iriograph-resize-handle")).toHaveLength(8);
   });
 
-  it("Group Frame内部click/right clickは前面z-orderを選びnode/edge hitを奪わない", async () => {
+  it("Group Frame内部click/right clickは選択状態より保存z-orderを優先しnode/edge hitを奪わない", async () => {
     const scene = sceneFixture();
     const frame = {
       elementId: "frame-back",
@@ -2460,7 +2460,14 @@ describe("DiagramCanvas pointer gestures", () => {
       },
       groupZOrder: 2,
     }];
-    wrapper = mount(DiagramCanvas, { attachTo: document.body, props: { scene } });
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene,
+        selectedElementId: "frame-back",
+        selectedElementIds: ["frame-back"],
+      },
+    });
     configureCanvasCoordinates(wrapper);
 
     await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
@@ -2482,10 +2489,164 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(lastPayload<{ kind: string; elementId: string }>(wrapper, "contextMenuRequest"))
       .toMatchObject({ kind: "region", elementId: "frame-front" });
 
+    await wrapper.setProps({ selectedElementId: undefined, selectedElementIds: [] });
+    await wrapper.get(".iriograph-canvas-grid").trigger("pointerdown", {
+      button: 0,
+      clientX: 520,
+      clientY: 410,
+    });
+    dispatchPointer("pointerup", 520, 410);
+    expect(lastPayload(wrapper, "selectionRequest")).toEqual({
+      elementId: "frame-front",
+      mode: "replace",
+    });
+
     await wrapper.get('[data-element-id="node-a"]').trigger("pointerdown", { button: 0, clientX: 350, clientY: 370 });
     dispatchPointer("pointerup", 350, 370);
     expect(lastPayload(wrapper, "selectionRequest")).toMatchObject({ elementId: "node-a" });
   });
+
+  it.each(["select", "pan"] as const)(
+    "選択済みGroup Frame内部dragは%s modeでもmulti-selectionのgeometry移動を優先する",
+    async (dragMode) => {
+      const scene = groupFrameSceneFixture();
+      wrapper = mount(DiagramCanvas, {
+        attachTo: document.body,
+        props: {
+          scene,
+          dragMode,
+          snap: disabledSnap(),
+          selectedElementId: "frame",
+          selectedElementIds: ["frame", "node-b"],
+        },
+      });
+      configureCanvasCoordinates(wrapper);
+      const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+
+      await wrapper.get(".iriograph-diagram-canvas").trigger("pointerdown", {
+        button: 0,
+        clientX: 520,
+        clientY: 560,
+      });
+      dispatchPointer("pointermove", 560, 590);
+      dispatchPointer("pointerup", 560, 590);
+      await flushPreview();
+
+      expect(lastPayload<Array<{ elementId: string; geometry: ElementGeometry }>>(
+        wrapper,
+        "geometryBatchChange",
+      )).toEqual(expect.arrayContaining([
+        { elementId: "frame", geometry: { x: 40, y: 30, width: 500, height: 300 } },
+        { elementId: "node-b", geometry: { x: 340, y: 190, width: 120, height: 60 } },
+      ]));
+      expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(false);
+      expect(viewport.element.scrollLeft).toBe(0);
+      expect(viewport.element.scrollTop).toBe(0);
+      expect(wrapper.emitted("gestureStart")).toHaveLength(1);
+      expect(wrapper.emitted("gestureEnd")).toHaveLength(1);
+    },
+  );
+
+  it("未選択Group Frame内部はclick選択を保ち、dragはmodeどおりmarqueeまたはpanに渡す", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: { scene: groupFrameSceneFixture(), snap: disabledSnap() },
+    });
+    configureViewport(wrapper, 800, 650);
+    configureCanvasCoordinates(wrapper);
+    const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+    const canvas = wrapper.get(".iriograph-diagram-canvas");
+
+    await canvas.trigger("pointerdown", { button: 0, clientX: 520, clientY: 560 });
+    dispatchPointer("pointerup", 520, 560);
+    expect(lastPayload(wrapper, "selectionRequest")).toEqual({
+      elementId: "frame",
+      mode: "replace",
+    });
+
+    await canvas.trigger("pointerdown", { button: 0, clientX: 520, clientY: 560 });
+    dispatchPointer("pointermove", 560, 590);
+    await flushPreview();
+    expect(wrapper.find(".iriograph-selection-marquee").exists()).toBe(true);
+    dispatchPointer("pointerup", 560, 590);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+
+    await wrapper.setProps({ dragMode: "pan" });
+    await canvas.trigger("pointerdown", { button: 0, clientX: 520, clientY: 560 });
+    dispatchPointer("pointermove", 480, 530);
+    dispatchPointer("pointerup", 480, 530);
+    expect(viewport.element.scrollLeft).toBe(40);
+    expect(viewport.element.scrollTop).toBe(30);
+    expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+  });
+
+  it("選択済みGroup Frameより前面のnode dragを優先しFrame gestureを開始しない", async () => {
+    wrapper = mount(DiagramCanvas, {
+      attachTo: document.body,
+      props: {
+        scene: groupFrameSceneFixture(),
+        dragMode: "pan",
+        snap: disabledSnap(),
+        selectedElementId: "frame",
+        selectedElementIds: ["frame"],
+      },
+    });
+
+    await wrapper.get('[data-element-id="node-a"]').trigger("pointerdown", {
+      button: 0,
+      clientX: 360,
+      clientY: 380,
+    });
+    dispatchPointer("pointermove", 390, 400);
+    dispatchPointer("pointerup", 390, 400);
+
+    const changes = lastPayload<Array<{ elementId: string; geometry: ElementGeometry }>>(
+      wrapper,
+      "geometryBatchChange",
+    );
+    expect(changes).toEqual([
+      { elementId: "node-a", geometry: { x: 50, y: 60, width: 120, height: 60 } },
+    ]);
+    expect(changes?.some((change) => change.elementId === "frame")).toBe(false);
+  });
+
+  it.each(["select", "pan"] as const)(
+    "完全なCanvas空白の単clickだけが%s modeの選択を解除する",
+    async (dragMode) => {
+      wrapper = mount(DiagramCanvas, {
+        attachTo: document.body,
+        props: {
+          scene: groupFrameSceneFixture(),
+          dragMode,
+          selectedElementId: "node-a",
+          selectedElementIds: ["node-a"],
+        },
+      });
+      configureCanvasCoordinates(wrapper);
+      configureViewport(wrapper, 800, 650);
+
+      await wrapper.get(".iriograph-diagram-canvas").trigger("pointerdown", {
+        button: 0,
+        clientX: 520,
+        clientY: 640,
+      });
+      dispatchPointer("pointermove", 518, 638);
+      dispatchPointer("pointerup", 518, 638);
+      expect(lastPayload(wrapper, "selectionRequest")).toEqual({
+        elementId: "",
+        mode: "replace",
+      });
+      const viewport = wrapper.get<HTMLElement>(".iriograph-canvas-scroll");
+      expect(viewport.element.scrollLeft).toBe(0);
+      expect(viewport.element.scrollTop).toBe(0);
+      const selectionRequestCount = wrapper.emitted("selectionRequest")?.length;
+
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+      document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, button: 0 }));
+      expect(wrapper.emitted("selectionRequest")).toHaveLength(selectionRequestCount ?? 0);
+      expect(wrapper.emitted("geometryBatchChange")).toBeUndefined();
+    },
+  );
 
   it("Group Frame名称dragを内外bandへ正規化しmember衝突を警告してmembershipを変えない", async () => {
     const scene = sceneFixture();
@@ -2684,6 +2845,33 @@ function sceneFixture(): DiagramScene {
       projectionRuleId: "fallback",
     }],
   };
+}
+
+function groupFrameSceneFixture(): DiagramScene {
+  const scene = sceneFixture();
+  scene.containers = [{
+    elementId: "frame",
+    semanticRef: "urn:test:frame",
+    structuralKind: "container",
+    groupRole: "membership",
+    groupFrame: {
+      kind: "membership",
+      semanticRef: "urn:test:frame",
+      provenance: {
+        operator: "membership-container",
+        derivation: "resource",
+        sourceStatementRefs: [],
+      },
+    },
+    label: "担当領域",
+    templateRef: "urn:test:group",
+    headerPosition: "top",
+    style: { fill: "transparent", stroke: "#555", text: "#222" },
+    geometry: { x: 0, y: 0, width: 500, height: 300 },
+    pinned: false,
+    placement: "generated",
+  }];
+  return scene;
 }
 
 function generatedRouteScene(): DiagramScene {

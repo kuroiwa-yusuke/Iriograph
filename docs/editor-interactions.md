@@ -4,8 +4,8 @@
 
 ## 操作の基本
 
-- Node、container、region、edgeをclickすると選択し、右Inspectorで対象を確認できます。Ctrl/Cmd clickは選択のtoggle、Shift clickは追加、空白clickまたはEscapeは選択解除です。
-- Toolbarの`範囲選択`と`移動`でprimary pointerによる空白・Group Frame内側dragを切り替えます。既定の`範囲選択`では、Nodeは矩形との交差、edgeは実際の線との交差、背景Group Frameは枠全体が入った場合にまとめて選択し、Shiftは追加、Ctrl/Cmdは反転です。関係の接続先やGroup member等をCanvasから選ぶ段階でも同じ集合選択を使えますが、その段階で受け付ける種類と単一／複数件数だけに絞ります。`移動`ではviewportをpanし、中ボタンまたはAltによる一時panはどちらのmodeでも利用できます。Modeはsession-onlyです。
+- Node、container、region、edgeをclickすると選択し、右Inspectorで対象を確認できます。Ctrl/Cmd clickは選択のtoggle、Shift clickは追加、Canvasの完全な空白clickまたはEscapeは選択解除です。Sidebar、toolbar、Inspector等のCanvas外を操作しても選択は解除しません。
+- Toolbarの`範囲選択`と`移動`でprimary pointerによる空白・未選択Group Frame内側dragを切り替えます。既定の`範囲選択`では、Nodeは矩形との交差、edgeは実際の線との交差、背景Group Frameは枠全体が入った場合にまとめて選択し、Shiftは追加、Ctrl/Cmdは反転です。関係の接続先やGroup member等をCanvasから選ぶ段階でも同じ集合選択を使えますが、その段階で受け付ける種類と単一／複数件数だけに絞ります。`移動`ではviewportをpanし、中ボタンまたはAltによる一時panはどちらのmodeでも利用できます。選択済みGroup Frameの空内部dragはどちらのmodeでも選択集合のgeometry移動を優先し、前面objectとFrameのz順を越えて背面Frameを掴みません。Modeはsession-onlyです。
 - 操作名、resource、class、predicateは人が読めるlabel/commentを主表示にします。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやread-onlyの`Advanced`詳細へ渡しません。完全IRIはHost/Core内部transaction・監査logとeditableなTurtle/Document sourceに保持し、label文字列をidentityやcatalog ruleの判定には使いません。
 - `意味`の作成・変更は、利用者が実行buttonを一度押すと内部でcandidate graphのvalidationとsemantic transactionを続けて行い、一つのrevisionへ確定します。Validation error時は確定せず、対象fieldの近くに次の行動を示します。通常変更に別のPreview/Apply確認画面は挟みません。
 - `ビュー`の変更は現在のnamed viewだけへ作用します。位置、size、template、icon、edge routingを変更してもTurtleは変わりません。
@@ -89,6 +89,8 @@ class領域を通常profileへ移植したりはしません。
 残る直接型と継承型は型一覧で確認します。Tagを選ぶとexactな型と要素へfocusした型一覧を開き、型一覧の
 `図で表示`は該当要素をsession-onlyでhighlightしてviewportへ移します。これらのnavigationはgeometry、overlay、
 history、dirty stateを変更しません。型の専用geometry、Euler/Venn表示、永続highlightは標準Editorへ持ちません。
+
+単一要素はCanvas選択後の`要素を変更する` → `名前・説明・種類を変更`からも、図を開いたまま同じ型候補を付与・解除できます。型一覧と意味Inspectorは同じTurtleの`rdf:type`を正本とし、通常UIにIRIを出しません。
 
 ## 対象別context menu
 
@@ -208,7 +210,7 @@ Classification-constrained viewでは、複数regionに属する要素の全boun
 
 Region、Seq、通常containerの移動と8-handle resizeは、意味上のmember全boundsと必要paddingを包含することをhard constraintにします。複数の枠に属するmemberは、すべての所属先contentの共通範囲内へ全boundsを保ちます。一つのSeqとmemberを同時に動かす場合も、別のSeq・region・containerから外れる候補はcommitしません。Geometryを変更してもmembershipは増減せず、membershipを変更したい場合は`所属・並び順を編集`へ移ります。外周labelとoffsetはlayoutの占有boxに含めます。
 
-選択中のregionまたはSeq group本体は、保存された前後関係を変更せず構造layer内だけで一時前面にします。これにより重なった別region/Seqの枠に遮られず、edgeとnodeの上には出ません。8個のresize handleだけは独立したtransient interaction layerへ描画し、nodeと重なる場合も操作できます。選択解除時は元の描画順へ戻し、選択による前面化をView overlay、history、dirty stateへ記録しません。
+選択中のregionまたはSeq group本体は、保存された前後関係を変更せず構造layer内だけで一時前面にします。これにより枠と選択表示を確認でき、edgeとnodeの上には出ません。ただし重なり内部のpointer-through hitは保存済みz-orderの最前面Frameを対象とし、選択状態だけで背面Frameを掴みません。8個のresize handleだけは独立したtransient interaction layerへ描画し、nodeと重なる場合も操作できます。選択解除時は元の描画順へ戻し、選択による前面化をView overlay、history、dirty stateへ記録しません。
 
 ## Comment表示
 

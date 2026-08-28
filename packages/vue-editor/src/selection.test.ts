@@ -53,6 +53,25 @@ describe("selection geometry policy", () => {
     ]);
   });
 
+  it("領域をselection rootとして意味上のmemberも同じdeltaで移動する", () => {
+    const scene = sceneFixture();
+    const provenance = { sourceStatementRefs: ["urn:test:s"], operator: "membership-region" as const, derivation: "direct" as const };
+    scene.regions = [{
+      elementId: "region-a", semanticRef: "urn:test:region", structuralKind: "region", label: "領域",
+      templateRef: "urn:test:region", geometry: { x: 0, y: 0, width: 240, height: 180 },
+      style: { fill: "#fff", stroke: "#000", text: "#000" }, pinned: false, placement: "generated", provenance,
+    }];
+    scene.memberships = [{
+      semanticRef: "urn:test:m", containerElementId: "region-a", regionElementId: "region-a",
+      memberElementId: "node-a", provenance,
+    }];
+
+    expect(translateSelection(scene, ["region-a"], { x: 32, y: 24 }, noSnap())).toEqual([
+      { elementId: "node-a", geometry: { x: 52, y: 64, width: 40, height: 30 } },
+      { elementId: "region-a", geometry: { x: 32, y: 24, width: 240, height: 180 } },
+    ]);
+  });
+
   it("targetをgridより優先し、target外では8px gridへ決定的にsnapする", () => {
     const scene = sceneFixture();
     expect(translateSelection(scene, ["node-a"], { x: 49, y: 0 })[0]?.geometry.x).toBe(70);

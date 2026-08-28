@@ -15,11 +15,29 @@ import type { AssetAccess, AssetResolver } from "./assets";
 import type { DiagramScene } from "./model";
 
 describe("package default icons", () => {
-  it("ships a small labeled SVG catalog with exact source files and license metadata", () => {
-    expect(packageDefaultIcons).toHaveLength(13);
+  it("ships a curated labeled SVG catalog with exact source files and license metadata", () => {
+    expect(packageDefaultIcons).toHaveLength(74);
     expect(packageDefaultIcons.map((icon) => icon.label)).toEqual(expect.arrayContaining([
-      "クラウド", "サーバー", "データベース", "API", "関数", "承認", "警告",
+      "ユーザー", "歯車", "文書",
+      "クラウド", "サーバー", "データベース", "コンテナー", "ルーター",
+      "データ表", "分析", "メッセージ", "メール", "セキュリティ", "決済", "配送",
+      "チーム", "組織", "業務", "顧客", "合意",
+      "コンピューティング", "メモリ", "インターネット", "外部通信", "Webhook",
+      "表計算", "バイナリデータ", "検索", "絞り込み", "アーカイブ",
+      "セキュリティ警告", "アクセス制御", "本人確認",
+      "稼働状況", "メトリクス", "ログ", "障害", "保守", "インシデント", "監視", "自動化",
     ]));
+    expect(packageDefaultIcons.map((icon) => icon.assetRef)).toEqual(expect.arrayContaining([
+      "urn:iriograph:icon:lucide:user-round:1",
+      "urn:iriograph:icon:lucide:cog:1",
+      "urn:iriograph:icon:lucide:file-text:1",
+      "urn:iriograph:icon:lucide:building-2:1",
+      "urn:iriograph:icon:lucide:cpu:1",
+      "urn:iriograph:icon:lucide:shield-alert:1",
+      "urn:iriograph:icon:lucide:monitor-check:1",
+    ]));
+    expect(new Set(packageDefaultIcons.map((icon) => icon.assetRef))).toHaveLength(74);
+    expect(new Set(packageDefaultIcons.map((icon) => icon.name))).toHaveLength(74);
     for (const icon of packageDefaultIcons) {
       const file = readFileSync(new URL(`../assets/icons/${icon.name}.svg`, import.meta.url), "utf8").trim();
       expect(file).toBe(icon.svg);

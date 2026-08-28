@@ -828,6 +828,7 @@ export type SceneDerivedRouteChoice = {
     | "auto-straight-safe"
     | "auto-orthogonal-safe"
     | "auto-curve-safe"
+    | "auto-curve-fallback"
     | "auto-polyline-fallback"
     | "auto-self-loop-preserved"
     | "explicit-route-mode"

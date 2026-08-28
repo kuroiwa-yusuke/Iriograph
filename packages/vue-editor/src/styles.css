@@ -2851,18 +2851,18 @@
 
 .iriograph-node-type-tag {
   position: absolute;
-  right: 5px;
-  top: 4px;
+  right: 4px;
+  top: 3px;
   z-index: 3;
-  max-width: min(46%, calc(100% - 10px));
-  min-height: 16px;
+  max-width: min(46%, calc(100% - 8px));
+  min-height: 14px;
   overflow: hidden;
-  padding: 2px 6px;
+  padding: 1px 4px;
   border: 1px solid color-mix(in srgb, var(--iriograph-node-accent) 55%, #fff);
   border-radius: 999px;
   color: #24324a;
   background: rgb(255 255 255 / 90%);
-  font-size: 8px;
+  font-size: 7px;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;

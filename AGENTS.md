@@ -40,17 +40,20 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - Human structured command、Turtle直接編集、LLM返却Turtleはcandidate graph以降のvalidation、全view projection、display reconciliationを共有する。
 - Rich editorの意味InspectorはCanvas選択中心とし、初期blur状態には「新しい要素を作る」「関係を作る」「要素を変更する」「関係を変更する」の4入口だけを表示する。入口の後は一段に一つの判断を順次表示し、Canvas事前選択をroleへ明示的にseedする。新規nodeはhost allocatorが発行するopaque IRI、名前、resolved profileで選んだnode-roleを、新規groupは名前と包含・順序付き・候補等の業務group kindを一つのatomic transactionで作る。通常profileでは`rdfs:Class`をGroup Frameとして新規作成せず、型の作成・階層編集・一括付与・削除を独立した`型一覧`へ集約する。図上には最もspecific、profileの高い表示優先度、IRI順で決めた直接型一件だけをtag表示し、残る直接型・継承型は型一覧へ置く。既存の明示的な`classification-region` documentは読込・編集互換を保つが、標準profileへ暗黙移行しない。関係作成はdirect/membershipをicon familyで先に選び、family切替時にdraftを相互変換しない。非削除の意味操作は、利用者の実行一回の中でcandidate graph validationとatomic semantic transactionを続けて行い、別のPreview/Apply確認画面を挟まない。Canvasの右クリック、Context Menu key、Shift+F10は対象別context menuを開き、node、direct edge、derived guide、各group、空白に応じた意味・ビュー各入口を示すが、menu選択だけではmutationせず該当Inspector/actionへfocusする。未実行のform、inline新規member chip、ghost node/edgeはephemeral UI stateに留め、documentへ保存しない。
 - 通常の意味編集UIではIRI、`rdf:type`、`rdfs:label`、`rdfs:comment`という語を露出せず、それぞれ種類、名前、説明として扱う。関係候補はcatalog/profileを正本としてsubjectをA、objectをBとした日本語例文でcategory別に表示し、opaque option IDでexact termへ解決する。生のIRIは通常UI、tooltip、Advanced DOMへ渡さず、A/Bは候補説明だけに使い確定edgeへ保存しない。
+- 一件の要素への型付与・解除はCanvasで選択したまま意味Inspectorから行える。`型一覧`とInspectorは別の保存機構を持たず、同じlabel-first候補とsemantic transactionを使う。図上の代表直接型は一件のcompact tagだけにする。
 - Direct edgeの意味上の始点・終点変更は意味tabでwritableなedgeを選択した場合に許可し、Canvas上の端子を別の有効nodeへdropした時点で、元statement削除、新statement追加、個別statement comment移送をcandidate validation後の一つのsemantic transactionとして直接確定する。空白や領域へのdropでは元の接続を維持し、未接続状態をsemantic graphにもview overlayにも保存しない。ビューtabの同じ端子操作はnode周囲の接続位置だけを変更し、S/P/Oを変えない。
 - Predicate resource全体の説明と個別statementの説明を分ける。個別説明はexact S/P/OをRDF標準reificationで指し、その`rdfs:comment`としてTurtleへ保存する。View-only captionへ意味説明を代入しない。
 - Structured commandとLLM editの成功時は、同じdataset serializerでTurtleを決定的に再生成する。Turtle sourceの直接編集は適用された原文を保持するが、後の再serialize時にcomment、空白、triple記述順などの書式が保持されることを保証しない。
 - Delete/Backspaceと右Inspectorの削除は現在の選択集合をcandidate validation後のatomic semantic transactionとして扱う。選択外のincident edge、membership、Seq/Alt membershipへ削除が波及する場合だけ、label付き影響一覧modalとCanvas上のsession-only previewを出し、明示的cascade確認を要求する。影響する表示objectをすべて選択済みならmodalなしで直接確定する。Seq/Altのordinal変更は一つのatomic patchで再採番する。
 - Semantic変更後は、存続IRIのoverlayを維持してdisplay reconciliationを行う。
 - 自動再投影と全体layoutはsemantic sourceの確定変更時だけ実行する。Overlay-only変更では他要素を再配置せず、変更要素とincident edgeのderived routeだけを更新する。
+- `auto`の表示経路は、安全な直線、水平線と垂直線を一回ずつ接続する一直角・最大一中間点の直交線、内角90度以上のbounded Bezierの順に選ぶ。障害物探索の任意角度pivotは内部corridorに留め、自動polylineとして表示しない。利用者が明示した`manual` routeと既存fixed routeはこの自動選択へ混ぜない。
 - 通常の自動再配置は`placement: "generated"`の要素だけを対象とし、user配置をlayout更新で移動しない。
 - 生成可能なstyleやicon定義をdocumentへ複製しない。
 - 既定appearanceはcatalogを正本とし、利用者の色・透明度・線幅等の個別調整だけを安全なsparse overlayとして保持する。任意CSSは保存しない。
 - 右Inspector内のinlineビュー編集は別のPreview/Apply確認を要求しない。Checkbox、select、preset、resetは操作時に直接一つのpresentation transactionへ確定し、color/range/numberは`input`中だけsession previewして`change`で一つのhistory itemへ確定する。
 - Canvasのgrid表示とsnap間隔はeditor sessionだけに保持し、Turtle、portable document、view overlay、history、dirty stateへ保存しない。GridはCanvas座標へ追従する非interactiveな背景layerとし、標準snap間隔と同じ既定8 unitを使う。
+- Canvasの完全な空白をprimary clickした場合だけ選択を解除し、sidebar、toolbar、Inspector等のCanvas外操作では選択を維持する。空白dragはsessionの範囲選択／移動modeに従うが、選択済みGroup Frameの空内部dragはmodeにかかわらずそのFrameを含むgeometry選択集合の移動を優先する。前面node、edge、handleとFrame同士の永続z順を越えて背面Frameを掴まない。
 - 保存schema変更にはversion方針とtestを伴わせる。
 
 ## 文書

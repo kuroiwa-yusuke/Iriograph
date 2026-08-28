@@ -29,8 +29,7 @@ const diamondDocument = {
     ].join("\n"),
   },
   imports: [
-    { catalogRef: "urn:iriograph:catalog:rdf-rdfs-classification-region@1" },
-    { catalogRef: "urn:iriograph:catalog:workflow-mock-classification-region@1" },
+    { catalogRef: "urn:iriograph:catalog:workflow-classification-region@1" },
   ],
   views: [{
     viewId: "main",

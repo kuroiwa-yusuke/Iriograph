@@ -45,7 +45,14 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   await expect.poll(() => numericStyle(node, "width")).toBeCloseTo(44, 0);
 
   await page.locator(".iriograph-edge-group").first().dispatchEvent("click");
+  await page.locator(".iriograph-inspector-mode-tabs")
+    .getByRole("button", { name: "ビュー", exact: true }).click();
+  const routeMode = page.getByLabel("線の形式");
+  await routeMode.selectOption("manual");
+  const routing = routeMode.locator("xpath=ancestor::details");
+  await routing.getByRole("button", { name: "経路点を追加" }).click();
   const waypoint = page.locator(".iriograph-waypoints circle").first();
+  await expect(waypoint).toBeVisible();
   const initialWaypointX = Number(await waypoint.getAttribute("cx"));
   await dispatchPointerDrag(page, waypoint, await requiredBox(waypoint, "waypoint"), 36, 20);
   await expect.poll(async () => Math.abs(
@@ -105,6 +112,73 @@ test("左右サイドバーを折りたたむとCanvasが空いた領域まで�
   await page.getByLabel("右サイドバーを開く").click();
   await expect(page.getByLabel("左サイドバーを閉じる")).toBeVisible();
   await expect(page.getByLabel("右サイドバーを閉じる")).toBeVisible();
+});
+
+test("選択済み領域は空内部から移動でき、Canvas空白だけが選択を解除する", async ({ page }) => {
+  await openPurchaseSample(page);
+  await page.getByLabel("全体を表示").click();
+  const frame = groupFrame(page, "購入申請フロー");
+  const frameBox = await requiredBox(frame, "group frame");
+  await dispatchPointerDrag(page, frame, frameBox, 0, 0);
+  await expect(frame).toHaveClass(/selected/u);
+  const initialX = await numericStyle(frame, "left");
+
+  const interior = await frame.evaluate((element) => {
+    const frameRect = element.getBoundingClientRect();
+    const occupied = [...document.querySelectorAll([
+      ".iriograph-scene-node",
+      ".iriograph-scene-container:not(.group-frame)",
+      ".iriograph-region-label",
+    ].join(","))].map((item) => item.getBoundingClientRect());
+    const foregroundFrames = [...document.querySelectorAll(
+      ".iriograph-scene-container.group-frame, .iriograph-scene-region.group-frame",
+    )]
+      .filter((item) => item !== element)
+      .map((item) => item.getBoundingClientRect());
+    for (let y = frameRect.top + 24; y < frameRect.bottom - 24; y += 16) {
+      for (let x = frameRect.left + 24; x < frameRect.right - 24; x += 16) {
+        const hit = document.elementFromPoint(x, y);
+        const blankTarget = hit?.classList.contains("iriograph-diagram-canvas")
+          || hit?.classList.contains("iriograph-canvas-grid");
+        if (
+          blankTarget
+          && !occupied.some((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)
+          && !foregroundFrames.some((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)
+        ) {
+          return { x, y };
+        }
+      }
+    }
+    throw new Error("group frame has no blank interior point");
+  });
+  await page.mouse.move(interior.x, interior.y);
+  await page.mouse.down();
+  await page.mouse.move(interior.x + 64, interior.y + 32);
+  await page.mouse.up();
+  await expect.poll(async () => Math.abs(await numericStyle(frame, "left") - initialX))
+    .toBeGreaterThan(0);
+
+  const blank = await page.locator(".iriograph-diagram-canvas").evaluate((canvas) => {
+    const bounds = canvas.getBoundingClientRect();
+    const viewport = canvas.closest(".iriograph-canvas-scroll")?.getBoundingClientRect();
+    if (!viewport) throw new Error("Canvas viewport is missing");
+    const objects = [...canvas.querySelectorAll([
+      ".iriograph-scene-node",
+      ".iriograph-scene-container",
+      ".iriograph-scene-region",
+      ".iriograph-edge-group",
+    ].join(","))].map((item) => item.getBoundingClientRect());
+    for (let y = Math.max(bounds.top, viewport.top) + 12; y < Math.min(bounds.bottom, viewport.bottom) - 12; y += 24) {
+      for (let x = Math.max(bounds.left, viewport.left) + 12; x < Math.min(bounds.right, viewport.right) - 12; x += 24) {
+        if (!objects.some((box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom)) {
+          return { x, y };
+        }
+      }
+    }
+    throw new Error("Canvas has no blank point");
+  });
+  await page.mouse.click(blank.x, blank.y);
+  await expect(page.locator(".iriograph-scene-node.selected, .iriograph-scene-container.selected, .iriograph-scene-region.selected, .iriograph-edge-group.selected")).toHaveCount(0);
 });
 
 test("Documentタブでactive view overlayをTurtle不変の一履歴としてsource編集する", async ({ page }) => {
@@ -742,7 +816,7 @@ test("意味側のedge端子dropは接続先を直接atomic更新し、個別説
   const turtleBefore = await readTurtle(page);
   const edge = page.locator('.iriograph-edge-group[aria-label*="内容を審査から承認ポリシーへの関連する"]');
   await expect(edge).toHaveCount(1);
-  await edge.click();
+  await edge.dispatchEvent("click");
   const inspector = page.locator(".iriograph-inspector");
 
   const targetHandle = page.locator(".iriograph-endpoint-anchors.semantic circle").nth(1);
@@ -951,6 +1025,9 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   await page.mouse.click(marqueeOrigin!.x, marqueeOrigin!.y);
   await expect(page.locator(".iriograph-scene-node.selected")).toHaveCount(0);
   await selectedNodes[0]!.click();
+  await page.locator(".iriograph-inspector-mode-tabs")
+    .getByRole("button", { name: "ビュー", exact: true }).click();
+  await expect(selectedNodes[0]!).toHaveClass(/selected/u);
   await selectedNodes[1]!.click({ modifiers: ["Control"] });
   await selectedNodes[2]!.click({ modifiers: ["Control"] });
   await expect(page.locator(".iriograph-scene-node.selected")).toHaveCount(3);

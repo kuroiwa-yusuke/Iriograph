@@ -153,8 +153,8 @@ describe("display reconciliation", () => {
     {
       name: "relation追加とparallel/self-loop",
       source: localizedAddSource,
-      expectedAffected: 4,
-      expectedFixed: 2,
+      expectedAffected: 1,
+      expectedFixed: 5,
     },
     {
       name: "predicate変更",
@@ -165,10 +165,10 @@ describe("display reconciliation", () => {
     {
       name: "endpoint変更",
       source: localizedEndpointSource,
-      expectedAffected: 2,
-      expectedFixed: 3,
+      expectedAffected: 1,
+      expectedFixed: 4,
     },
-  ])("$nameを各viewのincident routeだけへ局所化する", async ({
+  ])("$nameを各viewの変更routeだけへ局所化する", async ({
     source,
     expectedAffected,
     expectedFixed,
@@ -202,6 +202,7 @@ describe("display reconciliation", () => {
     })));
     const routeOnlyRequests = requests.filter((request) => request.mode === "route-only");
     expect(routeOnlyRequests).toHaveLength(previous.views.length);
+    expect(requests.filter((request) => request.mode === "incremental")).toHaveLength(0);
     expect(routeOnlyRequests.map((request) => Object.keys(request.fixedDerivedRoutes ?? {}).length))
       .toEqual(previous.views.map(() => expectedFixed));
     expect(samples.filter((sample) => sample.mode === "route-only").map((sample) => ({
@@ -211,11 +212,26 @@ describe("display reconciliation", () => {
 
     for (const view of previous.views) {
       const previousRoutes = new Map(before[view.viewId]!.edges.map((edge) => [edge.elementId, edge.route]));
+      const previousChoices = new Map(before[view.viewId]!.edges.map((edge) => [
+        edge.elementId,
+        edge.derivedRouteChoice,
+      ]));
       const request = routeOnlyRequests.find((entry) => entry.layoutRef === view.layoutRef)!;
       for (const edgeId of Object.keys(request.fixedDerivedRoutes ?? {})) {
         expect(JSON.stringify(
           result.scenes[view.viewId]!.edges.find((edge) => edge.elementId === edgeId)?.route,
         )).toBe(JSON.stringify(previousRoutes.get(edgeId)));
+        const previousChoice = previousChoices.get(edgeId)!;
+        if (previousChoice) {
+          expect(request.fixedDerivedRouteChoices?.[edgeId]).toEqual({
+            ...previousChoice,
+            source: "fixed",
+            reason: "fixed-derived-route",
+          });
+          expect(
+            result.scenes[view.viewId]!.edges.find((edge) => edge.elementId === edgeId)?.derivedRouteChoice,
+          ).toEqual(request.fixedDerivedRouteChoices?.[edgeId]);
+        }
       }
     }
   });
@@ -272,11 +288,11 @@ describe("display reconciliation", () => {
     const fixedIds = Object.keys(mainRequest.fixedDerivedRoutes ?? {});
     expect(fixedIds.length).toBeGreaterThan(20);
     expect(events.find((event) => event.viewId === "main")).toMatchObject({
-      affectedEdges: 12,
+      affectedEdges: 1,
       fixedDerivedRoutes: fixedIds.length,
     });
     expect(samples.find((sample) => sample.mode === "route-only" && sample.layoutRef === STANDARD_LAYOUT_REFS.hierarchicalLr))
-      .toMatchObject({ routedEdges: 12, fixedDerivedRoutes: fixedIds.length });
+      .toMatchObject({ routedEdges: 1, fixedDerivedRoutes: fixedIds.length });
     const previousRoutes = new Map(before.edges.map((edge) => [edge.elementId, edge.route]));
     for (const edgeId of fixedIds) {
       expect(JSON.stringify(

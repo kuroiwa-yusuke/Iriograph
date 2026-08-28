@@ -13,6 +13,7 @@ export * from "./rdf.js";
 export * from "./rdfs-closure.js";
 export * from "./rule-resolution.js";
 export * from "./standard-catalog.js";
+export * from "./workflow-catalog.js";
 export * from "./catalog-resolution.js";
 export * from "./layout.js";
 export * from "./endpoint-anchor.js";

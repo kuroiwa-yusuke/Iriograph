@@ -949,9 +949,9 @@ ex:b rdfs:label "B" .
     }], context);
 
     expect(preview.valid).toBe(true);
-    expect(calls.map((call) => call.mode)).toEqual([
-      "incremental", "route-only", "incremental", "route-only",
-    ]);
+    // The exact prebuilt Scenes above are reused as reconciliation input; only
+    // each candidate view's route-only pass reaches a layout adapter.
+    expect(calls.map((call) => call.mode)).toEqual(["route-only", "route-only"]);
     expect(calls.filter((call) => call.mode === "route-only").every((call) => call.fixed)).toBe(true);
     const callsAfterPreview = calls.length;
     const result = await applyAuthoringPreview(document, preview, context, {
@@ -993,7 +993,7 @@ ex:b rdfs:label "B" .
     });
     expect(clonedApply.accepted).toBe(true);
     expect(calls.slice(callsAfterPreview).map((call) => call.mode)).toEqual([
-      "incremental", "route-only", "incremental", "route-only",
+      "route-only", "route-only",
     ]);
   });
 

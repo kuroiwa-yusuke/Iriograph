@@ -103,6 +103,13 @@ export type LayoutRequest = {
    * only valid for route-only execution and is never a portable overlay.
    */
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>;
+  /**
+   * Renderer-only metadata paired with `fixedDerivedRoutes`. In particular,
+   * this carries auto-curve controls which cannot be reconstructed from the
+   * endpoint-only public route. It is transaction-local and never portable
+   * overlay data.
+   */
+  fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>;
 };
 
 export type LayoutDiagnostic = {
@@ -149,6 +156,7 @@ export type LayoutDerivedRouteChoice = {
     | "auto-straight-safe"
     | "auto-orthogonal-safe"
     | "auto-curve-safe"
+    | "auto-curve-fallback"
     | "auto-polyline-fallback"
     | "auto-self-loop-preserved"
     | "explicit-route-mode"
@@ -305,18 +313,29 @@ function restoreFixedDerivedRoutes(
   for (const [edgeId, points] of Object.entries(fixed)) {
     routes[edgeId] = points.map(copyPoint);
   }
+  const derivedRouteChoices = Object.fromEntries(Object.entries(candidate.derivedRouteChoices ?? {}).map(([
+    edgeId,
+    choice,
+  ]) => [edgeId, cloneLayoutDerivedRouteChoice(choice)]));
+  for (const [edgeId, route] of Object.entries(fixed)) {
+    const requested = request.fixedDerivedRouteChoices?.[edgeId];
+    derivedRouteChoices[edgeId] = requested
+      ? cloneLayoutDerivedRouteChoice(requested)
+      : fixedDerivedRouteChoiceFor(route);
+  }
   const spacing = { ...DEFAULT_SPACING, ...request.spacing };
   const bounds = sceneBounds(
     layoutResultBoundGeometries(request, candidate.geometries),
     [
       ...Object.values(routes).flat(),
-      ...layoutDerivedRouteControlPoints(candidate.derivedRouteChoices),
+      ...layoutDerivedRouteControlPoints(derivedRouteChoices),
     ],
     spacing.margin,
   );
   return {
     ...candidate,
     routes,
+    derivedRouteChoices,
     width: bounds.width,
     height: bounds.height,
   };
@@ -1647,16 +1666,19 @@ function validateDerivedRouteChoices(
 
 function validateFixedDerivedRouteRequest(request: LayoutRequest): LayoutDiagnostic[] {
   const fixed = request.fixedDerivedRoutes;
-  if (!fixed || Object.keys(fixed).length === 0) return [];
+  const fixedChoices = request.fixedDerivedRouteChoices;
+  if ((!fixed || Object.keys(fixed).length === 0) && (!fixedChoices || Object.keys(fixedChoices).length === 0)) {
+    return [];
+  }
   const diagnostics: LayoutDiagnostic[] = [];
   if (request.mode !== "route-only") {
     diagnostics.push(invalidResult(
       request,
-      "fixedDerivedRoutes is only valid in route-only mode",
+      "fixedDerivedRoutes and fixedDerivedRouteChoices are only valid in route-only mode",
     ));
   }
   const expectedEdgeIds = new Set(request.scene.edges.map((edge) => edge.elementId));
-  for (const [edgeId, points] of Object.entries(fixed).sort(([left], [right]) => (
+  for (const [edgeId, points] of Object.entries(fixed ?? {}).sort(([left], [right]) => (
     compareText(left, right)
   ))) {
     if (!expectedEdgeIds.has(edgeId)) {
@@ -1674,7 +1696,68 @@ function validateFixedDerivedRouteRequest(request: LayoutRequest): LayoutDiagnos
       });
     }
   }
+  for (const [edgeId, choice] of Object.entries(fixedChoices ?? {}).sort(([left], [right]) => (
+    compareText(left, right)
+  ))) {
+    const invalid = (message: string): void => {
+      diagnostics.push({ ...invalidResult(request, message), edgeId });
+    };
+    if (!fixed?.[edgeId]) {
+      invalid(`fixed derivedRouteChoice has no fixedDerivedRoutes entry: ${edgeId}`);
+      continue;
+    }
+    if (!expectedEdgeIds.has(edgeId)) {
+      invalid(`fixed derivedRouteChoice refers to an unknown edge: ${edgeId}`);
+      continue;
+    }
+    if (choice.source !== "fixed" || choice.reason !== "fixed-derived-route") {
+      invalid(`fixed derivedRouteChoice must use fixed source/reason: ${edgeId}`);
+    }
+    if (!isValidLayoutDerivedRouteChoice(choice)) {
+      invalid(`fixed derivedRouteChoice is invalid: ${edgeId}`);
+    }
+  }
   return diagnostics;
+}
+
+function fixedDerivedRouteChoiceFor(route: readonly Point[]): LayoutDerivedRouteChoice {
+  return {
+    family: route.length === 2 ? "straight" : "polyline",
+    source: "fixed",
+    reason: "fixed-derived-route",
+  };
+}
+
+function cloneLayoutDerivedRouteChoice(
+  choice: LayoutDerivedRouteChoice,
+): LayoutDerivedRouteChoice {
+  return {
+    ...choice,
+    ...(choice.curve ? {
+      curve: {
+        sourceControl: copyPoint(choice.curve.sourceControl),
+        targetControl: copyPoint(choice.curve.targetControl),
+        guidePivot: copyPoint(choice.curve.guidePivot),
+        guideAngleDegrees: choice.curve.guideAngleDegrees,
+      },
+    } : {}),
+    ...(choice.rejected ? { rejected: choice.rejected.map((rejection) => ({ ...rejection })) } : {}),
+  };
+}
+
+function isValidLayoutDerivedRouteChoice(choice: LayoutDerivedRouteChoice): boolean {
+  const validFamilies = new Set<LayoutDerivedRouteFamily>([
+    "straight", "curve", "polyline", "orthogonal", "manual",
+  ]);
+  if (!validFamilies.has(choice.family)) return false;
+  if (!choice.curve) return true;
+  return choice.family === "curve"
+    && Number.isFinite(choice.curve.guideAngleDegrees)
+    && [
+      choice.curve.sourceControl,
+      choice.curve.targetControl,
+      choice.curve.guidePivot,
+    ].every((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
 }
 
 function sameRouteValue(left: readonly Point[], right: readonly Point[]): boolean {
@@ -2667,6 +2750,11 @@ const PARALLEL_LANE_GAP = 20;
 const SELF_LOOP_BASE = 36;
 const SELF_LOOP_GAP = 18;
 const ROUTE_OBSTACLE_PADDING = 10;
+// SVG's fitted affine transform can move a route that is mathematically on a
+// node boundary a fraction of a pixel into its rendered box. Keep generated
+// routes visibly clear of every non-endpoint node instead of accepting a
+// boundary-hugging corridor that only appears safe in layout coordinates.
+const ROUTE_RENDERER_CLEARANCE = 0.1;
 const ROUTE_GRID_OBSTACLE_LIMIT = 24;
 const ROUTE_GRID_COMMITTED_LIMIT = 16;
 const ROUTE_GRID_ELEMENT_LIMIT = 256;
@@ -2800,7 +2888,7 @@ function directRoute(
 export function flattenLayoutDerivedCurve(
   route: readonly Point[],
   curve: LayoutDerivedCurve,
-  subdivisions = 16,
+  subdivisions = 24,
 ): Point[] {
   const start = route[0];
   const end = route.at(-1);
@@ -2836,9 +2924,10 @@ export function layoutDerivedRouteControlPoints(
 
 /**
  * Chooses only for `auto`: safe direct segment, safe one-bend orthogonal,
- * safe gentle cubic, then the already-refined one-pivot polyline. Explicit
- * modes and fixed routes are classified for renderer consumption but their
- * public route is unchanged.
+ * then a bounded set of safe gentle cubics. The visibility-grid route remains
+ * an internal search corridor; an arbitrary-angle pivot is never exposed as
+ * an automatic polyline. Explicit modes and fixed routes keep their public
+ * route unchanged.
  */
 function selectDerivedRouteFamilies(
   input: Record<string, Point[]>,
@@ -2877,16 +2966,24 @@ function selectDerivedRouteFamilies(
     if (!base || base.length < 2 || !source || !target) continue;
     const rejected: LayoutDerivedRouteRejection[] = [];
     if (edge.sourceElementId === edge.targetElementId) {
-      rejected.push(
-        { family: "straight", reason: "self-loop" },
-        { family: "orthogonal", reason: "self-loop" },
-        { family: "curve", reason: "self-loop" },
-      );
+      const candidate = selfLoopDerivedCurveCandidate(base);
+      routes[edge.elementId] = [copyPoint(base[0]!), copyPoint(base.at(-1)!)];
+      if (candidate) {
+        routeStates.set(edge.elementId, {
+          edge,
+          points: candidate.flattened,
+          bounds: pointBounds(candidate.flattened),
+        });
+      }
       state.derivedRouteChoices[edge.elementId] = {
-        family: "polyline",
+        family: "curve",
         source: "auto",
-        reason: "auto-self-loop-preserved",
-        rejected,
+        reason: "auto-curve-safe",
+        ...(candidate ? { curve: candidate.curve } : {}),
+        rejected: [
+          { family: "straight", reason: "self-loop" },
+          { family: "orthogonal", reason: "self-loop" },
+        ],
       };
       continue;
     }
@@ -2922,7 +3019,13 @@ function selectDerivedRouteFamilies(
     }
     rejected.push({ family: "straight", reason: directRejection });
 
-    const orthogonalCandidates = oneBendOrthogonalCandidates(base);
+    const orthogonalCandidates = oneBendOrthogonalCandidates(
+      base,
+      edge,
+      source,
+      target,
+      state,
+    );
     const evaluatedOrthogonal = orthogonalCandidates.map((candidate) => {
       const cost = routeCost(candidate, edge, obstacles, others);
       return {
@@ -2967,48 +3070,165 @@ function selectDerivedRouteFamilies(
       reason: rejectedOrthogonal?.rejection ?? "no-guide",
     });
 
-    const curveCandidate = derivedCurveCandidate(base, false, edge);
-    if (!curveCandidate) {
+    const curveCandidates = boundedDerivedCurveCandidates(
+      edge,
+      base,
+      obstacles,
+      others,
+      state,
+    );
+    const evaluatedCurves = curveCandidates.map((candidate) => {
+      const cost = routeCost(candidate.flattened, edge, obstacles, others);
+      return {
+        ...candidate,
+        cost,
+        rejection: routeFamilyRejection(
+          candidate.flattened,
+          cost,
+          baseCost,
+          edge,
+          others,
+          source,
+          target,
+        ),
+      };
+    });
+    const safeCurve = evaluatedCurves
+      .filter((candidate) => candidate.rejection === undefined)
+      .sort(compareDerivedCurveCandidate)[0];
+    if (safeCurve) {
+      routes[edge.elementId] = safeCurve.route.map(copyPoint);
+      routeStates.set(edge.elementId, {
+        edge,
+        points: safeCurve.flattened,
+        bounds: pointBounds(safeCurve.flattened),
+      });
+      state.derivedRouteChoices[edge.elementId] = {
+        family: "curve",
+        source: "auto",
+        reason: "auto-curve-safe",
+        curve: safeCurve.curve,
+        rejected,
+      };
+      continue;
+    }
+    if (evaluatedCurves.length === 0) {
       rejected.push({ family: "curve", reason: "no-guide" });
-    } else if (curveCandidate.curve.guideAngleDegrees < 90 - 1e-6) {
-      rejected.push({ family: "curve", reason: "tight-turn" });
     } else {
-      const curveCost = routeCost(curveCandidate.flattened, edge, obstacles, others);
-      const curveRejection = routeFamilyRejection(
-        curveCandidate.flattened,
-        curveCost,
-        baseCost,
+      const bestRejected = [...evaluatedCurves].sort(compareDerivedCurveCandidate)[0]!;
+      rejected.push({ family: "curve", reason: bestRejected.rejection ?? "interaction" });
+    }
+    const endpointCompatible = evaluatedCurves.filter((candidate) => (
+      endpointLegsLeaveElements(candidate.flattened, source, target)
+    ));
+    const fallbackPool = endpointCompatible.length > 0 ? endpointCompatible : evaluatedCurves;
+    const fallback = [...fallbackPool]
+      .filter((candidate) => candidate.cost[0] === 0 && candidate.cost[2] === 0)
+      .sort(compareDerivedCurveCandidate)[0]
+      ?? [...fallbackPool].sort(compareDerivedCurveCandidate)[0];
+    if (!fallback) continue;
+    routes[edge.elementId] = fallback.route.map(copyPoint);
+    routeStates.set(edge.elementId, {
+      edge,
+      points: fallback.flattened,
+      bounds: pointBounds(fallback.flattened),
+    });
+    state.derivedRouteChoices[edge.elementId] = {
+      family: "curve",
+      source: "auto",
+      reason: "auto-curve-fallback",
+      curve: fallback.curve,
+      rejected,
+    };
+    if (
+      fallback.cost[0] !== 0
+      || fallback.cost[2] !== 0
+      || !endpointLegsLeaveElements(fallback.flattened, source, target)
+    ) {
+      state.diagnostics.push({
+        severity: "warning",
+        code: "layout-auto-route-unresolved",
+        message: `automatic curve still violates an obstacle or endpoint constraint: ${edge.elementId}`,
+        layoutRef: state.request.layoutRef,
+        edgeId: edge.elementId,
+      });
+    }
+  }
+  if (state.edges.length <= 48) {
+    refineSelectedCurveFamilies(routes, state, sorted, routeStates, autoEdges);
+  }
+  return routes;
+}
+
+/** Re-scores curves once every peer has its final rendered family. */
+function refineSelectedCurveFamilies(
+  routes: Record<string, Point[]>,
+  state: LayoutState,
+  sorted: readonly LayoutEdge[],
+  routeStates: Map<string, RoutedEdgeState>,
+  autoEdges: readonly LayoutEdge[],
+): void {
+  for (const edge of [...autoEdges].reverse()) {
+    const choice = state.derivedRouteChoices[edge.elementId];
+    const publicRoute = routes[edge.elementId];
+    const current = routeStates.get(edge.elementId);
+    const source = state.geometries[edge.sourceElementId];
+    const target = state.geometries[edge.targetElementId];
+    if (
+      choice?.source !== "auto"
+      || choice.family !== "curve"
+      || !choice.curve
+      || !publicRoute
+      || publicRoute.length < 2
+      || !current
+      || !source
+      || !target
+      || edge.sourceElementId === edge.targetElementId
+    ) continue;
+
+    const others = routedOthers(sorted, routeStates, edge, state);
+    const obstacles = routeObstacles(edge, state);
+    const currentCost = routeCost(current.points, edge, obstacles, others);
+    const currentCandidate: EvaluatedDerivedCurveCandidate = {
+      route: publicRoute.map(copyPoint),
+      curve: choice.curve,
+      flattened: current.points.map(copyPoint),
+      cost: currentCost,
+      rejection: undefined,
+    };
+    const alternatives = boundedDerivedCurveCandidates(
+      edge,
+      publicRoute,
+      obstacles,
+      others,
+      state,
+    ).map((candidate): EvaluatedDerivedCurveCandidate => {
+      const cost = routeCost(candidate.flattened, edge, obstacles, others);
+      return { ...candidate, cost, rejection: routeFamilyRejection(
+        candidate.flattened,
+        cost,
+        currentCost,
         edge,
         others,
         source,
         target,
-      );
-      if (!curveRejection) {
-        routes[edge.elementId] = [copyPoint(base[0]!), copyPoint(base.at(-1)!)];
-        routeStates.set(edge.elementId, {
-          edge,
-          points: curveCandidate.flattened,
-          bounds: pointBounds(curveCandidate.flattened),
-        });
-        state.derivedRouteChoices[edge.elementId] = {
-          family: "curve",
-          source: "auto",
-          reason: "auto-curve-safe",
-          curve: curveCandidate.curve,
-          rejected,
-        };
-        continue;
-      }
-      rejected.push({ family: "curve", reason: curveRejection });
-    }
+      ) };
+    }).filter((candidate) => candidate.rejection === undefined);
+    const best = [currentCandidate, ...alternatives].sort(compareDerivedCurveCandidate)[0]!;
+    if (curveCandidateSignature(best) === curveCandidateSignature(currentCandidate)) continue;
+
+    routes[edge.elementId] = best.route.map(copyPoint);
+    routeStates.set(edge.elementId, {
+      edge,
+      points: best.flattened.map(copyPoint),
+      bounds: pointBounds(best.flattened),
+    });
     state.derivedRouteChoices[edge.elementId] = {
-      family: "polyline",
-      source: "auto",
-      reason: "auto-polyline-fallback",
-      rejected,
+      ...choice,
+      reason: "auto-curve-safe",
+      curve: best.curve,
     };
   }
-  return routes;
 }
 
 /**
@@ -3038,14 +3258,16 @@ function selectLargeDerivedRouteFamilies(
       continue;
     }
     if (edge.sourceElementId === edge.targetElementId) {
+      const candidate = selfLoopDerivedCurveCandidate(route);
+      routes[edge.elementId] = [copyPoint(route[0]!), copyPoint(route.at(-1)!)];
       state.derivedRouteChoices[edge.elementId] = {
-        family: "polyline",
+        family: "curve",
         source: "auto",
-        reason: "auto-self-loop-preserved",
+        reason: "auto-curve-safe",
+        ...(candidate ? { curve: candidate.curve } : {}),
         rejected: [
           { family: "straight", reason: "self-loop" },
           { family: "orthogonal", reason: "self-loop" },
-          { family: "curve", reason: "self-loop" },
         ],
       };
       continue;
@@ -3068,29 +3290,78 @@ function selectLargeDerivedRouteFamilies(
       };
       continue;
     }
+    const candidate = largeDerivedCurveCandidate(route, edge);
+    routes[edge.elementId] = candidate.route.map(copyPoint);
     state.derivedRouteChoices[edge.elementId] = {
-      family: "polyline",
+      family: "curve",
       source: "auto",
-      reason: "auto-polyline-fallback",
+      reason: "auto-curve-fallback",
+      curve: candidate.curve,
       rejected: [
         { family: "straight", reason: "interaction" },
         { family: "orthogonal", reason: "interaction" },
-        { family: "curve", reason: "no-guide" },
       ],
     };
   }
   return routes;
 }
 
-function oneBendOrthogonalCandidates(route: readonly Point[]): Point[][] {
+function oneBendOrthogonalCandidates(
+  route: readonly Point[],
+  edge?: LayoutEdge,
+  source?: ElementGeometry,
+  target?: ElementGeometry,
+  state?: LayoutState,
+): Point[][] {
   const start = route[0];
   const end = route.at(-1);
   if (!start || !end || samePoint(start, end)) return [];
-  const candidates = [
+  const candidates: Point[][] = [
     [copyPoint(start), { x: end.x, y: start.y }, copyPoint(end)],
     [copyPoint(start), { x: start.x, y: end.y }, copyPoint(end)],
-  ].filter(isOneBendOrthogonalRoute);
-  return [...new Map(candidates.map((candidate) => [
+  ];
+  if (
+    edge && source && target && state
+    && !isValidEdgeEndpointAnchor(edge.sourceAnchor)
+    && !isValidEdgeEndpointAnchor(edge.targetAnchor)
+  ) {
+    const sourceShape = layoutElementShape(state.elements.get(edge.sourceElementId));
+    const targetShape = layoutElementShape(state.elements.get(edge.targetElementId));
+    const horizontalAnchors = [0.25, 0.75];
+    const verticalAnchors = [0, 0.5];
+    const sourceHorizontal = horizontalAnchors.map((position) => (
+      edgeEndpointAnchorPoint(source, sourceShape, { position })
+    ));
+    const sourceVertical = verticalAnchors.map((position) => (
+      edgeEndpointAnchorPoint(source, sourceShape, { position })
+    ));
+    const targetHorizontal = horizontalAnchors.map((position) => (
+      edgeEndpointAnchorPoint(target, targetShape, { position })
+    ));
+    const targetVertical = verticalAnchors.map((position) => (
+      edgeEndpointAnchorPoint(target, targetShape, { position })
+    ));
+    for (const sourcePoint of sourceHorizontal) {
+      for (const targetPoint of targetVertical) {
+        candidates.push([
+          sourcePoint,
+          { x: targetPoint.x, y: sourcePoint.y },
+          targetPoint,
+        ]);
+      }
+    }
+    for (const sourcePoint of sourceVertical) {
+      for (const targetPoint of targetHorizontal) {
+        candidates.push([
+          sourcePoint,
+          { x: sourcePoint.x, y: targetPoint.y },
+          targetPoint,
+        ]);
+      }
+    }
+  }
+  const valid = candidates.filter(isOneBendOrthogonalRoute);
+  return [...new Map(valid.map((candidate) => [
     routeSignature(candidate),
     candidate,
   ])).values()].sort((left, right) => compareText(routeSignature(left), routeSignature(right)));
@@ -3149,6 +3420,15 @@ function explicitDerivedRouteChoice(
   route: readonly Point[],
   state: LayoutState,
 ): LayoutDerivedRouteChoice | undefined {
+  // A route-only reconciliation keeps the exact prior renderer result. Check
+  // this before an explicit route mode: otherwise an unchanged explicit curve
+  // loses its derived controls (and is rejected as non-fixed by validation).
+  if (isFixedDerivedRoute(edge, state)) {
+    const preserved = state.request.fixedDerivedRouteChoices?.[edge.elementId];
+    return preserved
+      ? cloneLayoutDerivedRouteChoice(preserved)
+      : fixedDerivedRouteChoiceFor(route);
+  }
   if (edge.routeMode === "straight") {
     return { family: "straight", source: "explicit", reason: "explicit-route-mode" };
   }
@@ -3165,13 +3445,6 @@ function explicitDerivedRouteChoice(
       source: "explicit",
       reason: "explicit-route-mode",
       ...(candidate ? { curve: candidate.curve } : {}),
-    };
-  }
-  if (isFixedDerivedRoute(edge, state)) {
-    return {
-      family: route.length === 2 ? "straight" : "polyline",
-      source: "fixed",
-      reason: "fixed-derived-route",
     };
   }
   if (isImmutableRoute(edge)) {
@@ -3196,11 +3469,229 @@ function routeFamilyRejection(
   return undefined;
 }
 
+type DerivedCurveCandidate = {
+  route: Point[];
+  curve: LayoutDerivedCurve;
+  flattened: Point[];
+};
+
+type EvaluatedDerivedCurveCandidate = DerivedCurveCandidate & {
+  cost: RouteCost;
+  rejection: LayoutDerivedRouteRejection["reason"] | undefined;
+};
+
+function boundedDerivedCurveCandidates(
+  edge: LayoutEdge,
+  base: readonly Point[],
+  obstacles: readonly RouteObstacle[],
+  others: readonly RoutedEdge[],
+  state: LayoutState,
+): DerivedCurveCandidate[] {
+  const start = base[0];
+  const end = base.at(-1);
+  if (!start || !end || samePoint(start, end)) return [];
+  const source = state.geometries[edge.sourceElementId];
+  const target = state.geometries[edge.targetElementId];
+  if (!source || !target) return [];
+  const endpointGuides = state.edges.length <= 48
+    ? autoCurveEndpointGuides(edge, source, target, state)
+    : [];
+  const needsExtendedClearance = state.edges.length <= 48
+    && obstacles.some((obstacle) => Math.max(obstacle.width, obstacle.height) > 960);
+  const compactGuides = compactRouteCandidates(edge, base, obstacles, others, state, false);
+  const guideRoutes = [
+    base.map(copyPoint),
+    ...(state.edges.length <= 48
+      ? compactGuides.slice(0, needsExtendedClearance ? 15 : 6)
+      : compactGuides),
+    ...endpointGuides,
+    ...syntheticCurveGuides(start, end, edge.elementId).map((guide) => [
+      copyPoint(start),
+      guide,
+      copyPoint(end),
+    ]),
+  ];
+  const distinctGuides = [...new Map(guideRoutes.flatMap((route) => {
+    const routeStart = route[0];
+    const routeEnd = route.at(-1);
+    const guide = route.length === 3 ? route[1] : undefined;
+    if (
+      !routeStart || !routeEnd || !guide
+      || samePoint(routeStart, guide) || samePoint(guide, routeEnd)
+      || innerAngleDegrees(routeStart, guide, routeEnd) < 90 - 1e-6
+    ) return [];
+    const normalized = [copyPoint(routeStart), copyPoint(guide), copyPoint(routeEnd)];
+    return [[routeSignature(normalized), normalized] as const];
+  })).values()].slice(0, state.edges.length > 48 ? 2 : needsExtendedClearance ? 32 : 12);
+  const pivotTensions = needsExtendedClearance ? [0.82, 4 / 3] : [0.82];
+  const corridorTensions = state.edges.length > 48
+    ? [3.2]
+    : needsExtendedClearance
+      ? [0.82, 2, 5.2, 13.6]
+      : [5.2];
+  const candidates = new Map<string, DerivedCurveCandidate>();
+  for (const route of distinctGuides) {
+    for (const tension of pivotTensions) {
+      const candidate = derivedCurveCandidate(route, false, edge, tension, "pivot");
+      if (!candidate || candidate.curve.guideAngleDegrees < 90 - 1e-6) continue;
+      candidates.set(curveCandidateSignature(candidate), candidate);
+    }
+    for (const tension of corridorTensions) {
+      const candidate = derivedCurveCandidate(route, false, edge, tension, "corridor");
+      if (!candidate || candidate.curve.guideAngleDegrees < 90 - 1e-6) continue;
+      candidates.set(curveCandidateSignature(candidate), candidate);
+    }
+  }
+  if (state.edges.length <= 48) {
+    for (const offsetRatio of [0.32, 0.4]) {
+      for (const sign of [-1, 1]) {
+        const candidate = derivedSCurveCandidate(base, offsetRatio, sign);
+        if (!candidate) continue;
+        candidates.set(curveCandidateSignature(candidate), candidate);
+      }
+    }
+  }
+  return [...candidates.values()].filter((candidate) => (
+    curveCandidateWithinLocalEnvelope(candidate, base, source, target, obstacles)
+  ));
+}
+
+function autoCurveEndpointGuides(
+  edge: LayoutEdge,
+  source: ElementGeometry,
+  target: ElementGeometry,
+  state: LayoutState,
+): Point[][] {
+  if (isValidEdgeEndpointAnchor(edge.sourceAnchor) || isValidEdgeEndpointAnchor(edge.targetAnchor)) {
+    return [];
+  }
+  const sourceShape = layoutElementShape(state.elements.get(edge.sourceElementId));
+  const targetShape = layoutElementShape(state.elements.get(edge.targetElementId));
+  const endpointPairs = [
+    [0.25, 0.75],
+    [0.75, 0.25],
+    [0.5, 0],
+    [0, 0.5],
+    [0.25, 0.25],
+    [0.75, 0.75],
+    [0, 0],
+    [0.5, 0.5],
+  ] as const;
+  return endpointPairs.flatMap(([sourcePosition, targetPosition]) => {
+    const start = edgeEndpointAnchorPoint(source, sourceShape, { position: sourcePosition });
+    const end = edgeEndpointAnchorPoint(target, targetShape, { position: targetPosition });
+    if (samePoint(start, end)) return [];
+    return syntheticCurveGuides(
+      start,
+      end,
+      `${edge.elementId}:${sourcePosition}:${targetPosition}`,
+    ).slice(2, 4).map((guide) => [start, guide, end]);
+  });
+}
+
+function curveCandidateWithinLocalEnvelope(
+  candidate: DerivedCurveCandidate,
+  base: readonly Point[],
+  source: ElementGeometry,
+  target: ElementGeometry,
+  obstacles: readonly RouteObstacle[] = [],
+): boolean {
+  const sourceCenter = centerOf(source);
+  const targetCenter = centerOf(target);
+  const obstacleDetour = Math.min(960, Math.max(
+    0,
+    ...obstacles.map((obstacle) => Math.max(obstacle.width, obstacle.height) * 0.35),
+  ));
+  const padding = Math.max(
+    48,
+    Math.min(480, pointDistance(sourceCenter, targetCenter) * 0.4),
+    obstacleDetour,
+  );
+  const corridor = expandGeometry(pointBounds([
+    ...base,
+    { x: source.x, y: source.y },
+    { x: source.x + source.width, y: source.y + source.height },
+    { x: target.x, y: target.y },
+    { x: target.x + target.width, y: target.y + target.height },
+  ]), padding);
+  return [
+    candidate.curve.sourceControl,
+    candidate.curve.targetControl,
+    ...candidate.flattened,
+  ].every((point) => pointInsideOrOnGeometry(point, corridor));
+}
+
+function compareDerivedCurveCandidate(
+  left: EvaluatedDerivedCurveCandidate,
+  right: EvaluatedDerivedCurveCandidate,
+): number {
+  return compareNumberTuples(left.cost, right.cost)
+    || compareText(curveCandidateSignature(left), curveCandidateSignature(right));
+}
+
+function curveCandidateSignature(candidate: DerivedCurveCandidate): string {
+  return [
+    routeSignature(candidate.route),
+    pointSignature(candidate.curve.sourceControl),
+    pointSignature(candidate.curve.targetControl),
+  ].join("|");
+}
+
+function largeDerivedCurveCandidate(
+  route: readonly Point[],
+  edge: LayoutEdge,
+): DerivedCurveCandidate {
+  const start = route[0]!;
+  const end = route.at(-1)!;
+  const candidates = [
+    derivedCurveCandidate(route, false, edge),
+    ...syntheticCurveGuides(start, end, edge.elementId).map((guide) => (
+      derivedCurveCandidate([start, guide, end], false, edge)
+    )),
+  ].filter((candidate): candidate is DerivedCurveCandidate => (
+    candidate !== undefined && candidate.curve.guideAngleDegrees >= 90 - 1e-6
+  ));
+  return candidates.sort((left, right) => (
+    compareText(curveCandidateSignature(left), curveCandidateSignature(right))
+  ))[0] ?? derivedCurveCandidate(
+    [start, syntheticCurveGuide(start, end, edge.elementId), end],
+    false,
+    edge,
+  )!;
+}
+
+function selfLoopDerivedCurveCandidate(
+  route: readonly Point[],
+): DerivedCurveCandidate | undefined {
+  const start = route[0];
+  const end = route.at(-1);
+  const sourceControl = route[1];
+  const targetControl = route.at(-2);
+  if (!start || !end || !sourceControl || !targetControl || samePoint(start, end)) return undefined;
+  const curve: LayoutDerivedCurve = {
+    sourceControl: copyPoint(sourceControl),
+    targetControl: copyPoint(targetControl),
+    guidePivot: {
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+    },
+    guideAngleDegrees: 180,
+  };
+  const publicRoute = [copyPoint(start), copyPoint(end)];
+  return {
+    route: publicRoute,
+    curve,
+    flattened: flattenLayoutDerivedCurve(publicRoute, curve),
+  };
+}
+
 function derivedCurveCandidate(
   route: readonly Point[],
   allowSyntheticGuide: boolean,
   edge: LayoutEdge,
-): { curve: LayoutDerivedCurve; flattened: Point[] } | undefined {
+  tension = 0.82,
+  controlMode: "pivot" | "corridor" = "pivot",
+): DerivedCurveCandidate | undefined {
   const start = route[0];
   const end = route.at(-1);
   if (!start || !end || samePoint(start, end)) return undefined;
@@ -3209,21 +3700,80 @@ function derivedCurveCandidate(
     : allowSyntheticGuide ? syntheticCurveGuide(start, end, edge.elementId) : undefined;
   if (!guide || samePoint(start, guide) || samePoint(guide, end)) return undefined;
   const angle = innerAngleDegrees(start, guide, end);
-  const tension = 0.82;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const tangent = { x: dx / length, y: dy / length };
+  const normal = { x: -tangent.y, y: tangent.x };
+  const middle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  const guideOffset = { x: guide.x - middle.x, y: guide.y - middle.y };
+  const along = dotProduct(guideOffset, tangent);
+  const perpendicular = dotProduct(guideOffset, normal);
+  const sourceAlong = length / 3 + along * 0.5;
+  const targetAlong = length / 3 - along * 0.5;
   const curve: LayoutDerivedCurve = {
-    sourceControl: interpolatePoint(start, guide, tension),
-    targetControl: interpolatePoint(end, guide, tension),
+    sourceControl: controlMode === "pivot" ? interpolatePoint(start, guide, tension) : {
+      x: start.x + tangent.x * sourceAlong + normal.x * perpendicular * tension,
+      y: start.y + tangent.y * sourceAlong + normal.y * perpendicular * tension,
+    },
+    targetControl: controlMode === "pivot" ? interpolatePoint(end, guide, tension) : {
+      x: end.x - tangent.x * targetAlong + normal.x * perpendicular * tension,
+      y: end.y - tangent.y * targetAlong + normal.y * perpendicular * tension,
+    },
     guidePivot: guide,
     guideAngleDegrees: angle,
   };
-  return { curve, flattened: flattenLayoutDerivedCurve(route, curve) };
+  const publicRoute = [copyPoint(start), copyPoint(end)];
+  return {
+    route: publicRoute,
+    curve,
+    flattened: flattenLayoutDerivedCurve(publicRoute, curve),
+  };
+}
+
+function derivedSCurveCandidate(
+  route: readonly Point[],
+  offsetRatio: number,
+  sign: number,
+): DerivedCurveCandidate | undefined {
+  const start = route[0];
+  const end = route.at(-1);
+  if (!start || !end || samePoint(start, end)) return undefined;
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length === 0) return undefined;
+  const tangent = { x: dx / length, y: dy / length };
+  const normal = { x: -tangent.y, y: tangent.x };
+  const offset = Math.min(480, length * offsetRatio) * sign;
+  const curve: LayoutDerivedCurve = {
+    sourceControl: {
+      x: start.x + tangent.x * length / 3 + normal.x * offset,
+      y: start.y + tangent.y * length / 3 + normal.y * offset,
+    },
+    targetControl: {
+      x: end.x - tangent.x * length / 3 - normal.x * offset,
+      y: end.y - tangent.y * length / 3 - normal.y * offset,
+    },
+    guidePivot: {
+      x: (start.x + end.x) / 2,
+      y: (start.y + end.y) / 2,
+    },
+    guideAngleDegrees: 180,
+  };
+  const publicRoute = [copyPoint(start), copyPoint(end)];
+  return {
+    route: publicRoute,
+    curve,
+    flattened: flattenLayoutDerivedCurve(publicRoute, curve),
+  };
 }
 
 function syntheticCurveGuide(start: Point, end: Point, identity: string): Point {
   const dx = end.x - start.x;
   const dy = end.y - start.y;
   const length = Math.hypot(dx, dy) || 1;
-  const offset = Math.max(24, Math.min(80, length * 0.15));
+  const offset = Math.max(0.25, Math.min(80, Math.max(4, length * 0.15), length * 0.45));
   const sign = stableTextParity(identity) === 0 ? -1 : 1;
   return {
     x: (start.x + end.x) / 2 - dy / length * offset * sign,
@@ -3231,12 +3781,35 @@ function syntheticCurveGuide(start: Point, end: Point, identity: string): Point 
   };
 }
 
-function stableTextParity(value: string): 0 | 1 {
+function syntheticCurveGuides(start: Point, end: Point, _identity: string): Point[] {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const middle = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+  const normal = { x: -dy / length, y: dx / length };
+  const result: Point[] = [];
+  for (const ratio of [0.12, 0.24, 0.36, 0.45]) {
+    const offset = Math.max(0.25, length * ratio);
+    for (const sign of [-1, 1]) {
+      result.push({
+        x: middle.x + normal.x * offset * sign,
+        y: middle.y + normal.y * offset * sign,
+      });
+    }
+  }
+  return result;
+}
+
+function stableTextHash(value: string): number {
   let result = 0;
   for (let index = 0; index < value.length; index += 1) {
     result = (result * 31 + value.charCodeAt(index)) >>> 0;
   }
-  return (result & 1) as 0 | 1;
+  return result;
+}
+
+function stableTextParity(value: string): 0 | 1 {
+  return (stableTextHash(value) & 1) as 0 | 1;
 }
 
 function interpolatePoint(start: Point, end: Point, ratio: number): Point {
@@ -3979,7 +4552,7 @@ function routeObstacles(edge: LayoutEdge, state: LayoutState): RouteObstacle[] {
     const geometry = state.geometries[element.elementId];
     if (!geometry) continue;
     if (element.elementId !== edge.sourceElementId && element.elementId !== edge.targetElementId) {
-      result.push({ ...copyGeometry(geometry), kind: "body" });
+      result.push({ ...expandGeometry(geometry, ROUTE_RENDERER_CLEARANCE), kind: "body" });
     }
     for (const reservation of layoutExternalReservationGeometries(element, geometry)) {
       result.push({ ...copyGeometry(reservation), kind: "reservation" });

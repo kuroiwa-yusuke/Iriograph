@@ -228,9 +228,21 @@ function validateRequestedMembershipGeometry(
         message: "所属する領域または並び順の枠を表示上で解決できないため、変更を取り消しました。",
       };
     }
-    const finalTargetGeometry = requestedById.get(targetElementId)?.geometry ?? target.geometry;
+    const requestedMember = requestedById.get(memberId);
+    const requestedTarget = requestedById.get(targetElementId);
+    if (
+      requestedMember
+      && requestedTarget
+      && preservesRelativeGeometry(
+        member.geometry,
+        requestedMember.geometry,
+        target.geometry,
+        requestedTarget.geometry,
+      )
+    ) continue;
+    const finalTargetGeometry = requestedTarget?.geometry ?? target.geometry;
     const bounds = membershipTargetBounds(target, finalTargetGeometry);
-    const finalMember = requestedById.get(memberId)?.geometry ?? member.geometry;
+    const finalMember = requestedMember?.geometry ?? member.geometry;
     if (!containsRectangle(bounds, finalMember)) {
       return {
         code: "membership-region-intersection-empty",
@@ -240,6 +252,20 @@ function validateRequestedMembershipGeometry(
     }
   }
   return undefined;
+}
+
+function preservesRelativeGeometry(
+  member: ElementGeometry,
+  requestedMember: ElementGeometry,
+  target: ElementGeometry,
+  requestedTarget: ElementGeometry,
+): boolean {
+  return requestedMember.width === member.width
+    && requestedMember.height === member.height
+    && requestedTarget.width === target.width
+    && requestedTarget.height === target.height
+    && requestedMember.x - member.x === requestedTarget.x - target.x
+    && requestedMember.y - member.y === requestedTarget.y - target.y;
 }
 
 type MembershipBinding = {

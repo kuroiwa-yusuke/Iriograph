@@ -590,6 +590,45 @@ describe("SemanticIntentPanel", () => {
     expect(wrapper.get(".iriograph-membership-editor").text()).not.toContain("申請の概念領域");
   });
 
+  it("label選択で直接型を付与・解除し、一覧にない既存型を保持する", async () => {
+    const wrapper = mount(SemanticIntentPanel, { props: {
+      elementDetails: {
+        iri: "urn:test:a",
+        label: "申請",
+        classIris: ["urn:test:Hidden", "urn:test:Application"],
+        labelValues: [{ value: "申請", language: "ja" }],
+        commentValues: [],
+      },
+      classes: [
+        { iri: "urn:test:Application", label: "申請書" },
+        { iri: "urn:test:Task", label: "業務タスク" },
+      ],
+    } });
+
+    await click(wrapper, "要素の詳細を編集");
+    const editor = wrapper.get(".iriograph-semantic-type-editor");
+    expect(editor.text()).toContain("申請書");
+    expect(editor.text()).toContain("業務タスク");
+    expect(editor.html()).not.toMatch(/urn:test:|IRI/u);
+    const checkboxes = editor.findAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(checkboxes.map((checkbox) => checkbox.element.checked)).toEqual([true, false]);
+
+    await checkboxes[0]!.setValue(false);
+    await checkboxes[1]!.setValue(true);
+    await click(wrapper, "変更を保存");
+
+    expect(wrapper.emitted("executeCommands")?.[0]?.[0]).toEqual([{
+      type: "set-property",
+      commandId: "intent-types",
+      subjectIri: "urn:test:a",
+      predicateIri: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+      values: [
+        { kind: "iri", iri: "urn:test:Hidden" },
+        { kind: "iri", iri: "urn:test:Task" },
+      ],
+    }]);
+  });
+
   it("nodeの入出力関係と相手を一覧表示し重なりedgeへfocusできる", async () => {
     const wrapper = mount(SemanticIntentPanel, { props: {
       elementDetails: {

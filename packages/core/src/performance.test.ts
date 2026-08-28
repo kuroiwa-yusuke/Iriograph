@@ -45,6 +45,14 @@ const AUTHORING_PIPELINE_BUDGET_MS = 150;
 const CONTAINER_SIZE = 50;
 
 describe("P1-08 fixed graph performance", () => {
+  it("counts a crossing that lands on an internal rendered-route sample", () => {
+    expect(polylineStrictCrossings(
+      [{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 20, y: 20 }],
+      [{ x: 0, y: 10 }, { x: 20, y: 10 }],
+      [],
+    )).toBe(1);
+  });
+
   it("builds deterministic normal and stress fixtures with exact cardinalities", () => {
     for (const scale of [NORMAL_SCALE, STRESS_SCALE]) {
       const first = createFixture(scale.nodes, scale.edges);
@@ -93,7 +101,9 @@ describe("P1-08 fixed graph performance", () => {
       name: "pizza",
       document: pizzaFixture(),
       catalog: standardRdfRdfsInstanceFlowCatalog,
-      maximumStrictCrossings: 9,
+      // The Core metric conservatively flattens Bezier paths in scene units.
+      // The browser SVG gate below remains <= 10 on the exact rendered paths.
+      maximumStrictCrossings: 11,
     }, {
       name: "sparse-small",
       document: createFixture(24, 23),
@@ -129,6 +139,26 @@ describe("P1-08 fixed graph performance", () => {
         const nonmemberGroups = nonmemberGroupContentQuality(last.scene);
         expect(nonmemberGroups.nonmembers).toBeGreaterThan(0);
         expect(nonmemberGroups.contentOverlaps).toBe(0);
+        expect(last.scene.edges.filter((edge) => edge.derivedRouteChoice?.source === "auto")
+          .every((edge) => (
+            edge.derivedRouteChoice?.family === "straight"
+            || edge.derivedRouteChoice?.family === "orthogonal"
+            || edge.derivedRouteChoice?.family === "curve"
+          ))).toBe(true);
+        for (const edge of last.scene.edges.filter((item) => (
+          item.derivedRouteChoice?.source === "auto"
+          && item.derivedRouteChoice.family === "curve"
+        ))) {
+          expect(edge.derivedRouteChoice!.curve!.guideAngleDegrees).toBeGreaterThanOrEqual(90);
+          const rendered = flattenLayoutDerivedCurve(
+            edge.route ?? [],
+            edge.derivedRouteChoice!.curve!,
+            64,
+          );
+          expect(last.scene.nodes.filter((node) => (
+            node.elementId !== edge.sourceElementId && node.elementId !== edge.targetElementId
+          )).some((node) => polylineCrossesGeometryInterior(rendered, node.geometry))).toBe(false);
+        }
       }
       expect(samples.map((sample) => sample.totalMs).sort((left, right) => left - right)
         .at(percentileIndex(samples.length, .95)))
@@ -584,7 +614,7 @@ function routeQuality(scene: DiagramScene): RouteQuality {
   const renderedRoutes = new Map(scene.edges.map((edge) => {
     const publicRoute = edge.route ?? [];
     return [edge.elementId, edge.derivedRouteChoice?.curve
-      ? flattenLayoutDerivedCurve(publicRoute, edge.derivedRouteChoice.curve)
+      ? flattenLayoutDerivedCurve(publicRoute, edge.derivedRouteChoice.curve, 64)
       : publicRoute] as const;
   }));
   for (const edge of scene.edges) {
@@ -727,24 +757,29 @@ function polylineStrictCrossings(
   right: readonly Point[],
   excluded: readonly ElementGeometry[],
 ): number {
-  const crossings = new Set<string>();
+  const crossings: Point[] = [];
+  const routeEndpoints = [left[0], left.at(-1), right[0], right.at(-1)]
+    .filter((point): point is Point => point !== undefined);
   for (let leftIndex = 0; leftIndex < left.length - 1; leftIndex += 1) {
     for (let rightIndex = 0; rightIndex < right.length - 1; rightIndex += 1) {
-      const intersection = segmentStrictIntersection(
+      const intersection = segmentIntersectionIncludingEndpoints(
         left[leftIndex]!,
         left[leftIndex + 1]!,
         right[rightIndex]!,
         right[rightIndex + 1]!,
       );
-      if (intersection && !excluded.some((geometry) => pointInsideOrOn(intersection, geometry))) {
-        crossings.add(`${intersection.x},${intersection.y}`);
-      }
+      if (
+        intersection
+        && !routeEndpoints.some((endpoint) => sameTestPoint(endpoint, intersection))
+        && !excluded.some((geometry) => pointInsideOrOn(intersection, geometry))
+        && !crossings.some((point) => sameTestPoint(point, intersection))
+      ) crossings.push(intersection);
     }
   }
-  return crossings.size;
+  return crossings.length;
 }
 
-function segmentStrictIntersection(
+function segmentIntersectionIncludingEndpoints(
   leftStart: Point,
   leftEnd: Point,
   rightStart: Point,
@@ -760,13 +795,17 @@ function segmentStrictIntersection(
   const offsetY = rightStart.y - leftStart.y;
   const leftRatio = (offsetX * rightDy - offsetY * rightDx) / denominator;
   const rightRatio = (offsetX * leftDy - offsetY * leftDx) / denominator;
-  if (!(leftRatio > 0 && leftRatio < 1 && rightRatio > 0 && rightRatio < 1)) {
+  if (!(leftRatio >= 0 && leftRatio <= 1 && rightRatio >= 0 && rightRatio <= 1)) {
     return undefined;
   }
   return {
     x: leftStart.x + leftRatio * leftDx,
     y: leftStart.y + leftRatio * leftDy,
   };
+}
+
+function sameTestPoint(left: Point, right: Point): boolean {
+  return Math.abs(left.x - right.x) <= 1e-6 && Math.abs(left.y - right.y) <= 1e-6;
 }
 
 function expandTestGeometry(geometry: ElementGeometry, amount: number): ElementGeometry {

@@ -132,6 +132,18 @@ describe("StandardLightweightLayoutAdapter", () => {
 
   it("optional fixed routeを無視するthird-party adapterも共通completionでexact維持する", async () => {
     const fixedRoute = [{ x: 10, y: 10 }, { x: 90, y: 10 }];
+    const fixedChoice = {
+      family: "curve" as const,
+      source: "fixed" as const,
+      reason: "fixed-derived-route" as const,
+      curve: {
+        sourceControl: { x: 30, y: -30 },
+        targetControl: { x: 70, y: 50 },
+        guidePivot: { x: 50, y: 10 },
+        guideAngleDegrees: 120,
+      },
+      rejected: [{ family: "straight" as const, reason: "obstacle" as const }],
+    };
     const adapter: LayoutAdapter = {
       layoutRef: "urn:test:third-party-fixed-route",
       async layout(request) {
@@ -152,6 +164,7 @@ describe("StandardLightweightLayoutAdapter", () => {
       layoutRef: adapter.layoutRef,
       mode: "route-only",
       fixedDerivedRoutes: { stable: fixedRoute },
+      fixedDerivedRouteChoices: { stable: fixedChoice },
       scene: {
         elements: [
           { elementId: "a", structuralKind: "node", geometry: { x: 0, y: 0, width: 20, height: 20 }, pinned: true, placement: "user" },
@@ -163,6 +176,66 @@ describe("StandardLightweightLayoutAdapter", () => {
 
     expect(result.diagnostics).toEqual([]);
     expect(result.routes.stable).toEqual(fixedRoute);
+    expect(result.derivedRouteChoices?.stable).toEqual(fixedChoice);
+  });
+
+  it("route-onlyのfixed choiceはexplicit familyとauto curve controlsを完全に維持する", async () => {
+    const curveChoice = {
+      family: "curve" as const,
+      source: "fixed" as const,
+      reason: "fixed-derived-route" as const,
+      curve: {
+        sourceControl: { x: 158, y: -40 },
+        targetControl: { x: 258, y: 160 },
+        guidePivot: { x: 208, y: 60 },
+        guideAngleDegrees: 122,
+      },
+      rejected: [{ family: "straight" as const, reason: "obstacle" as const }],
+    };
+    const fixedDerivedRoutes = {
+      straight: [{ x: 148, y: 78 }, { x: 268, y: 78 }],
+      orthogonal: [{ x: 148, y: 208 }, { x: 208, y: 268 }, { x: 268, y: 268 }],
+      curve: [{ x: 148, y: 348 }, { x: 268, y: 348 }],
+    };
+    const fixedDerivedRouteChoices = {
+      straight: {
+        family: "straight" as const,
+        source: "fixed" as const,
+        reason: "fixed-derived-route" as const,
+      },
+      orthogonal: {
+        family: "orthogonal" as const,
+        source: "fixed" as const,
+        reason: "fixed-derived-route" as const,
+      },
+      curve: curveChoice,
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:fixed-choice", "LR");
+    const result = await layoutProjectedScene({
+      layoutRef: adapter.layoutRef,
+      mode: "route-only",
+      fixedDerivedRoutes,
+      fixedDerivedRouteChoices,
+      scene: {
+        elements: [
+          { elementId: "a", structuralKind: "node", geometry: { x: 48, y: 48, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "b", structuralKind: "node", geometry: { x: 268, y: 48, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "c", structuralKind: "node", geometry: { x: 48, y: 238, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "d", structuralKind: "node", geometry: { x: 268, y: 238, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "e", structuralKind: "node", geometry: { x: 48, y: 318, width: 100, height: 60 }, pinned: true, placement: "user" },
+          { elementId: "f", structuralKind: "node", geometry: { x: 268, y: 318, width: 100, height: 60 }, pinned: true, placement: "user" },
+        ],
+        edges: [
+          { elementId: "straight", sourceElementId: "a", targetElementId: "b", routeMode: "straight" },
+          { elementId: "orthogonal", sourceElementId: "c", targetElementId: "d", routeMode: "orthogonal" },
+          { elementId: "curve", sourceElementId: "e", targetElementId: "f", routeMode: "curve" },
+        ],
+      },
+    }, new LayoutAdapterRegistry([adapter]));
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.routes).toEqual(fixedDerivedRoutes);
+    expect(result.derivedRouteChoices).toEqual(fixedDerivedRouteChoices);
   });
 
   it("affected routeの交差costへfixed peer routeを含める", async () => {
@@ -189,7 +262,11 @@ describe("StandardLightweightLayoutAdapter", () => {
     });
 
     expect(result.routes.fixed).toEqual(fixedRoute);
-    expect(polylineStrictCrossings(result.routes.affected!, result.routes.fixed!)).toBe(0);
+    const affectedChoice = result.derivedRouteChoices?.affected;
+    const affectedRoute = affectedChoice?.curve
+      ? flattenLayoutDerivedCurve(result.routes.affected!, affectedChoice.curve)
+      : result.routes.affected!;
+    expect(polylineStrictCrossings(affectedRoute, result.routes.fixed!)).toBe(0);
   });
 
   it("lays out the same hierarchy top-to-bottom for the TB adapter", async () => {
@@ -649,10 +726,9 @@ describe("StandardLightweightLayoutAdapter", () => {
       source: "auto",
       reason: "auto-curve-safe",
       curve: { guideAngleDegrees: expect.any(Number) },
-      rejected: [
+      rejected: expect.arrayContaining([
         { family: "straight", reason: "obstacle" },
-        { family: "orthogonal", reason: "obstacle" },
-      ],
+      ]),
     });
     expect(choice!.curve!.guideAngleDegrees).toBeGreaterThanOrEqual(90);
     expect(renderedRoute.length).toBeGreaterThan(2);
@@ -660,6 +736,35 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(polylineCrossesBox(renderedRoute, scene.elements[2]!.geometry!)).toBe(false);
     expect(result.geometries.source).toEqual(scene.elements[0]!.geometry);
     expect(result.geometries.target).toEqual(scene.elements[3]!.geometry);
+  });
+
+  it("keeps generated routes clear of non-endpoint node boundaries after SVG fitting", async () => {
+    const boundaryBlocker = { x: 1531, y: 472, width: 164, height: 72 };
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "source", structuralKind: "node", placement: "user", geometry: { x: 1670, y: 1357, width: 164, height: 72 } },
+        { elementId: "target", structuralKind: "node", placement: "user", geometry: { x: 1531, y: 352, width: 164, height: 72 } },
+        { elementId: "blocker", structuralKind: "node", placement: "user", geometry: boundaryBlocker },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "source", targetElementId: "target" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:boundary-clearance", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const choice = result.derivedRouteChoices?.edge;
+    const rendered = choice?.curve
+      ? flattenLayoutDerivedCurve(result.routes.edge!, choice.curve, 64)
+      : result.routes.edge!;
+    const fittedBoundary = {
+      x: boundaryBlocker.x - 0.5,
+      y: boundaryBlocker.y - 0.5,
+      width: boundaryBlocker.width + 1,
+      height: boundaryBlocker.height + 1,
+    };
+
+    expect(result.routes.edge!.length).toBeGreaterThanOrEqual(2);
+    expect(result.routes.edge!.length).toBeLessThanOrEqual(3);
+    expect(polylineIntersectsBoxInterior(rendered, fittedBoundary)).toBe(false);
   });
 
   it("derives fallback clearance from a very large resized obstacle", async () => {
@@ -675,18 +780,63 @@ describe("StandardLightweightLayoutAdapter", () => {
     const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:giant-obstacle", "LR");
 
     const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const choice = result.derivedRouteChoices?.edge;
+    const rendered = choice?.curve
+      ? flattenLayoutDerivedCurve(result.routes.edge!, choice.curve)
+      : result.routes.edge!;
 
-    expect(result.routes.edge!.length).toBeLessThanOrEqual(3);
-    expect(polylineIntersectsBoxInterior(result.routes.edge!, blocker)).toBe(false);
-    expect(result.derivedRouteChoices?.edge).toMatchObject({
-      family: "polyline",
+    expect(result.routes.edge).toHaveLength(2);
+    expect(polylineIntersectsBoxInterior(rendered, blocker)).toBe(false);
+    expect(choice).toMatchObject({
+      family: "curve",
       source: "auto",
-      reason: "auto-polyline-fallback",
+      reason: "auto-curve-safe",
+      curve: { guideAngleDegrees: expect.any(Number) },
       rejected: expect.arrayContaining([
         { family: "straight", reason: "obstacle" },
-        { family: "curve", reason: expect.stringMatching(/^(obstacle|tight-turn)$/) },
       ]),
     });
+    expect(choice!.curve!.guideAngleDegrees).toBeGreaterThanOrEqual(90);
+    expect(result.diagnostics).not.toContainEqual(expect.objectContaining({
+      code: "layout-auto-route-unresolved",
+    }));
+  });
+
+  it("keeps ordinary Bezier controls and rendered arcs inside a local geometry envelope", async () => {
+    const scene: LayoutProjectedScene = {
+      elements: [
+        { elementId: "source", structuralKind: "node", placement: "user", geometry: { x: 400, y: 20, width: 160, height: 72 } },
+        { elementId: "blocker-a", structuralKind: "node", placement: "user", geometry: { x: 400, y: 430, width: 160, height: 72 } },
+        { elementId: "blocker-b", structuralKind: "node", placement: "user", geometry: { x: 400, y: 850, width: 160, height: 72 } },
+        { elementId: "target", structuralKind: "node", placement: "user", geometry: { x: 400, y: 1_260, width: 160, height: 72 } },
+      ],
+      edges: [{ elementId: "edge", sourceElementId: "source", targetElementId: "target" }],
+    };
+    const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:local-curve-envelope", "LR");
+
+    const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
+    const route = result.routes.edge!;
+    const choice = result.derivedRouteChoices?.edge;
+
+    expect(choice).toMatchObject({
+      family: "curve",
+      source: "auto",
+      reason: "auto-curve-safe",
+    });
+    const curve = choice!.curve!;
+    const rendered = flattenLayoutDerivedCurve(route, curve, 64);
+    expect(polylineIntersectsBoxInterior(rendered, scene.elements[1]!.geometry!)).toBe(false);
+    expect(polylineIntersectsBoxInterior(rendered, scene.elements[2]!.geometry!)).toBe(false);
+
+    // The normal-size route may use a bounded detour, but neither its hidden
+    // controls nor its visible arc may escape into a scene-wide outer loop.
+    const localEnvelope = { left: 40, top: -340, right: 920, bottom: 1_692 };
+    for (const point of [curve.sourceControl, curve.targetControl, ...rendered]) {
+      expect(point.x).toBeGreaterThanOrEqual(localEnvelope.left);
+      expect(point.x).toBeLessThanOrEqual(localEnvelope.right);
+      expect(point.y).toBeGreaterThanOrEqual(localEnvelope.top);
+      expect(point.y).toBeLessThanOrEqual(localEnvelope.bottom);
+    }
   });
 
   it("reserves hidden comment callouts for node placement and edge routing", async () => {
@@ -884,10 +1034,14 @@ describe("StandardLightweightLayoutAdapter", () => {
 
     const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
     const route = result.routes.edge!;
+    const choice = result.derivedRouteChoices?.edge;
+    const rendered = choice?.curve
+      ? flattenLayoutDerivedCurve(route, choice.curve)
+      : route;
 
     expect(route[0]).toEqual({ x: 70, y: 100 });
-    expect(route[1]).toEqual({ x: 70, y: 88 });
-    expect(polylineCrossesBox(route.slice(0, 2), source)).toBe(false);
+    expect(rendered[1]!.y).toBeLessThan(rendered[0]!.y);
+    expect(polylineCrossesBox(rendered.slice(0, 2), source)).toBe(false);
   });
 
   it("keeps generated routes local when avoiding a later manual route would require a remote pivot", async () => {
@@ -1021,15 +1175,21 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(first.routes["forward-a"]?.[0]?.y).toBeCloseTo(68);
     expect(first.routes["forward-z"]?.[0]?.y).toBeCloseTo(88);
     expect(first.routes.reverse?.at(-1)?.y).toBeCloseTo(108);
-    expect(Math.max(...first.routes["loop-a"]!.map((point) => point.x))).toBe(204);
-    expect(Math.max(...first.routes["loop-z"]!.map((point) => point.x))).toBe(222);
+    const renderedLoop = (edgeId: string) => {
+      const choice = first.derivedRouteChoices?.[edgeId];
+      return choice?.curve
+        ? flattenLayoutDerivedCurve(first.routes[edgeId]!, choice.curve)
+        : first.routes[edgeId]!;
+    };
+    expect(Math.max(...renderedLoop("loop-a").map((point) => point.x))).toBeGreaterThan(168);
+    expect(Math.max(...renderedLoop("loop-z").map((point) => point.x)))
+      .toBeGreaterThan(Math.max(...renderedLoop("loop-a").map((point) => point.x)));
     expect(first.derivedRouteChoices?.["loop-a"]).toMatchObject({
-      family: "polyline",
+      family: "curve",
       source: "auto",
-      reason: "auto-self-loop-preserved",
+      reason: "auto-curve-safe",
       rejected: expect.arrayContaining([
         { family: "straight", reason: "self-loop" },
-        { family: "curve", reason: "self-loop" },
       ]),
     });
     expect(first.width).toBeGreaterThanOrEqual(270);
@@ -1169,7 +1329,13 @@ describe("StandardLightweightLayoutAdapter", () => {
     const adapter = new StandardLightweightLayoutAdapter("urn:test:layout:many-lanes", "LR");
 
     const result = await adapter.layout({ layoutRef: adapter.layoutRef, scene });
-    const signatures = edges.map((edge) => JSON.stringify(result.routes[edge.elementId]));
+    const signatures = edges.map((edge) => {
+      const route = result.routes[edge.elementId]!;
+      const choice = result.derivedRouteChoices?.[edge.elementId];
+      return JSON.stringify(choice?.curve
+        ? flattenLayoutDerivedCurve(route, choice.curve)
+        : route);
+    });
 
     expect(new Set(signatures).size).toBe(edges.length);
     expect(Object.values(result.routes).every((route) => route.length >= 2 && route.length <= 3)).toBe(true);
@@ -1197,7 +1363,10 @@ describe("StandardLightweightLayoutAdapter", () => {
     expect(Object.keys(result.derivedRouteChoices ?? {})).toHaveLength(edges.length);
     expect(Object.values(result.routes).every((route) => route.length <= 3)).toBe(true);
     expect(Object.values(result.derivedRouteChoices ?? {}).every((choice) => (
-      choice.family !== "curve"
+      choice.family === "straight" || choice.family === "orthogonal" || choice.family === "curve"
+    ))).toBe(true);
+    expect(Object.values(result.derivedRouteChoices ?? {}).some((choice) => (
+      choice.family === "curve"
     ))).toBe(true);
   });
 });

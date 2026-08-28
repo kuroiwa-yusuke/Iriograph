@@ -80,6 +80,16 @@ Top-levelの`imports`はTurtle/RDF graph importではなく、表示規則を持
 
 `createStandardRdfRdfsCatalog("full" | "instance-flow" | "classification-region")`でも同じcatalogを生成できます。Hostはdocumentのimport参照を解決し、viewの`profileRef`と一致するcatalogをruntime contextへ登録します。Presetによる非表示はprojection結果だけへ作用し、`semantic.source`と語彙索引は完全なまま保持します。
 
+業務図向けのshape、style、package iconまで同じpackageから解決する自己完結presetは次です。意味ruleは上記RDF/RDFS presetと同一で、業務classやlabelによる特別扱いを追加しません。
+
+| Export | `catalogRef` | `profileRef` |
+|---|---|---|
+| `standardWorkflowCatalog` | `urn:iriograph:catalog:workflow@1` | `urn:iriograph:profile:rdf-rdfs:1` |
+| `standardWorkflowInstanceFlowCatalog` | `urn:iriograph:catalog:workflow-instance-flow@1` | `urn:iriograph:profile:rdf-rdfs:instance-flow:1` |
+| `standardWorkflowClassificationRegionCatalog` | `urn:iriograph:catalog:workflow-classification-region@1` | `urn:iriograph:profile:rdf-rdfs:classification-region:1` |
+
+`createStandardWorkflowCatalog(...)`でも同じpresetを生成できます。Portable documentがtop-level `imports`を持つ場合、Hostは各runtime profileへ、実際に解決へ使ったexactなversion付きrefを`sourceCatalogRefs`として登録します。Coreは全named viewで使うref集合とdocumentの宣言集合を比較し、不一致なら`catalog-import-context-mismatch`で投影を停止します。同じ`profileRef`を持つ別catalogへ黙ってfallbackしないため、Mockと組込みHostでtemplate、色、shape、iconが変わりません。`imports`のない旧文書と、取得元を申告できないlegacy runtimeは従来のprofile-only互換を維持します。
+
 Viewの永続変更は`applyViewCommand`の`add`、`duplicate`、`configure`、`delete`、
 `reset-overlay`だけを使います。`viewId`はimmutableで、duplicateはoverlayをexact cloneしながら
 新IDを割り当てます。configureは対象viewだけを再照合し、locale-only変更はoverlayをexactに
@@ -225,11 +235,13 @@ export interface LayoutAdapter {
 ```
 
 `LayoutRequest.fixedDerivedRoutes?`は`route-only` transactionだけが使うoptionalな
-`edgeId -> endpoint込みroute`です。指定routeはadapterの自動routing対象外で、返却値でも
-JSON値として完全一致しなければなりません。標準adapterはinitial/refinement/compactionから除外し、
-他のaffected routeの交差・重複costには固定peerとして含めます。未対応のthird-party adapterが
-fieldを無視してもCore共通completionが指定routeを復元するため後方互換ですが、局所計算量の削減を
-保証するにはadapter自身の対応が必要です。このfieldとrouteはdocument overlay、waypointへ保存しません。
+`edgeId -> endpoint込みroute`です。Bezierの公開routeは端点だけなので、対になる
+`fixedDerivedRouteChoices?`がfamily、制御点、rejection traceを保持します。指定routeとchoiceはadapterの
+自動routing対象外で、返却値でもJSON値として完全一致しなければなりません。標準adapterは
+initial/refinement/compactionから除外し、他のaffected routeの交差・重複costには固定peerとして含めます。
+未対応のthird-party adapterが両fieldを無視してもCore共通completionが指定値を復元するため後方互換ですが、
+局所計算量の削減を保証するにはadapter自身の対応が必要です。これらはtransaction-localなScene derived値であり、
+document overlay、waypointへ保存しません。
 
 Coreはnode-link、LR/TB階層、Bag container、pinned geometryを扱う決定的な標準軽量adapterを提供し、Vue editorはこれをdefaultとして利用します。Hostがlayout adapterを明示注入した場合は同じinterfaceでworkerを使う高機能adapter等へ差し替えます。Adapter未解決、失敗、結果不正はdiagnosticとし、異なるlayoutへ黙ってfallbackしません。標準adapterはunordered endpoint pair内をelement IDのcode-point順で束ね、parallel laneを20 unit間隔、右側self-loopを36 unitから兄弟ごとに18 unit拡張して決定的にrouteします。Node attachmentの範囲を超えるparallel laneはnode外stubを使って間隔を維持し、routeの正方向への張り出しをScene boundsへ含めます。自動生成routeはsource/target以外の中間点を最大1個にし、直線で障害物回避と接続品質を満たす場合は0個にします。Optional adapterの結果も同じcompletionを通し、manual waypointはこの上限の対象外です。
 
@@ -272,6 +284,8 @@ Coreが同梱する既定SVGは`urn:iriograph:icon:lucide:<name>:1`を予約name
 trusted pathであり、hostの`AssetPolicy`を拡張・緩和しません。それ以外のassetは従来どおりhost
 resolverと元のpolicyを必ず通ります。`withPackageDefaultIconAccess(hostAccess)`もhost policy objectを
 そのまま維持します。
+
+0.10.0は業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
 
 ## Semantic transaction
 

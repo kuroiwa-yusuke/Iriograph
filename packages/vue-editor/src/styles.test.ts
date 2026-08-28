@@ -43,4 +43,9 @@ describe("package style isolation", () => {
     expect(css).toMatch(/\.content-horizontal\s*\{[^}]*width:\s*64%;[^}]*height:\s*24%;/su);
     expect(css).toMatch(/\.content-vertical\s*\{[^}]*width:\s*24%;[^}]*height:\s*64%;[^}]*flex-direction:\s*column;/su);
   });
+
+  it("Canvasの型tagはnode本文を隠しにくいcompact typographyとpaddingに保つ", () => {
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(/\.iriograph-node-type-tag\s*\{[^}]*min-height:\s*14px;[^}]*padding:\s*1px 4px;[^}]*font-size:\s*7px;/su);
+  });
 });

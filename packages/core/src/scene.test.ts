@@ -12,10 +12,11 @@ import type { IriographDocumentV1 } from "./model";
 import { projectSemanticView } from "./projection";
 import {
   buildIriographView,
+  createProjectionRuntimeContext,
   layoutProjectedDiagramScene,
   type ProjectionRuntimeContext,
 } from "./scene";
-import { standardRdfRdfsCatalog } from "./standard-catalog";
+import { catalogRef, standardRdfRdfsCatalog } from "./standard-catalog";
 
 describe("ProjectedScene conversion", () => {
   it("auto routeをendpoint込みのderived Scene routeとして渡す", async () => {
@@ -225,6 +226,54 @@ describe("ProjectedScene conversion", () => {
     const scene = await buildIriographView(documentFor({}), "main", context);
     expect(scene.nodes).toHaveLength(2);
     expect(scene.diagnostics).toEqual([]);
+  });
+
+  it("同一runtimeのreconciliation cacheがあっても通常buildは新しいdocumentを再投影する", async () => {
+    let layouts = 0;
+    const standard = new StandardLightweightLayoutAdapter(STANDARD_LAYOUT_REFS.hierarchicalLr, "LR");
+    const adapter: LayoutAdapter = {
+      layoutRef: standard.layoutRef,
+      async layout(request) {
+        layouts += 1;
+        return standard.layout(request);
+      },
+    };
+    const context: ProjectionRuntimeContext = {
+      catalogsByProfile: new Map([[
+        standardRdfRdfsCatalog.profileRef,
+        { catalog: standardRdfRdfsCatalog },
+      ]]),
+      layouts: new LayoutAdapterRegistry([adapter]),
+    };
+    const first = documentFor({});
+    const second = structuredClone(first);
+    second.semantic.source = second.semantic.source.replace('rdfs:label "A"', 'rdfs:label "Renamed"');
+
+    await buildIriographView(first, "main", context, "incremental");
+    const rebuilt = await buildIriographView(second, "main", context, "incremental");
+
+    expect(layouts).toBe(2);
+    expect(rebuilt.nodes.find((node) => node.semanticRef === "urn:test:scene:a")?.label).toBe("Renamed");
+  });
+
+  it("宣言catalogとhost解決catalogが違う場合に既定表示へfallbackしない", async () => {
+    const document = documentFor({});
+    document.imports = [{ catalogRef: "urn:iriograph:catalog:other-presentation@1" }];
+    const context = createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], createStandardLayoutRegistry());
+
+    const scene = await buildIriographView(document, "main", context);
+
+    expect(scene.nodes).toEqual([]);
+    expect(scene.diagnostics).toContainEqual(expect.objectContaining({
+      severity: "error",
+      code: "catalog-import-context-mismatch",
+      message: expect.stringContaining("urn:iriograph:catalog:other-presentation@1"),
+    }));
   });
 
   it("sparse font/icon content metricsをlayout minimumへ渡してnodeをautogrowする", async () => {

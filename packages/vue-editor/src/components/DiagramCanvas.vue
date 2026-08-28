@@ -2135,6 +2135,21 @@ function startViewportPan(
   const selectionTarget = clickElement ?? hitGroup;
   const middleButton = event.button === 1;
   if (!primaryOnBlank && !middleButton && !forcePrimary) return;
+  if (
+    primaryOnBlank
+    && hitGroup
+    && selectedElementIdsSet.value.has(hitGroup.elementId)
+    && !event.altKey
+    && !props.semanticPositionPicking
+    && !props.semanticResourcePicking
+    && !props.structuredSelectionPicking
+  ) {
+    // Group frames intentionally let pointer events pass through their empty
+    // interior. Recover the selected frame here, after all foreground DOM
+    // targets have had precedence, and use the normal geometry gesture.
+    startMove(event, hitGroup);
+    return;
+  }
   const primaryPan = primaryOnBlank && (
     event.altKey
     || props.semanticPositionPicking
@@ -2155,7 +2170,8 @@ function startViewportPan(
   let moved = false;
 
   const handleMove = (moveEvent: PointerEvent): void => {
-    if (Math.hypot(moveEvent.clientX - origin.x, moveEvent.clientY - origin.y) > 4) moved = true;
+    if (!moved && Math.hypot(moveEvent.clientX - origin.x, moveEvent.clientY - origin.y) <= 4) return;
+    moved = true;
     setViewportScroll(
       initial.x - (moveEvent.clientX - origin.x),
       initial.y - (moveEvent.clientY - origin.y),
@@ -2192,6 +2208,17 @@ function startViewportPan(
           selectedElementIdsSet.value.has(selectionTarget.elementId),
         ));
       }
+      return;
+    }
+    if (
+      upEvent?.type === "pointerup"
+      && primaryOnBlank
+      && !moved
+      && !props.semanticPositionPicking
+      && !props.semanticResourcePicking
+      && !props.structuredSelectionPicking
+    ) {
+      requestSelection({ elementId: "", mode: "replace" });
     }
   };
   stopViewportTracking?.();
@@ -2204,13 +2231,17 @@ function startViewportPan(
 function topGroupFrameAtEvent(event: PointerEvent | MouseEvent): GeometryElement | undefined {
   const point = canvasPositionAt(event as PointerEvent);
   if (!point) return undefined;
-  return [...orderedGroupFrames.value].reverse().find((element) => {
+  const containing = [...orderedGroupFrames.value].reverse().filter((element) => {
     const geometry = geometryFor(element);
     return point.x >= geometry.x
       && point.x <= geometry.x + geometry.width
       && point.y >= geometry.y
       && point.y <= geometry.y + geometry.height;
   });
+  // Interior hit testing follows the persisted Group Frame order. Selection
+  // may expose handles within its structural layer, but must not make a rear
+  // frame pointer-reachable through a front frame.
+  return containing[0];
 }
 
 function startSelectionMarquee(event: PointerEvent, clickElement?: GeometryElement): void {

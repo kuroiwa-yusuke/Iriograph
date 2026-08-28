@@ -176,6 +176,22 @@ describe("membership-region presentation constraints", () => {
     ]);
   });
 
+  it("相対配置が不変な既存の非包含は再判定せず、固定された共有所属は引き続きclampする", () => {
+    const scene = matrixScene();
+    scene.regions![0]!.geometry = { x: 20, y: 20, width: 50, height: 50 };
+
+    const result = constrainMembershipRegionMovement(scene, [
+      { elementId: "region-a", geometry: { x: 220, y: 20, width: 50, height: 50 } },
+      { elementId: "node", geometry: { x: 340, y: 90, width: 40, height: 30 } },
+    ]);
+
+    expect(result.issue).toBeUndefined();
+    expect(result.changes).toEqual([
+      { elementId: "region-a", geometry: { x: 180, y: 20, width: 50, height: 50 } },
+      { elementId: "node", geometry: { x: 300, y: 90, width: 40, height: 30 } },
+    ]);
+  });
+
   it("Seq・領域・containerの全所属intersectionへmemberをclampする", () => {
     const scene = overlappingSequenceScene();
     const result = constrainMembershipRegionMovement(scene, [{

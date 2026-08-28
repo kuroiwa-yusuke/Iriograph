@@ -248,9 +248,11 @@ const selectedSemanticTypeTokens = computed({
   }),
   set: (tokens: string[]) => {
     const selected = new Set(tokens);
-    classIris.value = props.classes
+    const editableIris = new Set(props.classes.map((choice) => choice.iri));
+    const unlistedIris = classIris.value.filter((iri) => !editableIris.has(iri));
+    classIris.value = [...unlistedIris, ...props.classes
       .filter((choice) => selected.has(semanticTypeToken(choice)))
-      .map((choice) => choice.iri);
+      .map((choice) => choice.iri)];
   },
 });
 const selectedSequenceToken = computed({
@@ -1078,7 +1080,7 @@ defineExpose({ focusPendingIntent, focusEditSection, resetIntent: reset });
       <nav v-if="selectedEdge || inspectedResources.length" class="iriograph-selection-edit-actions" aria-label="選択中の意味を編集">
         <button v-if="selectedEdge" type="button" :disabled="!enabled || busy" @click="choose('edit-relation')">関係の意味を編集</button>
         <template v-else>
-          <button v-if="inspectedResources.length === 1" type="button" :disabled="!enabled || busy" @click="choose('edit-element')">要素の詳細を編集</button>
+          <button v-if="inspectedResources.length === 1" type="button" :disabled="!enabled || busy" @click="choose('edit-element')">要素の詳細を編集（名前・説明・種類）</button>
           <button type="button" :disabled="!enabled || busy" @click="choose('edit-relation')">所属・並び順を編集</button>
         </template>
       </nav>

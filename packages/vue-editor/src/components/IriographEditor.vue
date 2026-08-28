@@ -225,7 +225,7 @@ type RegionLabelPlacement = "top" | "right" | "bottom" | "left";
 type DocumentRefreshKind = "semantic" | "presentation";
 type DisplayInspectorAction = DisplayInspectorSection;
 type InspectorMode = "semantic" | "appearance";
-type SemanticDestination = "relation-meaning" | "relation-reconnect" | "group-membership" | "group-sequence" | "group-alternatives";
+type SemanticDestination = "element-details" | "relation-meaning" | "relation-reconnect" | "group-membership" | "group-sequence" | "group-alternatives";
 type DeletionImpact = {
   key: string;
   label: string;
@@ -774,6 +774,15 @@ const authoringClassChoices = computed<AuthoringChoice[]>(() => {
       category: term.category,
       example: term.examples?.[0],
       sentencePattern: term.sentencePattern,
+    });
+  }
+  for (const item of typeSystemIndex.value.presentation.types) {
+    const iri = typeSystemIndex.value.resolveTypeId(item.typeId);
+    if (!iri || choices.has(iri)) continue;
+    choices.set(iri, {
+      iri,
+      label: item.label,
+      description: item.description,
     });
   }
   const graph = parseSemanticGraph(draft.value);
@@ -4487,7 +4496,11 @@ function focusStructuredDestination(
   effect: Extract<StructuredAuthoringFlowEffect, { type: "focus" }>,
 ): void {
   if (effect.intent.kind !== "inspector") return;
-  openSemanticDestination(effect.intent.destination);
+  openSemanticDestination(
+    effect.intent.destination,
+    undefined,
+    effect.intent.destination === "element-details",
+  );
 }
 
 function flowTargetElementId(): string | undefined {
@@ -4499,8 +4512,15 @@ function flowTargetElementId(): string | undefined {
   return undefined;
 }
 
-function openSemanticDestination(destination: FlowInspectorDestination | SemanticDestination, explicitElementId?: string): void {
+function openSemanticDestination(
+  destination: FlowInspectorDestination | SemanticDestination,
+  explicitElementId?: string,
+  inlineElementDetails = false,
+): void {
   const elementId = explicitElementId ?? flowTargetElementId();
+  const inlineNodeDetails = destination === "element-details"
+    && inlineElementDetails
+    && Boolean(elementId && structuredChoice(elementId)?.kind === "node");
   if (elementId) selectElement(elementId);
   structuredAuthoringState.value = {
     ...createStructuredAuthoringFlow({
@@ -4511,7 +4531,7 @@ function openSemanticDestination(destination: FlowInspectorDestination | Semanti
   rightSidebarCollapsed.value = false;
   inspectorMode.value = "semantic";
   structuredCanvasPicker.value = undefined;
-  if (destination === "element-details") {
+  if (destination === "element-details" && !inlineNodeDetails) {
     semanticDestination.value = undefined;
     if (elementId) openDetailsDialog(elementId);
     return;
@@ -4522,7 +4542,7 @@ function openSemanticDestination(destination: FlowInspectorDestination | Semanti
     return;
   }
   semanticDestination.value = destination;
-  activeSemanticIntent.value = "edit-relation";
+  activeSemanticIntent.value = destination === "element-details" ? "edit-element" : "edit-relation";
   const focusSection = destination === "group-sequence"
     ? "sequence"
     : destination === "group-alternatives"

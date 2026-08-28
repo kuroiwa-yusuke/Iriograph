@@ -39,7 +39,7 @@ Command判定はVue、DOM、Sceneの操作から分離したpure resolverで行�
 
 Presentation keyの最初の`keydown`でgestureを開始し、key repeat中はlocal previewだけを更新する。`keyup`またはCanvasの`blur`で一度だけdocumentへcommitし、一つのundo history itemにする。`Escape`はdocumentを変更せずpreviewを破棄する。Pointer操作と同じoverlay更新、projection、history境界を使う。
 
-Toolbarの`Canvasドラッグモード`は`範囲選択`と`移動`を排他的な押下状態として公開する。Primary pointerの空白またはGroup Frame interior dragは選択中modeに従い、既定の範囲選択では選択枠と終了件数をlive regionへ通知する。Shiftは既存選択へ追加、Ctrl/Cmdはtoggleとし、structured authoringの対象picker中も同じgestureをaccepted kindと件数制約へ通す。移動modeはviewport panだけを行う。中ボタンまたはAltによる一時panは両modeで利用でき、mode自体はdocument、history、dirty stateへ入れない。
+Toolbarの`Canvasドラッグモード`は`範囲選択`と`移動`を排他的な押下状態として公開する。Primary pointerの空白または未選択Group Frame interior dragは選択中modeに従い、既定の範囲選択では選択枠と終了件数をlive regionへ通知する。選択済みGroup Frameの空内部dragは両modeで選択集合のgeometry移動を優先し、前面objectとFrameの永続z順は維持する。Shiftは既存選択へ追加、Ctrl/Cmdはtoggleとし、structured authoringの対象picker中も同じgestureをaccepted kindと件数制約へ通す。移動modeはviewport panだけを行う。Canvasの完全な空白を単clickした場合だけ通常選択を解除し、Canvas外のcontrol操作では維持する。中ボタンまたはAltによる一時panは両modeで利用でき、mode自体はdocument、history、dirty stateへ入れない。
 
 `input`、`textarea`、`select`、有効な`contenteditable`内のkey eventとIME composition中のeventはCanvas/global shortcutへ渡さない。`readOnly`ではArrowによる位置変更を発行せずpanとして扱い、focus移動、選択、pan、zoom、revealを許可する。
 

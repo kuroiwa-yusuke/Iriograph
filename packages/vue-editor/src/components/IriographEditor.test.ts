@@ -1024,7 +1024,11 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.findAll(".iriograph-template-preview").length).toBeGreaterThan(1);
     expect(wrapper.get('.iriograph-template-choices[role="radiogroup"]').text()).not.toContain("urn:");
     const packageButtons = wrapper.findAll(".iriograph-package-icon-choices button");
-    expect(packageButtons.length).toBeGreaterThan(5);
+    expect(packageButtons).toHaveLength(75);
+    expect(wrapper.get(".iriograph-package-icon-choices").text())
+      .toContain("クラウド設定");
+    expect(wrapper.get(".iriograph-package-icon-choices").text())
+      .toContain("インシデント");
     expect(wrapper.findAll(".iriograph-package-icon-choices img").length).toBe(packageButtons.length - 1);
     await packageButtons[1]!.trigger("click");
     await waitUntil(() => Boolean(
@@ -1762,6 +1766,46 @@ describe("IriographEditor transaction regression", () => {
     await openAppearanceInspector(wrapper);
     expect(wrapper.find(".structured-wizard").exists()).toBe(false);
     expect(wrapper.find(".iriograph-display-inspector").isVisible()).toBe(true);
+  });
+
+  it("Canvas選択から右Inspector内でlabel-firstに型を付与・解除し図を表示したまま保つ", async () => {
+    const fixture = documentFixture();
+    const context = testAuthoringContext(fixture);
+    context.structuredAuthoring = {
+      ...context.structuredAuthoring,
+      nodeRoles: [{ roleId: "task", classIri: TASK_CLASS, label: "業務タスク" }],
+    };
+    context.terms = context.terms.map((term) => (
+      term.iri === TASK_CLASS ? { ...term, label: "業務タスク" } : term
+    ));
+    wrapper = await mountEditor({ authoringContext: context });
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const node = canvas.props("scene").nodes.find((item) => item.semanticRef === `${NS}a`)!;
+    exposedSelectionApi(wrapper).selectElement(node.elementId);
+    await nextTick();
+
+    await buttonWithText(wrapper, "要素を変更する").trigger("click");
+    await buttonWithText(wrapper.get(".structured-wizard"), "名前・説明・種類を変更").trigger("click");
+    await nextTick();
+
+    expect(wrapper.find(".iriograph-structured-details-dialog").exists()).toBe(false);
+    expect(wrapper.get(".iriograph-diagram-panel").isVisible()).toBe(true);
+    const typeEditor = wrapper.get(".iriograph-semantic-type-editor");
+    expect(typeEditor.text()).toContain("業務タスク");
+    expect(typeEditor.html()).not.toMatch(/urn:test:|https?:\/\/|rdf:type|IRI/u);
+
+    await typeEditor.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
+    await buttonWithText(wrapper.get(".iriograph-intent-panel"), "変更を保存").trigger("click");
+    await waitUntil(() => hasDirectType(latestDocument(wrapper!), `${NS}a`, TASK_CLASS));
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(1);
+
+    await buttonWithText(wrapper.get(".iriograph-intent-panel"), "要素の詳細を編集").trigger("click");
+    const assignedTypeEditor = wrapper.get(".iriograph-semantic-type-editor");
+    expect(assignedTypeEditor.get<HTMLInputElement>('input[type="checkbox"]').element.checked).toBe(true);
+    await assignedTypeEditor.get<HTMLInputElement>('input[type="checkbox"]').setValue(false);
+    await buttonWithText(wrapper.get(".iriograph-intent-panel"), "変更を保存").trigger("click");
+    await waitUntil(() => !hasDirectType(latestDocument(wrapper!), `${NS}a`, TASK_CLASS));
+    expect(wrapper.emitted("update:modelValue")).toHaveLength(2);
   });
 
   it("意味とビューを切り替えてもWizardの未送信入力を失わない", async () => {

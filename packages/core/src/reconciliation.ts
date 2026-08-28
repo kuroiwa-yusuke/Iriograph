@@ -20,10 +20,12 @@ import type {
 } from "./model.js";
 import { projectSemanticView } from "./projection.js";
 import { canonicalQuad, parseSemanticGraph } from "./rdf.js";
+import type { LayoutDerivedRouteChoice } from "./layout.js";
 import {
   buildIriographView,
   type ProjectionRuntimeContext,
 } from "./scene.js";
+import { cachedIncrementalIriographView } from "./scene-cache.js";
 
 type GeometryElement = ProjectedNode | ProjectedContainer | ProjectedRegion;
 type ProjectedElement = GeometryElement | ProjectedEdge;
@@ -116,7 +118,8 @@ export async function reconcileIriographDocumentViews(
     const previousView = previous.views.find((item) => item.viewId === view.viewId);
     let previousScene: DiagramScene | undefined;
     if (previousView) {
-      previousScene = await buildIriographView(previous, view.viewId, context, "incremental");
+      previousScene = cachedIncrementalIriographView(previous, view.viewId, context)
+        ?? await buildIriographView(previous, view.viewId, context, "incremental");
       // The previous scene is reconstructed only as reconciliation input. Its
       // non-blocking layout warnings describe the old display and must not be
       // reported as results of the candidate transaction (or accumulated on
@@ -187,6 +190,7 @@ export async function reconcileIriographDocumentViews(
       context,
       edgeOnly ? "route-only" : "incremental",
       routePlan?.fixedDerivedRoutes,
+      routePlan?.fixedDerivedRouteChoices,
     );
     const sceneDiagnostics = relevantSceneDiagnostics(scene.diagnostics, edgeOnly, routePlan);
     diagnostics.push(...sceneDiagnostics);
@@ -206,13 +210,13 @@ export async function reconcileIriographDocumentViews(
 type EdgeOnlyRoutePlan = {
   affectedEdgeIds: Set<string>;
   fixedDerivedRoutes: Record<string, Point[]>;
+  fixedDerivedRouteChoices: Record<string, LayoutDerivedRouteChoice>;
 };
 
 /**
- * Limits an edge-only transaction to a deterministic one-hop incident set.
- * Added/deleted/identity-or-endpoint-changed edges seed their old and new
- * endpoints. Candidate edges touching any seed endpoint are affected; every
- * other generated edge reuses the previous renderer route exactly.
+ * Limits an edge-only transaction to the changed candidate edges. Existing
+ * incident routes stay fixed and still participate in the changed route's
+ * crossing/overlap cost, avoiding a cascading reroute for a local edit.
  */
 function planEdgeOnlyRoutes(
   previous: DiagramScene,
@@ -247,24 +251,7 @@ function planEdgeOnlyRoutes(
     overlay: overlay[candidate.elementId],
   })).sort((left, right) => compareIdentity(left.elementId, right.elementId));
   const previousById = new Map(previous.edges.map((edge) => [edge.elementId, edge]));
-  const candidateById = new Map(candidates.map((edge) => [edge.elementId, edge]));
   const changedCandidateIds = new Set<string>();
-  const changedEndpointIds = new Set<string>();
-
-  for (const oldEdge of [...previous.edges].sort((left, right) => (
-    compareIdentity(left.elementId, right.elementId)
-  ))) {
-    const candidate = candidateById.get(oldEdge.elementId);
-    if (
-      !candidate
-      || candidate.sourceElementId !== oldEdge.sourceElementId
-      || candidate.targetElementId !== oldEdge.targetElementId
-      || routeRelevantEdgeChanged(oldEdge, candidate.edge, candidate.overlay)
-    ) {
-      changedEndpointIds.add(oldEdge.sourceElementId);
-      changedEndpointIds.add(oldEdge.targetElementId);
-    }
-  }
   for (const candidate of candidates) {
     const oldEdge = previousById.get(candidate.elementId);
     if (
@@ -274,17 +261,12 @@ function planEdgeOnlyRoutes(
       || routeRelevantEdgeChanged(oldEdge, candidate.edge, candidate.overlay)
     ) {
       changedCandidateIds.add(candidate.elementId);
-      changedEndpointIds.add(candidate.sourceElementId);
-      changedEndpointIds.add(candidate.targetElementId);
     }
   }
 
-  const affectedEdgeIds = new Set(candidates.filter((candidate) => (
-    changedCandidateIds.has(candidate.elementId)
-    || changedEndpointIds.has(candidate.sourceElementId)
-    || changedEndpointIds.has(candidate.targetElementId)
-  )).map((candidate) => candidate.elementId));
+  const affectedEdgeIds = changedCandidateIds;
   const fixedDerivedRoutes: Record<string, Point[]> = {};
+  const fixedDerivedRouteChoices: Record<string, LayoutDerivedRouteChoice> = {};
   for (const candidate of candidates) {
     if (affectedEdgeIds.has(candidate.elementId)) continue;
     const oldEdge = previousById.get(candidate.elementId);
@@ -292,8 +274,15 @@ function planEdgeOnlyRoutes(
       && candidate.edge.routeMode !== "manual";
     if (!oldEdge?.route || oldEdge.route.length < 2 || !derived) continue;
     fixedDerivedRoutes[candidate.elementId] = oldEdge.route.map((point) => clone(point));
+    if (oldEdge.derivedRouteChoice) {
+      fixedDerivedRouteChoices[candidate.elementId] = {
+        ...clone(oldEdge.derivedRouteChoice),
+        source: "fixed",
+        reason: "fixed-derived-route",
+      };
+    }
   }
-  return { affectedEdgeIds, fixedDerivedRoutes };
+  return { affectedEdgeIds, fixedDerivedRoutes, fixedDerivedRouteChoices };
 }
 
 function routeRelevantEdgeChanged(

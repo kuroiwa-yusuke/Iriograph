@@ -2,40 +2,41 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
+  catalogRef,
   parseIriographDocumentV1,
   projectSemanticView,
-  standardRdfRdfsCatalog,
+  standardWorkflowCatalog,
+  standardWorkflowClassificationRegionCatalog,
+  standardWorkflowInstanceFlowCatalog,
+  workflowIconRefs,
 } from "@iriograph/core";
 
 import {
   mockProjectionCatalog,
   mockClassificationRegionProjectionCatalog,
   mockInstanceFlowProjectionCatalog,
-  workflowClassificationRegionDomainCatalog,
-  workflowDomainCatalog,
-  workflowInstanceFlowDomainCatalog,
 } from "./catalog";
 
 describe("normalized RDF/RDFS mock", () => {
-  it("defaultsなしdomain catalogをstandard catalogと決定的に結合する", () => {
-    expect(workflowDomainCatalog.defaults).toBeUndefined();
-    expect(workflowDomainCatalog.rules).toEqual([]);
-    expect(mockProjectionCatalog.profileRef).toBe(standardRdfRdfsCatalog.profileRef);
-    expect(mockProjectionCatalog.defaults).toEqual(standardRdfRdfsCatalog.defaults);
-    expect(Object.keys(mockProjectionCatalog.templates)).toEqual(
-      [...Object.keys(mockProjectionCatalog.templates)].sort(compareText),
+  it("package-owned workflow catalog presetをそのまま利用する", () => {
+    expect(mockProjectionCatalog).toBe(standardWorkflowCatalog);
+    expect(mockInstanceFlowProjectionCatalog).toBe(standardWorkflowInstanceFlowCatalog);
+    expect(mockClassificationRegionProjectionCatalog).toBe(
+      standardWorkflowClassificationRegionCatalog,
     );
-    expect(Object.keys(mockProjectionCatalog.assets)).toEqual(
-      [...Object.keys(mockProjectionCatalog.assets)].sort(compareText),
-    );
-    expect(new Set(mockProjectionCatalog.rules.map((rule) => rule.ruleId)).size)
-      .toBe(mockProjectionCatalog.rules.length);
+    expect(catalogRef(mockProjectionCatalog)).toBe("urn:iriograph:catalog:workflow@1");
+    expect(catalogRef(mockInstanceFlowProjectionCatalog))
+      .toBe("urn:iriograph:catalog:workflow-instance-flow@1");
+    expect(catalogRef(mockClassificationRegionProjectionCatalog))
+      .toBe("urn:iriograph:catalog:workflow-classification-region@1");
     expect(mockInstanceFlowProjectionCatalog.profileRef)
       .toBe("urn:iriograph:profile:rdf-rdfs:instance-flow:1");
     expect(mockClassificationRegionProjectionCatalog.profileRef)
       .toBe("urn:iriograph:profile:rdf-rdfs:classification-region:1");
-    expect(workflowInstanceFlowDomainCatalog.defaults).toBeUndefined();
-    expect(workflowClassificationRegionDomainCatalog.defaults).toBeUndefined();
+    expect(mockInstanceFlowProjectionCatalog.templates["urn:iriograph:template:user-task:1"])
+      .toMatchObject({ iconRef: workflowIconRefs.userTask });
+    expect(mockInstanceFlowProjectionCatalog.assets[workflowIconRefs.userTask])
+      .toMatchObject({ assetRef: workflowIconRefs.userTask, mediaType: "image/svg+xml" });
   });
 
   it("標準regionと明示追加したnode-linkから同じ意味graphを投影する", () => {

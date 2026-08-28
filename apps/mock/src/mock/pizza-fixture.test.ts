@@ -4,8 +4,10 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  applyPortableDocumentReplace,
   buildIriographView,
   parseIriographDocumentV1,
+  previewPortableDocumentReplace,
   projectSemanticView,
   type ElementGeometry,
   type IriographDocumentV1,
@@ -93,6 +95,32 @@ describe("Pizza canonical fixture", () => {
       }
     }
   }, 20_000);
+
+  it("r2のportable JSONをDocument置換としてpreview・applyできる", async () => {
+    const current = readPizzaDocument(PIZZA_FILES[0]);
+    const candidateSource = readFileSync(
+      new URL(`../../public/workspace/models/${PIZZA_FILES[2]}`, import.meta.url),
+      "utf8",
+    );
+    const preview = await previewPortableDocumentReplace(
+      current,
+      candidateSource,
+      mockProjectionRuntimeContext,
+      { documentRevision: "r1" },
+    );
+
+    expect(preview.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(preview.valid).toBe(true);
+    const applied = await applyPortableDocumentReplace(
+      current,
+      preview,
+      mockProjectionRuntimeContext,
+      { confirmationId: preview.confirmationId, documentRevision: "r1" },
+    );
+    expect(applied.accepted).toBe(true);
+    expect(applied.document).toEqual(readPizzaDocument(PIZZA_FILES[2]));
+    expect(applied.scenes).toHaveProperty("main");
+  });
 });
 
 function readPizzaDocument(name: typeof PIZZA_FILES[number]): IriographDocumentV1 {

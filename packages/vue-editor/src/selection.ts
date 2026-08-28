@@ -116,7 +116,7 @@ export function translateSelection(
 ): GeometryChange[] {
   const index = geometryIndex(scene);
   const roots = selectionRoots(index, elementIds);
-  const participants = expandRootGroups(index, roots);
+  const participants = expandRootGroups(scene, index, roots);
   if (participants.length === 0) return [];
   const settings = normalizeDiagramSnapSettings(snapValue);
   const snapped = snapTranslation(scene, participants, requestedDelta, settings);
@@ -428,16 +428,26 @@ function hasSelectedAncestor(
 }
 
 function expandRootGroups(
+  scene: DiagramScene,
   index: ReadonlyMap<string, GeometryElement>,
   roots: readonly GeometryElement[],
 ): GeometryElement[] {
-  const rootsSet = new Set(roots.map((element) => element.elementId));
-  return [...index.values()]
-    .filter((element) => (
-      rootsSet.has(element.elementId)
-      || hasSelectedAncestor(index, element.elementId, rootsSet)
-    ))
-    .sort((left, right) => compareText(left.elementId, right.elementId));
+  const included = new Map(roots.map((element) => [element.elementId, element]));
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const members = current.structuralKind === "container"
+      ? semanticContainerMembers(scene, current.elementId, index)
+      : current.structuralKind === "region"
+        ? semanticRegionMembers(scene, current.elementId, index)
+        : [];
+    for (const member of members) {
+      if (included.has(member.elementId)) continue;
+      included.set(member.elementId, member);
+      queue.push(member);
+    }
+  }
+  return [...included.values()].sort((left, right) => compareText(left.elementId, right.elementId));
 }
 
 function parentElementId(element: GeometryElement | undefined): string | undefined {

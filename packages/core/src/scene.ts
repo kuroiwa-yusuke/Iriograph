@@ -7,6 +7,7 @@ import {
   layoutProjectedScene,
   type LayoutAdapterRegistry,
   type LayoutDiagnostic,
+  type LayoutDerivedRouteChoice,
   type LayoutExternalReservation,
   type LayoutMode,
 } from "./layout.js";
@@ -31,10 +32,14 @@ import type {
   VisualStyle,
 } from "./model.js";
 import { projectSemanticView } from "./projection.js";
+import { compareCodePoints } from "./rdf.js";
+import { rememberIncrementalScene } from "./scene-cache.js";
 
 export type ResolvedProfileProjection = {
   catalog: ProjectionCatalogV1;
   ruleOrigins?: readonly ProjectionRuleOrigin[];
+  /** Exact immutable catalog sources used to build this resolved profile. */
+  sourceCatalogRefs?: readonly string[];
 };
 
 export type ProjectionRuntimeContext = {
@@ -51,7 +56,13 @@ export function createProjectionRuntimeContext(
   return {
     catalogsByProfile: new Map(catalogs.map((entry) => [
       entry.profileRef,
-      { catalog: entry.catalog, ruleOrigins: entry.ruleOrigins },
+      {
+        catalog: entry.catalog,
+        ruleOrigins: entry.ruleOrigins,
+        ...(entry.sourceCatalogRefs
+          ? { sourceCatalogRefs: [...entry.sourceCatalogRefs] }
+          : {}),
+      },
     ])),
     layouts,
     projectionOptions,
@@ -65,6 +76,7 @@ export async function buildIriographView(
   context: ProjectionRuntimeContext,
   mode: LayoutMode = "incremental",
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
+  fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>,
 ): Promise<DiagramScene> {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
   if (!view) {
@@ -85,6 +97,8 @@ export async function buildIriographView(
       semanticRef: viewId,
     }]);
   }
+  const catalogImportDiagnostic = resolvedCatalogImportDiagnostic(document, context);
+  if (catalogImportDiagnostic) return emptyScene(viewId, [catalogImportDiagnostic]);
   const projected = remapProjectedRuleOrigins(
     projectSemanticView(
       document,
@@ -94,13 +108,62 @@ export async function buildIriographView(
     ),
     profile.ruleOrigins,
   );
-  return layoutProjectedDiagramScene(
+  const scene = await layoutProjectedDiagramScene(
     projected,
     view.layoutRef,
     context.layouts,
     mode,
     fixedDerivedRoutes,
+    fixedDerivedRouteChoices,
   );
+  if (
+    mode === "incremental"
+    && !fixedDerivedRoutes
+    && !fixedDerivedRouteChoices
+    && !hasBlockingDiagnostics(scene.diagnostics)
+  ) {
+    rememberIncrementalScene(document, viewId, context, scene);
+  }
+  return scene;
+}
+
+/**
+ * A declared catalog import is part of the portable rendering contract. When
+ * source refs are available, require the document-wide set used by all named
+ * views to match exactly instead of silently projecting through a host's
+ * different catalog for the same profileRef. Import-less legacy documents
+ * retain the historical profile-only behavior.
+ */
+function resolvedCatalogImportDiagnostic(
+  document: IriographDocument,
+  context: ProjectionRuntimeContext,
+): ProjectionDiagnostic | undefined {
+  if (!document.imports?.length) return undefined;
+  const declared = [...new Set(document.imports.map((entry) => entry.catalogRef))]
+    .sort(compareCodePoints);
+  const resolved = new Set<string>();
+  for (const profileRef of new Set(document.views.map((view) => view.profileRef))) {
+    const sourceRefs = context.catalogsByProfile.get(profileRef)?.sourceCatalogRefs;
+    if (!sourceRefs) return undefined;
+    for (const sourceRef of sourceRefs) resolved.add(sourceRef);
+  }
+  const actual = [...resolved].sort(compareCodePoints);
+  if (declared.length === actual.length && declared.every((value, index) => value === actual[index])) {
+    return undefined;
+  }
+  const missing = declared.filter((value) => !resolved.has(value));
+  const undeclared = actual.filter((value) => !declared.includes(value));
+  return {
+    severity: "error",
+    category: "profile",
+    code: "catalog-import-context-mismatch",
+    message: [
+      "Documentが指定した表示catalogとhostが解決したcatalogが一致しません。",
+      missing.length > 0 ? `未解決: ${missing.join(", ")}` : undefined,
+      undeclared.length > 0 ? `未宣言: ${undeclared.join(", ")}` : undefined,
+      "同じversionのpackageとcatalogを利用してください。",
+    ].filter((value): value is string => value !== undefined).join(" "),
+  };
 }
 
 /** Converts semantic projection into a renderer Scene with endpoint-inclusive routes. */
@@ -110,6 +173,7 @@ export async function layoutProjectedDiagramScene(
   registry: LayoutAdapterRegistry,
   mode: LayoutMode = "incremental",
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
+  fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>,
 ): Promise<DiagramScene> {
   if (hasBlockingDiagnostics(projected.diagnostics)) {
     return emptyScene(projected.viewId, projected.diagnostics);
@@ -118,6 +182,7 @@ export async function layoutProjectedDiagramScene(
     layoutRef,
     mode,
     fixedDerivedRoutes,
+    fixedDerivedRouteChoices,
     scene: {
       elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
         elementId: element.elementId,

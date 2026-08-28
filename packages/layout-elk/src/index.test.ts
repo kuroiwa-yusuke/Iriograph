@@ -201,8 +201,18 @@ describe("ElkLayeredLayoutAdapter", () => {
       "urn:test:routes",
     ));
 
-    expect(result.routes.self).toHaveLength(3);
-    expect(result.routes.self![0]).not.toEqual(result.routes.self![1]);
+    const selfChoice = result.derivedRouteChoices?.self;
+    const renderedSelf = selfChoice?.curve
+      ? flattenLayoutDerivedCurve(result.routes.self!, selfChoice.curve)
+      : result.routes.self!;
+    expect(result.routes.self).toHaveLength(2);
+    expect(selfChoice).toMatchObject({
+      family: "curve",
+      source: "auto",
+      reason: "auto-curve-safe",
+      curve: { guideAngleDegrees: 180 },
+    });
+    expect(new Set(renderedSelf.map((point) => `${point.x}:${point.y}`)).size).toBeGreaterThan(2);
     expect(result.routes["parallel-1"]).not.toEqual(result.routes["parallel-2"]);
     expect(result.routes.manual!.slice(1, -1)).toEqual([
       { x: 300, y: 20 },
@@ -511,8 +521,8 @@ describe("ElkLayeredLayoutAdapter", () => {
 
     expect(result.accepted).toBe(true);
     expect(events).toEqual([
-      expect.objectContaining({ viewId: "standard", affectedEdges: 2, fixedDerivedRoutes: 1 }),
-      expect.objectContaining({ viewId: "elk", affectedEdges: 2, fixedDerivedRoutes: 1 }),
+      expect.objectContaining({ viewId: "standard", affectedEdges: 1, fixedDerivedRoutes: 2 }),
+      expect.objectContaining({ viewId: "elk", affectedEdges: 1, fixedDerivedRoutes: 2 }),
     ]);
     const stableRef = statementIdentity(
       "urn:test:elk-multi:c",
@@ -523,9 +533,10 @@ describe("ElkLayeredLayoutAdapter", () => {
       expect(result.scenes[view.viewId]!.edges.find((edge) => edge.semanticRef === stableRef)?.route)
         .toEqual(before[view.viewId]!.edges.find((edge) => edge.semanticRef === stableRef)?.route);
     }
-    // Initial comparison and reconciliation's previous Scene use ELK. The
-    // candidate route-only pass detects fixed geometry and uses Core routing.
-    expect(engine.inputs).toHaveLength(2);
+    // The initial comparison Scene is reused by reconciliation. The candidate
+    // route-only pass detects fixed geometry and uses Core routing, so ELK is
+    // invoked only for the original prebuild.
+    expect(engine.inputs).toHaveLength(1);
   });
 
   test("diagnoses impossible fixed overlap without changing either geometry", async () => {
