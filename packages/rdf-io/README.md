@@ -3,7 +3,7 @@
 `@iriograph/rdf-io` is a framework-independent boundary for importing Turtle or JSON-LD into an RDF dataset, previewing a new document or merge, applying the result atomically, explicitly rebasing a namespace, and exporting semantic RDF only.
 
 ```sh
-npm install @iriograph/rdf-io@0.11.0
+npm install --save-exact @iriograph/rdf-io
 ```
 
 ## Import and merge

@@ -1,24 +1,49 @@
-# Iriograph設計文書
+# Iriograph documentation
 
-Iriographの目的は、tripleを単にnode-link図へ変換することではなく、意味グラフを業務上読める図として編集・検証・再利用できるようにすることです。
+文書は、最初に読む設計、正確な仕様、Editor、host統合、開発記録を分けています。通常は次の順で十分です。
 
-- [theory.md](./theory.md): 設計思想と技術選択の判断基準
-- [rdf-rdfs-profile.md](./rdf-rdfs-profile.md): RDF/RDFSベース語彙、構造制約、catalog bindingのv1規範仕様
-- [authoring-profile.md](./authoring-profile.md): 人間・LLMの語彙統制と表示要求からのsemantic rewrite仕様
-- [interface.md](./interface.md): document、catalog、Scene、editorの公開契約
-- [implementation.md](./implementation.md): package境界と処理構成
-- [semantic-notation.md](./semantic-notation.md): 意味Turtleと表示notationの分離、serializer表記規則
-- [semantic-access.md](./semantic-access.md): label-first索引、revision alias、LLM向けread/write wrapper
-- [agent-integration.md](./agent-integration.md): profile解決、Cloud transport、agent routing、外部候補review
-- [rdf-io.md](./rdf-io.md): Turtle/JSON-LD import、merge、rebase、export
-- [domain-profiles.md](./domain-profiles.md): domain profile kitとvendor icon catalog
-- [host-conformance.md](./host-conformance.md): Mock/Cloud共通のpackage・deploy gate
-- [spatial-membership.md](./spatial-membership.md): 階層containerと多対多regionの空間文法
-- [editor-interactions.md](./editor-interactions.md): 4入口の段階的意味flow、対象別context menu、details、ビュー操作のinteraction規則
-- [layout-optimization.md](./layout-optimization.md): 混雑最適化pipeline、layout adapter選択、性能・品質指標
-- [accessibility.md](./accessibility.md): Canvas keyboard、focus、ARIAの規範契約
-- [distribution.md](./distribution.md): package配布contractとSemVer方針
-- [testing.md](./testing.md): component test、browser E2E、参照図との100点構造評価と完了時の検証手順
-- [backlog.md](./backlog.md): 未実装事項の優先順位、依存、完了条件
+1. [設計原則](./architecture/principles.md) — Iriographが解く問題と、意味・表示・layoutの境界
+2. [Package・実装構成](./architecture/packages.md) — 11 packageの責務と処理pipeline
+3. [RDF/RDFS profile](./semantics/rdf-profile.md) — 意味graph、標準語彙、catalog binding
+4. [Editor操作](./editor/interactions.md) — 利用者向け編集flow
+5. [Host conformance](./integration/host-conformance.md) — Mockとproduct hostで同じ機能を保つgate
 
-設計判断は`theory.md`、semantic構造と投影規則は`rdf-rdfs-profile.md`、semantic write policyは`authoring-profile.md`を正本とします。型定義は`packages/core/src/model.ts`、RDF/RDFS標準catalogは`packages/core/src/standard-catalog.ts`、domain appearanceの実例は`apps/mock/src/mock/catalog.json`にあります。
+## 正本
+
+### Architecture
+
+- [設計原則](./architecture/principles.md)
+- [Package・実装構成](./architecture/packages.md)
+- [公開契約](./architecture/public-contracts.md)
+
+### Semantics
+
+- [RDF/RDFS profile](./semantics/rdf-profile.md)
+- [Authoring profile](./semantics/authoring-profile.md)
+- [意味と表示notation](./semantics/notation.md)
+- [Semantic validation](./semantics/validation.md)
+- [RDF import / export](./semantics/rdf-io.md)
+
+### Editor and layout
+
+- [Editor操作](./editor/interactions.md)
+- [Named view](./editor/views.md)
+- [Accessibility](./editor/accessibility.md)
+- [空間membership](./editor/spatial-membership.md)
+- [Layout・routing・性能](./editor/layout.md)
+
+### Integration and distribution
+
+- [Semantic Access](./integration/semantic-access.md)
+- [Agent・host連携](./integration/agents.md)
+- [Domain profile・vendor catalog](./integration/domain-profiles.md)
+- [Host conformance](./integration/host-conformance.md)
+- [Package配布・version](./integration/distribution.md)
+
+## Development records
+
+- [開発・検証](./development/testing.md) — 現在のcommand、gate、test配置規則
+- [評価履歴](./evaluations/reference-reconstruction.md) — 参照画像・agent実験・過去実測。現行仕様の正本ではありません
+- [バックログ](./backlog.md) — 未実装項目だけを管理します
+
+設計原則の正本は`architecture/principles.md`、意味構造は`semantics/rdf-profile.md`、semantic write policyは`semantics/authoring-profile.md`です。TypeScriptの型とruntime schemaがAPI形状の実行可能な正本であり、`architecture/public-contracts.md`はその読み方と不変条件を説明します。

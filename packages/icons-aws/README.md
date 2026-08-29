@@ -1,6 +1,6 @@
 # @iriograph/icons-aws
 
-AWS Architecture Icons を Iriograph で参照するための、公開可能な metadata-only package です。package version は `0.11.0`、対象の公式配布版は `2026-Q3`（release identifier `07312026`）です。
+AWS Architecture Icons を Iriograph で参照するための、公開可能な metadata-only package です。対象の公式配布版は `2026-Q3`（release identifier `07312026`）です。
 
 この package は AWS の SVG・ZIP・その他の artwork bytes を同梱せず、実行時にも download しません。利用者が AWS 公式サイトから archive を取得し、host application が展開済み local asset または署名 URL を resolver に渡します。AWS 公式の `aws-samples/sample-architecture-diagram-mcp-server` も、Terms of Use を理由に icon を bundle せず、利用者 download と category-colored initial fallback を採用しています。
 

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick } from "vue";
 
-import type { EditorContextAction } from "../context-actions";
+import type { EditorContextAction } from "../inspector/context-actions";
 import type {
   TargetContextDestination,
   TargetContextMenuEntry,
   TargetContextMenuSession,
-} from "../target-context-menu";
+} from "../inspector/target-context-menu";
 import EditorContextMenu from "./EditorContextMenu.vue";
 
 const props = defineProps<{

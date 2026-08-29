@@ -4,7 +4,7 @@ Iriographのportable document、RDF/RDFS projection catalog、runtime validation
 semantic transaction、決定的layoutを提供するframework非依存のESM packageです。
 
 ```sh
-npm install @iriograph/core
+npm install --save-exact @iriograph/core
 ```
 
 ```ts
@@ -183,7 +183,7 @@ Human textarea入力は妥当な原文を保持し、LLM sourceとstructured com
 Domain constraintは`ResolvedSemanticValidationContext`の非同期portとして注入できます。
 Direct Turtle、structured dataset、LLM sourceは同じportを通り、engine固有のStoreやSHACL型を
 public contractへ公開しません。Warningの明示確認、stable diagnostic identity、abort、cache keyの
-契約はrepositoryの`docs/semantic-validation.md`を参照してください。
+契約は[Semantic validation](../../docs/semantics/validation.md)を参照してください。
 
 保存documentの`schemaVersion`とcatalogのversionはpackage versionとは独立した契約です。
 詳細はrepositoryの設計文書を参照してください。

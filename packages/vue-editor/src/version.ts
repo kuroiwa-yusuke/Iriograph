@@ -1,5 +1,5 @@
 /** Kept in lockstep with the published package version by the release gate. */
-export const IRIOGRAPH_EDITOR_PACKAGE_VERSION = "0.11.0";
+export const IRIOGRAPH_EDITOR_PACKAGE_VERSION = "0.11.1";
 
 /** Stable capability IDs consumed by Mock/Cloud host conformance checks. */
 export const IRIOGRAPH_EDITOR_CAPABILITIES = Object.freeze([

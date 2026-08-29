@@ -9,7 +9,7 @@ Labelは発見と説明に使いますが、identityには使いません。検�
 ## Install
 
 ```sh
-npm install @iriograph/core@0.5.0 @iriograph/semantic-access@0.5.0
+npm install --save-exact @iriograph/core @iriograph/semantic-access
 ```
 
 ## Read
@@ -74,4 +74,4 @@ const result = await writes.apply(preview, {
 
 `apply`は同じrevisionのpreviewと完全一致するconfirmation IDを必須にします。Aliasが古い場合は`StaleSemanticRevisionError`、未知の場合は`UnknownSemanticAliasError`を返します。最終的な検証、canonical Turtle生成、全view reconciliation、保存はCoreまたはCloud側WritePortの責務です。
 
-詳細な契約は[`docs/semantic-access.md`](../../docs/semantic-access.md)を参照してください。
+詳細な契約は[Semantic Access](../../docs/integration/semantic-access.md)を参照してください。

@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/profile-resolver",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Host-side immutable authoring profile and vocabulary resolver for Iriograph.",
   "type": "module",
   "license": "UNLICENSED",
@@ -30,6 +30,6 @@
   },
   "publishConfig": { "access": "public" },
   "engines": { "node": ">=20.19" },
-  "dependencies": { "@iriograph/core": "0.11.0" },
+  "dependencies": { "@iriograph/core": "0.11.1" },
   "devDependencies": { "typescript": "^5.8.3", "vitest": "^4.1.8" }
 }

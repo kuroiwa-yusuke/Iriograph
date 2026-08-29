@@ -6,8 +6,8 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 ## 責務境界
 
 - `semantic.source`は意味情報の正本とする。座標、色、icon、viewportを混ぜない。
-- ベースsemantic profileは`docs/rdf-rdfs-profile.md`を正本とし、包含、順序、選択、参照には定義済みのRDF/RDFS語彙を優先する。
-- Semantic write policyは`docs/authoring-profile.md`を正本とし、rendererのunknown fallbackとLLMのterm生成許可を分ける。
+- ベースsemantic profileは`docs/semantics/rdf-profile.md`を正本とし、包含、順序、選択、参照には定義済みのRDF/RDFS語彙を優先する。
+- Semantic write policyは`docs/semantics/authoring-profile.md`を正本とし、rendererのunknown fallbackとLLMのterm生成許可を分ける。
 - Catalogは意味から構造的な表示primitiveへの宣言的な写像を持つ。
 - Sceneの構造名は`node`、`edge`、`container`、`annotation`など表示・編集上の性質で付ける。
 - View overlayはgeometry、pin、manual routeなど、catalogから復元できない表示情報だけを持つ。
@@ -59,25 +59,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 
 ## 文書
 
-- `docs/theory.md`: 設計思想と判断基準。
-- `docs/rdf-rdfs-profile.md`: semantic base vocabulary、構造制約、catalog bindingの規範仕様。
-- `docs/authoring-profile.md`: actor別の語彙統制とprofile-guided semantic rewriteの規範仕様。
-- `docs/semantic-validation.md`: domain validation port、diagnostic identity、warning確認、cache identityの規範仕様。
-- `docs/view-management.md`: named view command、active view、view別session、一時hideの規範仕様。
-- `docs/interface.md`: document、catalog、Sceneの公開契約。
-- `docs/implementation.md`: package境界と投影処理。
-- `docs/semantic-notation.md`: 意味Turtleと表示notation、canonical serializerの境界。
-- `docs/layout-optimization.md`: 自動配置pipeline、layout adapter、性能・品質基準。
-- `docs/accessibility.md`: Canvas keyboard、focus、ARIAの規範仕様。
-- `docs/editor-interactions.md`: context menu、details dialog、appearance、意味操作の人間向けinteraction仕様。
-- `docs/spatial-membership.md`: 階層containerと多対多region membershipの空間文法。
-- `docs/semantic-access.md`: label-first索引、revision alias、LLM read/write wrapperの仕様。
-- `docs/agent-integration.md`: profile解決、semantic transport、agent routing、外部候補reviewの仕様。
-- `docs/rdf-io.md`: Turtle/JSON-LD import、merge、明示rebase、exportの仕様。
-- `docs/domain-profiles.md`: domain profile kitとvendor icon catalogの配布境界。
-- `docs/host-conformance.md`: packageとhostの共通deploy gate。
-- `docs/distribution.md`: package配布、lockstep version、依存licenseの方針。
-- `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。
+文書の入口と全正本は`docs/README.md`に集約する。設計原則は`docs/architecture/principles.md`、意味構造は`docs/semantics/rdf-profile.md`、semantic write policyは`docs/semantics/authoring-profile.md`、Editor操作は`docs/editor/interactions.md`、検証手順は`docs/development/testing.md`を優先する。`docs/backlog.md`には未実装項目だけを置き、完了snapshot、過去versionの性能値、実験記録は混ぜない。
 
 バックログを完了ログにせず、細かな試行錯誤は設計文書へ残さない。
 
@@ -102,7 +84,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
    hostにNode.jsがない場合は、repositoryをmountしたNode.js Docker imageで同じcommandを実行する。
 4. `docker compose up -d --build`で最新sourceからlocal mockを実際に起動し、HTTP応答を確認する。
    UIまたは操作を変更した場合は、対象画面をbrowserで開き、変更操作と隣接操作、console errorを確認する。
-   Editor UIまたはtransactionを変更した場合は`docs/testing.md`に従って`npm run verify:e2e`も実行する。local browserを用意できない場合は`Dockerfile.e2e`の固定Playwright imageを使う。
+   Editor UIまたはtransactionを変更した場合は`docs/development/testing.md`に従って`npm run verify:e2e`も実行する。local browserを用意できない場合は`Dockerfile.e2e`の固定Playwright imageを使う。
 5. `git status`とdiffを確認し、今回の変更だけをcommitする。ユーザーの未commit変更や無関係な変更を混ぜない。
 6. 通常のpushを現在のbranchへ行い、remoteへ反映されたこととworktreeの状態を確認する。
 

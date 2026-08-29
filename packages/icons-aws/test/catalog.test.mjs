@@ -32,7 +32,7 @@ const PACKAGE_ROOT = new URL("../", import.meta.url);
 const CATALOG_EXTENSION = "urn:iriograph:extension:vendor-icon-catalog:1";
 
 test("immutable catalog identity and metadata-only distribution are fixed", async () => {
-  assert.equal(AWS_ICON_PACKAGE_VERSION, "0.11.0");
+  assert.equal(AWS_ICON_PACKAGE_VERSION, "0.11.1");
   assert.equal(AWS_ICON_VENDOR_DISTRIBUTION, "2026-Q3");
   assert.equal(AWS_ICON_CATALOG_ID, "urn:iriograph:catalog:vendor:aws:architecture-icons");
   assert.equal(AWS_ICON_CATALOG_VERSION, "2026-q3");

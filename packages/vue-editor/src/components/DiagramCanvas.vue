@@ -63,17 +63,17 @@ import {
   type EditableEdgeRouting,
   type EdgeCurveControlHandle,
   type EdgeRoutingUpdate,
-} from "../edge-routing";
+} from "../canvas/edge-routing";
 import {
   moveSceneNavigatorFocus,
   restoreSceneNavigatorFocus,
   sceneNavigatorItems,
   type SceneNavigatorItem,
-} from "../scene-navigation";
+} from "../navigation/scene-navigation";
 import {
   keyboardArrowMovement,
   resolveCanvasKeyboardCommand,
-} from "../keyboard-commands";
+} from "../navigation/keyboard-commands";
 import {
   diagramContentBounds,
   diagramWorkAreaBounds,
@@ -86,7 +86,7 @@ import {
   type DiagramViewportMetrics,
   type DiagramViewportState,
   type DiagramWorkAreaBounds,
-} from "../viewport";
+} from "../navigation/viewport";
 import {
   normalizeDiagramSnapSettings,
   resizeGeometryElement,
@@ -98,21 +98,21 @@ import {
   type GeometryChange,
   type GeometryElement,
   type ResizeHandle,
-} from "../selection";
+} from "../canvas/selection";
 import type {
   DiagramContextMenuRequest,
   DiagramContextTargetKind,
-} from "../context-actions";
+} from "../inspector/context-actions";
 import {
   semanticTextLabel,
   type SemanticDisplayMetadata,
-} from "../semantic-metadata";
+} from "../authoring/semantic-metadata";
 import {
   constrainIconPresentationResize,
   constrainMembershipRegionMovement,
-} from "../region-membership-constraints";
-import type { CanvasDragMode, CollapsedGroupSummary } from "../view-session";
-import type { DiagramNodeTypeTagPresentation } from "../type-system";
+} from "../canvas/region-membership-constraints";
+import type { CanvasDragMode, CollapsedGroupSummary } from "../document/view-session";
+import type { DiagramNodeTypeTagPresentation } from "../authoring/type-system";
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;

@@ -8,7 +8,7 @@ request into ELK's graph model.
 ## Install
 
 ```sh
-npm install @iriograph/core@0.5.0 @iriograph/layout-elk@0.5.0
+npm install --save-exact @iriograph/core @iriograph/layout-elk
 ```
 
 ## Use the bundled engine

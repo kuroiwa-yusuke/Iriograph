@@ -1,60 +1,79 @@
 # Iriograph
 
-Iriographは、意味グラフをTurtleで保持し、RDF/RDFSを基底にしたcatalog規則から編集可能な図へ投影するpackageです。
-意味の正本と表示調整を分離したまま、業務フロー、関係図、アイコンを含むリッチな図を扱います。
+Iriographは、Turtleを意味の正本として保持し、RDF/RDFSを基底にしたcatalog規則から編集可能な業務図・関係図へ投影するpackage群です。座標、色、routing、icon等の表示overlayを意味graphから分離したまま、WYSIWYG編集、検証、再利用、LLM向けのlabel-first索引を提供します。
 
-このrepositoryには、フレームワーク非依存のcore、意味検索・安全な書込wrapper、任意導入のELK layout adapter、埋め込み用Vue editor、local mock hostがあります。
+## Vueへ埋め込む
 
-## Local mock
+利用するpackageはexact versionで固定します。
 
-Node.js 22以降を利用する場合:
+```sh
+npm install --save-exact @iriograph/core @iriograph/vue-editor
+```
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+import type { IriographDocument, ProjectionRuntimeContext } from "@iriograph/core";
+import { IriographEditor } from "@iriograph/vue-editor";
+import "@iriograph/vue-editor/styles.css";
+
+const props = defineProps<{
+  initialDocument: IriographDocument;
+  projectionRuntimeContext: ProjectionRuntimeContext;
+}>();
+const document = ref(props.initialDocument);
+</script>
+
+<template>
+  <IriographEditor
+    v-model="document"
+    :runtime-context="projectionRuntimeContext"
+  />
+</template>
+```
+
+Editorはworkspace、HTTP、認証、永続化を知りません。Product hostは`v-model`のdocument、認証済みasset resolver、IRI allocator、resolved authoring profile、保存・revision conflictを注入します。
+
+## Packageを選ぶ
+
+| 用途 | Package |
+|---|---|
+| Document、projection、標準layout | `@iriograph/core` |
+| Vue WYSIWYG editor | `@iriograph/vue-editor` |
+| Turtle / JSON-LD import・export | `@iriograph/rdf-io` |
+| Label-first検索・安全なsemantic write facade | `@iriograph/semantic-access` |
+| Authoring profile解決 | `@iriograph/profile-resolver` |
+| Domain profile作成 | `@iriograph/profile-kit` |
+| ELK layered layout | `@iriograph/layout-elk` |
+| Closed presentation candidate tool | `@iriograph/presentation-tools` |
+| Semantic/presentation agent bridge | `@iriograph/agent-bridge` |
+| AWS architecture icon metadata/resolver | `@iriograph/icons-aws` |
+| Mock/product host共通gate | `@iriograph/host-conformance` |
+
+11 packageは同じversionを使うlockstep releaseです。Public exports、配布順、SemVerは[Package配布・version](./docs/integration/distribution.md)を参照してください。
+
+## Local Mock
+
+Node.js 22以降では次を実行します。
 
 ```sh
 npm install
 npm run dev
 ```
 
-Dockerを利用する場合:
+Dockerでは次を実行し、`http://localhost:5173`を開きます。
 
 ```sh
-docker compose up --build
+docker compose up -d --build
 ```
 
-ブラウザで `http://localhost:5173` を開きます。mock hostは
-`apps/mock/public/workspace`にある実際の`.iriograph`と画像assetをtree表示し、
-編集内容はbrowserのpath別working copyへ保存します。初期ファイルは、表示座標を写経せず
-semantic Turtleと空のview overlayから自動配置するピザ注文・配送フローです。検証一式は次で実行できます。
+Mockは`apps/mock/public/workspace`の`.iriograph`と画像assetをtree表示し、browserのpath別working copyへ保存します。検証は`npm run verify`、Editor/transaction変更時は`npm run verify:e2e`です。
 
-```sh
-npm run verify
-```
+## Documentation and status
 
-## Package境界
+- [Documentation map](./docs/README.md)
+- [設計原則](./docs/architecture/principles.md)
+- [公開契約](./docs/architecture/public-contracts.md)
+- [バックログ](./docs/backlog.md)
 
-- `@iriograph/core`: document model、Turtle parse、catalog投影、actor別controlled source write、検証、display reconciliation、内部のsemantic command prepare/apply
-- `@iriograph/semantic-access`: label/comment検索、describe・近傍/subgraph、revision alias、Core commandへの安全なwrite bridge
-- `@iriograph/layout-elk`: compound graph、port、直交routingを扱う任意導入のELK Layered adapter。Worker engineをhostから注入可能
-- `@iriograph/vue-editor`: 表示overlayと意味グラフを分離し、Canvas選択中心の意味編集と右Inspector内の直接確定ビュー編集を提供する埋め込みVue component
-- `@iriograph/mock`: localStorage、workspace asset、static authoring context/IRI allocatorを接続したlocal host例
-
-`@iriograph/vue-editor`はworkspace、HTTP、認証、永続化を知りません。hostは`v-model`でdocumentを受け取り、`save` eventを任意の保存APIへ接続します。
-
-## Package release
-
-4 packageはlockstep versionでAWS CodeArtifactへ公開します。公開処理は
-`@iriograph/core`、`@iriograph/semantic-access`、`@iriograph/layout-elk`、`@iriograph/vue-editor`の順に、
-CodeArtifact上のexact versionを確認し、既公開packageを変更せず未公開packageだけをpublishします。
-部分成功後も同じworkflowを安全に再実行できます。Trigger、version検証、配布物検証を含む方針は
-[Package配布とversion方針](./docs/distribution.md)を参照してください。
-
-全packageの公開確認が成功すると、そのcommitへ不変のlightweight tag
-`packages-published-v<version>`が作られます。GitHub Actionsの閲覧権限に依存せず、例えば
-`git ls-remote --refs origin refs/tags/packages-published-v0.1.0`で公開成功と対象commitを確認できます。
-同じversionのtagが別commitへ移動されることはありません。
-失敗時は`packages-publish-failure-<commit>`と`packages-publish-diagnostic-<commit>`から、
-credentialを含めずverify/publishのどちらで停止したかに加え、`failedStage`からinstall、version check、
-各workspace test、typecheck、build、tarball consumer、AWS認証、CodeArtifact login、scope設定、publishの
-どの段階だったかを確認できます。Verify失敗時だけは、redact・上限付きの`verifyLogTailBase64`から
-失敗段階の末尾も確認できます。
-
-詳細は[設計文書](./docs/README.md)、[RDF/RDFSベースプロファイル仕様](./docs/rdf-rdfs-profile.md)、[Semantic Authoring Profile仕様](./docs/authoring-profile.md)、[layout最適化方針](./docs/layout-optimization.md)、[バックログ](./docs/backlog.md)を参照してください。
+現時点の配布先は認証付きAWS CodeArtifactです。各package metadataは`UNLICENSED`で、再配布条件を決めるLICENSE本文はまだありません。そのため、npmjs等への一般公開はlicense決定後に行います。

@@ -6,7 +6,7 @@ import {
   openTargetContextMenu,
   targetContextMenuEntries,
   type TargetContextSubject,
-} from "../target-context-menu";
+} from "../inspector/target-context-menu";
 import TargetContextMenu from "./TargetContextMenu.vue";
 
 describe("TargetContextMenu", () => {

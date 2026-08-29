@@ -121,17 +121,17 @@ import {
   type AuthoringStructureChoice,
   type EditorAuthoringDraft,
   structureKey,
-} from "../authoring-draft";
+} from "../authoring/authoring-draft";
 import {
   containmentPresentationTranslation,
   findContainmentConsistencyWarnings,
   type ContainmentConsistencyWarning,
-} from "../containment-consistency";
+} from "../canvas/containment-consistency";
 import {
   AssetSceneSession,
   normalizePickedAssetRef,
   type AssetPicker,
-} from "../asset-session";
+} from "../assets/asset-session";
 import {
   appendEdgeCurveKnot,
   appendEdgeWaypoint,
@@ -141,19 +141,19 @@ import {
   routingWithCurve,
   routingWithEndpointAnchor,
   type EdgeRoutingUpdate,
-} from "../edge-routing";
+} from "../canvas/edge-routing";
 import {
   normalizeDiagramZoom,
   type DiagramCanvasNavigationApi,
   type IriographEditorNavigationApi,
-} from "../viewport";
+} from "../navigation/viewport";
 import {
   createDiagramViewSession,
   sceneWithCollapsedGroups,
   sceneWithTemporaryHiddenElements,
   type CanvasDragMode,
   type DiagramViewSession,
-} from "../view-session";
+} from "../document/view-session";
 import {
   alignSelection,
   distributeSelection,
@@ -171,8 +171,8 @@ import {
   type GeometryElement,
   type GeometryChange,
   type IriographEditorSelectionApi,
-} from "../selection";
-import type { DiagramContextMenuRequest } from "../context-actions";
+} from "../canvas/selection";
+import type { DiagramContextMenuRequest } from "../inspector/context-actions";
 import {
   createStructuredAuthoringFlow,
   reduceStructuredAuthoringFlow,
@@ -181,49 +181,49 @@ import {
   type StructuredAuthoringFlowEffect,
   type StructuredAuthoringFlowEvent,
   type StructuredAuthoringFlowState,
-} from "../structured-authoring-flow";
+} from "../authoring/structured-authoring-flow";
 import {
   openTargetContextMenu,
   targetContextMenuEntries,
   type TargetContextDestination,
   type TargetContextMenuSession,
   type TargetContextSubject,
-} from "../target-context-menu";
-import { diagnosticGuidance } from "../diagnostic-guidance";
-import { semanticDisplayMetadata } from "../semantic-metadata";
-import { membershipOverviewForElement } from "../membership-overview";
+} from "../inspector/target-context-menu";
+import { diagnosticGuidance } from "../inspector/diagnostic-guidance";
+import { semanticDisplayMetadata } from "../authoring/semantic-metadata";
+import { membershipOverviewForElement } from "../authoring/membership-overview";
 import {
   displayInspectorSectionsFor,
   displayInspectorSectionForContextDestination,
   primaryDisplayInspectorSection,
   type DisplayInspectorSection,
-} from "../display-inspector-sections";
+} from "../inspector/display-inspector-sections";
 import {
   layoutDirectionForRef,
   layoutRefForDirection,
   standardLayoutRefForDirection,
-} from "../layout-direction";
+} from "../canvas/layout-direction";
 import {
   constrainIconPresentationResize,
   constrainMembershipRegionMovement,
   membershipRegionClassIrisAtPoint,
-} from "../region-membership-constraints";
-import { reconcilePresentationScene } from "../presentation-scene";
-import type { EditorAssetOption } from "../editor-assets";
-import type { WorkspaceLocator, WorkspaceLocatorSuggestion } from "../workspace-locator";
+} from "../canvas/region-membership-constraints";
+import { reconcilePresentationScene } from "../canvas/presentation-scene";
+import type { EditorAssetOption } from "../assets/editor-assets";
+import type { WorkspaceLocator, WorkspaceLocatorSuggestion } from "../assets/workspace-locator";
 import type {
   DocumentDuplicateHandoff,
   DocumentIdentityAllocator,
   PredicateInferencePolicy,
   StructuredAuthoringClipboard,
-} from "../editor-host-contracts";
+} from "../document/editor-host-contracts";
 import {
   deriveTypeSystem,
   type DiagramNodeTypeTagPresentation,
   type TypeSystemAction,
   type TypeSystemFocus,
   type TypeSystemShowInDiagramRequest,
-} from "../type-system";
+} from "../authoring/type-system";
 
 type Panel = "diagram" | "types" | "turtle" | "document";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;

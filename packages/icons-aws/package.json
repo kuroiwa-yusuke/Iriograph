@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/icons-aws",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Publishable metadata catalog and host-supplied resolvers for AWS Architecture Icons in Iriograph.",
   "type": "module",
   "license": "UNLICENSED",

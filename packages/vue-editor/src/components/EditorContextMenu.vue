@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from "vue";
 
-import type { EditorContextAction, EditorContextActionId } from "../context-actions";
+import type { EditorContextAction, EditorContextActionId } from "../inspector/context-actions";
 
 const props = defineProps<{
   actions: readonly EditorContextAction[];

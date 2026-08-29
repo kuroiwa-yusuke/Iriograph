@@ -9,7 +9,7 @@ const ASSET_NAMESPACE = `${ASSET_NAMESPACE_ROOT}${CATALOG_VERSION}:`;
 const TEMPLATE_NAMESPACE_ROOT = "urn:iriograph:template:vendor:aws:architecture-icons:";
 const LOCATOR_NAMESPACE_ROOT = "urn:iriograph:asset-source:vendor:aws:architecture-icons:";
 
-export const AWS_ICON_PACKAGE_VERSION = "0.11.0";
+export const AWS_ICON_PACKAGE_VERSION = "0.11.1";
 export const AWS_ICON_VENDOR_DISTRIBUTION = "2026-Q3";
 export const AWS_ICON_CATALOG_ID = CATALOG_ID;
 export const AWS_ICON_CATALOG_VERSION = CATALOG_VERSION;

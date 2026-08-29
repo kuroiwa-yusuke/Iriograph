@@ -8,7 +8,7 @@ import {
   type TypeSystemFocus,
   type TypeSystemPresentation,
   type TypeSystemShowInDiagramRequest,
-} from "../type-system";
+} from "../authoring/type-system";
 
 const props = withDefaults(defineProps<{
   presentation: TypeSystemPresentation;

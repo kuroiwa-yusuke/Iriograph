@@ -7,7 +7,7 @@ import { defineComponent, h } from "vue";
 import type { DiagramScene, ElementGeometry, Point } from "@iriograph/core";
 
 import DiagramCanvas from "./DiagramCanvas.vue";
-import type { DiagramCanvasNavigationApi } from "../viewport";
+import type { DiagramCanvasNavigationApi } from "../navigation/viewport";
 
 describe("DiagramCanvas pointer gestures", () => {
   let wrapper: VueWrapper | undefined;

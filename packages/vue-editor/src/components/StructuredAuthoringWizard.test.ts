@@ -17,7 +17,7 @@ import {
   type FlowCanvasChoice,
   type StructuredAuthoringFlowEvent,
   type StructuredAuthoringFlowState,
-} from "../structured-authoring-flow";
+} from "../authoring/structured-authoring-flow";
 import StructuredAuthoringWizard from "./StructuredAuthoringWizard.vue";
 
 const presentation: StructuredAuthoringPresentation = {

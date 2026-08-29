@@ -4,7 +4,7 @@ Iriograph documentをWYSIWYG編集する埋め込み用Vue 3 componentです。V
 dependencyです。Coreは互換性を固定するため同じIriograph releaseを直接依存します。
 
 ```sh
-npm install @iriograph/core @iriograph/vue-editor vue
+npm install --save-exact @iriograph/core @iriograph/vue-editor vue
 ```
 
 CSSは公開subpathから明示的に読み込みます。
@@ -109,7 +109,7 @@ Canvas右click、Context Menu key、Shift+F10は同じ対象別menuを開きま�
 membershipは生成しません。
 Nodeのビュー編集ではlabel/iconをCanvas内で個別dragでき、`nodeLabelOffset`/`nodeIconOffset`だけを
 sparse appearanceへ保存します。Resetとundo/redoを提供し、Turtleやnode geometryは変更しません。
-利用者操作とhostの注入責務は[Editor interaction guide](../../docs/editor-interactions.md)を参照してください。
+利用者操作とhostの注入責務は[Editor操作](../../docs/editor/interactions.md)を参照してください。
 
 ## Keyboard and accessibility
 
@@ -123,4 +123,4 @@ Key repeatはCanvas上のpreviewだけを更新し、keyup/blurで一つのprese
 Escapeはpreviewを破棄します。`input`、`textarea`、`select`、`contenteditable`、IME composition中の
 eventはCanvas/global shortcutの対象外です。`readOnly`でもfocus、selection、pan、zoom、revealは
 利用できます。ARIA、focus fallback、dialog、live statusを含む規範契約はworkspaceの
-`docs/accessibility.md`を参照してください。
+[Accessibility](../../docs/editor/accessibility.md)を参照してください。

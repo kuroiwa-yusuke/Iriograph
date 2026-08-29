@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { FlowCanvasChoice } from "../structured-authoring-flow";
+import type { FlowCanvasChoice } from "../authoring/structured-authoring-flow";
 
 export type StructuredAuthoringCanvasOption = FlowCanvasChoice & {
   label: string;
@@ -23,7 +23,7 @@ import type {
   StructuredPredicateHierarchyPresentation,
 } from "@iriograph/core";
 
-import { diagnosticGuidance } from "../diagnostic-guidance";
+import { diagnosticGuidance } from "../inspector/diagnostic-guidance";
 import {
   memberKey,
   reduceStructuredAuthoringFlow,
@@ -38,7 +38,7 @@ import {
   type StructuredAuthoringFlowEvent,
   type StructuredAuthoringFlowState,
   type StructuredAuthoringReadyDraft,
-} from "../structured-authoring-flow";
+} from "../authoring/structured-authoring-flow";
 
 const props = withDefaults(defineProps<{
   state: StructuredAuthoringFlowState;

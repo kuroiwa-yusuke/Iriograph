@@ -38,9 +38,9 @@ import TypeListPanel from "./TypeListPanel.vue";
 import {
   diagramFitZoom,
   type IriographEditorNavigationApi,
-} from "../viewport";
-import type { IriographEditorSelectionApi } from "../selection";
-import { createStaticWorkspaceLocator } from "../workspace-locator";
+} from "../navigation/viewport";
+import type { IriographEditorSelectionApi } from "../canvas/selection";
+import { createStaticWorkspaceLocator } from "../assets/workspace-locator";
 
 const NS = "urn:test:editor:";
 const TASK_CLASS = `${NS}Task`;

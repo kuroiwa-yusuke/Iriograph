@@ -12,10 +12,10 @@ import {
   emptyAuthoringDraft,
   type AuthoringChoice,
   type EditorAuthoringDraft,
-} from "../authoring-draft";
-import { diagnosticGuidance } from "../diagnostic-guidance";
-import type { MembershipOverview } from "../membership-overview";
-import type { PredicateInferencePolicy } from "../editor-host-contracts";
+} from "../authoring/authoring-draft";
+import { diagnosticGuidance } from "../inspector/diagnostic-guidance";
+import type { MembershipOverview } from "../authoring/membership-overview";
+import type { PredicateInferencePolicy } from "../document/editor-host-contracts";
 
 export type SemanticIntent = "add-element" | "add-relation" | "edit-element" | "edit-relation";
 

@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/presentation-tools",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Closed, revision-safe presentation candidate tools for Iriograph hosts.",
   "type": "module",
   "license": "UNLICENSED",
@@ -49,6 +49,6 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "@iriograph/core": "0.11.0"
+    "@iriograph/core": "0.11.1"
   }
 }
