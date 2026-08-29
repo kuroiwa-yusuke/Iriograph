@@ -33,7 +33,11 @@ import type {
 } from "./model.js";
 import { projectSemanticView } from "./projection.js";
 import { compareCodePoints } from "./rdf.js";
-import { rememberIncrementalScene } from "./scene-cache.js";
+import {
+  forgetIncrementalScene,
+  rememberIncrementalScene,
+  rememberIncrementalSceneIfAbsent,
+} from "./scene-cache.js";
 
 export type ResolvedProfileProjection = {
   catalog: ProjectionCatalogV1;
@@ -69,6 +73,33 @@ export function createProjectionRuntimeContext(
   };
 }
 
+/**
+ * Retains a successful pre-asset Scene as the incremental reconciliation
+ * baseline for this exact document/view/runtime binding. This controlled hook
+ * is intended for presentation-only reconciliation paths which do not call
+ * `buildIriographView`. Blocking or mismatched Scenes are rejected and cannot
+ * leave a stale baseline behind.
+ */
+export function retainIncrementalReconciliationScene(
+  document: IriographDocument,
+  viewId: string,
+  context: ProjectionRuntimeContext,
+  scene: DiagramScene,
+): boolean {
+  const view = document.views.find((candidate) => candidate.viewId === viewId);
+  if (
+    !view
+    || scene.viewId !== viewId
+    || !context.catalogsByProfile.has(view.profileRef)
+    || hasBlockingDiagnostics(scene.diagnostics)
+  ) {
+    forgetIncrementalScene(document, viewId, context);
+    return false;
+  }
+  rememberIncrementalScene(document, viewId, context, scene);
+  return true;
+}
+
 /** Resolves a view's profile and layout, returning a renderer-ready Scene. */
 export async function buildIriographView(
   document: IriographDocument,
@@ -78,6 +109,7 @@ export async function buildIriographView(
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
   fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>,
   newlyConstrainedElementIds?: readonly string[],
+  preservedElementIds?: readonly string[],
 ): Promise<DiagramScene> {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
   if (!view) {
@@ -117,6 +149,7 @@ export async function buildIriographView(
     fixedDerivedRoutes,
     fixedDerivedRouteChoices,
     newlyConstrainedElementIds,
+    preservedElementIds,
   );
   if (
     mode === "incremental"
@@ -124,7 +157,7 @@ export async function buildIriographView(
     && !fixedDerivedRouteChoices
     && !hasBlockingDiagnostics(scene.diagnostics)
   ) {
-    rememberIncrementalScene(document, viewId, context, scene);
+    rememberIncrementalSceneIfAbsent(document, viewId, context, scene);
   }
   return scene;
 }
@@ -177,6 +210,7 @@ export async function layoutProjectedDiagramScene(
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
   fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>,
   newlyConstrainedElementIds?: readonly string[],
+  preservedElementIds?: readonly string[],
 ): Promise<DiagramScene> {
   if (hasBlockingDiagnostics(projected.diagnostics)) {
     return emptyScene(projected.viewId, projected.diagnostics);
@@ -187,6 +221,7 @@ export async function layoutProjectedDiagramScene(
     fixedDerivedRoutes,
     fixedDerivedRouteChoices,
     newlyConstrainedElementIds,
+    preservedElementIds,
     scene: {
       elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
         elementId: element.elementId,

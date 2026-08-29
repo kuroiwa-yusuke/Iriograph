@@ -2595,7 +2595,7 @@ describe("LayoutAdapterRegistry", () => {
 
   it("new hierarchy memberだけを固定nested Group Frameの空き領域へ再配置する", async () => {
     const outer = { x: 100, y: 100, width: 800, height: 700 };
-    const inner = { x: 140, y: 170, width: 420, height: 330 };
+    const inner = { x: 140, y: 170, width: 420, height: 300 };
     const clerk = { x: 180, y: 250, width: 120, height: 60 };
     const cook = { x: 350, y: 250, width: 120, height: 60 };
     const price = { x: 1_020, y: 180, width: 120, height: 60 };
@@ -2751,11 +2751,13 @@ describe("LayoutAdapterRegistry", () => {
   });
 
   it("generated outer Group Frameは既存nested subtreeを動かさず必要量だけ拡張する", async () => {
-    const inner = { x: 140, y: 170, width: 420, height: 330 };
-    const member = { x: 180, y: 250, width: 120, height: 60 };
+    const outer = { x: 100, y: 100, width: 500, height: 420 };
+    const inner = { x: 156, y: 192, width: 388, height: 250 };
+    const member = { x: 212, y: 284, width: 120, height: 60 };
     const result = await layoutProjectedScene({
       layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
       newlyConstrainedElementIds: ["price"],
+      preservedElementIds: ["pizza-shop", "staff", "staff-member", "price"],
       scene: {
         elements: [
           {
@@ -2763,11 +2765,11 @@ describe("LayoutAdapterRegistry", () => {
             structuralKind: "container",
             groupRole: "membership",
             placement: "generated",
-            geometry: { x: 100, y: 100, width: 500, height: 420 },
+            geometry: outer,
           },
-          { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "user", geometry: inner },
-          { elementId: "staff-member", structuralKind: "node", parentElementId: "staff", placement: "user", geometry: member },
-          { elementId: "price", structuralKind: "node", parentElementId: "pizza-shop", placement: "user", geometry: { x: 900, y: 180, width: 160, height: 72 } },
+          { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "generated", geometry: inner },
+          { elementId: "staff-member", structuralKind: "node", parentElementId: "staff", placement: "generated", geometry: member },
+          { elementId: "price", structuralKind: "node", parentElementId: "pizza-shop", placement: "generated", geometry: { x: 900, y: 180, width: 160, height: 72 } },
         ],
         memberships: [
           { semanticRef: "shop-staff", containerElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
@@ -2780,13 +2782,23 @@ describe("LayoutAdapterRegistry", () => {
 
     expect(result.geometries.staff).toEqual(inner);
     expect(result.geometries["staff-member"]).toEqual(member);
+    expect(result.geometries["pizza-shop"]).toMatchObject({
+      x: outer.x,
+      y: outer.y,
+      width: outer.width,
+    });
+    expect(result.geometries["pizza-shop"]!.height).toBe(
+      result.geometries.price!.y + result.geometries.price!.height + 28 - outer.y,
+    );
     expect(isInside(result.geometries.staff!, result.geometries["pizza-shop"]!)).toBe(true);
     expect(isInside(result.geometries.price!, result.geometries["pizza-shop"]!)).toBe(true);
     expect(result.geometries["pizza-shop"]!.height).toBeGreaterThanOrEqual(420);
-    expect(result.diagnostics.some((item) => item.code.includes("outside"))).toBe(false);
+    expect(result.diagnostics.filter((item) => (
+      item.code.includes("outside") && item.elementId === "price"
+    ))).toEqual([]);
   });
 
-  it("new hierarchy memberの空きがない固定Group Frameでは既存geometryを崩さず診断する", async () => {
+  it("user Group Frameに空きがなければresize/reflowせず診断する", async () => {
     const outer = { x: 100, y: 100, width: 500, height: 420 };
     const inner = { x: 130, y: 165, width: 440, height: 325 };
     const member = { x: 170, y: 240, width: 120, height: 60 };
@@ -2794,12 +2806,13 @@ describe("LayoutAdapterRegistry", () => {
     const result = await layoutProjectedScene({
       layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
       newlyConstrainedElementIds: ["price"],
+      preservedElementIds: ["pizza-shop", "staff", "staff-member", "price"],
       scene: {
         elements: [
           { elementId: "pizza-shop", structuralKind: "container", groupRole: "membership", placement: "user", geometry: outer },
-          { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "user", geometry: inner },
-          { elementId: "staff-member", structuralKind: "node", parentElementId: "staff", placement: "user", geometry: member },
-          { elementId: "price", structuralKind: "node", parentElementId: "pizza-shop", placement: "user", geometry: price },
+          { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "generated", geometry: inner },
+          { elementId: "staff-member", structuralKind: "node", parentElementId: "staff", placement: "generated", geometry: member },
+          { elementId: "price", structuralKind: "node", parentElementId: "pizza-shop", placement: "generated", geometry: price },
         ],
         memberships: [
           { semanticRef: "shop-staff", containerElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
@@ -2813,6 +2826,10 @@ describe("LayoutAdapterRegistry", () => {
     expect(result.geometries["pizza-shop"]).toEqual(outer);
     expect(result.geometries.staff).toEqual(inner);
     expect(result.geometries["staff-member"]).toEqual(member);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "layout-new-membership-placement-unavailable",
+      elementId: "price",
+    }));
     expect(result.diagnostics).toContainEqual(expect.objectContaining({
       code: "group-member-outside",
       elementId: "price",

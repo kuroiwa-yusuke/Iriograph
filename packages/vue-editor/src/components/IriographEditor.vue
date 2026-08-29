@@ -23,6 +23,7 @@ import {
   previewPortableDocumentReplace,
   projectSemanticView,
   resolveIconContentMetrics,
+  retainIncrementalReconciliationScene,
   previewAuthoringCommands,
   previewStructuredAuthoringBatch,
   previewStructuredAuthoringRequest,
@@ -710,14 +711,7 @@ const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
   const runtime = projectionRuntimeContext.value ?? unwrapProjectionRuntimeContext(toRaw(source.runtime));
   return {
     ...source,
-    runtime: {
-      ...runtime,
-      catalogsByProfile: runtime.catalogsByProfile,
-      layouts: runtime.layouts,
-      projectionOptions: runtime.projectionOptions
-        ? toRaw(runtime.projectionOptions)
-        : undefined,
-    },
+    runtime,
     allocator: toRaw(props.resourceIriAllocator ?? source.allocator),
     semanticValidation: semanticValidationContext.value,
   };
@@ -2064,6 +2058,7 @@ async function refreshPresentationScene(): Promise<void> {
       sceneWithGeneratedGeometryBaselines(rawScene.value, document.documentId, viewId, view.overlay),
       projected,
     );
+    const reconciliationBaseline = clone(reconciled);
     const result = await assetSceneSession.enrich(
       assetRequest,
       reconciled,
@@ -2071,6 +2066,7 @@ async function refreshPresentationScene(): Promise<void> {
       withPackageDefaultIconAccess(props.assetAccess),
     );
     if (requestToken !== sceneRequestToken || !result.accepted) return;
+    retainIncrementalReconciliationScene(document, viewId, runtime, reconciliationBaseline);
     rawScene.value = result.scene;
     clearMissingSelection(scene.value);
   } catch (cause) {
@@ -6422,7 +6418,12 @@ function sceneWithGeneratedGeometryBaselines(
   const baselines = generatedGeometryBaselines.get(geometryBaselineKey(documentId, viewId));
   if (!baselines) return value;
   const apply = <T extends SceneNode | SceneContainer | SceneRegion>(element: T): T => {
-    const baseline = !overlay[element.elementId]?.geometry ? baselines[element.elementId] : undefined;
+    // A removed user geometry is the explicit "reset to automatic" transition.
+    // Generated elements may legitimately differ from this stored reset baseline
+    // and presentation-only edits must preserve their current geometry.
+    const baseline = element.placement === "user" && !overlay[element.elementId]?.geometry
+      ? baselines[element.elementId]
+      : undefined;
     return baseline ? { ...element, geometry: { ...baseline } } : element;
   };
   return {
@@ -6932,6 +6933,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <DiagramCanvas
             ref="diagramCanvas"
             :scene="renderedScene"
+            :scene-session-key="`${draft.documentId}\u0000${currentActiveViewId}`"
             :selected-element-id="selectedElementId"
             :selected-element-ids="selectedElementIds"
             :zoom="zoom"

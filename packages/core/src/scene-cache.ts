@@ -32,14 +32,7 @@ export function cachedIncrementalIriographView(
 ): DiagramScene | undefined {
   const binding = documentSceneBinding(document, viewId);
   const cached = incrementalSceneCache.get(context)?.get(binding);
-  if (
-    !cached
-    || cached.contextBinding !== runtimeSceneBinding(context)
-    || cached.catalogsByProfile !== context.catalogsByProfile
-    || cached.layouts !== context.layouts
-    || cached.projectionOptions !== context.projectionOptions
-    || cached.resolveAssetUrl !== context.projectionOptions?.resolveAssetUrl
-  ) return undefined;
+  if (!cached || !cachedSceneMatchesRuntime(cached, context)) return undefined;
   return structuredClone(cached.scene);
 }
 
@@ -71,6 +64,28 @@ export function rememberIncrementalScene(
   }
 }
 
+/** Internal build-path hook; never replaces a retained rendered baseline. */
+export function rememberIncrementalSceneIfAbsent(
+  document: IriographDocument,
+  viewId: string,
+  context: ProjectionRuntimeContext,
+  scene: DiagramScene,
+): void {
+  const binding = documentSceneBinding(document, viewId);
+  const existing = incrementalSceneCache.get(context)?.get(binding);
+  if (existing && cachedSceneMatchesRuntime(existing, context)) return;
+  rememberIncrementalScene(document, viewId, context, scene);
+}
+
+/** Removes an exact document/view binding after a caller rejects its Scene. */
+export function forgetIncrementalScene(
+  document: IriographDocument,
+  viewId: string,
+  context: ProjectionRuntimeContext,
+): void {
+  incrementalSceneCache.get(context)?.delete(documentSceneBinding(document, viewId));
+}
+
 function documentSceneBinding(document: IriographDocument, viewId: string): string {
   // Iriograph documents are serializable persistence values. A value binding
   // lets reconciliation reuse a Scene after its caller defensively cloned the
@@ -93,4 +108,15 @@ function runtimeSceneBinding(context: ProjectionRuntimeContext): string {
     // in place without trusting a stale Scene across an exact catalog revision.
     projectionOptions: context.projectionOptions ? "present" : "absent",
   });
+}
+
+function cachedSceneMatchesRuntime(
+  cached: CachedIncrementalScene,
+  context: ProjectionRuntimeContext,
+): boolean {
+  return cached.contextBinding === runtimeSceneBinding(context)
+    && cached.catalogsByProfile === context.catalogsByProfile
+    && cached.layouts === context.layouts
+    && cached.projectionOptions === context.projectionOptions
+    && cached.resolveAssetUrl === context.projectionOptions?.resolveAssetUrl;
 }

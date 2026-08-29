@@ -106,6 +106,12 @@ export type LayoutRequest = {
    */
   newlyConstrainedElementIds?: readonly string[];
   /**
+   * Transaction-local surviving elements whose reconciled geometry must not
+   * be regenerated during this semantic change, even when their persisted
+   * placement remains `generated`.
+   */
+  preservedElementIds?: readonly string[];
+  /**
    * Transaction-local renderer routes that must be reused exactly. This is
    * only valid for route-only execution and is never a portable overlay.
    */
@@ -272,7 +278,15 @@ export async function layoutProjectedScene(
   request: LayoutRequest,
   registry: LayoutAdapterRegistry,
 ): Promise<LayoutResult> {
-  const validationRequest = withNewlyConstrainedSubtreesMovable(request);
+  const expandableGroupIds = newlyConstrainedGeneratedOwnerIds(request);
+  const preservedRequest = withElementsFixed(
+    request,
+    new Set(request.preservedElementIds ?? []),
+  );
+  const validationRequest = withElementsMovable(
+    withNewlyConstrainedSubtreesMovable(preservedRequest),
+    expandableGroupIds,
+  );
   const requestDiagnostics = validateFixedDerivedRouteRequest(request);
   if (requestDiagnostics.length > 0) {
     return emptyResult(request.layoutRef, requestDiagnostics);
@@ -280,14 +294,19 @@ export async function layoutProjectedScene(
   const resolution = registry.resolve(request.layoutRef);
   if (!resolution.resolved) return emptyResult(request.layoutRef, resolution.diagnostics);
   try {
-    const result = await resolution.adapter.layout(request);
+    const result = await resolution.adapter.layout(preservedRequest);
     // `structuralCompletion` is an optimization hint, never a trust boundary.
     // Every adapter result crosses the same idempotent Group Frame completion.
     const completed = restoreFixedDerivedRoutes(
-      request,
-      completeRegionLayout(request, result, result.direction ?? "LR"),
+      preservedRequest,
+      completeRegionLayout(
+        preservedRequest,
+        result,
+        result.direction ?? "LR",
+        expandableGroupIds,
+      ),
     );
-    const normalized = normalizeGeneratedAdapterRoutes(request, completed);
+    const normalized = normalizeGeneratedAdapterRoutes(preservedRequest, completed);
     const invalid = validateAdapterResult(validationRequest, normalized);
     return invalid.length > 0
       ? emptyResult(request.layoutRef, [...normalized.diagnostics, ...invalid])
@@ -302,6 +321,29 @@ export async function layoutProjectedScene(
   }
 }
 
+function newlyConstrainedGeneratedOwnerIds(request: LayoutRequest): Set<string> {
+  const constrained = new Set(request.newlyConstrainedElementIds ?? []);
+  const elementById = new Map(request.scene.elements.map((element) => [element.elementId, element]));
+  const ownersByMember = new Map<string, string[]>();
+  for (const membership of request.scene.memberships ?? []) {
+    const ownerId = membership.regionElementId ?? membership.containerElementId;
+    const owners = ownersByMember.get(membership.memberElementId) ?? [];
+    owners.push(ownerId);
+    ownersByMember.set(membership.memberElementId, owners);
+  }
+  const result = new Set<string>();
+  const visitOwners = (memberId: string): void => {
+    for (const ownerId of ownersByMember.get(memberId) ?? []) {
+      const owner = elementById.get(ownerId);
+      if (!owner || !isGroupFrameElement(owner) || isFixed(owner) || result.has(ownerId)) continue;
+      result.add(ownerId);
+      visitOwners(ownerId);
+    }
+  };
+  for (const memberId of constrained) visitOwners(memberId);
+  return result;
+}
+
 function withNewlyConstrainedSubtreesMovable(request: LayoutRequest): LayoutRequest {
   return withElementsMovable(request, newlyConstrainedMovementIds(request));
 }
@@ -314,6 +356,19 @@ function withElementsMovable(request: LayoutRequest, movableIds: ReadonlySet<str
       ...request.scene,
       elements: request.scene.elements.map((element) => movableIds.has(element.elementId)
         ? { ...element, pinned: false, placement: "generated" }
+        : element),
+    },
+  };
+}
+
+function withElementsFixed(request: LayoutRequest, fixedIds: ReadonlySet<string>): LayoutRequest {
+  if (fixedIds.size === 0) return request;
+  return {
+    ...request,
+    scene: {
+      ...request.scene,
+      elements: request.scene.elements.map((element) => fixedIds.has(element.elementId)
+        ? { ...element, pinned: true, placement: "user" }
         : element),
     },
   };
@@ -404,6 +459,7 @@ export function completeRegionLayout(
   request: LayoutRequest,
   candidate: LayoutResult,
   direction: LayoutDirection = "LR",
+  expandableGroupIds: ReadonlySet<string> = new Set(),
 ): LayoutResult {
   const regionCandidates = request.scene.elements
     .filter((element) => element.structuralKind === "region")
@@ -419,6 +475,7 @@ export function completeRegionLayout(
     copyGeometry(geometry),
   ]));
   const diagnostics = [...candidate.diagnostics];
+  clearStaleNewMembershipDiagnostics(diagnostics, new Set(request.newlyConstrainedElementIds ?? []));
   const regionMemberships = [...(request.scene.memberships ?? [])]
     .filter((membership) => membership.regionElementId)
     .sort((left, right) => compareText(left.semanticRef, right.semanticRef));
@@ -438,6 +495,7 @@ export function completeRegionLayout(
     diagnostics,
     spacing,
     direction,
+    expandableGroupIds,
   );
 
   // Nested frames, sibling normalization and unrelated-frame separation can
@@ -447,7 +505,9 @@ export function completeRegionLayout(
   for (let pass = 0; pass < maximumPasses; pass += 1) {
     const before = copyGeometryRecord(geometries);
     for (const group of groups) {
-      if (isFixed(group)) {
+      const locallyExpandable = expandableGroupIds.has(group.elementId)
+        && locallyManagedElementIds.has(group.elementId);
+      if (isFixed(group) && !locallyExpandable) {
         if (group.geometry && !locallyManagedElementIds.has(group.elementId)) {
           geometries[group.elementId] = copyGeometry(group.geometry);
         }
@@ -458,12 +518,14 @@ export function completeRegionLayout(
         .map((membership) => geometries[membership.memberElementId])
         .filter((geometry): geometry is ElementGeometry => geometry !== undefined);
       if (members.length === 0) continue;
-      geometries[group.elementId] = completeGeneratedGroupGeometry(
-        geometries[group.elementId],
-        members,
-        group.size ?? group.geometry ?? defaultGroupFrameSize(group),
-        spacing,
-      );
+      geometries[group.elementId] = locallyExpandable
+        ? minimallyExpandGeneratedGroupGeometry(geometries[group.elementId], members, spacing)
+        : completeGeneratedGroupGeometry(
+            geometries[group.elementId],
+            members,
+            group.size ?? group.geometry ?? defaultGroupFrameSize(group),
+            spacing,
+          );
     }
 
     const normalizedRegionIds = normalizeGeneratedRegionSiblingSpans(
@@ -551,6 +613,31 @@ export function completeRegionLayout(
   };
 }
 
+const NEW_MEMBERSHIP_REVALIDATED_DIAGNOSTIC_CODES = new Set([
+  "layout-new-membership-placement-unavailable",
+  "group-membership-intersection-empty",
+  "region-membership-intersection-empty",
+  "group-member-outside-intersection",
+  "region-member-outside-intersection",
+  "group-member-outside",
+  "region-member-outside",
+]);
+
+function clearStaleNewMembershipDiagnostics(
+  diagnostics: LayoutDiagnostic[],
+  newlyConstrainedElementIds: ReadonlySet<string>,
+): void {
+  if (newlyConstrainedElementIds.size === 0) return;
+  for (let index = diagnostics.length - 1; index >= 0; index -= 1) {
+    const diagnostic = diagnostics[index]!;
+    if (
+      diagnostic.elementId
+      && newlyConstrainedElementIds.has(diagnostic.elementId)
+      && NEW_MEMBERSHIP_REVALIDATED_DIAGNOSTIC_CODES.has(diagnostic.code)
+    ) diagnostics.splice(index, 1);
+  }
+}
+
 function placeNewlyConstrainedGroupMembers(
   request: LayoutRequest,
   groups: readonly LayoutElement[],
@@ -559,6 +646,7 @@ function placeNewlyConstrainedGroupMembers(
   diagnostics: LayoutDiagnostic[],
   spacing: LayoutSpacing,
   direction: LayoutDirection,
+  expandableGroupIds: ReadonlySet<string>,
 ): Set<string> {
   const constrainedIds = new Set(request.newlyConstrainedElementIds ?? []);
   const locallyManagedIds = new Set<string>();
@@ -644,16 +732,22 @@ function placeNewlyConstrainedGroupMembers(
       moveSubtree(memberId, candidate, movementIds);
       continue;
     }
-    if (owners.every((owner) => !isFixed(owner))) {
+    if (owners.every((owner) => expandableGroupIds.has(owner.elementId))) {
       const occupied = geometryUnion(obstacles) ?? geometryUnion(ownerContent)!;
       const nextMovementOrigin = direction === "LR"
         ? {
-            x: occupied.x,
+            x: Math.max(
+              allowed ? allowed.x + spacing.containerPadding : occupied.x,
+              occupied.x,
+            ),
             y: occupied.y + occupied.height + spacing.itemGap,
           }
         : {
             x: occupied.x + occupied.width + spacing.itemGap,
-            y: occupied.y,
+            y: Math.max(
+              allowed ? allowed.y + spacing.containerPadding : occupied.y,
+              occupied.y,
+            ),
           };
       const expandedPlacement = {
         ...member,
@@ -661,6 +755,21 @@ function placeNewlyConstrainedGroupMembers(
         y: member.y + nextMovementOrigin.y - movementBounds.y,
       };
       moveSubtree(memberId, expandedPlacement, movementIds);
+      const activateOwnerChain = (memberElementId: string): void => {
+        for (const membership of memberships) {
+          if (membership.memberElementId !== memberElementId) continue;
+          const owner = ownersForMembership(membership, groups);
+          if (!owner || !expandableGroupIds.has(owner.elementId) || locallyManagedIds.has(owner.elementId)) {
+            continue;
+          }
+          locallyManagedIds.add(owner.elementId);
+          activateOwnerChain(owner.elementId);
+        }
+      };
+      for (const owner of owners) {
+        locallyManagedIds.add(owner.elementId);
+        activateOwnerChain(owner.elementId);
+      }
       continue;
     }
     pushDiagnosticOnce(diagnostics, {
@@ -672,6 +781,13 @@ function placeNewlyConstrainedGroupMembers(
     });
   }
   return locallyManagedIds;
+}
+
+function ownersForMembership(
+  membership: LayoutMembership,
+  groups: readonly LayoutElement[],
+): LayoutElement | undefined {
+  return groups.find((group) => membershipBelongsToGroup(membership, group));
 }
 
 function firstAvailableMemberPlacement(
@@ -1432,6 +1548,29 @@ function completeGeneratedGroupGeometry(
     width: Math.max(minimum.width, current?.width ?? 0),
     height: Math.max(minimum.height, current?.height ?? 0),
   }, spacing);
+}
+
+function minimallyExpandGeneratedGroupGeometry(
+  current: ElementGeometry | undefined,
+  members: readonly ElementGeometry[],
+  spacing: LayoutSpacing,
+): ElementGeometry {
+  if (!current || !isValidGeometry(current)) {
+    return completeGeneratedGroupGeometry(current, members, { width: 0, height: 0 }, spacing);
+  }
+  const memberBounds = geometryUnion(members)!;
+  const padding = spacing.containerPadding;
+  const required = {
+    x: memberBounds.x - padding,
+    y: memberBounds.y - padding,
+    width: memberBounds.width + padding * 2,
+    height: memberBounds.height + padding * 2,
+  };
+  const left = Math.min(current.x, required.x);
+  const top = Math.min(current.y, required.y);
+  const right = Math.max(current.x + current.width, required.x + required.width);
+  const bottom = Math.max(current.y + current.height, required.y + required.height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
 function packEmptyGeneratedRegions(

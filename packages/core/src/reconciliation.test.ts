@@ -15,7 +15,11 @@ import {
   type StandardLayoutPerformanceSample,
 } from "./layout";
 import type { IriographDocument, IriographDocumentV1 } from "./model";
-import { buildIriographView, type ProjectionRuntimeContext } from "./scene";
+import {
+  buildIriographView,
+  retainIncrementalReconciliationScene,
+  type ProjectionRuntimeContext,
+} from "./scene";
 import {
   reconcileIriographDocumentViews,
   type DisplayReconciliationEvent,
@@ -77,7 +81,7 @@ describe("display reconciliation", () => {
     }));
   });
 
-  it("nested Groupへのmembership追加で料金だけを局所配置し既存user overlayを維持する", async () => {
+  it("nested Groupへのmembership追加で既存subtreeを固定しgenerated outerだけ最小拡張する", async () => {
     const previousSource = `
 @prefix : <${NS}> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -93,39 +97,58 @@ describe("display reconciliation", () => {
       "rdfs:member :staff .",
       "rdfs:member :staff, :price .",
     );
-    const outer = { x: 100, y: 100, width: 900, height: 720 };
-    const inner = { x: 140, y: 170, width: 500, height: 360 };
-    const clerk = { x: 180, y: 250, width: 164, height: 72 };
-    const cook = { x: 390, y: 250, width: 164, height: 72 };
-    const delivery = { x: 180, y: 370, width: 164, height: 72 };
-    const price = { x: 1_200, y: 220, width: 164, height: 72 };
+    const outer = { x: 100, y: 100, width: 500, height: 420 };
+    const inner = { x: 130, y: 165, width: 440, height: 325 };
+    const clerk = { x: 170, y: 240, width: 120, height: 60 };
+    const cook = { x: 330, y: 240, width: 120, height: 60 };
+    const delivery = { x: 170, y: 350, width: 120, height: 60 };
+    const price = { x: 800, y: 180, width: 164, height: 72 };
     const previous = localizedDocumentFor(previousSource);
     previous.views = [previous.views[0]!];
     previous.views[0]!.kind = "region";
-    previous.views[0]!.overlay = {
-      shop: { semanticRef: `${NS}pizza-shop`, geometry: outer, placement: "user" },
-      staff: { semanticRef: `${NS}staff`, geometry: inner, placement: "user" },
-      clerk: { semanticRef: `${NS}clerk`, geometry: clerk, placement: "user" },
-      cook: { semanticRef: `${NS}cook`, geometry: cook, placement: "user" },
-      delivery: { semanticRef: `${NS}delivery`, geometry: delivery, placement: "user" },
-      price: { semanticRef: `${NS}price`, geometry: price, placement: "user" },
-    };
+    previous.views[0]!.overlay = {};
     const candidate = structuredClone(previous);
     candidate.semantic.source = candidateSource;
 
-    const result = await reconcileIriographDocumentViews(previous, candidate, runtimeContext());
+    const context = runtimeContext();
+    const cached = await buildIriographView(previous, "main", context);
+    const geometryBySemantic = new Map([
+      [`${NS}pizza-shop`, outer],
+      [`${NS}staff`, inner],
+      [`${NS}clerk`, clerk],
+      [`${NS}cook`, cook],
+      [`${NS}delivery`, delivery],
+      [`${NS}price`, price],
+    ]);
+    for (const element of [...(cached.regions ?? []), ...cached.containers, ...cached.nodes]) {
+      const geometry = geometryBySemantic.get(element.semanticRef);
+      if (!geometry) continue;
+      element.geometry = { ...geometry };
+      element.pinned = false;
+      element.placement = "generated";
+    }
+    expect(retainIncrementalReconciliationScene(previous, "main", context, cached)).toBe(true);
+    const selectionProjection = await buildIriographView(previous, "main", context);
+    expect(selectionProjection.regions?.find((element) => element.semanticRef === `${NS}staff`)?.geometry)
+      .not.toEqual(inner);
+
+    const result = await reconcileIriographDocumentViews(previous, candidate, context);
 
     expect(result.accepted).toBe(true);
     const view = result.document.views[0]!;
-    expect(overlayFor(view.overlay, `${NS}pizza-shop`)?.geometry).toEqual(outer);
+    const expandedOuter = overlayFor(view.overlay, `${NS}pizza-shop`)!.geometry!;
+    expect(expandedOuter).toMatchObject({ x: outer.x, y: outer.y, width: outer.width });
     expect(overlayFor(view.overlay, `${NS}staff`)?.geometry).toEqual(inner);
     expect(overlayFor(view.overlay, `${NS}clerk`)?.geometry).toEqual(clerk);
     expect(overlayFor(view.overlay, `${NS}cook`)?.geometry).toEqual(cook);
     expect(overlayFor(view.overlay, `${NS}delivery`)?.geometry).toEqual(delivery);
     const movedPrice = overlayFor(view.overlay, `${NS}price`)!;
     expect(movedPrice.geometry).not.toEqual(price);
-    expect(movedPrice.placement).toBe("user");
-    expect(isInside(movedPrice.geometry!, outer)).toBe(true);
+    expect(movedPrice.placement).toBe("generated");
+    expect(expandedOuter.height).toBe(
+      movedPrice.geometry!.y + movedPrice.geometry!.height + 28 - outer.y,
+    );
+    expect(isInside(movedPrice.geometry!, expandedOuter)).toBe(true);
     expect(overlaps(movedPrice.geometry!, inner)).toBe(false);
     const scene = result.scenes.main!;
     const outerElement = scene.regions!.find((element) => element.semanticRef === `${NS}pizza-shop`)!;
@@ -138,6 +161,65 @@ describe("display reconciliation", () => {
     ]));
     expect(isInside(innerElement.geometry, outerElement.geometry)).toBe(true);
     expect(result.diagnostics.some((item) => item.code.includes("intersection-empty"))).toBe(false);
+  });
+
+  it("新規resourceの複数membershipをgenerated Groupの共通intersectionへ局所配置する", async () => {
+    const previousSource = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:left a rdf:Bag ; rdfs:label "Left" ; rdfs:member :a .
+:right a rdf:Bag ; rdfs:label "Right" ; rdfs:member :b .
+:a rdfs:label "A" .
+:b rdfs:label "B" .
+`;
+    const candidateSource = `${previousSource}
+:d rdfs:label "D" .
+:left rdfs:member :d .
+:right rdfs:member :d .
+`;
+    const previous = localizedDocumentFor(previousSource);
+    previous.views = [previous.views[0]!];
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = candidateSource;
+    const context = runtimeContext();
+    const cached = await buildIriographView(previous, "main", context);
+    const previousGeometry = new Map([
+      [`${NS}left`, { x: 100, y: 100, width: 300, height: 240 }],
+      [`${NS}right`, { x: 500, y: 100, width: 300, height: 240 }],
+      [`${NS}a`, { x: 160, y: 180, width: 120, height: 60 }],
+      [`${NS}b`, { x: 560, y: 180, width: 120, height: 60 }],
+    ]);
+    for (const element of [...cached.containers, ...(cached.regions ?? []), ...cached.nodes]) {
+      const geometry = previousGeometry.get(element.semanticRef);
+      if (!geometry) continue;
+      element.geometry = { ...geometry };
+      element.pinned = false;
+      element.placement = "generated";
+    }
+    expect(retainIncrementalReconciliationScene(previous, "main", context, cached)).toBe(true);
+
+    const result = await reconcileIriographDocumentViews(previous, candidate, context);
+
+    expect(result.accepted).toBe(true);
+    const scene = result.scenes.main!;
+    const elementBySemantic = new Map([
+      ...scene.containers,
+      ...(scene.regions ?? []),
+      ...scene.nodes,
+    ].map((element) => [element.semanticRef, element]));
+    expect(elementBySemantic.get(`${NS}a`)?.geometry).toEqual(previousGeometry.get(`${NS}a`));
+    expect(elementBySemantic.get(`${NS}b`)?.geometry).toEqual(previousGeometry.get(`${NS}b`));
+    const left = elementBySemantic.get(`${NS}left`)!;
+    const right = elementBySemantic.get(`${NS}right`)!;
+    const member = elementBySemantic.get(`${NS}d`)!;
+    expect(isInside(member.geometry, left.geometry)).toBe(true);
+    expect(isInside(member.geometry, right.geometry)).toBe(true);
+    expect(result.diagnostics.filter((item) => (
+      "elementId" in item
+      && item.elementId === member.elementId
+      && item.code.includes("outside-intersection")
+    ))).toEqual([]);
   });
 
   it("一つのviewでもlayoutを解決できなければ全documentをrollbackする", async () => {

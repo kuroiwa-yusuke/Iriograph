@@ -115,6 +115,8 @@ import type { DiagramNodeTypeTagPresentation } from "../type-system";
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;
+  /** Resets the ephemeral work area only when the owning document/view changes. */
+  sceneSessionKey?: string;
   selectedElementId?: string;
   selectedElementIds?: string[];
   zoom?: number;
@@ -254,6 +256,7 @@ const viewport = reactive<DiagramViewportMetrics>({
   height: 0,
 });
 const workArea = ref<DiagramWorkAreaBounds>(diagramWorkAreaBounds(props.scene));
+let workAreaHasSceneContent = sceneHasWorkspaceContent(props.scene);
 const viewportPanning = ref(false);
 const selectionMarquee = ref<{
   origin: Point;
@@ -508,14 +511,33 @@ watch(
 );
 
 watch(
-  () => props.scene,
-  () => {
+  [
+    () => props.scene,
+    () => props.sceneSessionKey ?? props.scene.viewId,
+  ],
+  ([nextScene, nextSessionKey], [, previousSessionKey]) => {
     // A host-driven Scene replacement invalidates the gesture snapshot. Do
     // not let a later keyup commit geometry or routing derived from stale IDs.
     if (keyboardGesture) cancelKeyboardGesture();
     else clearKeyboardPreview();
     previewNodeIconSizes.value = {};
-    replaceWorkArea(diagramWorkAreaBounds(props.scene));
+    const nextHasSceneContent = sceneHasWorkspaceContent(nextScene);
+    if (nextSessionKey !== previousSessionKey) {
+      replaceWorkArea(diagramWorkAreaBounds(nextScene));
+      workAreaHasSceneContent = nextHasSceneContent;
+    } else if (!workAreaHasSceneContent && nextHasSceneContent) {
+      replaceWorkArea(diagramWorkAreaBounds(nextScene));
+      workAreaHasSceneContent = true;
+    } else if (nextHasSceneContent) {
+      // Route completion and local semantic reconciliation can change the
+      // content bounds while every surviving geometry remains fixed. Keep the
+      // current semantic origin whenever the new content still fits inside the
+      // session workspace; grow it monotonically only when more room is needed.
+      replaceWorkArea(expandDiagramWorkAreaBounds(
+        workArea.value,
+        [diagramContentBounds(nextScene)],
+      ));
+    }
     if (props.semanticPositionPicking || props.semanticResourcePicking || props.structuredSelectionPicking) emit("semanticPickCancel");
   },
 );
@@ -3308,6 +3330,15 @@ function canvasPosition(geometry: ElementGeometry): Point {
 
 function workAreaViewBox(): string {
   return `${workArea.value.x} ${workArea.value.y} ${workArea.value.width} ${workArea.value.height}`;
+}
+
+function sceneHasWorkspaceContent(scene: DiagramScene): boolean {
+  return scene.nodes.length > 0
+    || scene.containers.length > 0
+    || (scene.regions?.length ?? 0) > 0
+    || scene.edges.length > 0
+    || (scene.memberships?.length ?? 0) > 0
+    || (scene.groupGuides?.length ?? 0) > 0;
 }
 
 function expandWorkAreaFor(changes: readonly GeometryChange[]): boolean {

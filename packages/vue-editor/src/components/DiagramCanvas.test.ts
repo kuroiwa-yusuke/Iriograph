@@ -284,6 +284,53 @@ describe("DiagramCanvas pointer gestures", () => {
     }]);
   });
 
+  it("同じdocument/viewのScene更新では既存余白内のroute変化でwork area原点を動かさない", async () => {
+    const scene = sceneFixture();
+    wrapper = mount(DiagramCanvas, {
+      props: { scene, sceneSessionKey: "document-a\u0000main" },
+    });
+    const edgeLayer = wrapper.get<SVGSVGElement>(".iriograph-edge-layer");
+    const node = wrapper.get<HTMLElement>('.iriograph-scene-node[data-element-id="node-a"]');
+    const viewBoxBefore = edgeLayer.attributes("viewBox");
+    const positionBefore = { left: node.element.style.left, top: node.element.style.top };
+
+    const routeRefresh = structuredClone(scene);
+    routeRefresh.edges[0]!.route = [
+      { x: 140, y: 70 },
+      { x: 220, y: -102.425 },
+      { x: 300, y: 190 },
+    ];
+    routeRefresh.edges[0]!.waypoints = undefined;
+    await wrapper.setProps({ scene: routeRefresh });
+
+    expect(edgeLayer.attributes("viewBox")).toBe(viewBoxBefore);
+    expect({ left: node.element.style.left, top: node.element.style.top }).toEqual(positionBefore);
+
+    await wrapper.setProps({ sceneSessionKey: "document-b\u0000main" });
+    const resetViewBox = edgeLayer.attributes("viewBox");
+    expect(resetViewBox).not.toBe(viewBoxBefore);
+    const [, resetTop] = resetViewBox!.split(" ").map(Number);
+    expect(resetTop).toBeCloseTo(-422.425);
+  });
+
+  it("寸法だけを持つempty Sceneから最初の実Sceneでwork areaを初期化する", async () => {
+    const empty = sceneFixture();
+    empty.width = 1120;
+    empty.height = 680;
+    empty.nodes = [];
+    empty.edges = [];
+    wrapper = mount(DiagramCanvas, {
+      props: { scene: empty, sceneSessionKey: "document-a\u0000main" },
+    });
+    const stage = wrapper.get<HTMLElement>(".iriograph-canvas-stage");
+    expect(stage.element.style.width).toBe("1760px");
+
+    await wrapper.setProps({ scene: sceneFixture() });
+
+    expect(stage.element.style.width).toBe("1440px");
+    expect(wrapper.get(".iriograph-edge-layer").attributes("viewBox")).toBe("-320 -320 1440 1140");
+  });
+
   it("意味編集の端子dropはnodeだけを接続先draftとして通知しview routingを変更しない", async () => {
     const scene = sceneFixture();
     wrapper = mount(DiagramCanvas, {

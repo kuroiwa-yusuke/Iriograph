@@ -171,6 +171,9 @@ export async function reconcileIriographDocumentViews(
     const newlyConstrainedElementIds = edgeOnly || !previousScene
       ? []
       : newlyConstrainedMembershipElementIds(previousScene, rawProjected, view.overlay);
+    const preservedElementIds = edgeOnly || !previousScene
+      ? []
+      : preservedReconciledElementIds(previousScene, rawProjected, view.overlay);
     if (options.observer) {
       try {
         options.observer(Object.freeze({
@@ -195,6 +198,7 @@ export async function reconcileIriographDocumentViews(
       routePlan?.fixedDerivedRoutes,
       routePlan?.fixedDerivedRouteChoices,
       newlyConstrainedElementIds,
+      preservedElementIds,
     );
     const sceneDiagnostics = relevantSceneDiagnostics(scene.diagnostics, edgeOnly, routePlan);
     diagnostics.push(...sceneDiagnostics);
@@ -209,6 +213,33 @@ export async function reconcileIriographDocumentViews(
     scenes,
     diagnostics: uniqueSortedDiagnostics(diagnostics),
   };
+}
+
+function preservedReconciledElementIds(
+  previous: DiagramScene,
+  next: {
+    nodes: ProjectedNode[];
+    containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
+  },
+  overlay: Readonly<Record<string, ViewElementOverlay>>,
+): string[] {
+  const previousKindBySemantic = new Map([
+    ...previous.nodes,
+    ...previous.containers,
+    ...(previous.regions ?? []),
+  ].map((element) => [element.semanticRef, element.structuralKind]));
+  const elementIdBySemantic = new Map(Object.entries(overlay).flatMap(([elementId, entry]) => (
+    entry.geometry ? [[entry.semanticRef, elementId] as const] : []
+  )));
+  return [...next.nodes, ...next.containers, ...(next.regions ?? [])]
+    .flatMap((element) => (
+      previousKindBySemantic.get(element.semanticRef) === element.structuralKind
+        && elementIdBySemantic.has(element.semanticRef)
+        ? [elementIdBySemantic.get(element.semanticRef)!]
+        : []
+    ))
+    .sort(compareIdentity);
 }
 
 function newlyConstrainedMembershipElementIds(
@@ -263,7 +294,9 @@ function newlyConstrainedMembershipElementIds(
       ))
     ) return [];
     const member = geometryElementsById.get(membership.memberElementId);
-    return member && previousKindBySemantic.get(memberSemanticRef) === member.structuralKind
+    if (!member) return [];
+    const previousKind = previousKindBySemantic.get(memberSemanticRef);
+    return previousKind === undefined || previousKind === member.structuralKind
       ? [effectiveElementIdBySemantic.get(memberSemanticRef) ?? membership.memberElementId]
       : [];
   }))].sort(compareIdentity);
@@ -513,9 +546,10 @@ function reconcileViewOverlay(
     nextSemanticRefs.add(element.semanticRef);
     const oldElement = previousElements.get(element.semanticRef);
     const oldEntry = previousOverlay.get(element.semanticRef);
-    if (!oldElement || !oldEntry) continue;
+    if (!oldElement) continue;
     if (
-      oldElement.structuralKind === "edge"
+      oldEntry
+      && oldElement.structuralKind === "edge"
       && element.structuralKind === "edge"
       && !sameEdgeEndpoints(
         oldElement,
@@ -555,11 +589,21 @@ function reconcileViewOverlay(
       });
     }
     const compatible = compatibleOverlay(
-      oldEntry.overlay,
+      oldEntry?.overlay ?? { semanticRef: oldElement.semanticRef },
       element,
       catalog,
       diagnostics,
     );
+    if (
+      compatible
+      && sameKind
+      && oldElement.structuralKind !== "edge"
+      && element.structuralKind !== "edge"
+    ) {
+      compatible.geometry = clone(oldElement.geometry);
+      compatible.pinned = oldElement.pinned;
+      compatible.placement = oldElement.placement;
+    }
     if (compatible) overlay[elementId] = compatible;
   }
 

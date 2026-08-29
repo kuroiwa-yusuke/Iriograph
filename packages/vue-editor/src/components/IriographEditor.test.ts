@@ -2278,6 +2278,197 @@ describe("IriographEditor transaction regression", () => {
     expect(latestDocument(wrapper).semantic.source).toContain("rdfs:member");
   });
 
+  it("sparse generated overlayへpresentation edit後にnested membershipを追加しても既存Groupを保つ", async () => {
+    const fixture = documentFixture();
+    fixture.documentId = "editor-generated-nested-membership";
+    fixture.views[0]!.kind = "region";
+    fixture.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:pizza-shop a rdf:Bag ; rdfs:label "ピザ店" ; rdfs:member :staff, :menu, :delivery .
+:staff a rdf:Bag ; rdfs:label "店員" ; rdfs:member :cook .
+:menu a rdf:Bag ; rdfs:label "メニュー" ; rdfs:member :pizza .
+:delivery a rdf:Bag ; rdfs:label "配送" ; rdfs:member :driver .
+:cook rdfs:label "調理担当" .
+:pizza rdfs:label "マルゲリータ" .
+:driver rdfs:label "配送担当" .
+:price rdfs:label "料金" .
+`;
+    wrapper = await mountEditor({ modelValue: fixture }, 4);
+    const initialScene = wrapper.getComponent(DiagramCanvas).props("scene") as DiagramScene;
+    const generatedGroupGeometry = new Map([
+      ...initialScene.containers,
+      ...(initialScene.regions ?? []),
+    ].map((element) => [element.semanticRef, { ...element.geometry }]));
+    for (const element of [
+      ...(initialScene.regions ?? []),
+      ...initialScene.containers,
+      ...initialScene.nodes,
+    ]) {
+      fixture.views[0]!.overlay[element.elementId] = {
+        semanticRef: element.semanticRef,
+        placement: "generated",
+      };
+    }
+    const initialOuter = initialScene.regions!
+      .find((element) => element.semanticRef === `${NS}pizza-shop`)!;
+    fixture.views[0]!.overlay[initialOuter.elementId] = {
+      semanticRef: initialOuter.semanticRef,
+      geometry: {
+        ...initialOuter.geometry,
+        y: initialOuter.geometry.y + 123,
+      },
+      pinned: true,
+      placement: "user",
+    };
+    wrapper.unmount();
+    wrapper = undefined;
+    document.body.innerHTML = "";
+
+    const layoutRegistry = createStandardLayoutRegistry();
+    const runtime = createProjectionRuntimeContext([{
+      profileRef: standardRdfRdfsCatalog.profileRef,
+      sourceCatalogRefs: [catalogRef(standardRdfRdfsCatalog)],
+      catalog: standardRdfRdfsCatalog,
+      ruleOrigins: [],
+    }], layoutRegistry);
+    const context = { ...testAuthoringContext(fixture), runtime };
+    const iconRef = "urn:test:workspace:icons:cook";
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      runtimeContext: runtime,
+      authoringContext: context,
+      catalog: undefined,
+      assetOptions: [{
+        assetRef: iconRef,
+        label: "調理画像",
+        path: "assets/cook.svg",
+        mediaType: "image/svg+xml",
+      }],
+      workspaceLocator: createStaticWorkspaceLocator([{
+        path: "assets/cook.svg",
+        assetRef: iconRef,
+        label: "調理画像",
+      }]),
+    }, 4);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const beforePresentation = canvas.props("scene") as DiagramScene;
+    const currentGroupGeometry = new Map([
+      ...beforePresentation.containers,
+      ...(beforePresentation.regions ?? []),
+    ].map((element) => [element.semanticRef, { ...element.geometry }]));
+    const generatedInnerRegions = beforePresentation.regions!
+      .filter((element) => element.semanticRef !== `${NS}pizza-shop`);
+    expect(generatedInnerRegions).toHaveLength(3);
+    expect(generatedInnerRegions.some((element) => (
+      JSON.stringify(generatedGroupGeometry.get(element.semanticRef))
+        !== JSON.stringify(element.geometry)
+    ))).toBe(true);
+    const cook = beforePresentation.nodes.find((element) => element.semanticRef === `${NS}cook`)!;
+
+    exposedSelectionApi(wrapper).selectElement(cook.elementId);
+    await nextTick();
+    await openAppearanceInspector(wrapper);
+    const pathInput = wrapper.get<HTMLInputElement>('input[placeholder*="../assets"]');
+    pathInput.element.value = "assets/";
+    await pathInput.trigger("input");
+    await buttonWithText(wrapper.get('[aria-label="画像pathの候補"]'), "調理画像").trigger("click");
+    await waitUntil(() => overlayFor(latestDocument(wrapper!), cook.semanticRef)?.appearance?.iconRef === iconRef);
+    await settle();
+
+    const afterPresentation = latestDocument(wrapper);
+    const afterPresentationScene = wrapper.getComponent(DiagramCanvas).props("scene") as DiagramScene;
+    for (const group of [
+      ...afterPresentationScene.containers,
+      ...(afterPresentationScene.regions ?? []),
+    ]) {
+      expect(group.geometry).toEqual(currentGroupGeometry.get(group.semanticRef));
+    }
+    for (const region of beforePresentation.regions ?? []) {
+      expect(overlayFor(afterPresentation, region.semanticRef)).toMatchObject({
+        semanticRef: region.semanticRef,
+      });
+      if (region.semanticRef !== `${NS}pizza-shop`) {
+        expect(overlayFor(afterPresentation, region.semanticRef)).toMatchObject({
+          placement: "generated",
+        });
+        expect(overlayFor(afterPresentation, region.semanticRef)?.geometry).toBeUndefined();
+      }
+    }
+    const before = afterPresentationScene;
+    const outer = before.regions!.find((element) => element.semanticRef === `${NS}pizza-shop`)!;
+    const innerRegions = before.regions!.filter((element) => element.semanticRef !== outer.semanticRef);
+    expect(innerRegions).toHaveLength(3);
+    const price = before.nodes.find((element) => element.semanticRef === `${NS}price`)!;
+    const existingInnerGeometry = new Map(innerRegions.map((element) => [
+      element.semanticRef,
+      { ...element.geometry },
+    ]));
+
+    await wrapper.setProps({
+      modelValue: afterPresentation,
+      runtimeContext: runtime,
+      authoringContext: {
+        ...context,
+        runtime,
+        documentRevision: `${context.documentRevision}:icon`,
+      },
+    });
+    await waitUntil(() => !wrapper!.text().includes("図を更新中…"));
+    const presentationUpdateCount = wrapper.emitted("update:modelValue")?.length ?? 0;
+
+    exposedSelectionApi(wrapper).selectElement(price.elementId);
+    await nextTick();
+    await buttonWithText(wrapper, "意味").trigger("click");
+    await nextTick();
+    await buttonWithText(wrapper, "関係を作る").trigger("click");
+    await buttonWithText(wrapper, "グループへ所属させる").trigger("click");
+    await buttonWithText(wrapper, "Canvasからグループを選ぶ").trigger("click");
+    const currentOuter = (wrapper.getComponent(DiagramCanvas).props("scene") as DiagramScene)
+      .regions!.find((element) => element.semanticRef === outer.semanticRef)!;
+    emitCanvas(wrapper.getComponent(DiagramCanvas), "structuredSelectionRequest", {
+      elementId: currentOuter.elementId,
+      mode: "replace",
+    });
+    await nextTick();
+    expect(wrapper.get(".structured-wizard").text()).toContain("ピザ店");
+    await buttonWithText(wrapper, "次へ").trigger("click");
+    await buttonWithText(wrapper, "次へ").trigger("click");
+    await waitUntil(() => (
+      (wrapper!.emitted("update:modelValue")?.length ?? 0) > presentationUpdateCount
+    ));
+
+    const updated = latestDocument(wrapper);
+    for (const [semanticRef, geometry] of existingInnerGeometry) {
+      expect(overlayFor(updated, semanticRef)?.geometry).toEqual(geometry);
+      expect(overlayFor(updated, semanticRef)?.placement).toBe("generated");
+    }
+    const expandedOuter = overlayFor(updated, outer.semanticRef)!;
+    expect(expandedOuter.geometry).toMatchObject({
+      x: outer.geometry.x,
+      y: outer.geometry.y,
+      width: outer.geometry.width,
+    });
+    expect(expandedOuter.placement).toBe("user");
+    const movedPrice = overlayFor(updated, price.semanticRef)!;
+    expect(movedPrice.geometry).not.toEqual(price.geometry);
+    expect(movedPrice.placement).toBe("generated");
+    expect(expandedOuter.geometry).toEqual({
+      x: outer.geometry.x,
+      y: outer.geometry.y,
+      width: Math.max(
+        outer.geometry.width,
+        movedPrice.geometry!.x + movedPrice.geometry!.width + 28 - outer.geometry.x,
+      ),
+      height: Math.max(
+        outer.geometry.height,
+        movedPrice.geometry!.y + movedPrice.geometry!.height + 28 - outer.geometry.y,
+      ),
+    });
+    expect(updated.semantic.source).toContain("rdfs:member :price");
+  });
+
   it("Turtle draftと入力中semantic formを排他にし未実行の変更を保存flushしない", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({
