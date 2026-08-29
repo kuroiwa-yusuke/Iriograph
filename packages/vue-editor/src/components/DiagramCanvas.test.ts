@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it } from "vitest";
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
@@ -25,7 +27,11 @@ describe("DiagramCanvas pointer gestures", () => {
       },
     });
     expect(wrapper.get(".iriograph-diagram-canvas").attributes("style")).toContain("--iriograph-grid-size: 12px");
+    expect(wrapper.get(".iriograph-diagram-canvas").attributes("style")).toContain("--iriograph-grid-visual-step: 12px");
+    expect(wrapper.get(".iriograph-diagram-canvas").attributes("style")).toContain("--iriograph-grid-line-width: 1px");
     expect(wrapper.get(".iriograph-canvas-grid").attributes("aria-hidden")).toBe("true");
+    const css = readFileSync("src/styles.css", "utf8");
+    expect(css).toMatch(/\.iriograph-canvas-grid\s*\{[^}]*repeating-linear-gradient\(to right,[^}]*--iriograph-grid-line-width[^}]*--iriograph-grid-visual-step[^}]*repeating-linear-gradient\(to bottom,[^}]*pointer-events:\s*none;/su);
     expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').attributes()).toMatchObject({
       "data-scene-x": "20",
       "data-scene-y": "40",
@@ -34,6 +40,31 @@ describe("DiagramCanvas pointer gestures", () => {
     });
     await wrapper.setProps({ showGrid: false });
     expect(wrapper.find(".iriograph-canvas-grid").exists()).toBe(false);
+    expect(wrapper.emitted("geometryChange")).toBeUndefined();
+  });
+
+  it("低倍率ではsnapの整数倍を使いgridを画面上8px以上・線幅1pxに保つ", async () => {
+    wrapper = mount(DiagramCanvas, {
+      props: {
+        scene: sceneFixture(),
+        zoom: .3,
+        snap: { grid: { enabled: true, size: 8 }, targets: { enabled: true, tolerance: 6 } },
+      },
+    });
+    let style = wrapper.get(".iriograph-diagram-canvas").attributes("style");
+    expect(style).toContain("--iriograph-grid-size: 8px");
+    expect(style).toContain("--iriograph-grid-visual-step: 32px");
+    expect(style).toContain("--iriograph-grid-line-width: 3.3333px");
+
+    await wrapper.setProps({ zoom: .5 });
+    style = wrapper.get(".iriograph-diagram-canvas").attributes("style");
+    expect(style).toContain("--iriograph-grid-visual-step: 16px");
+    expect(style).toContain("--iriograph-grid-line-width: 2px");
+
+    await wrapper.setProps({ zoom: 1 });
+    style = wrapper.get(".iriograph-diagram-canvas").attributes("style");
+    expect(style).toContain("--iriograph-grid-visual-step: 8px");
+    expect(style).toContain("--iriograph-grid-line-width: 1px");
     expect(wrapper.emitted("geometryChange")).toBeUndefined();
   });
 

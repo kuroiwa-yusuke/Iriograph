@@ -491,6 +491,7 @@ function emptyDocument(): IriographDocumentV1 {
         <span class="status-pill" :class="dirty ? 'warning' : 'neutral'">
           {{ dirty ? "未保存" : "保存済み" }}
         </span>
+        <span v-if="saveMessage" class="save-message" role="status">{{ saveMessage }}</span>
         <input
           ref="importInput"
           class="sr-only"
@@ -574,6 +575,7 @@ function emptyDocument(): IriographDocumentV1 {
         <IriographEditor
           ref="editor"
           v-model="document"
+          hide-header
           :runtime-context="mockProjectionRuntimeContext"
           :title="documentTitle"
           :file-path="activeFilePath"

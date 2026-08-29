@@ -203,7 +203,7 @@ import {
 } from "../region-membership-constraints";
 import { reconcilePresentationScene } from "../presentation-scene";
 import type { EditorAssetOption } from "../editor-assets";
-import type { WorkspaceLocator } from "../workspace-locator";
+import type { WorkspaceLocator, WorkspaceLocatorSuggestion } from "../workspace-locator";
 import type {
   DocumentDuplicateHandoff,
   DocumentIdentityAllocator,
@@ -373,6 +373,14 @@ const authoringBusy = ref(false);
 const pickingAsset = ref(false);
 const iconPathDraft = ref("");
 const iconPathIssue = ref("");
+const iconSelectionFeedback = ref("");
+const iconAssetSelectionBusy = ref(false);
+const lastIconSelection = ref<{
+  elementId: string;
+  assetRef: string;
+  label: string;
+  path?: string;
+}>();
 const viewCommandBusy = ref(false);
 const viewDialogMode = ref<"manage" | "add" | "configure">();
 const viewDialogParentMode = ref<"manage">();
@@ -437,6 +445,7 @@ let authoringRequestToken = 0;
 let authoringAbortController: AbortController | undefined;
 let pickerRequestToken = 0;
 let pickerAbortController: AbortController | undefined;
+let iconAssetSelectionRequestToken = 0;
 let viewCommandRequestToken = 0;
 let viewCommandAbortController: AbortController | undefined;
 let portableDocumentRequestToken = 0;
@@ -1618,12 +1627,20 @@ const assetOptions = computed<EditorAssetOption[]>(() => {
     (left.label ?? left.path ?? left.assetRef).localeCompare(right.label ?? right.path ?? right.assetRef, "ja")
   ));
 });
+const selectedIconOption = computed(() => {
+  const element = selectedElement.value;
+  if (!element || element.structuralKind === "edge" || !element.iconRef) return undefined;
+  return assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef);
+});
 const iconInputValue = computed(() => {
   const element = selectedElement.value;
   if (!element || element.structuralKind === "edge" || !element.iconRef) return "";
   if (element.structuralKind !== "node" && !element.groupFrame) return "";
-  const option = assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef);
-  return option?.path ?? "";
+  const remembered = lastIconSelection.value;
+  return selectedIconOption.value?.path
+    ?? (remembered?.elementId === element.elementId && remembered.assetRef === element.iconRef
+      ? remembered.path ?? ""
+      : "");
 });
 const workspaceLocatorRequest = computed(() => ({
   documentPath: props.filePath,
@@ -1638,8 +1655,33 @@ const workspaceAssetBreadcrumbs = computed(() => (
 const selectedIconLabel = computed(() => {
   const element = selectedElement.value;
   if (!element || element.structuralKind === "edge" || !element.iconRef) return "アイコンなし";
-  return assetOptions.value.find((candidate) => candidate.assetRef === element.iconRef)?.label
+  const remembered = lastIconSelection.value;
+  return selectedIconOption.value?.label
+    ?? (remembered?.elementId === element.elementId && remembered.assetRef === element.iconRef
+      ? remembered.label
+      : undefined)
     ?? "カタログで設定されたアイコン";
+});
+const selectedIconPresentation = computed(() => {
+  const element = selectedElement.value;
+  const remembered = lastIconSelection.value;
+  if (remembered?.elementId === selectedElementId.value && (
+    iconAssetSelectionBusy.value || element?.structuralKind !== "edge" && element?.iconRef === remembered.assetRef
+  )) return remembered;
+  if (!element || element.structuralKind === "edge" || !element.iconRef) return undefined;
+  return {
+    elementId: element.elementId,
+    assetRef: element.iconRef,
+    label: selectedIconOption.value?.label ?? "選択中の画像",
+    path: selectedIconOption.value?.path,
+  };
+});
+const selectedIconPreviewUrl = computed(() => {
+  const element = selectedElement.value;
+  const presentation = selectedIconPresentation.value;
+  return element && element.structuralKind !== "edge" && element.iconRef === presentation?.assetRef
+    ? element.iconUrl
+    : undefined;
 });
 const selectedIconMetrics = computed(() => {
   const element = selectedElement.value;
@@ -1671,6 +1713,11 @@ watch([selectedElementId, iconInputValue], () => {
   iconPathDraft.value = iconInputValue.value;
   iconPathIssue.value = "";
 }, { immediate: true });
+watch(selectedElementId, () => {
+  iconSelectionFeedback.value = "";
+  iconAssetSelectionBusy.value = false;
+  iconAssetSelectionRequestToken += 1;
+});
 const appearancePresetStyles = computed(() => activeCatalog.value?.styles ?? {});
 const appearancePrimaryElement = computed(() => {
   const ids = new Set(appearanceTargetIds.value);
@@ -3130,33 +3177,46 @@ function updateIcon(event: Event): void {
   const value = input.value.trim();
   iconPathDraft.value = value;
   iconPathIssue.value = "";
+  iconSelectionFeedback.value = "";
   if (!value) {
-    updateAppearance("iconRef", undefined);
+    clearIconSelection();
     return;
   }
   const exactRefOption = assetOptions.value.find((candidate) => candidate.assetRef === value);
   if (exactRefOption) {
     iconPathDraft.value = exactRefOption.path ?? value;
-    updateAppearance("iconRef", exactRefOption.assetRef);
+    commitIconSelection(exactRefOption.assetRef, {
+      label: exactRefOption.label ?? exactRefOption.path ?? "画像",
+      path: exactRefOption.path,
+    });
     return;
   }
   const pathOption = assetOptions.value.find((candidate) => candidate.path === value);
   const packagePathOption = pathOption?.assetRef.startsWith("urn:iriograph:icon:") ? pathOption : undefined;
   if (packagePathOption) {
     iconPathDraft.value = packagePathOption.path ?? value;
-    updateAppearance("iconRef", packagePathOption.assetRef);
+    commitIconSelection(packagePathOption.assetRef, {
+      label: packagePathOption.label ?? packagePathOption.path ?? "画像",
+      path: packagePathOption.path,
+    });
     return;
   }
   const located = props.workspaceLocator?.resolve({ documentPath: props.filePath, input: value });
   if (located?.status === "resolved") {
     const stableOption = assetOptions.value.find((candidate) => candidate.assetRef === located.assetRef);
     iconPathDraft.value = stableOption?.path ?? located.path;
-    updateAppearance("iconRef", located.assetRef);
+    commitIconSelection(located.assetRef, {
+      label: stableOption?.label ?? fileNameFromPath(located.path),
+      path: stableOption?.path ?? located.path,
+    });
     return;
   }
   if (!props.workspaceLocator && pathOption) {
     iconPathDraft.value = pathOption.path ?? value;
-    updateAppearance("iconRef", pathOption.assetRef);
+    commitIconSelection(pathOption.assetRef, {
+      label: pathOption.label ?? pathOption.path ?? "画像",
+      path: pathOption.path,
+    });
     return;
   }
   {
@@ -3171,12 +3231,80 @@ function updateIcon(event: Event): void {
 function updateIconPathDraft(event: Event): void {
   iconPathDraft.value = (event.target as HTMLInputElement).value;
   iconPathIssue.value = "";
+  iconSelectionFeedback.value = "";
 }
 
 function chooseWorkspacePath(input: string): void {
   iconPathDraft.value = input;
   iconPathIssue.value = "";
+  iconSelectionFeedback.value = "";
   void nextTick(() => document.getElementById(iconPathInputId)?.focus());
+}
+
+function chooseWorkspaceSuggestion(option: WorkspaceLocatorSuggestion): void {
+  if (option.kind === "folder") {
+    chooseWorkspacePath(option.input);
+    return;
+  }
+  if (props.readOnly) return;
+  const located = props.workspaceLocator?.resolve({ documentPath: props.filePath, input: option.input });
+  if (located?.status !== "resolved") {
+    iconPathIssue.value = located?.message ?? "画像ファイルを選択できませんでした。";
+    iconSelectionFeedback.value = "";
+    rejectInvalidAssetRef(iconPathIssue.value);
+    return;
+  }
+  const stableOption = assetOptions.value.find((candidate) => candidate.assetRef === located.assetRef);
+  iconPathDraft.value = option.input;
+  iconPathIssue.value = "";
+  commitIconSelection(located.assetRef, {
+    label: stableOption?.label ?? option.label,
+    path: option.input,
+  });
+}
+
+function commitIconSelection(
+  assetRef: string,
+  presentation: { label: string; path?: string },
+): void {
+  const element = selectedElement.value;
+  if (
+    !element
+    || element.structuralKind === "edge"
+    || element.structuralKind !== "node" && !element.groupFrame
+    || props.readOnly
+  ) return;
+  const requestToken = ++iconAssetSelectionRequestToken;
+  lastIconSelection.value = {
+    elementId: element.elementId,
+    assetRef,
+    label: presentation.label,
+    path: presentation.path,
+  };
+  iconAssetSelectionBusy.value = true;
+  iconSelectionFeedback.value = `${presentation.label}を設定しています…`;
+  const committed = updateAppearance("iconRef", assetRef);
+  if (!committed) {
+    iconAssetSelectionBusy.value = false;
+    iconSelectionFeedback.value = `${presentation.label}を選択中です。`;
+    return;
+  }
+  void committed.finally(() => {
+    if (requestToken !== iconAssetSelectionRequestToken || selectedElementId.value !== element.elementId) return;
+    iconAssetSelectionBusy.value = false;
+    iconSelectionFeedback.value = `${presentation.label}をアイコンに設定しました。`;
+  });
+}
+
+function clearIconSelection(): void {
+  if (props.readOnly) return;
+  iconAssetSelectionRequestToken += 1;
+  iconAssetSelectionBusy.value = false;
+  lastIconSelection.value = undefined;
+  iconPathDraft.value = "";
+  iconPathIssue.value = "";
+  iconSelectionFeedback.value = "アイコンを外しました。";
+  updateAppearance("iconRef", undefined);
 }
 
 async function chooseAssetIcon(): Promise<void> {
@@ -3194,6 +3322,8 @@ async function chooseAssetIcon(): Promise<void> {
   const controller = new AbortController();
   pickerAbortController = controller;
   pickingAsset.value = true;
+  iconPathIssue.value = "";
+  iconSelectionFeedback.value = "画像ファイルを参照しています…";
   const elementId = element.elementId;
   try {
     const result = await picker({
@@ -3206,16 +3336,27 @@ async function chooseAssetIcon(): Promise<void> {
       requestToken !== pickerRequestToken
       || controller.signal.aborted
       || selectedElementId.value !== elementId
-      || result.status === "cancelled"
     ) return;
+    if (result.status === "cancelled") {
+      iconSelectionFeedback.value = "画像ファイルの選択をキャンセルしました。";
+      return;
+    }
     const assetRef = normalizePickedAssetRef(result.assetRef);
     if (!assetRef) {
+      iconPathIssue.value = "画像ファイルを選択できませんでした。";
+      iconSelectionFeedback.value = "";
       rejectInvalidAssetRef("asset pickerがabsolute IRIを返しませんでした。", element.semanticRef);
       return;
     }
-    updateAppearance("iconRef", assetRef);
+    const option = assetOptions.value.find((candidate) => candidate.assetRef === assetRef);
+    commitIconSelection(assetRef, {
+      label: option?.label ?? "参照した画像",
+      path: option?.path,
+    });
   } catch (cause) {
     if (requestToken !== pickerRequestToken || controller.signal.aborted) return;
+    iconPathIssue.value = "画像ファイルを参照できませんでした。再試行してください。";
+    iconSelectionFeedback.value = "";
     applyDiagnostics.value = [{
       severity: "warning",
       code: "asset-picker-failed",
@@ -3252,7 +3393,7 @@ function cancelAssetPicker(): void {
 function updateAppearance(
   field: "templateRef" | "iconRef",
   value: string | undefined,
-): void {
+): Promise<void> | undefined {
   const element = selectedElement.value;
   if (!element || element.structuralKind === "edge") return;
   if (field === "iconRef") {
@@ -3260,7 +3401,7 @@ function updateAppearance(
       (diagnostic) => diagnostic.code !== "asset-ref-invalid",
     );
   }
-  mutateDocument((document) => {
+  return mutateDocument((document) => {
     const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
     if (!view) return;
     const current = view.overlay[element.elementId] ?? { semanticRef: element.semanticRef };
@@ -6137,12 +6278,12 @@ function showAllTemporaryHidden(): void {
 function mutateDocument(
   mutation: (document: IriographDocument) => void,
   recordHistory = true,
-): void {
+): Promise<void> | undefined {
   if (props.readOnly) return;
   const next = clone(draft.value);
   mutation(next);
   if (JSON.stringify(next) === JSON.stringify(draft.value)) return;
-  publish(next, recordHistory, "presentation");
+  return publish(next, recordHistory, "presentation");
 }
 
 function publish(
@@ -6470,6 +6611,10 @@ function compactRef(value: string): string {
   return /^v?\d+(?:\.\d+)*$/.test(last)
     ? segments.at(-2) ?? last
     : last;
+}
+
+function fileNameFromPath(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? "画像";
 }
 
 function templateDisplayLabel(template: VisualTemplate, fallbackOrdinal?: number): string {
@@ -6977,22 +7122,27 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           @intent-change="activeSemanticIntent = $event"
           @draft-state-change="semanticIntentDraftPending = $event"
         />
-        <StructuredAuthoringWizard
-          v-else-if="inspectorMode === 'semantic'"
-          :state="structuredAuthoringState"
-          :presentation="structuredPresentation"
-          :predicate-hierarchy="structuredPredicateHierarchy"
-          :canvas-options="structuredCanvasOptions"
-          :request-id="structuredRequestId"
-          :busy="authoringBusy"
-          :read-only="readOnly"
-          :disabled-reason="authoringBlockedReason"
-          :guidance="pendingAuthoringGuidance"
-          @transition="transitionStructuredAuthoring"
-          @submit="submitStructuredAuthoring"
-          @request-canvas-selection="requestStructuredCanvasSelection"
-          @focus-destination="focusStructuredDestination"
-        />
+        <template v-else-if="inspectorMode === 'semantic'">
+          <section v-if="selectedElement" class="iriograph-semantic-selection-context" aria-label="Canvasの選択">
+            <span><small>Canvasの選択</small><strong>{{ selectedElement.label }}</strong></span>
+            <small>{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択中。次の操作へまとめて引き継ぎます。` : '次の操作では、この対象を最初から選択済みにします。' }}</small>
+          </section>
+          <StructuredAuthoringWizard
+            :state="structuredAuthoringState"
+            :presentation="structuredPresentation"
+            :predicate-hierarchy="structuredPredicateHierarchy"
+            :canvas-options="structuredCanvasOptions"
+            :request-id="structuredRequestId"
+            :busy="authoringBusy"
+            :read-only="readOnly"
+            :disabled-reason="authoringBlockedReason"
+            :guidance="pendingAuthoringGuidance"
+            @transition="transitionStructuredAuthoring"
+            @submit="submitStructuredAuthoring"
+            @request-canvas-selection="requestStructuredCanvasSelection"
+            @focus-destination="focusStructuredDestination"
+          />
+        </template>
         <div v-show="inspectorMode === 'appearance'" class="iriograph-display-inspector">
         <section class="iriograph-grid-visibility">
           <label><span>Canvasグリッド</span><button type="button" :aria-pressed="showCanvasGrid" @click="showCanvasGrid = !showCanvasGrid">{{ showCanvasGrid ? '表示中' : '非表示' }}</button></label>
@@ -7068,17 +7218,20 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @toggle="handleDisplayInspectorSectionToggle('icon', $event)"
           >
             <summary :id="displayInspectorSectionDomId('icon')"><span><strong>アイコンと内容</strong><small>{{ selectedIconLabel }}・{{ selectedElement.structuralKind === 'node' ? '要素内' : '名称band内' }}の配置</small></span></summary>
-            <div class="iriograph-package-icon-choices" role="radiogroup" aria-label="同梱アイコン">
-              <button type="button" :aria-pressed="!selectedElement.iconRef" :disabled="readOnly" @click="updateAppearance('iconRef', undefined)"><span>なし</span></button>
-              <button
-                v-for="icon in packageDefaultIcons"
-                :key="icon.assetRef"
-                type="button"
-                :aria-pressed="selectedElement.iconRef === icon.assetRef"
-                :disabled="readOnly"
-                @click="updateAppearance('iconRef', icon.assetRef)"
-              ><img :src="packageIconPreviewUrl(icon.assetRef)" alt="" /><span>{{ icon.label }}</span></button>
-            </div>
+            <details class="iriograph-package-icon-disclosure">
+              <summary><span><strong>同梱アイコン</strong><small>現在: {{ selectedIconLabel }}</small></span></summary>
+              <div class="iriograph-package-icon-choices" role="radiogroup" aria-label="同梱アイコン">
+                <button type="button" :aria-pressed="!selectedElement.iconRef" :disabled="readOnly || pickingAsset" @click="clearIconSelection"><span>なし</span></button>
+                <button
+                  v-for="icon in packageDefaultIcons"
+                  :key="icon.assetRef"
+                  type="button"
+                  :aria-pressed="selectedElement.iconRef === icon.assetRef"
+                  :disabled="readOnly || pickingAsset"
+                  @click="commitIconSelection(icon.assetRef, { label: icon.label, path: `@iriograph/core/icons/${icon.name}.svg` })"
+                ><img :src="packageIconPreviewUrl(icon.assetRef)" alt="" /><span>{{ icon.label }}</span></button>
+              </div>
+            </details>
             <label :for="iconPathInputId">Workspace画像のパス</label>
             <nav v-if="workspaceAssetBreadcrumbs.length" class="iriograph-asset-breadcrumbs" aria-label="Workspace画像path">
               <button v-for="item in workspaceAssetBreadcrumbs" :key="item.path" type="button" @click="chooseWorkspacePath(item.input)">{{ item.label }}</button>
@@ -7087,9 +7240,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :id="iconPathInputId"
               :list="assetSuggestionsListId"
               :value="iconPathDraft"
-              :disabled="readOnly"
+              :disabled="readOnly || pickingAsset"
+              :aria-invalid="Boolean(iconPathIssue)"
               @input="updateIconPathDraft"
               @change="updateIcon"
+              @keydown.enter.prevent="updateIcon"
               placeholder="例: ../assets/approval-policy.svg"
               autocomplete="off"
             />
@@ -7098,10 +7253,28 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <option v-for="option in workspaceAssetSuggestions.filter((candidate) => candidate.kind === 'asset')" :key="`workspace:${option.path}`" :value="option.input">{{ option.label }}</option>
             </datalist>
             <ul v-if="workspaceAssetSuggestions.length" class="iriograph-asset-segment-suggestions" aria-label="画像pathの候補">
-              <li v-for="option in workspaceAssetSuggestions" :key="`${option.kind}:${option.path}`"><button type="button" @click="chooseWorkspacePath(option.input)"><span>{{ option.kind === 'folder' ? '▸' : '▧' }}</span>{{ option.label }}</button></li>
+              <li v-for="option in workspaceAssetSuggestions" :key="`${option.kind}:${option.path}`">
+                <button
+                  type="button"
+                  :aria-pressed="option.kind === 'asset' ? selectedIconPresentation?.assetRef === option.assetRef : undefined"
+                  :disabled="option.kind === 'asset' && (readOnly || pickingAsset)"
+                  @click="chooseWorkspaceSuggestion(option)"
+                ><span>{{ option.kind === 'folder' ? '▸' : '▧' }}</span>{{ option.label }}</button>
+              </li>
             </ul>
             <small v-if="iconPathIssue" class="iriograph-field-error" role="alert">{{ iconPathIssue }}</small>
-            <small>現在: {{ selectedIconLabel }}。./ と ../ は開いている文書から、/ はWorkspace rootから辿ります。保存するのは画像pathでなく安定した参照IDです。</small>
+            <div
+              v-if="selectedIconPresentation"
+              class="iriograph-selected-icon-summary"
+              aria-label="選択中の画像"
+              :aria-busy="iconAssetSelectionBusy"
+            >
+              <img v-if="selectedIconPreviewUrl" :src="selectedIconPreviewUrl" alt="" />
+              <span v-else class="iriograph-selected-icon-placeholder" aria-hidden="true">▧</span>
+              <span><strong>{{ selectedIconPresentation.label }}</strong><small>{{ selectedIconPresentation.path ?? "パス情報なし（参照ダイアログから選択）" }}</small></span>
+            </div>
+            <small class="iriograph-icon-selection-status" role="status" aria-live="polite">{{ iconSelectionFeedback }}</small>
+            <small>./ と ../ は開いている文書から、/ はWorkspace rootから辿ります。保存するのは画像pathでなく安定した参照IDです。</small>
             <button
               v-if="pickAsset"
               type="button"
@@ -7109,7 +7282,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || pickingAsset"
               @click="chooseAssetIcon"
             >
-              {{ pickingAsset ? "画像を選択中…" : "Workspace画像を選択" }}
+              {{ pickingAsset ? "画像ファイルを参照中…" : "画像ファイルを参照…" }}
             </button>
             <details v-if="selectedElement.structuralKind === 'node' && selectedElement.iconRef" class="iriograph-view-disclosure" open>
               <summary>アイコンのサイズと収まり</summary>

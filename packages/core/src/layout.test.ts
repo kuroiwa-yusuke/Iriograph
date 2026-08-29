@@ -2593,6 +2593,232 @@ describe("LayoutAdapterRegistry", () => {
     expect(result.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   });
 
+  it("new hierarchy memberだけを固定nested Group Frameの空き領域へ再配置する", async () => {
+    const outer = { x: 100, y: 100, width: 800, height: 700 };
+    const inner = { x: 140, y: 170, width: 420, height: 330 };
+    const clerk = { x: 180, y: 250, width: 120, height: 60 };
+    const cook = { x: 350, y: 250, width: 120, height: 60 };
+    const price = { x: 1_020, y: 180, width: 120, height: 60 };
+    const baseElements: LayoutProjectedScene["elements"] = [
+      { elementId: "pizza-shop", structuralKind: "container", groupRole: "membership", placement: "user", geometry: outer },
+      { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "user", geometry: inner },
+      { elementId: "clerk", structuralKind: "node", parentElementId: "staff", placement: "user", geometry: clerk },
+      { elementId: "cook", structuralKind: "node", parentElementId: "staff", placement: "user", geometry: cook },
+      { elementId: "price", structuralKind: "node", placement: "user", geometry: price },
+    ];
+    const baseMemberships: NonNullable<LayoutProjectedScene["memberships"]> = [
+      { semanticRef: "shop-staff", containerElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
+      { semanticRef: "staff-clerk", containerElementId: "staff", memberElementId: "clerk", role: "membership" },
+      { semanticRef: "staff-cook", containerElementId: "staff", memberElementId: "cook", role: "membership" },
+    ];
+    const before = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      scene: { elements: baseElements, memberships: baseMemberships, edges: [] },
+    }, createStandardLayoutRegistry());
+    expect(before.geometries.price).toEqual(price);
+
+    const after = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      newlyConstrainedElementIds: ["price"],
+      scene: {
+        elements: baseElements.map((element) => element.elementId === "price"
+          ? { ...element, parentElementId: "pizza-shop" }
+          : element),
+        memberships: [
+          ...baseMemberships,
+          { semanticRef: "shop-price", containerElementId: "pizza-shop", memberElementId: "price", role: "membership" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(after.geometries["pizza-shop"]).toEqual(outer);
+    expect(after.geometries.staff).toEqual(inner);
+    expect(after.geometries.clerk).toEqual(clerk);
+    expect(after.geometries.cook).toEqual(cook);
+    expect(after.geometries.price).not.toEqual(price);
+    expect(isInside(after.geometries.staff!, after.geometries["pizza-shop"]!)).toBe(true);
+    expect(isInside(after.geometries.clerk!, after.geometries.staff!)).toBe(true);
+    expect(isInside(after.geometries.cook!, after.geometries.staff!)).toBe(true);
+    expect(isInside(after.geometries.price!, after.geometries["pizza-shop"]!)).toBe(true);
+    expect(overlaps(after.geometries.price!, after.geometries.staff!)).toBe(false);
+    expect(after.diagnostics.some((item) => item.code.includes("intersection-empty"))).toBe(false);
+  });
+
+  it("region viewでもnew memberだけをouterの空き領域へ配置してnested membershipを保つ", async () => {
+    const outer = { x: 100, y: 100, width: 900, height: 720 };
+    const inner = { x: 140, y: 170, width: 500, height: 360 };
+    const clerk = { x: 180, y: 250, width: 164, height: 72 };
+    const price = { x: 1_200, y: 220, width: 164, height: 72 };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      newlyConstrainedElementIds: ["price"],
+      scene: {
+        elements: [
+          { elementId: "pizza-shop", structuralKind: "region", groupRole: "membership", placement: "user", geometry: outer },
+          { elementId: "staff", structuralKind: "region", groupRole: "membership", placement: "user", geometry: inner },
+          { elementId: "clerk", structuralKind: "node", placement: "user", geometry: clerk },
+          { elementId: "price", structuralKind: "node", placement: "user", geometry: price },
+        ],
+        memberships: [
+          { semanticRef: "shop-staff", containerElementId: "pizza-shop", regionElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
+          { semanticRef: "staff-clerk", containerElementId: "staff", regionElementId: "staff", memberElementId: "clerk", role: "membership" },
+          { semanticRef: "shop-price", containerElementId: "pizza-shop", regionElementId: "pizza-shop", memberElementId: "price", role: "membership" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries["pizza-shop"]).toEqual(outer);
+    expect(result.geometries.staff).toEqual(inner);
+    expect(result.geometries.clerk).toEqual(clerk);
+    expect(result.geometries.price).not.toEqual(price);
+    expect(isInside(result.geometries.staff!, result.geometries["pizza-shop"]!)).toBe(true);
+    expect(isInside(result.geometries.clerk!, result.geometries.staff!)).toBe(true);
+    expect(isInside(result.geometries.price!, result.geometries["pizza-shop"]!)).toBe(true);
+    expect(overlaps(result.geometries.price!, result.geometries.staff!)).toBe(false);
+    expect(result.diagnostics.some((item) => item.code.includes("intersection-empty"))).toBe(false);
+  });
+
+  it("new nested Group memberを全descendantの相対座標ごとouterへ一体移動する", async () => {
+    const outer = { x: 100, y: 100, width: 1_000, height: 760 };
+    const inner = { x: 1_240, y: 180, width: 500, height: 420 };
+    const child = { x: 1_290, y: 250, width: 360, height: 280 };
+    const grandchild = { x: 1_350, y: 340, width: 140, height: 72 };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      newlyConstrainedElementIds: ["staff"],
+      scene: {
+        elements: [
+          { elementId: "pizza-shop", structuralKind: "region", groupRole: "membership", placement: "user", geometry: outer },
+          { elementId: "staff", structuralKind: "region", groupRole: "membership", placement: "user", geometry: inner },
+          { elementId: "delivery-team", structuralKind: "region", groupRole: "membership", placement: "user", geometry: child },
+          { elementId: "courier", structuralKind: "node", placement: "user", geometry: grandchild },
+        ],
+        memberships: [
+          { semanticRef: "shop-staff", containerElementId: "pizza-shop", regionElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
+          { semanticRef: "staff-delivery", containerElementId: "staff", regionElementId: "staff", memberElementId: "delivery-team", role: "membership" },
+          { semanticRef: "delivery-courier", containerElementId: "delivery-team", regionElementId: "delivery-team", memberElementId: "courier", role: "membership" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    const movedInner = result.geometries.staff!;
+    const delta = { x: movedInner.x - inner.x, y: movedInner.y - inner.y };
+    expect(delta).not.toEqual({ x: 0, y: 0 });
+    expect(result.geometries["delivery-team"]).toEqual({
+      ...child,
+      x: child.x + delta.x,
+      y: child.y + delta.y,
+    });
+    expect(result.geometries.courier).toEqual({
+      ...grandchild,
+      x: grandchild.x + delta.x,
+      y: grandchild.y + delta.y,
+    });
+    expect(isInside(movedInner, outer)).toBe(true);
+    expect(isInside(result.geometries["delivery-team"]!, movedInner)).toBe(true);
+    expect(isInside(result.geometries.courier!, result.geometries["delivery-team"]!)).toBe(true);
+    expect(result.diagnostics.some((item) => item.code.includes("intersection-empty"))).toBe(false);
+  });
+
+  it("new multi-region memberを全所属先の共通intersectionへ局所配置する", async () => {
+    const left = { x: 40, y: 40, width: 360, height: 260 };
+    const right = { x: 220, y: 40, width: 360, height: 260 };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      newlyConstrainedElementIds: ["shared"],
+      scene: {
+        elements: [
+          { elementId: "left", structuralKind: "region", groupRole: "classification", placement: "user", geometry: left },
+          { elementId: "right", structuralKind: "region", groupRole: "classification", placement: "user", geometry: right },
+          { elementId: "shared", structuralKind: "node", placement: "user", geometry: { x: 700, y: 80, width: 80, height: 50 } },
+        ],
+        memberships: [
+          { semanticRef: "left-shared", containerElementId: "left", regionElementId: "left", memberElementId: "shared", role: "membership" },
+          { semanticRef: "right-shared", containerElementId: "right", regionElementId: "right", memberElementId: "shared", role: "membership" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries.left).toEqual(left);
+    expect(result.geometries.right).toEqual(right);
+    expect(isInside(result.geometries.shared!, left)).toBe(true);
+    expect(isInside(result.geometries.shared!, right)).toBe(true);
+    expect(result.diagnostics.some((item) => item.code.includes("intersection"))).toBe(false);
+  });
+
+  it("generated outer Group Frameは既存nested subtreeを動かさず必要量だけ拡張する", async () => {
+    const inner = { x: 140, y: 170, width: 420, height: 330 };
+    const member = { x: 180, y: 250, width: 120, height: 60 };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      newlyConstrainedElementIds: ["price"],
+      scene: {
+        elements: [
+          {
+            elementId: "pizza-shop",
+            structuralKind: "container",
+            groupRole: "membership",
+            placement: "generated",
+            geometry: { x: 100, y: 100, width: 500, height: 420 },
+          },
+          { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "user", geometry: inner },
+          { elementId: "staff-member", structuralKind: "node", parentElementId: "staff", placement: "user", geometry: member },
+          { elementId: "price", structuralKind: "node", parentElementId: "pizza-shop", placement: "user", geometry: { x: 900, y: 180, width: 160, height: 72 } },
+        ],
+        memberships: [
+          { semanticRef: "shop-staff", containerElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
+          { semanticRef: "staff-member", containerElementId: "staff", memberElementId: "staff-member", role: "membership" },
+          { semanticRef: "shop-price", containerElementId: "pizza-shop", memberElementId: "price", role: "membership" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries.staff).toEqual(inner);
+    expect(result.geometries["staff-member"]).toEqual(member);
+    expect(isInside(result.geometries.staff!, result.geometries["pizza-shop"]!)).toBe(true);
+    expect(isInside(result.geometries.price!, result.geometries["pizza-shop"]!)).toBe(true);
+    expect(result.geometries["pizza-shop"]!.height).toBeGreaterThanOrEqual(420);
+    expect(result.diagnostics.some((item) => item.code.includes("outside"))).toBe(false);
+  });
+
+  it("new hierarchy memberの空きがない固定Group Frameでは既存geometryを崩さず診断する", async () => {
+    const outer = { x: 100, y: 100, width: 500, height: 420 };
+    const inner = { x: 130, y: 165, width: 440, height: 325 };
+    const member = { x: 170, y: 240, width: 120, height: 60 };
+    const price = { x: 800, y: 180, width: 160, height: 72 };
+    const result = await layoutProjectedScene({
+      layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,
+      newlyConstrainedElementIds: ["price"],
+      scene: {
+        elements: [
+          { elementId: "pizza-shop", structuralKind: "container", groupRole: "membership", placement: "user", geometry: outer },
+          { elementId: "staff", structuralKind: "container", groupRole: "membership", parentElementId: "pizza-shop", placement: "user", geometry: inner },
+          { elementId: "staff-member", structuralKind: "node", parentElementId: "staff", placement: "user", geometry: member },
+          { elementId: "price", structuralKind: "node", parentElementId: "pizza-shop", placement: "user", geometry: price },
+        ],
+        memberships: [
+          { semanticRef: "shop-staff", containerElementId: "pizza-shop", memberElementId: "staff", role: "membership" },
+          { semanticRef: "staff-member", containerElementId: "staff", memberElementId: "staff-member", role: "membership" },
+          { semanticRef: "shop-price", containerElementId: "pizza-shop", memberElementId: "price", role: "membership" },
+        ],
+        edges: [],
+      },
+    }, createStandardLayoutRegistry());
+
+    expect(result.geometries["pizza-shop"]).toEqual(outer);
+    expect(result.geometries.staff).toEqual(inner);
+    expect(result.geometries["staff-member"]).toEqual(member);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      code: "group-member-outside",
+      elementId: "price",
+    }));
+  });
+
   it("reapplies normalized endpoint anchors after generated region expansion", async () => {
     const result = await layoutProjectedScene({
       layoutRef: STANDARD_LAYOUT_REFS.hierarchicalLr,

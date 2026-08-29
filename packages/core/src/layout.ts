@@ -99,6 +99,13 @@ export type LayoutRequest = {
   mode?: LayoutMode;
   spacing?: Partial<LayoutSpacing>;
   /**
+   * Transaction-local members that have just acquired a Group membership
+   * constraint. Their persisted user placement remains authoritative metadata,
+   * but this layout invocation may move them into the new parent without
+   * disturbing the parent's existing subtree.
+   */
+  newlyConstrainedElementIds?: readonly string[];
+  /**
    * Transaction-local renderer routes that must be reused exactly. This is
    * only valid for route-only execution and is never a portable overlay.
    */
@@ -265,6 +272,7 @@ export async function layoutProjectedScene(
   request: LayoutRequest,
   registry: LayoutAdapterRegistry,
 ): Promise<LayoutResult> {
+  const validationRequest = withNewlyConstrainedSubtreesMovable(request);
   const requestDiagnostics = validateFixedDerivedRouteRequest(request);
   if (requestDiagnostics.length > 0) {
     return emptyResult(request.layoutRef, requestDiagnostics);
@@ -280,7 +288,7 @@ export async function layoutProjectedScene(
       completeRegionLayout(request, result, result.direction ?? "LR"),
     );
     const normalized = normalizeGeneratedAdapterRoutes(request, completed);
-    const invalid = validateAdapterResult(request, normalized);
+    const invalid = validateAdapterResult(validationRequest, normalized);
     return invalid.length > 0
       ? emptyResult(request.layoutRef, [...normalized.diagnostics, ...invalid])
       : normalized;
@@ -292,6 +300,49 @@ export async function layoutProjectedScene(
       layoutRef: request.layoutRef,
     }]);
   }
+}
+
+function withNewlyConstrainedSubtreesMovable(request: LayoutRequest): LayoutRequest {
+  return withElementsMovable(request, newlyConstrainedMovementIds(request));
+}
+
+function withElementsMovable(request: LayoutRequest, movableIds: ReadonlySet<string>): LayoutRequest {
+  if (movableIds.size === 0) return request;
+  return {
+    ...request,
+    scene: {
+      ...request.scene,
+      elements: request.scene.elements.map((element) => movableIds.has(element.elementId)
+        ? { ...element, pinned: false, placement: "generated" }
+        : element),
+    },
+  };
+}
+
+function newlyConstrainedMovementIds(request: LayoutRequest): Set<string> {
+  const result = new Set(request.newlyConstrainedElementIds ?? []);
+  const childrenByOwner = new Map<string, string[]>();
+  for (const element of request.scene.elements) {
+    if (!element.parentElementId) continue;
+    const children = childrenByOwner.get(element.parentElementId) ?? [];
+    children.push(element.elementId);
+    childrenByOwner.set(element.parentElementId, children);
+  }
+  for (const membership of request.scene.memberships ?? []) {
+    const ownerId = membership.regionElementId ?? membership.containerElementId;
+    const children = childrenByOwner.get(ownerId) ?? [];
+    children.push(membership.memberElementId);
+    childrenByOwner.set(ownerId, children);
+  }
+  const visit = (ownerId: string): void => {
+    for (const childId of childrenByOwner.get(ownerId) ?? []) {
+      if (result.has(childId)) continue;
+      result.add(childId);
+      visit(childId);
+    }
+  };
+  for (const rootId of [...result]) visit(rootId);
+  return result;
 }
 
 /**
@@ -379,6 +430,16 @@ export function completeRegionLayout(
   const groups = groupCompletionOrder(groupFrameCandidates, groupMemberships);
   const spacing = { ...DEFAULT_SPACING, ...request.spacing };
 
+  const locallyManagedElementIds = placeNewlyConstrainedGroupMembers(
+    request,
+    groupFrameCandidates,
+    groupMemberships,
+    geometries,
+    diagnostics,
+    spacing,
+    direction,
+  );
+
   // Nested frames, sibling normalization and unrelated-frame separation can
   // affect one another. Reach the deterministic fixpoint before routing so a
   // second postcondition pass cannot move geometry underneath adapter routes.
@@ -387,7 +448,9 @@ export function completeRegionLayout(
     const before = copyGeometryRecord(geometries);
     for (const group of groups) {
       if (isFixed(group)) {
-        if (group.geometry) geometries[group.elementId] = copyGeometry(group.geometry);
+        if (group.geometry && !locallyManagedElementIds.has(group.elementId)) {
+          geometries[group.elementId] = copyGeometry(group.geometry);
+        }
         continue;
       }
       const members = groupMemberships
@@ -460,11 +523,14 @@ export function completeRegionLayout(
     diagnostics,
     spacing.containerPadding,
   );
-  const routes = adjustGroupFrameRouteEndpoints(
+  const routes = adjustStructuralCompletionRouteEndpoints(
     request,
     candidate.routes,
     geometries,
-    new Set(groupFrameCandidates.map((group) => group.elementId)),
+    new Set([
+      ...groupFrameCandidates.map((group) => group.elementId),
+      ...newlyConstrainedMovementIds(request),
+    ]),
   );
   const bounds = sceneBounds(
     layoutResultBoundGeometries(request, geometries),
@@ -483,6 +549,172 @@ export function completeRegionLayout(
     height: bounds.height,
     diagnostics,
   };
+}
+
+function placeNewlyConstrainedGroupMembers(
+  request: LayoutRequest,
+  groups: readonly LayoutElement[],
+  memberships: readonly LayoutMembership[],
+  geometries: Record<string, ElementGeometry>,
+  diagnostics: LayoutDiagnostic[],
+  spacing: LayoutSpacing,
+  direction: LayoutDirection,
+): Set<string> {
+  const constrainedIds = new Set(request.newlyConstrainedElementIds ?? []);
+  const locallyManagedIds = new Set<string>();
+  if (constrainedIds.size === 0) return locallyManagedIds;
+  const childrenByParent = new Map<string, string[]>();
+  for (const element of request.scene.elements) {
+    if (!element.parentElementId) continue;
+    const children = childrenByParent.get(element.parentElementId) ?? [];
+    children.push(element.elementId);
+    childrenByParent.set(element.parentElementId, children);
+  }
+  const movementElementIds = (rootId: string): Set<string> => {
+    const result = new Set([rootId]);
+    const visit = (ownerId: string): void => {
+      const children = [
+        ...(childrenByParent.get(ownerId) ?? []),
+        ...memberships
+          .filter((membership) => groups.some((group) => (
+            group.elementId === ownerId && membershipBelongsToGroup(membership, group)
+          )))
+          .map((membership) => membership.memberElementId),
+      ].sort(compareText);
+      for (const childId of children) {
+        if (result.has(childId)) continue;
+        result.add(childId);
+        visit(childId);
+      }
+    };
+    visit(rootId);
+    return result;
+  };
+  const moveSubtree = (rootId: string, next: ElementGeometry, movementIds: ReadonlySet<string>): void => {
+    const current = geometries[rootId]!;
+    const delta = { x: next.x - current.x, y: next.y - current.y };
+    for (const elementId of movementIds) {
+      const geometry = geometries[elementId];
+      if (!geometry) continue;
+      geometries[elementId] = elementId === rootId
+        ? next
+        : { ...geometry, x: geometry.x + delta.x, y: geometry.y + delta.y };
+    }
+  };
+  for (const memberId of [...constrainedIds].sort(compareText)) {
+    const member = geometries[memberId];
+    if (!member) continue;
+    const movementIds = movementElementIds(memberId);
+    for (const elementId of movementIds) locallyManagedIds.add(elementId);
+    const movementBounds = geometryUnion([...movementIds].flatMap((elementId) => {
+      const geometry = geometries[elementId];
+      return geometry ? [geometry] : [];
+    }))!;
+    const owners = groups.filter((group) => memberships.some((membership) => (
+      membership.memberElementId === memberId && membershipBelongsToGroup(membership, group)
+    )));
+    const ownerContent = owners.flatMap((owner) => {
+      const geometry = geometries[owner.elementId];
+      return geometry ? [groupFrameContentBounds(owner, geometry, spacing)] : [];
+    });
+    if (ownerContent.length !== owners.length || owners.length === 0) continue;
+    const allowed = geometryIntersection(ownerContent);
+    const obstacles = request.scene.elements.flatMap((element) => {
+      if (movementIds.has(element.elementId) || owners.some((owner) => owner.elementId === element.elementId)) {
+        return [];
+      }
+      const geometry = geometries[element.elementId];
+      return geometry && intersects(geometry, geometryUnion(ownerContent)!) ? [geometry] : [];
+    });
+    const currentIsValid = allowed
+      && containsRectangle(allowed, expandGeometry(movementBounds, spacing.containerPadding))
+      && obstacles.every((obstacle) => !intersects(movementBounds, obstacle));
+    if (currentIsValid) continue;
+    const candidate = allowed
+      ? firstAvailableMemberPlacement(
+          member,
+          movementBounds,
+          allowed,
+          obstacles,
+          spacing,
+          direction,
+        )
+      : undefined;
+    if (candidate) {
+      moveSubtree(memberId, candidate, movementIds);
+      continue;
+    }
+    if (owners.every((owner) => !isFixed(owner))) {
+      const occupied = geometryUnion(obstacles) ?? geometryUnion(ownerContent)!;
+      const nextMovementOrigin = direction === "LR"
+        ? {
+            x: occupied.x,
+            y: occupied.y + occupied.height + spacing.itemGap,
+          }
+        : {
+            x: occupied.x + occupied.width + spacing.itemGap,
+            y: occupied.y,
+          };
+      const expandedPlacement = {
+        ...member,
+        x: member.x + nextMovementOrigin.x - movementBounds.x,
+        y: member.y + nextMovementOrigin.y - movementBounds.y,
+      };
+      moveSubtree(memberId, expandedPlacement, movementIds);
+      continue;
+    }
+    pushDiagnosticOnce(diagnostics, {
+      severity: "warning",
+      code: "layout-new-membership-placement-unavailable",
+      message: `${memberId}を新しい所属先の空き領域へ配置できません。固定Group Frameを広げるか、既存要素を移動してください。`,
+      layoutRef: request.layoutRef,
+      elementId: memberId,
+    });
+  }
+  return locallyManagedIds;
+}
+
+function firstAvailableMemberPlacement(
+  member: ElementGeometry,
+  movementBounds: ElementGeometry,
+  allowed: ElementGeometry,
+  obstacles: readonly ElementGeometry[],
+  spacing: LayoutSpacing,
+  direction: LayoutDirection,
+): ElementGeometry | undefined {
+  const padding = spacing.containerPadding;
+  const xValues = [
+    allowed.x + padding,
+    ...obstacles.flatMap((obstacle) => [
+      obstacle.x + obstacle.width + spacing.itemGap,
+      obstacle.x - spacing.itemGap - movementBounds.width,
+    ]),
+  ];
+  const yValues = [
+    allowed.y + padding,
+    ...obstacles.flatMap((obstacle) => [
+      obstacle.y + obstacle.height + spacing.itemGap,
+      obstacle.y - spacing.itemGap - movementBounds.height,
+    ]),
+  ];
+  const candidates = [...new Set(xValues)].flatMap((x) => [...new Set(yValues)].map((y) => ({
+    x,
+    y,
+    width: movementBounds.width,
+    height: movementBounds.height,
+  })));
+  candidates.sort((left, right) => direction === "LR"
+    ? left.y - right.y || left.x - right.x || compareGeometry(left, right)
+    : left.x - right.x || left.y - right.y || compareGeometry(left, right));
+  const footprint = candidates.find((candidate) => (
+    containsRectangle(allowed, expandGeometry(candidate, padding))
+    && obstacles.every((obstacle) => !intersects(candidate, obstacle))
+  ));
+  return footprint ? {
+    ...member,
+    x: member.x + footprint.x - movementBounds.x,
+    y: member.y + footprint.y - movementBounds.y,
+  } : undefined;
 }
 
 function isGroupFrameElement(element: LayoutElement): boolean {
@@ -1394,11 +1626,11 @@ function containsRectangle(container: ElementGeometry, member: ElementGeometry):
     && member.y + member.height <= container.y + container.height;
 }
 
-function adjustGroupFrameRouteEndpoints(
+function adjustStructuralCompletionRouteEndpoints(
   request: LayoutRequest,
   input: Readonly<Record<string, Point[]>>,
   geometries: Readonly<Record<string, ElementGeometry>>,
-  groupFrameIds: ReadonlySet<string>,
+  adjustedElementIds: ReadonlySet<string>,
 ): Record<string, Point[]> {
   const elements = new Map(request.scene.elements.map((element) => [element.elementId, element]));
   const result = Object.fromEntries(Object.entries(input).map(([id, points]) => [
@@ -1411,18 +1643,20 @@ function adjustGroupFrameRouteEndpoints(
     if (!points || points.length < 2) continue;
     const source = geometries[edge.sourceElementId];
     const target = geometries[edge.targetElementId];
-    if (source && groupFrameIds.has(edge.sourceElementId)) {
-      const shape: EdgeEndpointShape = elements.get(edge.sourceElementId)?.structuralKind === "region"
+    if (source && adjustedElementIds.has(edge.sourceElementId)) {
+      const element = elements.get(edge.sourceElementId);
+      const shape: EdgeEndpointShape = element?.structuralKind === "region"
         ? "region"
-        : "container";
+        : element?.structuralKind === "container" ? "container" : element?.shape ?? "rectangle";
       points[0] = isValidEdgeEndpointAnchor(edge.sourceAnchor)
         ? edgeEndpointAnchorPoint(source, shape, edge.sourceAnchor)
         : rectangleBoundaryPoint(source, points[1]!);
     }
-    if (target && groupFrameIds.has(edge.targetElementId)) {
-      const shape: EdgeEndpointShape = elements.get(edge.targetElementId)?.structuralKind === "region"
+    if (target && adjustedElementIds.has(edge.targetElementId)) {
+      const element = elements.get(edge.targetElementId);
+      const shape: EdgeEndpointShape = element?.structuralKind === "region"
         ? "region"
-        : "container";
+        : element?.structuralKind === "container" ? "container" : element?.shape ?? "rectangle";
       points[points.length - 1] = isValidEdgeEndpointAnchor(edge.targetAnchor)
         ? edgeEndpointAnchorPoint(target, shape, edge.targetAnchor)
         : rectangleBoundaryPoint(target, points.at(-2)!);

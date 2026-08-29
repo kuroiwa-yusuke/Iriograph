@@ -21,6 +21,8 @@
 3. `要素を変更する`
 4. `関係を変更する`
 
+Canvasに選択がある場合も4入口は増やしませんが、その直上に現在の名前と選択件数を短く表示し、次の操作へ選択済み対象として引き継がれることを示します。これにより初期blurの単純さを保ったまま、右clickを知らない利用者にもCanvas選択と意味操作のつながりを説明します。
+
 入口の後は一段に一つの判断だけを表示します。`新しい要素を作る`では最初にpreview付きの`要素` / `グループ`を選び、要素ならprofileが許可する種類を一件以上選んでから名前、グループなら包含・順序付き・候補等の業務グループから一つ選んでから名前へ進みます。Classの作成はこのflowへ混ぜず`型一覧`から行います。`要素を変更する`と`関係を変更する`は対象をCanvasから選び、対象に適用できる操作だけを次段に表示します。前段で選んだ種類、predicate、resource、Scene provenanceにより次段の候補を絞ります。通常UIとAdvanced DOMにIRI、`rdf:type`、`rdf:_1`、内部command名、capability patchを表示・入力させません。Presentationはopaque option/statement IDを使い、完全IRIとexact statementはHost/Core内部transaction・監査logとeditable sourceに保持します。
 
 Resource、region、container、Seqを一つ選択した初期概要には、`属する領域`と`含む要素`を
@@ -166,7 +168,7 @@ Edgeを選択して`ビュー`の`線の表示`を開くと、最初に経路形
 
 Template、icon、style、geometry等のdisplay項目は、右Inspectorの`ビュー`内で編集します。Canvas外のpopoverや別の「適用」確認は使いません。Checkbox、select、preset、resetは操作時に一つのpresentation transactionとして直接確定します。Color、range、numberは`input`中だけ一時Sceneへpreviewし、`change`で変更前後を一つのpresentation history itemとして確定します。Inline editorの`閉じる`は既に確定した変更を取り消さずsectionだけを畳み、確定前のsession previewだけを破棄します。同じpointer gestureや連続入力をkey repeatごとに複数のundo itemへ分割しません。
 
-Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Template/shapeはIRI文字列のselectでなく、実shape・style・iconの小previewから選びます。Workspace assetはhost pickerがabsolute asset IRIだけを返すか、hostがmetadata-onlyのworkspace locatorを注入します。Locatorは現在のdocument pathと入力segmentから候補とbreadcrumbを返し、workspace-root相対、`/`始まりのroot絶対、`./` / `../`のdocument相対を解決します。利用者はpathをsegment単位で辿れますが、Editorは最終解決した安定`assetRef`だけを保存します。Assetまたはdocumentをrenameした場合、hostは同じ`assetRef`へ新しいpathと取得先を対応付け、既存overlayを変更しません。Workspace外へのescape、folder、曖昧な同一path、未解決pathはinlineに拒否し、URL、認証情報、画像bytes、手入力されたIRIはdocumentへ保存しません。
+Catalogから再生成できるappearanceはportable documentへ複製しません。ユーザーが選んだtemplate/icon等だけをoverlay overrideとして保持し、「既定へ戻す」でoverrideを除去します。Template/shapeはIRI文字列のselectでなく、実shape・style・iconの小previewから選びます。同梱iconが多い場合は検索または折り畳みで段階表示し、Workspace画像の入口を長い一覧の末尾へ隠しません。Workspace assetはhost pickerがabsolute asset IRIだけを返すか、hostがmetadata-onlyのworkspace locatorを注入します。Locatorは現在のdocument pathと入力segmentから候補とbreadcrumbを返し、workspace-root相対、`/`始まりのroot絶対、`./` / `../`のdocument相対を解決します。Folder候補は次segmentへ移動するだけですが、画像候補の選択とhost pickerの選択は、その場で現在値、preview、選択済み表示を更新し、別の不明なApply操作を要求しません。利用者はpathをsegment単位で辿れますが、Editorは最終解決した安定`assetRef`だけを保存します。Assetまたはdocumentをrenameした場合、hostは同じ`assetRef`へ新しいpathと取得先を対応付け、既存overlayを変更しません。Workspace外へのescape、folder、曖昧な同一path、未解決pathはinlineに拒否し、URL、認証情報、画像bytes、手入力されたIRIはdocumentへ保存しません。
 
 Nodeの`ビュー`は少なくとも色、透明度、線、template、package同梱またはhost workspaceから選ぶicon、位置、sizeを扱います。選択中はCanvas上のlabelとiconを個別にdragでき、node中心からの相対offsetだけをsparse appearanceへ保存します。Drag中はCanvasでpreviewし、node外へ完全に失われない範囲へclampします。右Inspectorからlabel/icon位置を別々にresetでき、一gestureを一つのundo itemにし、Turtleとnode geometryは変更しません。Resize可能なnode、container、regionは四隅と四辺中央の8 handleだけをtransient interaction layerへ表示し、背面要素と重なっても操作できます。選択中のobject本体は元のsemantic層を越えません。Regionのresize制約は後述のmembershipを優先します。
 
@@ -186,7 +188,7 @@ Nodeの`ビュー`ではラベルとアイコンの相対位置に加えて、�
 
 Diamond nodeはnode box全体を回転せず、geometryと同じ未回転の座標系へbackground/border用のdiamond surfaceだけを描画します。Label、icon、drag hit area、8 resize handleはaxis-alignedのままとし、横書きは横長、縦書きは縦長の内接content boundsへ収めます。これにより長い日本語labelは内接範囲で折返し・clipされ、一文字幅への縮退やcounter-rotateによる方向反転を起こしません。Label本文はTurtle、文字方向とlabel/icon offsetはsparse appearanceという正本境界を維持し、layoutとendpoint計算はtemplateの実geometryだけを参照します。
 
-Canvasの`ビュー`tabは、薄いgridの表示/非表示toggleを持ちます。Grid間隔はsnapのsession設定と同じcanvas unitを使い、既定は8です。Zoomとscroll/panでは画面へ固定せずCanvas座標へ追従し、node、edge、region、空白Canvasのpointer/keyboard hit testを阻害しない非interactiveな背景layerに描画します。Toggleとgrid sizeはeditor session stateであり、Turtle、view overlay、portable document、presentation history、dirty stateへ保存しません。`readOnly`でも閲覧用toggleは利用できます。
+Canvasの`ビュー`tabは、薄いgridの表示/非表示toggleを持ちます。Grid間隔はsnapのsession設定と同じcanvas unitを使い、既定は8です。Zoomとscroll/panでは画面へ固定せずCanvas座標へ追従し、node、edge、region、空白Canvasのpointer/keyboard hit testを阻害しない非interactiveな背景layerに描画します。低倍率でも線がsub-pixelへ縮退して消えないよう、表示上の線幅または主要線の間隔をzoomに応じて補償できますが、snapの8 canvas unitと原点は変えません。Toggleとgrid sizeはeditor session stateであり、Turtle、view overlay、portable document、presentation history、dirty stateへ保存しません。`readOnly`でも閲覧用toggleは利用できます。
 
 Nodeをdragしてviewport端から48px以内へ近づけると、viewportはpointer方向へ段階的にpanします。これはnavigation sessionだけを更新し、node geometryは通常のdrag transaction一件としてpointerup時に確定します。
 

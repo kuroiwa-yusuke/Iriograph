@@ -285,7 +285,7 @@ trusted pathであり、hostの`AssetPolicy`を拡張・緩和しません。そ
 resolverと元のpolicyを必ず通ります。`withPackageDefaultIconAccess(hostAccess)`もhost policy objectを
 そのまま維持します。
 
-0.10.0は業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
+0.10.1は業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
 
 ## Semantic transaction
 
@@ -502,7 +502,7 @@ Resize可能なnode、container、regionは選択時に四隅と四辺中央の8
 
 標準snapは8 canvas unitのgridと、対象要素のleft/center/right、top/middle/bottom guideを使います。対象候補は距離、座標、element IDの順で決定的に解決し、target snapをgridより優先してからcontainer/Scene境界へclampします。Target toleranceの標準値は画面上6pxでzoom変換し、Altを押したdragでは一時的にsnapを無効化します。Snap設定とguide候補はsession stateで、documentやhistoryには保存しません。`readOnly`でもselectionとsnap設定の参照・変更は可能ですが、drag、keyboard move、resize、routing、整列、等間隔、undo/redoはdocumentを変更しません。
 
-Canvas gridはsnapの`gridSize`と同じcanvas unit間隔を描画し、既定値8を重複定義しません。Gridの原点とpattern offsetはCanvas座標変換から求め、zoom、scroll、panへ追従します。描画layerはhit-test対象外で、表示toggleは`ビュー`tabから変更できるsession stateです。Toggle操作は`update:modelValue`、presentation history、dirty stateを発生させず、Turtle、overlay、portable documentへ保存しません。
+Canvas gridはsnapの`gridSize`と同じcanvas unitと原点を使い、既定値8を重複定義しません。低倍率ではsnap値を変えず、その整数倍となる主要線の表示間隔を画面上8px以上にし、線幅を逆zoomで補償して画面上1pxを保ちます。Gridのpattern offsetはCanvas座標変換から求め、zoom、scroll、panへ追従します。描画layerはhit-test対象外で、表示toggleは`ビュー`tabから変更できるsession stateです。Toggle操作は`update:modelValue`、presentation history、dirty stateを発生させず、Turtle、overlay、portable documentへ保存しません。
 
 Edgeはclick/focusで個別選択し、parallel edgeとself-loopも各routeのhit areaを持ちます。選択edgeの
 ビューtabはroute modeとsource/target terminalを先に表示し、captionとendpoint anchor操作は折り畳み段階へ分けます。Anchorの正規化数値とprojection ruleは通常UIへ出しません。`straight`と`curve`ではwaypoint追加UIを表示せず、portable waypointを必ず除去します。Curveでは生の座標表を出さず、Inspectorから曲線点の追加・個別削除・automatic復帰を行います。

@@ -77,6 +77,69 @@ describe("display reconciliation", () => {
     }));
   });
 
+  it("nested Groupへのmembership追加で料金だけを局所配置し既存user overlayを維持する", async () => {
+    const previousSource = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:pizza-shop a rdf:Bag ; rdfs:label "ピザ店" ; rdfs:member :staff .
+:staff a rdf:Bag ; rdfs:label "店員" ; rdfs:member :clerk, :cook, :delivery .
+:clerk rdfs:label "店員" .
+:cook rdfs:label "調理担当" .
+:delivery rdfs:label "配達担当" .
+:price rdfs:label "料金" .
+`;
+    const candidateSource = previousSource.replace(
+      "rdfs:member :staff .",
+      "rdfs:member :staff, :price .",
+    );
+    const outer = { x: 100, y: 100, width: 900, height: 720 };
+    const inner = { x: 140, y: 170, width: 500, height: 360 };
+    const clerk = { x: 180, y: 250, width: 164, height: 72 };
+    const cook = { x: 390, y: 250, width: 164, height: 72 };
+    const delivery = { x: 180, y: 370, width: 164, height: 72 };
+    const price = { x: 1_200, y: 220, width: 164, height: 72 };
+    const previous = localizedDocumentFor(previousSource);
+    previous.views = [previous.views[0]!];
+    previous.views[0]!.kind = "region";
+    previous.views[0]!.overlay = {
+      shop: { semanticRef: `${NS}pizza-shop`, geometry: outer, placement: "user" },
+      staff: { semanticRef: `${NS}staff`, geometry: inner, placement: "user" },
+      clerk: { semanticRef: `${NS}clerk`, geometry: clerk, placement: "user" },
+      cook: { semanticRef: `${NS}cook`, geometry: cook, placement: "user" },
+      delivery: { semanticRef: `${NS}delivery`, geometry: delivery, placement: "user" },
+      price: { semanticRef: `${NS}price`, geometry: price, placement: "user" },
+    };
+    const candidate = structuredClone(previous);
+    candidate.semantic.source = candidateSource;
+
+    const result = await reconcileIriographDocumentViews(previous, candidate, runtimeContext());
+
+    expect(result.accepted).toBe(true);
+    const view = result.document.views[0]!;
+    expect(overlayFor(view.overlay, `${NS}pizza-shop`)?.geometry).toEqual(outer);
+    expect(overlayFor(view.overlay, `${NS}staff`)?.geometry).toEqual(inner);
+    expect(overlayFor(view.overlay, `${NS}clerk`)?.geometry).toEqual(clerk);
+    expect(overlayFor(view.overlay, `${NS}cook`)?.geometry).toEqual(cook);
+    expect(overlayFor(view.overlay, `${NS}delivery`)?.geometry).toEqual(delivery);
+    const movedPrice = overlayFor(view.overlay, `${NS}price`)!;
+    expect(movedPrice.geometry).not.toEqual(price);
+    expect(movedPrice.placement).toBe("user");
+    expect(isInside(movedPrice.geometry!, outer)).toBe(true);
+    expect(overlaps(movedPrice.geometry!, inner)).toBe(false);
+    const scene = result.scenes.main!;
+    const outerElement = scene.regions!.find((element) => element.semanticRef === `${NS}pizza-shop`)!;
+    const innerElement = scene.regions!.find((element) => element.semanticRef === `${NS}staff`)!;
+    expect(scene.memberships).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        containerElementId: outerElement.elementId,
+        memberElementId: innerElement.elementId,
+      }),
+    ]));
+    expect(isInside(innerElement.geometry, outerElement.geometry)).toBe(true);
+    expect(result.diagnostics.some((item) => item.code.includes("intersection-empty"))).toBe(false);
+  });
+
   it("一つのviewでもlayoutを解決できなければ全documentをrollbackする", async () => {
     const previous = documentFor(oldSource);
     const context = runtimeContext(new LayoutAdapterRegistry([
@@ -728,4 +791,24 @@ function geometryBySemantic(
       .filter((entry) => entry.geometry)
       .map((entry) => [entry.semanticRef, entry.geometry])),
   ]));
+}
+
+function isInside(
+  child: { x: number; y: number; width: number; height: number },
+  parent: { x: number; y: number; width: number; height: number },
+): boolean {
+  return child.x >= parent.x
+    && child.y >= parent.y
+    && child.x + child.width <= parent.x + parent.width
+    && child.y + child.height <= parent.y + parent.height;
+}
+
+function overlaps(
+  left: { x: number; y: number; width: number; height: number },
+  right: { x: number; y: number; width: number; height: number },
+): boolean {
+  return left.x < right.x + right.width
+    && left.x + left.width > right.x
+    && left.y < right.y + right.height
+    && left.y + left.height > right.y;
 }

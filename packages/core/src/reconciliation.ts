@@ -168,6 +168,9 @@ export async function reconcileIriographDocumentViews(
     const routePlan = edgeOnly
       ? planEdgeOnlyRoutes(previousScene!, rawProjected, view.overlay)
       : undefined;
+    const newlyConstrainedElementIds = edgeOnly || !previousScene
+      ? []
+      : newlyConstrainedMembershipElementIds(previousScene, rawProjected, view.overlay);
     if (options.observer) {
       try {
         options.observer(Object.freeze({
@@ -191,6 +194,7 @@ export async function reconcileIriographDocumentViews(
       edgeOnly ? "route-only" : "incremental",
       routePlan?.fixedDerivedRoutes,
       routePlan?.fixedDerivedRouteChoices,
+      newlyConstrainedElementIds,
     );
     const sceneDiagnostics = relevantSceneDiagnostics(scene.diagnostics, edgeOnly, routePlan);
     diagnostics.push(...sceneDiagnostics);
@@ -205,6 +209,71 @@ export async function reconcileIriographDocumentViews(
     scenes,
     diagnostics: uniqueSortedDiagnostics(diagnostics),
   };
+}
+
+function newlyConstrainedMembershipElementIds(
+  previous: DiagramScene,
+  next: {
+    nodes: ProjectedNode[];
+    containers: ProjectedContainer[];
+    regions?: ProjectedRegion[];
+    memberships?: DiagramScene["memberships"];
+  },
+  overlay: Readonly<Record<string, ViewElementOverlay>>,
+): string[] {
+  const previousSemanticByElementId = new Map([
+    ...previous.nodes,
+    ...previous.containers,
+    ...(previous.regions ?? []),
+  ].map((element) => [element.elementId, element.semanticRef]));
+  const previousKindBySemantic = new Map([
+    ...previous.nodes,
+    ...previous.containers,
+    ...(previous.regions ?? []),
+  ].map((element) => [element.semanticRef, element.structuralKind]));
+  const nextElements = [
+    ...next.nodes,
+    ...next.containers,
+    ...(next.regions ?? []),
+  ];
+  const nextSemanticByElementId = new Map([
+    ...nextElements,
+  ].map((element) => [element.elementId, element.semanticRef]));
+  const effectiveElementIdBySemantic = new Map(Object.entries(overlay).map(([elementId, entry]) => [
+    entry.semanticRef,
+    elementId,
+  ]));
+  const previousMemberships = new Set((previous.memberships ?? []).flatMap((membership) => {
+    const ownerSemanticRef = previousSemanticByElementId.get(membership.containerElementId);
+    const memberSemanticRef = previousSemanticByElementId.get(membership.memberElementId);
+    return ownerSemanticRef && memberSemanticRef
+      ? [spatialMembershipKey(ownerSemanticRef, memberSemanticRef)]
+      : [];
+  }));
+  const geometryElementsById = new Map(nextElements.map((element) => [element.elementId, element]));
+  return [...new Set((next.memberships ?? []).flatMap((membership) => {
+    const ownerSemanticRef = nextSemanticByElementId.get(membership.containerElementId);
+    const memberSemanticRef = nextSemanticByElementId.get(membership.memberElementId);
+    if (
+      !ownerSemanticRef
+      || !memberSemanticRef
+      || previousMemberships.has(spatialMembershipKey(
+        ownerSemanticRef,
+        memberSemanticRef,
+      ))
+    ) return [];
+    const member = geometryElementsById.get(membership.memberElementId);
+    return member && previousKindBySemantic.get(memberSemanticRef) === member.structuralKind
+      ? [effectiveElementIdBySemantic.get(memberSemanticRef) ?? membership.memberElementId]
+      : [];
+  }))].sort(compareIdentity);
+}
+
+function spatialMembershipKey(
+  ownerSemanticRef: string,
+  memberSemanticRef: string,
+): string {
+  return JSON.stringify([ownerSemanticRef, memberSemanticRef]);
 }
 
 type EdgeOnlyRoutePlan = {

@@ -268,6 +268,66 @@ test("pizza注文配送Turtleをoverlayなしで店舗領域と4 laneの自動la
   expect(consoleErrors).toEqual([]);
 });
 
+test("ピザ店へ料金を所属させても内側3領域を崩さず外側領域を移動できる", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => consoleErrors.push(error.message));
+
+  await page.goto("/");
+  await page.getByRole("button", {
+    name: "pizza-order-delivery-llm-overlay-r2.iriograph",
+    exact: true,
+  }).click();
+  await expect(page.locator(".document-heading")).toContainText("pizza-order-delivery-llm-overlay-r2");
+  await expect(nodeWithLabel(page, "料金")).toBeAttached({ timeout: 20_000 });
+  const shop = regionWithLabel(page, "ピザ店");
+  const childRegions = ["店員", "調理担当", "配達担当"]
+    .map((label) => regionWithLabel(page, label));
+  const regionsBefore = await Promise.all([shop, ...childRegions].map(sceneBox));
+
+  const wizard = page.locator(".structured-wizard");
+  await wizard.getByRole("button", { name: /^関係を作る/u }).click();
+  await wizard.getByRole("button", { name: /^グループへ所属させる/u }).click();
+  await wizard.getByRole("button", { name: "Canvasからグループを選ぶ", exact: true }).click();
+  await shop.locator(".iriograph-group-frame-label").click();
+  await expect(wizard.locator(".canvas-chip")).toContainText("ピザ店");
+  await wizard.getByRole("button", { name: "次へ", exact: true }).click();
+  await wizard.getByRole("button", { name: "Canvasから要素を選ぶ", exact: true }).click();
+  await nodeWithLabel(page, "料金").click();
+  await expect(wizard.locator(".chip-list .canvas-chip")).toContainText("料金");
+  await wizard.getByRole("button", { name: "次へ", exact: true }).click();
+  await expect(wizard.getByRole("heading", { name: "何をしますか？" })).toBeVisible();
+
+  const turtle = await readPizzaTurtle(page);
+  expect(turtle).toMatch(/:shop[\s\S]*?rdfs:member[^.]*:fee\s*\./u);
+  const regionsAfter = await Promise.all([shop, ...childRegions].map(sceneBox));
+  expect(regionsAfter).toEqual(regionsBefore);
+  for (const child of childRegions) {
+    expect(contains(await sceneBox(shop), await sceneBox(child))).toBe(true);
+  }
+  expect(contains(await sceneBox(shop), await sceneBox(nodeWithLabel(page, "料金")))).toBe(true);
+
+  const shopBeforeMove = await sceneBox(shop);
+  await shop.locator(".iriograph-group-frame-label").click();
+  await expect(shop).toHaveClass(/selected/u);
+  const shopBounds = await shop.boundingBox();
+  if (!shopBounds) throw new Error("ピザ店領域を操作できません");
+  const borderPoint = { x: shopBounds.x + 5, y: shopBounds.y + 5 };
+  await shop.dispatchEvent("pointerdown", { button: 0, clientX: borderPoint.x, clientY: borderPoint.y });
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x + 24, clientY: y + 16 }));
+    window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: x + 24, clientY: y + 16 }));
+  }, borderPoint);
+  await expect.poll(async () => (await sceneBox(shop)).x).not.toBe(shopBeforeMove.x);
+  for (const child of childRegions) {
+    expect(contains(await sceneBox(shop), await sceneBox(child))).toBe(true);
+  }
+  expect(contains(await sceneBox(shop), await sceneBox(nodeWithLabel(page, "料金")))).toBe(true);
+  expect(consoleErrors).toEqual([]);
+});
+
 function nodeWithLabel(page: Page, label: string): Locator {
   return page.locator(".iriograph-scene-node").filter({
     has: page.locator(".iriograph-node-label", { hasText: exactText(label) }),
@@ -278,6 +338,13 @@ function regionWithLabel(page: Page, label: string): Locator {
   return page.locator(".iriograph-scene-region").filter({
     has: page.locator(".iriograph-group-frame-label-text", { hasText: exactText(label) }),
   });
+}
+
+async function readPizzaTurtle(page: Page): Promise<string> {
+  await page.locator(".iriograph-view-tabs").getByRole("button", { name: /Turtle/u }).click();
+  const source = await page.getByLabel("Turtle source").inputValue();
+  await page.locator(".iriograph-view-tabs").getByRole("button", { name: "図", exact: true }).click();
+  return source;
 }
 
 function exactText(value: string): RegExp {

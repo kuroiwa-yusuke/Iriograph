@@ -68,6 +68,8 @@ E2Eは初期workspaceが空overlayのピザ注文・配送semantic seedを単一
 
 Canvasのhost埋込み回帰は通常幅と800px狭幅、左右sidebar折り畳み状態を通し、document横overflowなし、薄いgridの可視性、内部scroll、中ボタンまたはAlt+空白dragのpan、primary空白dragの矩形選択、node drag中auto-pan、外周handleへの到達を実Chromiumで確認します。Computed styleではsemantic object本体が選択中も`region/Seq < edge < node`を満たし、選択frontは同じ構造層内に留まることを検証します。Waypoint、endpoint halo、resize handleだけは最上位transient interaction layerでnode重なり時もhit testでき、通常edge線とterminal markerがそこへ複製されないことをDOM構造でも確認します。Seq fixtureは「承認」を枠headerへ一度だけ表示し、`rdf:_n`由来edgeを0件とします。AltからSeqへのbranchはSeq group境界をtargetとし、Seq labelをedgeへ転記しません。
 
+0.10.1では30%・50%・100% zoomでgridの主要線間隔がsnapの整数倍、表示線幅が1px以上であることをcomputed styleとscreenshotで確認します。Workspace画像は候補click、Enter、host picker成功/取消、無効pathを通し、画像選択だけが一回のpresentation更新と一回のundo単位を作り、folder選択はpath navigationだけでdocumentを変更しないことを固定します。Nested Group回帰は実Pizza文書の「料金」を外側の「ピザ店」へ追加し、`rdfs:member`の追加、内側の店員・調理担当・配達担当のgeometry不変、全bounds containment、追加後の外側Group移動を実Chromiumで確認します。
+
 ### ピザ参照図の100点構造評価
 
 参照画像との比較はpixel一致や主観的な「似ている」で判定せず、固定Chromium、viewport 1920×1080、working copyなし、`models/pizza-order-delivery.iriograph`、初期overlay `{}`で実行します。初期layoutとasset解決が完了してからfitし、Canvas座標のScene geometry/routeと実browser上の文字サイズをJSONへ記録し、同時にscreenshotを保存します。BPMN固有icon、色、font family、線の装飾は採点対象外です。

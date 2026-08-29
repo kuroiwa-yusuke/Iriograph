@@ -1971,11 +1971,10 @@
   position: absolute;
   inset: 0;
   z-index: var(--iriograph-canvas-grid-layer);
-  opacity: .28;
+  opacity: 1;
   background-image:
-    linear-gradient(to right, #9fb3ad 1px, transparent 1px),
-    linear-gradient(to bottom, #9fb3ad 1px, transparent 1px);
-  background-size: var(--iriograph-grid-size, 8px) var(--iriograph-grid-size, 8px);
+    repeating-linear-gradient(to right, rgb(96 124 116 / 18%) 0 var(--iriograph-grid-line-width, 1px), transparent var(--iriograph-grid-line-width, 1px) var(--iriograph-grid-visual-step, var(--iriograph-grid-size, 8px))),
+    repeating-linear-gradient(to bottom, rgb(96 124 116 / 18%) 0 var(--iriograph-grid-line-width, 1px), transparent var(--iriograph-grid-line-width, 1px) var(--iriograph-grid-visual-step, var(--iriograph-grid-size, 8px)));
   pointer-events: none;
 }
 
@@ -3774,6 +3773,53 @@
 .iriograph-template-preview img { width: 16px; height: 16px; object-fit: contain; }
 .iriograph-template-preview.shape-diamond img { transform: rotate(-45deg); }
 
+.iriograph-package-icon-disclosure {
+  margin: 1px 0 8px;
+  padding: 6px 8px;
+  border: 1px solid #d7e0dd;
+  border-radius: 5px;
+  background: #f8fbfa;
+}
+
+.iriograph-package-icon-disclosure > summary {
+  cursor: pointer;
+  color: #526b68;
+}
+
+.iriograph-package-icon-disclosure > summary > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.iriograph-package-icon-disclosure > summary strong {
+  font-size: 9px;
+}
+
+.iriograph-package-icon-disclosure > summary small {
+  min-width: 0;
+  overflow: hidden;
+  color: #748683;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-package-icon-disclosure[open] > .iriograph-package-icon-choices {
+  margin-top: 7px;
+}
+
+.iriograph-package-icon-disclosure + label {
+  color: #315957;
+  font-weight: 700;
+}
+
+.iriograph-package-icon-disclosure ~ input[list] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .iriograph-package-icon-choices {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3804,6 +3850,86 @@
 
 .iriograph-package-icon-choices img { width: 22px; height: 22px; }
 .iriograph-package-icon-choices span { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+
+.iriograph-selected-icon-summary {
+  min-width: 0;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid #b9cbc5;
+  border-radius: 5px;
+  background: #f3f8f6;
+}
+
+.iriograph-selected-icon-summary > img,
+.iriograph-selected-icon-placeholder {
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  object-fit: contain;
+}
+
+.iriograph-selected-icon-placeholder {
+  display: grid;
+  place-items: center;
+  border: 1px dashed #9db1ab;
+  border-radius: 4px;
+  color: #617b75;
+  background: #fff;
+}
+
+.iriograph-selected-icon-summary > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.iriograph-selected-icon-summary strong,
+.iriograph-selected-icon-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-icon-selection-status {
+  min-height: 14px;
+  display: block;
+  margin: 2px 0 4px;
+  color: #466460;
+}
+
+.iriograph-semantic-selection-context {
+  display: grid;
+  gap: 3px;
+  margin: 7px 8px 0;
+  padding: 7px 9px;
+  border: 1px solid #bfd0cb;
+  border-radius: 5px;
+  color: #365752;
+  background: #f3f8f6;
+}
+
+.iriograph-semantic-selection-context > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.iriograph-semantic-selection-context strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #173d3b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iriograph-semantic-selection-context > small {
+  color: #637b76;
+}
 
 .iriograph-node-content-guidance {
   display: block;

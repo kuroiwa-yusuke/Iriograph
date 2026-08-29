@@ -77,6 +77,7 @@ export async function buildIriographView(
   mode: LayoutMode = "incremental",
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
   fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>,
+  newlyConstrainedElementIds?: readonly string[],
 ): Promise<DiagramScene> {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
   if (!view) {
@@ -115,6 +116,7 @@ export async function buildIriographView(
     mode,
     fixedDerivedRoutes,
     fixedDerivedRouteChoices,
+    newlyConstrainedElementIds,
   );
   if (
     mode === "incremental"
@@ -174,6 +176,7 @@ export async function layoutProjectedDiagramScene(
   mode: LayoutMode = "incremental",
   fixedDerivedRoutes?: Readonly<Record<string, readonly Point[]>>,
   fixedDerivedRouteChoices?: Readonly<Record<string, LayoutDerivedRouteChoice>>,
+  newlyConstrainedElementIds?: readonly string[],
 ): Promise<DiagramScene> {
   if (hasBlockingDiagnostics(projected.diagnostics)) {
     return emptyScene(projected.viewId, projected.diagnostics);
@@ -183,6 +186,7 @@ export async function layoutProjectedDiagramScene(
     mode,
     fixedDerivedRoutes,
     fixedDerivedRouteChoices,
+    newlyConstrainedElementIds,
     scene: {
       elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
         elementId: element.elementId,

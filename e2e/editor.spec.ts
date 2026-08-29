@@ -63,7 +63,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   const textarea = page.getByLabel("Turtle source");
   const acceptedSource = `${await textarea.inputValue()}\n<urn:iriograph:demo:e2e-new> <http://www.w3.org/2000/01/rdf-schema#label> "E2E New" .\n`;
   await textarea.fill(acceptedSource);
-  await page.locator(".iriograph-editor-header button").click();
+  await page.locator(".topbar").getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("browser working copyを保存しました")).toBeVisible();
   await expect(textarea).toHaveValue(acceptedSource);
 
@@ -719,8 +719,12 @@ test("nodeの形とpackage/workspace icon、label/icon配置をビューだけ�
   await expect(alternateTemplate).toHaveAttribute("aria-pressed", "true");
 
   const packageIcons = inspector.locator('.iriograph-package-icon-choices[role="radiogroup"]');
-  const iconSection = packageIcons.locator("xpath=ancestor::details");
-  await iconSection.locator("summary").click();
+  const iconPanel = inspector.locator("details.iriograph-inspector-section").filter({ hasText: "アイコンと内容" });
+  if (await iconPanel.getAttribute("open") === null) {
+    await iconPanel.locator(":scope > summary").click();
+  }
+  const iconSection = inspector.locator(".iriograph-package-icon-disclosure");
+  await iconSection.locator(":scope > summary").click();
   await expect(iconSection).toHaveAttribute("open", "");
   await expect.poll(() => packageIcons.locator("button").count()).toBeGreaterThan(5);
   await expect(packageIcons.locator("img")).toHaveCount(
@@ -872,9 +876,20 @@ test("薄いCanvas gridはsnap間隔で表示し、toggleしても意味・dirty
   const grid = page.locator(".iriograph-canvas-grid");
   await expect(grid).toBeVisible();
   await expect(grid).toHaveCSS("pointer-events", "none");
-  await expect(grid).toHaveCSS("opacity", "0.28");
+  await expect(grid).toHaveCSS("opacity", "1");
   await expect(grid).not.toHaveCSS("background-image", "none");
-  await expect(grid).toHaveCSS("background-size", /^8px 8px(?:, 8px 8px)?$/u);
+  const gridMetrics = await grid.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      snap: Number.parseFloat(style.getPropertyValue("--iriograph-grid-size")),
+      visualStep: Number.parseFloat(style.getPropertyValue("--iriograph-grid-visual-step")),
+      lineWidth: Number.parseFloat(style.getPropertyValue("--iriograph-grid-line-width")),
+    };
+  });
+  expect(gridMetrics.snap).toBe(8);
+  expect(gridMetrics.visualStep).toBeGreaterThanOrEqual(gridMetrics.snap);
+  expect(gridMetrics.visualStep % gridMetrics.snap).toBe(0);
+  expect(gridMetrics.lineWidth).toBeGreaterThanOrEqual(1);
 
   const review = page.locator(".iriograph-scene-node").filter({ hasText: "内容を審査" });
   const reviewBox = await requiredBox(review, "node above grid");
@@ -1156,7 +1171,7 @@ test("parallel/self-loopを個別選択しstraight/curve・端子・manual routi
   await routing.getByRole("button", { name: "曲線点を追加" }).click();
   await expect(page.locator(".iriograph-curve-knot")).toHaveCount(1);
   await expect(page.locator(".iriograph-curve-handle")).toHaveCount(4);
-  await page.locator(".iriograph-editor-header button").click();
+  await page.locator(".topbar").getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("browser working copyを保存しました")).toBeVisible();
   const savedCurveOverlay = await page.evaluate(() => {
     const source = window.localStorage.getItem(
@@ -1449,7 +1464,7 @@ async function readTurtle(page: Page): Promise<string> {
 }
 
 async function saveAndReloadPurchaseSample(page: Page): Promise<void> {
-  await page.locator(".iriograph-editor-header")
+  await page.locator(".topbar")
     .getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByText("browser working copyを保存しました")).toBeVisible();
   await page.reload();

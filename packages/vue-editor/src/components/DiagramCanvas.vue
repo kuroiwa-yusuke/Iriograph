@@ -232,6 +232,7 @@ const CANVAS_PADDING = 20;
 const PAN_KEY_STEP = 64;
 const DRAG_AUTO_PAN_MARGIN = 48;
 const DRAG_AUTO_PAN_MAX_STEP = 24;
+const GRID_MIN_SCREEN_STEP = 8;
 const RESIZE_HANDLES: readonly ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 const instanceId = useId();
 const markerIds: Record<Exclude<EdgeTerminalMarker, "none">, string> = {
@@ -373,6 +374,16 @@ const viewportLabel = computed(() => [
   `x ${Math.round(minimapViewport.value.x)}`,
   `y ${Math.round(minimapViewport.value.y)}`,
 ].join(" · "));
+const canvasGridStyle = computed<Record<string, string>>(() => {
+  const zoom = Math.max(.1, props.zoom);
+  const snapSize = props.snap.grid.size;
+  const visualStepMultiplier = Math.max(1, Math.ceil(GRID_MIN_SCREEN_STEP / (snapSize * zoom)));
+  return {
+    "--iriograph-grid-size": `${snapSize}px`,
+    "--iriograph-grid-visual-step": `${snapSize * visualStepMultiplier}px`,
+    "--iriograph-grid-line-width": `${Number((1 / zoom).toFixed(4))}px`,
+  };
+});
 const selectionMarqueeGeometry = computed<ElementGeometry | undefined>(() => {
   const marquee = selectionMarquee.value;
   if (!marquee) return undefined;
@@ -1442,6 +1453,16 @@ function resizeHandleStyle(element: GeometryElement, handle: ResizeHandle): Reco
 
 function startRegionLabelMove(event: PointerEvent, region: SceneRegion): void {
   if (props.readOnly || event.button !== 0) return;
+  if (props.structuredSelectionPicking) {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("structuredSelectionRequest", selectionRequest(
+      event,
+      region.elementId,
+      selectedElementIdsSet.value.has(region.elementId),
+    ));
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   requestSelection({ elementId: region.elementId, mode: "replace" });
@@ -1458,6 +1479,16 @@ function startRegionLabelMove(event: PointerEvent, region: SceneRegion): void {
 
 function startGroupFrameLabelMove(event: PointerEvent, container: SceneContainer): void {
   if (props.readOnly || event.button !== 0 || !container.groupFrame) return;
+  if (props.structuredSelectionPicking) {
+    event.preventDefault();
+    event.stopPropagation();
+    emit("structuredSelectionRequest", selectionRequest(
+      event,
+      container.elementId,
+      selectedElementIdsSet.value.has(container.elementId),
+    ));
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   requestSelection({ elementId: container.elementId, mode: "replace" });
@@ -3418,7 +3449,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             width: `${workArea.width}px`,
             height: `${workArea.height}px`,
             transform: `scale(${zoom})`,
-            '--iriograph-grid-size': `${snap.grid.size}px`,
+            ...canvasGridStyle,
           }"
           @contextmenu="requestBlankContextMenu"
         >

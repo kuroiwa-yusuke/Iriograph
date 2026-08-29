@@ -1030,6 +1030,8 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.get(".iriograph-package-icon-choices").text())
       .toContain("インシデント");
     expect(wrapper.findAll(".iriograph-package-icon-choices img").length).toBe(packageButtons.length - 1);
+    expect(wrapper.get<HTMLDetailsElement>(".iriograph-package-icon-disclosure").element.open).toBe(false);
+    expect(wrapper.get(".iriograph-package-icon-disclosure summary").text()).toContain("現在: アイコンなし");
     await packageButtons[1]!.trigger("click");
     await waitUntil(() => Boolean(
       (canvas.props("scene") as DiagramScene).nodes.find((candidate) => candidate.elementId === node.elementId)?.iconUrl,
@@ -1038,6 +1040,9 @@ describe("IriographEditor transaction regression", () => {
       .toMatch(/^urn:iriograph:icon:lucide:/u);
     expect((canvas.props("scene") as DiagramScene).nodes.find((candidate) => candidate.elementId === node.elementId)?.iconUrl)
       .toMatch(/^data:image\/svg\+xml/u);
+    expect(wrapper.get('[aria-label="選択中の画像"] img').attributes("src"))
+      .toMatch(/^data:image\/svg\+xml/u);
+    expect(wrapper.get(".iriograph-package-icon-disclosure summary").text()).not.toContain("アイコンなし");
 
     let pathInput = wrapper.get<HTMLInputElement>('#' + wrapper.get('input[list]').attributes('id'));
     expect(datalistValuesFor(wrapper, `#${pathInput.attributes("id")}`)).toContain("assets/approval-flow.svg");
@@ -1121,16 +1126,82 @@ describe("IriographEditor transaction regression", () => {
     input.element.value = "../../assets/i";
     await input.trigger("input");
     expect(wrapper.get('[aria-label="画像pathの候補"]').text()).toContain("icons/");
+    const updateCountBeforeNavigation = wrapper.emitted("update:modelValue")?.length ?? 0;
     await buttonWithText(wrapper, "icons/").trigger("click");
     expect(input.element.value).toBe("../../assets/icons/");
-    await input.setValue("../../assets/icons/approval.svg");
-    await settle();
+    expect(wrapper.emitted("update:modelValue")?.length ?? 0).toBe(updateCountBeforeNavigation);
+
+    const assetSuggestion = buttonWithText(
+      wrapper.get('[aria-label="画像pathの候補"]'),
+      "承認",
+    );
+    expect(assetSuggestion.element.tagName).toBe("BUTTON");
+    await assetSuggestion.trigger("click");
+    await waitUntil(() => wrapper!.get(".iriograph-icon-selection-status").text().includes("設定しました"));
 
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.iconRef).toBe(assetRef);
-    await input.setValue("../../../secret.svg");
+    expect((wrapper.emitted("update:modelValue")?.length ?? 0) - updateCountBeforeNavigation).toBe(1);
+    const selected = wrapper.get('[aria-label="選択中の画像"]');
+    expect(selected.text()).toContain("承認");
+    expect(selected.text()).toContain("../../assets/icons/approval.svg");
+    expect(assetSuggestion.attributes("aria-pressed")).toBe("true");
+
+    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
     await settle();
+    expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.iconRef).toBeUndefined();
+
+    input.element.value = "../../../secret.svg";
+    await input.trigger("input");
+    await input.trigger("keydown", { key: "Enter" });
+    await nextTick();
     expect(wrapper.text()).toContain("Workspaceの外");
-    expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.iconRef).toBe(assetRef);
+    expect(input.attributes("aria-invalid")).toBe("true");
+    expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.iconRef).toBeUndefined();
+  });
+
+  it("外部の画像file pickerをloading/cancel付きで開き返却assetRefを即時確定する", async () => {
+    const assetRef = "urn:test:workspace:icons:picked";
+    let resolveFirstPick!: (result: { status: "cancelled" }) => void;
+    const pickAsset = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirstPick = resolve;
+      }))
+      .mockResolvedValueOnce({ status: "selected", assetRef });
+    wrapper = await mountEditor({
+      assetOptions: [{
+        assetRef,
+        label: "参照した承認画像",
+        path: "assets/picked-approval.svg",
+        mediaType: "image/svg+xml",
+      }],
+      pickAsset,
+    });
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    const node = (canvas.props("scene") as DiagramScene).nodes[0]!;
+    exposedSelectionApi(wrapper).selectElement(node.elementId);
+    await nextTick();
+    await openAppearanceInspector(wrapper);
+
+    let pickerButton = buttonWithText(wrapper, "画像ファイルを参照…");
+    await pickerButton.trigger("click");
+    pickerButton = buttonWithText(wrapper, "画像ファイルを参照中…");
+    expect(pickerButton.attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".iriograph-icon-selection-status").text()).toContain("参照しています");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    resolveFirstPick({ status: "cancelled" });
+    await flushPromises();
+    await nextTick();
+    expect(wrapper.get(".iriograph-icon-selection-status").text()).toContain("キャンセルしました");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+
+    await buttonWithText(wrapper, "画像ファイルを参照…").trigger("click");
+    await waitUntil(() => overlayFor(latestDocument(wrapper!), node.semanticRef)?.appearance?.iconRef === assetRef);
+    await waitUntil(() => wrapper!.get(".iriograph-icon-selection-status").text().includes("設定しました"));
+    expect(wrapper.get('[aria-label="選択中の画像"]').text())
+      .toContain("参照した承認画像");
+    expect(wrapper.get('[aria-label="選択中の画像"]').text())
+      .toContain("assets/picked-approval.svg");
   });
 
   it("Inspectorからderived routeをmanualへseedしlabel座標を隠してresetする", async () => {
@@ -1763,6 +1834,12 @@ describe("IriographEditor transaction regression", () => {
     ]);
     expect(wrapper.find(".iriograph-display-inspector").isVisible()).toBe(false);
     expect(wrapper.find('select[aria-label="Semantic operation"]').exists()).toBe(false);
+    const node = wrapper.getComponent(DiagramCanvas).props("scene").nodes[0]!;
+    exposedSelectionApi(wrapper).selectElement(node.elementId);
+    await nextTick();
+    expect(wrapper.get('[aria-label="Canvasの選択"]').text()).toContain(node.label);
+    expect(wrapper.get('[aria-label="Canvasの選択"]').text()).toContain("最初から選択済み");
+    expect(wrapper.findAll(".structured-wizard .entry-grid button")).toHaveLength(4);
     await openAppearanceInspector(wrapper);
     expect(wrapper.find(".structured-wizard").exists()).toBe(false);
     expect(wrapper.find(".iriograph-display-inspector").isVisible()).toBe(true);
