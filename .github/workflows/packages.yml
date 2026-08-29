@@ -208,7 +208,6 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: "24"
-          registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
       - name: Install workspace dependencies
         id: publish_install
@@ -257,21 +256,24 @@ jobs:
             echo "Long-lived npm publish tokens are forbidden; use GitHub OIDC" >&2
             exit 1
           fi
-          configured_registry="$(npm config get registry)"
+          publish_userconfig="${RUNNER_TEMP}/iriograph-publish.npmrc"
+          npm config set registry="${EXPECTED_NPM_REGISTRY}" --userconfig="${publish_userconfig}"
+          npm config set '@iriograph:registry'="${EXPECTED_NPM_REGISTRY}" --userconfig="${publish_userconfig}"
+          configured_registry="$(npm config get registry --userconfig="${publish_userconfig}")"
           if [[ "${configured_registry}" != "${EXPECTED_NPM_REGISTRY}" ]]; then
             echo "npm registry must be exactly ${EXPECTED_NPM_REGISTRY}" >&2
             exit 1
           fi
-          scoped_registry="$(npm config get '@iriograph:registry')"
-          case "${scoped_registry}" in
-            undefined|null|"") npm config set '@iriograph:registry' "${EXPECTED_NPM_REGISTRY}" ;;
-            "${EXPECTED_NPM_REGISTRY}") ;;
-            *)
-              echo "@iriograph scope is configured for a forbidden registry" >&2
-              exit 1
-              ;;
-          esac
-          [[ "$(npm config get '@iriograph:registry')" == "${EXPECTED_NPM_REGISTRY}" ]]
+          scoped_registry="$(npm config get '@iriograph:registry' --userconfig="${publish_userconfig}")"
+          if [[ "${scoped_registry}" != "${EXPECTED_NPM_REGISTRY}" ]]; then
+            echo "@iriograph scope must be exactly ${EXPECTED_NPM_REGISTRY}" >&2
+            exit 1
+          fi
+          if grep -Eq '_authToken|_password|username' "${publish_userconfig}"; then
+            echo "The publish npm configuration must not contain registry credentials" >&2
+            exit 1
+          fi
+          echo "NPM_CONFIG_USERCONFIG=${publish_userconfig}" >> "${GITHUB_ENV}"
       - name: Publish packages
         id: publish_packages
         run: npm run publish:packages

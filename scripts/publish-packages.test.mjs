@@ -265,7 +265,10 @@ test("the release workflow and audit vocabulary are npmjs-only", async () => {
   ]);
 
   assert.match(workflow, /id-token:\s*write/u);
-  assert.match(workflow, /registry-url:\s*"https:\/\/registry\.npmjs\.org"/u);
+  assert.match(workflow, /NPM_CONFIG_USERCONFIG=/u);
+  assert.match(workflow, /iriograph-publish\.npmrc/u);
+  assert.match(workflow, /must not contain registry credentials/u);
+  assert.doesNotMatch(workflow, /registry-url:/u);
   assert.match(workflow, /record_failure "npm-cli"/u);
   assert.match(workflow, /record_failure "npm-registry"/u);
   assert.match(workflow, /record_failure "npm-publish"/u);
