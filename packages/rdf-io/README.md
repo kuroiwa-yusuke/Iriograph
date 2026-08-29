@@ -1,6 +1,10 @@
 # @iriograph/rdf-io
 
+[日本語](./README_ja.md)
+
 `@iriograph/rdf-io` is a framework-independent boundary for importing Turtle or JSON-LD into an RDF dataset, previewing a new document or merge, applying the result atomically, explicitly rebasing a namespace, and exporting semantic RDF only.
+
+## Install
 
 ```sh
 npm install --save-exact @iriograph/rdf-io
@@ -67,3 +71,7 @@ const jsonLd = await exportRdfDataset({
 ```
 
 Export accepts only an RDF dataset, so geometry, routing, icons, colors, viewport state, and other view overlay data cannot enter the RDF output. Turtle export rejects named graphs instead of dropping graph identity; JSON-LD can preserve a complete RDF dataset. The loss report distinguishes non-semantic syntax/shape changes from RDF semantic loss.
+
+## License
+
+MIT. Third-party components retain the licenses listed in `THIRD_PARTY_NOTICES.md`. See [LICENSE](./LICENSE).

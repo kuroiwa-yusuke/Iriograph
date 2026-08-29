@@ -1,74 +1,75 @@
-# 開発・検証
+# Development and verification
 
-Iriographはpure graph処理、Vue component、実browser、配布tarball、利用hostを別々の層で検証します。Pointer操作や非同期保存をunit testだけで代用せず、変更した責務に最も近い層へ回帰testを置きます。
+[日本語版](../../docs_ja/development/testing.md)
 
-## 必須command
+Iriograph verifies pure graph processing, Vue components, real-browser behavior, distributable tarballs, and consuming hosts at separate layers. Pointer interaction and asynchronous persistence must not be represented only by unit tests.
 
-通常の変更は固定Node/Docker環境で次を実行します。
+## Required commands
+
+Run the full repository gate in the fixed Node/Docker environment:
 
 ```sh
 npm run verify
 ```
 
-これは11 packageとMockのtest、typecheck、build、lockstep version検証、packed tarball consumer検証を行います。Editor UI、transaction、layout、asset、host interactionを変更した場合は実Chromiumも通します。
+This covers tests, type checking, builds, lockstep-version validation, documentation checks, and packed-tarball consumer verification for all eleven packages and the Mock. Changes to editor UI, transactions, layout, assets, or host integration also require real Chromium:
 
 ```sh
 npm run verify:e2e
 ```
 
-Browserがない環境ではrepositoryと同じPlaywright versionを含むimageを使います。
+When the host has no browser:
 
 ```sh
 docker build -f Dockerfile.e2e -t iriograph-e2e .
 docker run --rm --ipc=host iriograph-e2e
 ```
 
-性能・描画gateは通常E2Eから分離します。
+Performance and rendering gates are separate:
 
 ```sh
 docker run --rm --ipc=host iriograph-e2e npm run verify:performance
 docker run --rm --ipc=host iriograph-e2e npm run verify:browser-performance
 ```
 
-完了前に最新sourceからMockを起動し、HTTP応答、通常幅と狭幅、保存・再読込、console error、失敗requestを確認します。
+Before completion, start the Mock from the latest source and verify HTTP response, normal and narrow widths, save/reload, console errors, and failed requests.
 
-## Testの配置
+## Test placement
 
-- Pure dataset、projection、authoring、layout、reconciliationは`packages/core/src/<責務>/`に実装とtestを置く
-- RDF交換、profile、semantic access、agent/presentation contractは各package内で検証する
-- Pointer座標、keyboard、ARIA、SVG経路は`@iriograph/vue-editor`のhelper/component testへ置く
-- Document transaction、history、pending flush、semantic/presentation分離は`IriographEditor` integration testへ置く
-- Browserの実event、CSS、grid、scroll、asset decode、Mock保存は`e2e/`へ置く
-- MockとCloudの機能差は`@iriograph/host-conformance`の同じmanifest・fixture・browser checkで検証する
+- Pure dataset, projection, authoring, layout, and reconciliation tests live beside their Core responsibility.
+- RDF exchange, profiles, semantic access, agents, and presentation contracts are tested in their packages.
+- Pointer coordinates, keyboard handling, ARIA, and SVG routing are Vue helper/component tests.
+- Document transactions, history, pending flush, and semantic/presentation separation are editor integration tests.
+- Real events, CSS, grid, scrolling, asset decoding, and Mock persistence are Playwright tests.
+- Mock/Cloud parity uses the same host-conformance manifest, fixtures, and browser checks.
 
-## 不変条件
+## Invariants
 
-- Semantic transaction失敗時はsourceだけでなく、document、Scene、全named view、historyをatomicに維持する
-- Overlay-only操作はTurtleを変えず、全体layoutを起動しない
-- Semantic変更は全viewを検証し、存続identityのsparse overlayを維持する
-- External/LLM candidateはrevision、context、exact patchへ束縛し、通常の人操作へ追加confirmationを持ち込まない
-- Asset byte、署名URL、認証情報をdocument、semantic DTO、snapshotへ入れない
-- Raw IRIは通常UI/DOMへ出さず、editable sourceと内部transaction identityに限定する
-- Named viewのselection、viewport、temporary hide、folding、gridはsession stateとし、dirty/historyへ入れない
-- 自動routeは安全なstraight、一直角orthogonal、bounded Bezierの順で、公開中間点は最大1個にする
-- Group/memberのdrag・resize・membership追加は全membership intersectionとnested containmentを破らない
+- A failed semantic transaction atomically preserves source, document, Scene, all named views, and history.
+- Overlay-only edits do not modify Turtle or start global layout.
+- Semantic edits validate all views and retain sparse overlays for surviving identities.
+- External/LLM candidates are bound to revision, context, and exact patch.
+- Asset bytes, signed URLs, and credentials never enter documents, semantic DTOs, or snapshots.
+- Raw IRIs remain in editable source and internal transaction identity, not ordinary UI/DOM.
+- Selection, viewport, temporary hide/fold state, and grid are session state rather than document history.
+- Auto-routing prefers safe straight lines, one-bend orthogonal lines, then bounded Bezier curves, with at most one public intermediate point.
+- Group and member drag, resize, and membership edits preserve every membership intersection and nested containment.
 
-## Layout・性能gate
+## Performance gates
 
-Coreのnormal/stress fixture、small graph phase timing、prepared relation transaction、実browser pan/drag、production settled timingは固定fixture、固定sample、固定budgetで判定します。Budgetやfixtureを変える場合は、同じ変更で[Layout・routing・性能](../editor/layout.md)の理由とtestを更新します。異なるmachineの絶対値を時系列比較しません。
+Core normal/stress fixtures, small-graph phase timing, prepared relation transactions, browser pan/drag, and production settled timing use fixed fixtures, sample counts, and budgets. Changes to budgets or fixtures must update [Layout, routing, and performance](../editor/layout.md) and the corresponding test in the same commit. Absolute timings from different machines are not compared as a time series.
 
-参照図の構造100点評価、画像proxy、agent prompt、token/cycle、過去versionの実測値は[評価履歴](../evaluations/reference-reconstruction.md)へ分離しています。評価結果をseed IRI、label、件数に特化したlayout分岐へ昇格しません。
+Reference-image structure scores, image proxies, agent prompts, token/cycle measurements, and historical results belong in [Evaluation history](../evaluations/reference-reconstruction.md). They must not become seed-specific layout branches.
 
-## Test追加規則
+## Adding tests
 
-- CoreへDOM/browser mockを入れない
-- Pointerの座標変換はcomponent、document revision/historyはEditor integration、実dispatchはPlaywrightで分ける
-- 一gestureはmove event数にかかわらず一history itemとし、Escape/cancel/abortは正本を変えない
-- Async結果はdocument、view、revision、context fingerprintへ束縛し、stale completionを破棄する
-- Authoringはopaque option IDをexact termへ解決し、unknown term、role conflict、namespace衝突をfail closedにする
-- Direct edge、membership、Seq/Alt、type、localized textの追加・削除・再接続を個別のprovenance付きtransactionとして検証する
-- Deleteは選択外への波及がある場合だけ影響一覧を確認し、Seq/Alt ordinalを同じatomic patchで再構成する
-- Appearanceはcatalog既定を複製せず、変更fieldだけをsparse overlayへ保存する
-- Assetはencoded byte上限とdecoded pixel上限、MIME/signature、abort時lease解放を別々に検証する
-- Accessibilityはsingle tab stop、実DOM ID、focus return、Escape、busy/status/alert、keyboard-only経路を固定する
-- Browser testのsample数やfixture件数へ依存するassertionを変える場合は、fixture・budget・文書を同じ変更に含める
+- Do not add DOM or browser mocks to Core.
+- Separate coordinate conversion, revision/history, and real dispatch across component, integration, and Playwright layers.
+- One gesture produces one history item regardless of move-event count; Escape, cancel, and abort do not mutate the source of truth.
+- Bind asynchronous results to document, view, revision, and context fingerprints, and discard stale completion.
+- Resolve opaque authoring option IDs to exact terms and fail closed on unknown terms, role conflict, or namespace collision.
+- Test direct edges, membership, Seq/Alt, types, localized text, deletion, and reconnection as distinct provenance-bearing transactions.
+- Ask for deletion confirmation only when effects extend beyond the selected objects; rebuild Seq/Alt ordinals in the same atomic patch.
+- Save appearance overrides sparsely rather than duplicating catalog defaults.
+- Test encoded-byte limits, decoded-pixel limits, MIME/signature validation, and lease release separately for assets.
+- Fix accessibility behavior for a single tab stop, real DOM IDs, focus return, Escape, busy/status/alert, and keyboard-only paths.

@@ -1,61 +1,52 @@
-# 意味情報と表示notationの境界
+# Semantic and presentation notation
 
-## 1. 目的
+[日本語版](../../docs_ja/semantics/notation.md)
 
-`semantic.source`には、LLM、validator、query、別view、別hostで再利用する意味だけを保存します。見た目を選ぶためだけのclassやpredicateは追加せず、template、shape、色、iconはcatalogと各named viewのoverlayで指定します。
+## Purpose
 
-この境界はTurtleを短くすること自体が目的ではありません。表示を変更しただけで意味graphやLLM入力が変わることを防ぎ、同じ意味から用途別のviewを作れるようにするための規則です。
+`semantic.source` stores only meaning that must survive for LLM understanding, validation, query, other views, other hosts, and reuse. Classes or predicates that exist only to choose a shape, color, template, or icon are not semantic data.
 
-## 2. Domain resource IRIとdomain vocabulary IRI
+This boundary is not primarily about shorter Turtle. It prevents a visual edit from changing the semantic graph or the agent input and allows multiple views over one meaning.
 
-Domain resource IRIは、業務上の対象や出来事を識別します。たとえば`ex:review`、`ex:approvalPolicy`はresourceであり、subjectまたはobjectとして関係、label、構造membershipを持ちます。
+## Resource and vocabulary IRIs
 
-Resource IRIのlocal nameに人間が読める意味語を入れることは必須ではありません。IRIはrenameに耐える安定identityであり、人間とLLMが理解する名前・説明は`rdfs:label`と`rdfs:comment`を主に使います。Labelが欠落する通常UIでは「名前未設定」等の汎用表示とopaque presentation IDを使い、compact IRIをtooltipやAdvanced DOMへfallback表示しません。完全IRIはeditableなTurtle/Document sourceとHost/Core内部transaction・監査logに保持し、IRIの綴りをclass、relation、構造として推論しません。
+A domain resource IRI identifies a business object or event. Its local name does not need to be human-readable. Stable identity survives rename; humans and agents use `rdfs:label` and `rdfs:comment`.
 
-このrename耐性には`.iriograph`のファイル名とworkspace pathも含みます。ファイル名、path、
-`documentId`からresource IRIやTurtle baseを推測しません。`semantic.baseIri`はportable documentに明示した
-fallback、Turtleの`@base`はsource内の標準directive、`@prefix`は単なるIRI aliasです。いずれも
-外部namespaceの利用を制限しません。外部語彙はabsolute IRIまたは`@prefix`で参照でき、参照した
-ontologyをCoreが暗黙fetchすることとは分けます。
+Ordinary UI does not expose compact IRIs as a fallback. It uses an unnamed label plus opaque presentation identity. Complete IRIs remain in editable source and internal transaction/audit identity. Their spelling is never interpreted as class, relation, or structure.
 
-Domain vocabulary IRIは、graphを解釈する語彙です。主に次の位置に現れます。
+File name, workspace path, and `documentId` do not determine resource IRIs or the Turtle base. `semantic.baseIri` is an explicit portable fallback, Turtle `@base` is a standard source directive, and `@prefix` is only an IRI alias. External vocabulary remains available through absolute IRIs or prefixes without implicit ontology fetching.
 
-- predicate
-- `rdf:type`のobject
-- `rdfs:Class`、`rdf:Property`として宣言されるsubject
-- `rdfs:subClassOf`、`rdfs:subPropertyOf`等の語彙関係
+Vocabulary IRIs appear as predicates, `rdf:type` objects, schema resources, and hierarchy/domain/range statements. Resource and vocabulary roles are not inferred from namespace, casing, or label; a profile declares roles while RDF's ability for one IRI to have multiple roles remains intact.
 
-両者をnamespace、local nameの大文字・小文字、labelから推測しません。同じIRIが複数の役割を持てるRDFの性質は維持しますが、authoring profileは実際に使うroleを明示します。
+Predicate resources use their own labels and comments as relation names and descriptions. Search is label-first, but storage and write commands preserve the selected predicate IRI.
 
-Predicateも同じくIRIでidentityを持ち、predicate resource自身の`rdfs:label`/`rdfs:comment`を関係名と説明に使います。Editorとsemantic access toolは「承認する」「参照する」等のlabelで候補を探せますが、保存・検索結果・write commandは選択したpredicate IRIを保持します。同名の関係は型、説明、上下位property、IRIを併記して区別します。
+## What belongs in Turtle
 
-## 3. Turtleへ入れる判断
+Information is semantic when it is needed for any of:
 
-次のいずれかに必要ならsemantic informationです。
+- LLM understanding or editing;
+- validation;
+- query, indexing, search, or inference;
+- cross-document or cross-host reference;
+- reuse with meaning preserved.
 
-- LLMが業務内容を理解・編集する
-- validatorが許可、必須、整合性を判定する
-- query、索引、検索、推論に利用する
-- 他のdiagram、document、hostから参照する
-- domain間で意味を保って再利用する
+Bag membership, Seq order, Alt alternatives, labels, references, retries, and meaningful domain relations belong in Turtle.
 
-`rdf:Bag`/`rdfs:member`の包含、`rdf:Seq`/`rdf:_n`の順序、`rdf:Alt`の選択は、配置だけでなくgraphの構造として検証・再利用するためTurtleに残します。`rdfs:label`、`rdfs:seeAlso`、意味のある`relatedTo`や`retry`も同様です。
+Plain membership can use `rdfs:member`. A domain-specific membership predicate may be declared as its subproperty and carry its own label/description. Per-statement evidence or temporal metadata requires an explicit relation-resource or another profile; it does not justify turning every membership into a custom relation object.
 
-単に「集合のmemberである」ことだけが必要なら`rdfs:member`で十分です。所属の種類そのものに業務意味がある場合は、domain predicateを`rdfs:subPropertyOf rdfs:member`として自己記述し、そのpredicateへlabel/commentを付けます。個々の所属statementごとに根拠、役割、期間等を説明する必要がある場合だけrelation resourceまたはRDF-star等の別profileを選び、すべての包含を独自relation resourceへ一般化しません。
+Presentation-only information includes:
 
-一方、次の用途しかない情報はpresentationです。
+- a green start circle;
+- a person icon for a task;
+- a diamond gateway;
+- view-specific template or color;
+- geometry, routing, and pins.
 
-- startを緑のcircleにする
-- taskへ人型iconを付ける
-- gatewayをdiamondにする
-- viewごとにtemplateや色を変える
-- geometry、routing、pinを調整する
+Do not create `StartEvent` or `UserTask` types solely for those effects. A real domain classification belongs in Turtle only when validation, query, agents, or reuse also depend on it.
 
-この目的だけで`ex:StartEvent`、`ex:UserTask`等のtypeを作りません。既存ontologyの`UserTask`と`ServiceTask`の差をvalidation、query、LLM、再利用にも使うなら、そのtypeは意味があるためTurtleへ置けます。判断基準は語彙名ではなく利用目的です。
+## Appearance
 
-## 4. 表示指定
-
-Catalogはtemplateとassetの再利用可能なlibraryを提供できます。Semantic ruleへ結び付いていないtemplateも有効です。各named viewは対象resourceのoverlayに`appearance.templateRef`または`appearance.iconRef`を明示し、同じresourceを別viewで異なる外観にできます。
+Catalogs provide reusable templates and assets, including templates without semantic rules. A named view stores explicit `appearance.templateRef` or `appearance.iconRef` overrides.
 
 ```json
 {
@@ -66,30 +57,30 @@ Catalogはtemplateとassetの再利用可能なlibraryを提供できます。Se
 }
 ```
 
-Overlayの指定をTurtleから推測したtypeへ逆変換しません。Templateを変えてもsemantic revisionを作らず、Turtleを変更しても存続resourceのuser overlayは互換な範囲で維持します。
+An overlay choice is never reverse-engineered into a type. Changing a template creates no semantic revision. Changing Turtle preserves compatible user appearance for surviving resources.
 
-## 5. 例
+## Example
 
-表示のためだけにtypeを持つ次の形式は避けます。
+Avoid appearance-only typing:
 
 ```turtle
-:start a :StartEvent ; rdfs:label "開始"@ja .
-:review a :UserTask ; rdfs:label "内容を審査"@ja .
+:start a :StartEvent ; rdfs:label "Start"@en .
+:review a :UserTask ; rdfs:label "Review"@en .
 ```
 
-業務上必要な情報だけなら次で十分です。
+Semantic content alone may be:
 
 ```turtle
-:start rdfs:label "開始"@ja .
-:review rdfs:label "内容を審査"@ja ;
+:start rdfs:label "Start"@en .
+:review rdfs:label "Review"@en ;
   rdfs:seeAlso :approvalPolicy ;
   :retry :review .
 ```
 
-Start circleとtask iconはview overlayが選びます。後から本当にtask分類が必要になった場合は、表示設定を正当化するためではなく、語彙と利用規則をversion管理したsemantic changeとして追加します。
+The view selects the start circle and task icon. If task classification later becomes a genuine domain requirement, it is added as a versioned semantic change, not as justification for an existing appearance.
 
-## 6. LLMとserializer
+## LLM and serialization
 
-LLMへ渡すのはTurtleと許可語彙・構造制約であり、overlay、template、asset URLではありません。したがってappearance-only typeをTurtleへ混ぜると、LLMが存在しない業務分類を意味として学習・再生成するため禁止します。
+Agents receive Turtle plus allowed vocabulary and structure constraints, not overlays, templates, or asset URLs. Appearance-only types would teach the model nonexistent domain classifications and are therefore prohibited.
 
-人がtextareaで直接適用した妥当なTurtleは原文を保持します。Structured commandとLLM editはexpanded RDF tupleを決定的にsortした後、標準prefix、base/default prefix、妥当な入力prefixを選び、`rdf:type`を`a`、短縮可能なIRIをprefixed nameとしてcanonical serializeします。Prefix alias、triple順、`a`と`rdf:type`、full IRIとprefixed nameの差はsemantic informationではありません。
+Direct human Turtle commits retain valid source bytes. Structured commands and LLM edits serialize deterministically from expanded RDF tuples. Prefix aliases, triple order, `a` versus `rdf:type`, and full versus prefixed IRI notation do not change semantics.

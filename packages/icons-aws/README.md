@@ -1,35 +1,42 @@
 # @iriograph/icons-aws
 
-AWS Architecture Icons を Iriograph で参照するための、公開可能な metadata-only package です。対象の公式配布版は `2026-Q3`（release identifier `07312026`）です。
+Metadata-only integration for referencing AWS Architecture Icons from Iriograph. The pinned vendor release is `2026-Q3` (release identifier `07312026`).
 
-この package は AWS の SVG・ZIP・その他の artwork bytes を同梱せず、実行時にも download しません。利用者が AWS 公式サイトから archive を取得し、host application が展開済み local asset または署名 URL を resolver に渡します。AWS 公式の `aws-samples/sample-architecture-diagram-mcp-server` も、Terms of Use を理由に icon を bundle せず、利用者 download と category-colored initial fallback を採用しています。
+This package does **not** bundle or download AWS SVG, ZIP, or other artwork. A user obtains the official archive and the host maps validated local assets or signed URLs into the resolver. AWS artwork remains subject to AWS terms.
 
-## 固定 identity
+## Install
+
+```sh
+npm install --save-exact @iriograph/icons-aws
+```
+
+## Immutable identity
 
 - Catalog ref: `urn:iriograph:catalog:vendor:aws:architecture-icons@2026-q3`
 - Catalog integrity: `sha256-ikFQsNfMsuJoAgiGyu2g/f0NWiCovV0ebOtJlkE1BDc=`
 - Asset namespace: `urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:`
 - Manifest: `@iriograph/icons-aws/catalog.manifest.json`
 
-Package SemVer、AWS vendor distribution、catalog version は別の version 軸です。Catalog/asset identity は vendor distribution を含み、package 更新から独立して immutable です。Catalog の `url` は `urn:iriograph:asset-source:...` locator であり、network URL や package 内 path ではありません。実際の取得 URL は resolver lease にだけ現れます。
+Package SemVer, vendor distribution, and catalog version are separate axes. Asset identity includes the vendor distribution and remains immutable across package updates. Manifest `url` values are opaque source locators, not network URLs or package paths. A resolved URL exists only in a temporary host lease.
 
-## 収録 metadata
+## Metadata
 
-13個の curated service entry に、次を固定しています。
+The curated catalog records thirteen services with:
 
-- 日本語/英語 label、日本語/英語 category、日本語概要
-- canonical slug と一般的な service alias
-- 公式 archive 内 path、個別 SVG SHA-256、byte length、`viewBox`
-- 未導入時に表示できる非ブランドの category-initial fallback
-- Amazon SageMaker → Amazon SageMaker AI の rename と旧 alias
-- AWS IoT 1-Click の full-shutdown metadata
-- package が予約する catalog/asset/template/locator namespace
+- English/Japanese labels and categories;
+- canonical slug and common aliases;
+- path inside the official archive;
+- individual SVG SHA-256, byte length, and `viewBox`;
+- non-branded category-initial fallback;
+- Amazon SageMaker → Amazon SageMaker AI rename metadata;
+- AWS IoT 1-Click shutdown metadata;
+- reserved catalog/asset/template/locator namespaces.
 
-`resolveAwsServiceAlias("EC2")` のように alias を immutable asset ref へ解決できます。旧 `SageMaker` alias は現行 asset を返しつつ `aws-icon-renamed` warning を残します。
+`resolveAwsServiceAlias("EC2")` resolves a human alias to an immutable asset ref. A legacy SageMaker alias resolves to the current entry while returning an `aws-icon-renamed` warning.
 
-## 未導入時
+## Safe fallback
 
-引数なしの resolver は network や filesystem に触れず、明確な diagnostic と fallback metadata を返します。
+A resolver without a provider performs no network or filesystem access:
 
 ```js
 import {
@@ -43,16 +50,14 @@ const result = await createAwsIconAssetResolver().resolve({
 
 // result.status === "unresolved"
 // result.diagnostic.code === "aws-icon-assets-not-installed"
-// result.fallback === { kind: "category-initial", text: "EC2", ... }
+// result.fallback.kind === "category-initial"
 ```
 
-## 利用者取得 archive の local mapping
+## User-owned local archive
 
-1. [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/) から Asset Package を利用者自身で取得します。
-2. archive の SHA-256 が manifest の `distribution.archiveSha256` と一致することを host/build pipeline で確認します。
-3. archive を host 管理領域へ展開し、manifest の `sourceArchivePath` を mapping に使います。
-
-Bytes mapping は package 内で byte length、個別 SHA-256、UTF-8、`viewBox`、危険な SVG content を検証してから Blob URL にします。次の例の filesystem access は host application が行い、この package 自身は `node:fs` に依存しません。
+1. Download the Asset Package from [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/).
+2. Verify the archive SHA-256 against `manifest.distribution.archiveSha256`.
+3. Extract it into host-managed storage and map `sourceArchivePath`.
 
 ```js
 import { readFile } from "node:fs/promises";
@@ -64,11 +69,13 @@ import {
 
 const assetRef = `${AWS_ICON_ASSET_NAMESPACE}service:amazon-ec2`;
 const entry = getAwsIconMetadata(assetRef);
-const expandedPath = `/user-owned/aws-icons/${entry.sourceArchivePath}`;
 
 const resolver = createAwsIconAssetResolver({
   delivery: "local",
-  localAssets: new Map([[entry.sourceArchivePath, { path: expandedPath }]]),
+  localAssets: new Map([[
+    entry.sourceArchivePath,
+    { path: `/user-owned/aws-icons/${entry.sourceArchivePath}` },
+  ]]),
   async localPathProvider({ path }) {
     return { bytes: await readFile(path) };
   },
@@ -77,11 +84,11 @@ const resolver = createAwsIconAssetResolver({
 const result = await resolver.resolve({ assetRef });
 ```
 
-`localAssets` の key は `assetRef`、`sourceArchivePath`、`slug` の順で照合します。値には `Uint8Array` / `ArrayBuffer` / `{ bytes }` を直接指定することもできます。Path mapping は host の `localPathProvider` が必須です。
+The package validates byte length, per-file SHA-256, UTF-8, `viewBox`, and dangerous SVG content before creating a Blob URL. Filesystem access remains host code; this package has no `node:fs` runtime dependency.
 
-## Host の署名 URL
+## Signed URL provider
 
-Host が user-owned archive から検証済み asset を配信する場合は、HTTPS origin allowlist と immutable metadata の attestation が必要です。
+A host may serve validated user-owned assets through HTTPS signed URLs:
 
 ```js
 const resolver = createAwsIconAssetResolver({
@@ -100,24 +107,28 @@ const resolver = createAwsIconAssetResolver({
 });
 ```
 
-Resolver は AWS 公式 archive URL を download せず、provider に期待 metadata として渡すだけです。署名 URL は allowlist 外 origin、HTTP、credentials、SHA-256/length/media type/viewBox 不一致を拒否します。
+The resolver rejects HTTP, embedded credentials, origins outside the allowlist, and integrity/length/MIME/viewBox mismatch. It never downloads the official archive by itself.
 
-## 診断と namespace
+## Diagnostics and namespaces
 
-`diagnoseAwsAssetReference()` と resolver は `aws-icon-renamed`、`aws-icon-deprecated`、`aws-icon-version-mismatch`、`aws-icon-not-found` を区別します。`diagnoseAwsCatalogReference()` は exact version のない catalog ref と別版を拒否します。
+`diagnoseAwsAssetReference()` and the resolver distinguish renamed, deprecated, version-mismatch, and not-found cases. `diagnoseAwsCatalogReference()` requires the exact catalog version.
 
-`assertNoAwsReservedNamespaceCollision()` は外部 catalog がこの package の catalog/asset/template/source-locator namespace を上書きすることを拒否します。Bundled manifest 自身を明示登録する場合だけ `{ allowBundledCatalog: true }` を使えます。
+`assertNoAwsReservedNamespaceCollision()` prevents external catalogs from overwriting this package's namespaces. `allowBundledCatalog: true` is only for registering the bundled manifest itself.
 
-## 公式一次資料
+## Vendor sources and terms
 
-すべて 2026-08-29 取得・確認です。
+- [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/)
+- [AWS icon package 2026-Q3](https://d1.awsstatic.com/onedam/marketing-channels/website/public/shared/architecture-icon-release/Icon-package_07312026.5846e92413caa21490223536cc97f1269e44fa92.zip)
+- [AWS sample Architecture Diagram MCP](https://github.com/aws-samples/sample-architecture-diagram-mcp-server)
+- [AWS Site Terms](https://aws.amazon.com/terms/)
+- [AWS Trademark Guidelines](https://aws.amazon.com/trademark-guidelines/)
+- [Amazon SageMaker AI rename](https://docs.aws.amazon.com/sagemaker/latest/dg/whatis.html)
+- [Services in Full Shutdown](https://docs.aws.amazon.com/general/latest/gr/full_shutdown_services.html)
 
-- [AWS Architecture Icons](https://aws.amazon.com/architecture/icons/) — 公式 icon package、diagram での利用、更新方針
-- [AWS icon package 2026-Q3](https://d1.awsstatic.com/onedam/marketing-channels/website/public/shared/architecture-icon-release/Icon-package_07312026.5846e92413caa21490223536cc97f1269e44fa92.zip) — metadata の対象となる公式 archive
-- [AWS sample Architecture Diagram MCP](https://github.com/aws-samples/sample-architecture-diagram-mcp-server) — Terms のため icon 非同梱、利用者 download、local root、initial fallback の公式 sample
-- [AWS Site Terms](https://aws.amazon.com/terms/) — copyright と site content の条件
-- [AWS Trademark Guidelines](https://aws.amazon.com/trademark-guidelines/) — mark、非提携表示、誤認防止
-- [Amazon SageMaker AI rename](https://docs.aws.amazon.com/sagemaker/latest/dg/whatis.html) — 2024-12-03 の名称変更
-- [Services in Full Shutdown](https://docs.aws.amazon.com/general/latest/gr/full_shutdown_services.html) — AWS IoT 1-Click の終了日
+The pinned archive SHA-256 is `d2d166c453526471749d520e0db022c459abef759d2946cf2dd1d1c992dc6526`; byte length is `13,988,918`; HTTP Last-Modified was `2026-08-06T07:01:09Z`.
 
-対象 archive の SHA-256 は `d2d166c453526471749d520e0db022c459abef759d2946cf2dd1d1c992dc6526`、byte length は `13,988,918`、HTTP Last-Modified は `2026-08-06T07:01:09Z` です。Archive と icon artwork は AWS の条件に従って利用してください。この package は AWS と提携、後援、承認関係にありません。
+Iriograph is not affiliated with, sponsored by, or endorsed by AWS.
+
+## License
+
+The package code and metadata are MIT licensed. AWS artwork is not included and remains subject to AWS terms. See [LICENSE](./LICENSE), [NOTICE](./NOTICE.md), and the [Japanese README](./README_ja.md).

@@ -1,49 +1,51 @@
-# Agent・host連携
+# Agents and host integration
 
-この文書は、Iriographの意味正本をLLMや外部serviceへ安全に公開し、候補を人が確認して適用する境界を定義します。Coreはnetwork、tenant、認証、model SDKを持ちません。
+[日本語版](../../docs_ja/integration/agents.md)
 
-## 解決済みauthoring context
+This document defines the boundary for exposing Iriograph semantics to LLMs and external services and for reviewing their candidates safely. Core owns no network, tenant, authentication, or model SDK.
 
-`@iriograph/profile-resolver`は`semantic.authoringProfileRef`を起点に、immutableなprofileとvocabulary importを取得し、宣言ID、version、integrity、循環、重複、role競合を検証します。出力の`ResolvedAuthoringContext`はopaqueな`roleId`/`predicateId`、locale別value ID、Group kind、default localeと任意のsemantic validation contextを持ちます。取得とcacheはHost注入transportの責務で、解決結果はprofile revisionと取得物fingerprintへ束縛します。
+## Resolved authoring context
 
-取得不能、stale、不正manifest時も既存graphのreadは可能です。ただしsemantic writeはfail closedにします。Draftやoptionはcontext revisionを跨いで再利用しません。
+`@iriograph/profile-resolver` starts from `semantic.authoringProfileRef`, retrieves immutable profiles and vocabulary imports, and validates declared identity, version, integrity, cycles, duplicates, and role conflicts. The resulting `ResolvedAuthoringContext` contains opaque role and predicate IDs, locale-specific value IDs, group kinds, a default locale, and optional semantic-validation context. Retrieval and caching belong to host-injected transport, and the result is bound to profile revision and artifact fingerprints.
 
-## 要求の分離
+An unavailable, stale, or invalid manifest does not block reading an existing graph, but semantic writes fail closed. Drafts and options never cross context revisions.
 
-`@iriograph/agent-bridge`は自然言語要求をsemantic、presentation、mixedの候補へ分類します。分類は権限ではありません。Semantic portとpresentation portが、current document revision、resolved context、許可fieldをそれぞれ再検証します。
+## Request separation
 
-- semantic: 要素、predicate、membership、順序、候補、名前・説明などの意味正本
-- presentation: geometry、size、色、routing、template、iconなどのview overlay
-- mixed: 上記二候補を別々のrevision-bound reviewへ出す。不可分な一transactionへまとめない
+`@iriograph/agent-bridge` classifies a natural-language request as semantic, presentation, or mixed. Classification is not authorization. The semantic and presentation ports independently recheck the current document revision, resolved context, and allowed fields.
 
-領域内に見える、近くにある等のgeometryからmembershipや順序を推論しません。Presentation要求からTurtleを変更しません。
+- **semantic:** resources, predicates, membership, order, alternatives, names, and descriptions
+- **presentation:** geometry, size, color, routing, templates, and icons
+- **mixed:** two separate revision-bound candidates and reviews; never one indivisible transaction
+
+Geometry such as visual containment or proximity does not imply membership or order. A presentation request cannot modify Turtle.
 
 ## Semantic transport
 
-`SemanticJsonTransport`は`@iriograph/semantic-access`のlabel-first index/write facadeをJSON transportへ閉じます。通常DTOはopaque alias/option ID、label、comment、近傍、membershipだけを持ち、raw IRI、Turtle全文、overlay、asset byte、認証付きURLを返しません。
+`SemanticJsonTransport` closes the label-first index/write facade from `@iriograph/semantic-access` behind a JSON boundary. Ordinary DTOs contain opaque aliases and option IDs, labels, comments, neighborhoods, and membership. They do not expose raw IRIs, full Turtle, overlays, asset bytes, or authenticated URLs.
 
-Hostは各requestで次を行います。
+For every request, the host:
 
-1. 認証主体、tenant/organization、permission、rate/size budget、abort signalを確認する
-2. service側のcurrent document revisionとresolved profileを読み直す
-3. client aliasやcandidateを信用せず再解決する
-4. Coreのauthoring transactionへcompileし、validation後にatomic保存する
-5. actor、revision、operation、結果を監査する
+1. authenticates the principal and checks tenant/organization, permissions, budgets, and abort signal;
+2. reloads the server-side current document revision and resolved profile;
+3. distrusts and re-resolves client aliases and candidates;
+4. compiles to a Core authoring transaction and saves atomically after validation;
+5. audits actor, revision, operation, and result.
 
-Cloud adapterはworkspace revisionとcurrent contextを毎request取得します。MCP、HTTP、Python RDF libraryはこのtransportのclientまたは内部索引実装にはできますが、別のwrite正本にはしません。
+MCP, HTTP, and Python RDF libraries may be clients or internal index implementations. They do not become an independent write source of truth.
 
-## 閉じたpresentation tool
+## Closed presentation tool
 
-`@iriograph/presentation-tools`はread-only Sceneを`PresentationSceneBridge`で安全なopaque IDへ写し、compact target/capability summaryだけをagentへ渡します。Bridgeはsource IRIと取得URLを外部DTOへ出さず、承認済みpatchだけをHost内部でsource overlay IDへ戻します。
+`@iriograph/presentation-tools` maps a read-only Scene to opaque IDs through `PresentationSceneBridge` and exposes only compact targets and capability summaries. The bridge does not reveal source IRIs or resolved URLs; it maps an accepted patch back to source overlay IDs inside the host.
 
-候補はsparse patchであり、任意CSS/URL、semantic write、Turtle、asset/image bytesを表現できません。Field、件数、座標、routing点、request/response byte、時間、tokenをHost policyで制限し、stale revision、未登録option、非finite値、包含違反、budget超過をrejectします。Render portはopaque screenshot IDだけを返し、画像bytesはsession storageに残します。
+Candidates are sparse patches that cannot represent arbitrary CSS/URLs, semantic writes, Turtle, or asset/image bytes. Host policy limits fields, item count, coordinates, route points, request/response bytes, time, and tokens. Stale revisions, unregistered options, non-finite values, containment violations, and budget excess fail closed. Render ports return an opaque screenshot ID, while bytes stay in session storage.
 
-## 外部候補review
+## External candidate review
 
-`ExternalCandidateReviewPanel`はsemantic差分とpresentation差分を別sectionにし、それぞれdocument/context revision、exact patch、diagnostic、candidate screenshotへ束縛します。利用者は片方だけapply/rejectできます。通常のCanvas操作や人の非削除structured editにはこの確認を挟みません。
+`ExternalCandidateReviewPanel` separates semantic and presentation diffs and binds each to document/context revision, exact patch, diagnostics, and optional candidate screenshot. A user may apply or reject either side independently. Ordinary canvas operations and non-deleting human structured edits do not use this extra review.
 
-Presentation候補のapplyはTurtle byte列を変更せず、semantic候補のapplyは別transactionとして全named viewをreconcileします。Rejectやvalidation failureは正本を変更しません。
+Applying a presentation candidate preserves Turtle bytes. Applying a semantic candidate reconciles all named views in a separate transaction. Rejection and validation failure do not mutate the source of truth.
 
-## Cloud registry transport
+## Registry transport
 
-Cloudはcatalog、vocabulary、profile、asset参照を同じ認証・immutable version・integrity・cache基盤から取得しますが、schemaを一つへ平坦化しません。Tenant/organization越境を拒否し、asset byteと署名URLをportable documentへ保存しません。Offline時はexact fingerprintの既存cacheだけを読み取りに使い、stale contextでwriteしません。
+A product host may retrieve catalogs, vocabularies, profiles, and asset references from the same authenticated immutable-version/integrity/cache infrastructure without flattening their schemas. Cross-tenant access is rejected. Asset bytes and signed URLs never enter portable documents. Offline reads may use only an exact-fingerprint cache; writes never use stale context.

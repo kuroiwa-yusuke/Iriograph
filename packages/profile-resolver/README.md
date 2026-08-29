@@ -1,8 +1,19 @@
 # @iriograph/profile-resolver
 
-Host境界でversion固定されたauthoring profileとvocabulary importを解決し、
-完全性、循環、opaque option IDの競合を検証して`ResolvedAuthoringContext`を組み立てます。
-Network、tenant認証、registry cacheは注入する`AuthoringArtifactResolver`の責務です。
+Resolves immutable authoring profiles and vocabulary imports at a host boundary and builds a validated `ResolvedAuthoringContext`.
 
-解決失敗は既存documentのreadを妨げません。Hostは返されたdiagnosticを表示し、
-semantic writeだけをfail closedにしてください。
+## Install
+
+```sh
+npm install --save-exact @iriograph/core @iriograph/profile-resolver
+```
+
+The resolver checks declared identity, version, integrity, import cycles, opaque option-ID collisions, and role conflicts. Network transport, tenant authentication, and immutable cache policy are supplied through `AuthoringArtifactResolver`.
+
+Resolution failure does not block reading an existing document. Hosts should surface diagnostics and fail closed only for controlled semantic writes.
+
+See [Authoring profile](../../docs/semantics/authoring-profile.md).
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

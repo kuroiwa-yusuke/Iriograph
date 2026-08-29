@@ -1,7 +1,19 @@
 # @iriograph/profile-kit
 
-Domain ontology、authoring metadata、projection catalog、asset/licenseを一つの配布単位として
-検証するためのmanifestとconformance helperです。Catalogやontologyを一つのschemaへ
-平坦化せず、標準catalogはversioned dependencyとして再利用します。
+Manifest, validation, fixtures, and conformance helpers for distributing a domain ontology, authoring metadata, projection rules, templates, assets, and license provenance as one versioned profile.
 
-このkitが確認するのはIriographとの接続契約です。BPMN等の外部規格準拠を主張しません。
+## Install
+
+```sh
+npm install --save-exact @iriograph/core @iriograph/profile-kit
+```
+
+The kit preserves separate ontology and catalog schemas while reusing standard catalogs as versioned dependencies. It validates identity, integrity, dependency, rule/role/template/asset conflicts, fallback behavior, and license metadata.
+
+Conformance demonstrates the connection to Iriograph; a BPMN-like or other familiar appearance does not claim format interoperability or standards compliance without a dedicated adapter and test suite.
+
+See [Domain profiles and vendor catalogs](../../docs/integration/domain-profiles.md).
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

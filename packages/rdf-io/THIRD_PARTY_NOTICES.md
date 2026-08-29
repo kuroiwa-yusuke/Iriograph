@@ -1,6 +1,6 @@
 # Third-party notices
 
-`@iriograph/rdf-io` uses the following third-party packages at runtime. Their licenses apply to those components; the Iriograph package remains `UNLICENSED`.
+`@iriograph/rdf-io` uses the following third-party packages at runtime. Their licenses apply to those components; the Iriograph package is distributed under the MIT License.
 
 - `n3` — MIT License — Copyright (c) Ruben Verborgh and contributors
 - `jsonld` — BSD 3-Clause License — Copyright (c) Digital Bazaar, Inc.

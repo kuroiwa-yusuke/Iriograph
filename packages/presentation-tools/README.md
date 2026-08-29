@@ -1,5 +1,7 @@
 # @iriograph/presentation-tools
 
+[日本語](./README_ja.md)
+
 Engine-independent tools for external or LLM-generated presentation candidates.
 The package exposes an immutable, revision-bound Scene index, compact target and
 capability summaries, a closed sparse-patch validator, deterministic diffs, and
@@ -10,6 +12,12 @@ arbitrary URLs, resolved asset URLs, authentication data, or asset/screenshot
 bytes. Template, icon and style choices use revision-bound opaque option IDs.
 Renderer output contains only an opaque screenshot ID and dimensions; any image
 bytes remain in host session storage.
+
+## Install
+
+```sh
+npm install --save-exact @iriograph/core @iriograph/presentation-tools
+```
 
 ```ts
 import {
@@ -97,3 +105,7 @@ emits bounded call and cycle audit records containing latency, request/response
 bytes, patch counts, outcome, screenshot ID or score summary. Token limits are
 cumulative across the session; time and byte limits are enforced per call and
 per cycle.
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

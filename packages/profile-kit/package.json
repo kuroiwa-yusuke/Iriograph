@@ -1,9 +1,9 @@
 {
   "name": "@iriograph/profile-kit",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Domain projection profile manifest and conformance kit for Iriograph.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
@@ -13,7 +13,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "README_ja.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -26,6 +26,6 @@
   },
   "publishConfig": { "access": "public" },
   "engines": { "node": ">=20.19" },
-  "dependencies": { "@iriograph/core": "0.11.1" },
+  "dependencies": { "@iriograph/core": "0.11.2" },
   "devDependencies": { "typescript": "^5.8.3", "vitest": "^4.1.8" }
 }

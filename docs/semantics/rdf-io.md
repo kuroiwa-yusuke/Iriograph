@@ -1,21 +1,23 @@
-# RDF dataset import / export
+# RDF dataset import and export
 
-`@iriograph/rdf-io`はIriograph documentの意味正本だけをTurtleまたはJSON-LDと交換するpackageです。View overlayや画像上の位置から意味を生成しません。
+[日本語版](../../docs_ja/semantics/rdf-io.md)
+
+`@iriograph/rdf-io` exchanges only the semantic source of truth as Turtle or JSON-LD. It never derives semantics from overlay geometry or image positions.
 
 ## Import
 
-Importは入力をRDF datasetへ正規化し、expanded IRI、blank node、literalのlanguage/datatype、base、重複statementを保持します。新規documentと既存graphへのmerge candidateを分け、いずれもsemantic diff、collision、loss reportを返します。Schemaまたはsemantic errorがあれば適用せず、HostはCore authoring transactionへ候補を渡してatomicに確定します。
+Import normalizes input into an RDF dataset while preserving expanded IRIs, blank nodes, literal language and datatype, base resolution, and duplicate statements. New-document and merge candidates are separate operations; both return semantic diffs, collisions, and loss reports. Schema or semantic errors prevent application. A host passes a valid candidate to a Core authoring transaction for atomic commit.
 
-Profileのdefault localeをimport済みliteralへ補完しません。外部expanded IRIをlocal namespaceへ暗黙変換しません。見た目の囲い、位置、線種からtypeやmembershipを推測しません。
+Import does not add the profile's default locale to existing literals, rewrite external expanded IRIs into a local namespace, or infer type, membership, or ordering from visual containment, position, or line style.
 
-## Mergeとrebase
+## Merge and rebase
 
-Mergeは同一expanded IRIを同一resourceとして扱います。Local IRI衝突、異なるliteral、blank node scopeをreportし、衝突解決を利用者またはHost policyへ返します。
+Merge treats equal expanded IRIs as the same resource and reports local-IRI collisions, incompatible literals, and blank-node scope. Resolution belongs to the user or host policy.
 
-文書コピー等でnamespaceを変える場合だけ、明示rebase operationを使います。Rebaseは対象base、変換対象IRI集合、変換前後のmappingをpreviewし、外部vocabulary IRI、標準語彙、対象外absolute IRIを保持します。File renameだけではRDF IRIを書き換えません。
+Changing a namespace during document copy is an explicit rebase operation. Rebase previews the source base, the exact IRI set, and the before/after mapping. It preserves standard vocabulary, external vocabulary, and absolute IRIs outside the selected namespace. Renaming a file never rewrites RDF identity implicitly.
 
 ## Export
 
-Exportはsemantic datasetだけをTurtleまたはJSON-LDへ変換します。Language/datatypeとexpanded identityをlosslessに保ち、overlay、viewport、icon URL、workspace pathを混ぜません。Turtleのcomment、空白、prefix順等の書式完全保持は保証せず、意味datasetを決定的にserializeします。
+Export serializes only the semantic dataset to Turtle or JSON-LD. It preserves language, datatype, and expanded identity without adding overlays, viewport state, icon URLs, or workspace paths. Turtle comments, whitespace, prefix order, and statement formatting are not guaranteed to survive a later deterministic reserialization.
 
-外部diagram形式はこのpackageへ列挙しません。BPMN XML等が必要な場合は、形式固有のloss mappingを持つ独立adapterとして追加します。
+Format-specific diagram exchange such as BPMN XML belongs in a separate adapter with an explicit loss model rather than an enumeration inside this package.

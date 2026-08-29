@@ -1,9 +1,9 @@
 {
   "name": "@iriograph/vue-editor",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Embeddable Vue editor for Iriograph semantic diagrams.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
@@ -28,7 +28,9 @@
   ],
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "README_ja.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "vite build && vue-tsc -p tsconfig.build.json",
@@ -54,9 +56,9 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "@iriograph/agent-bridge": "0.11.1",
-    "@iriograph/core": "0.11.1",
-    "@iriograph/semantic-access": "0.11.1"
+    "@iriograph/agent-bridge": "0.11.2",
+    "@iriograph/core": "0.11.2",
+    "@iriograph/semantic-access": "0.11.2"
   },
   "peerDependencies": {
     "vue": "^3.5.0"

@@ -1,9 +1,9 @@
 {
   "name": "@iriograph/layout-elk",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Optional ELK.js layered layout adapter for Iriograph scenes.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
@@ -26,7 +26,9 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "README_ja.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -49,7 +51,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "@iriograph/core": "0.11.1",
+    "@iriograph/core": "0.11.2",
     "elkjs": "0.12.0"
   }
 }

@@ -1,10 +1,6 @@
 # @iriograph/semantic-access
 
-`@iriograph/semantic-access`は、Iriograph documentのTurtleを人間・LLM向けに検索し、短いaliasを安全なCore authoring commandへ変換するframework非依存packageです。
-
-Labelは発見と説明に使いますが、identityには使いません。検索結果は常に完全IRIとdocument revisionに束縛されたaliasを返します。表示overlay、asset byte、raw SPARQL UpdateはAPIへ公開しません。
-
-`standardPredicateVocabularyJa`は、RDF/RDFS、Dublin Core Terms、PROV-O、SKOSの代表的なpredicate IRIへ日本語label、説明、category、利用例を付けたpicker用metadataです。Turtleへ日本語独自predicateを追加せず、hostはprofileに必要なcategoryだけを`standardPredicateTermsJa()`で選んで`ResolvedAuthoringContext`へ加えられます。表示metadataは検索支援だけに使い、commandと索引は常に標準IRIをidentityとして保持します。
+Framework-independent label-first search and revision-safe authoring facade over Iriograph Turtle.
 
 ## Install
 
@@ -18,60 +14,43 @@ npm install --save-exact @iriograph/core @iriograph/semantic-access
 import { SemanticAccessIndex } from "@iriograph/semantic-access";
 
 const semantic = new SemanticAccessIndex(document, workspaceRevision, {
-  locales: ["ja-JP", "en"],
+  locales: ["en", "ja-JP"],
 });
 
-const resources = semantic.searchResources("申請");
-const predicates = semantic.searchPredicates("承認");
-const details = semantic.describe({
-  ...resources[0].reference,
-});
-const related = semantic.subgraph({
-  root: resources[0].reference,
-  depth: 2,
-});
+const resources = semantic.searchResources("approval");
+const predicates = semantic.searchPredicates("depends on");
+const detail = semantic.describe(resources[0].alias);
+const related = semantic.subgraph(resources[0].alias, { depth: 2 });
 ```
 
-主なread APIは次のとおりです。
+Labels and descriptions support discovery but never replace identity. Results use aliases bound to an exact document revision and index fingerprint. Ordinary DTOs do not expose overlays, asset bytes, authenticated URLs, or raw SPARQL Update.
 
-- `searchResources`、`searchPredicates` / `searchRelations`: label、SKOS alias、comment、IRIの決定的なlexical検索
-- `describe`: localeに適合する表示名、全label/comment、type、class/property階層、近傍件数
-- `hierarchy` / `predicateHierarchy`: multi-parent階層の全finite simple pathと距離。到達可能なcycleは
-  traversalを停止した`hierarchy-cycle`診断として返す
-- `neighbors`、`subgraph`: incoming/outgoing relationとdepth制限付き部分graph。各relationはexact statement identityと個別commentを保持
-- `statementComments`: revision aliasでexact S/P/Oを照合して個別commentを取得
-- `memberships`: `rdfs:member`とsubproperty closure。`rdf:_n`系は`kind: "ordinal-membership"`で区別し、`includeOrdinals: false`で除外可能
+Read APIs cover resources and predicates, descriptions, localized values, class/property hierarchy, incoming/outgoing neighborhoods, exact statement comments, related subgraphs, and normalized Bag/Seq/Alt membership. Limited RDFS inference is explicit and separate from asserted-edge counts.
 
-## Safe write
+`standardPredicateVocabularyJa` and related helpers add localized picker metadata for selected RDF/RDFS, Dublin Core Terms, PROV-O, and SKOS predicates without creating custom Japanese predicates.
 
-Hostは`SemanticWritePort`を注入します。直接Coreを利用するhostでは`createCoreSemanticWritePort`を使えます。
+## Write
+
+A host injects a `SemanticWritePort`; direct Core hosts can use `createCoreSemanticWritePort`.
 
 ```ts
-import {
-  SemanticAuthoringFacade,
-  createCoreSemanticWritePort,
-} from "@iriograph/semantic-access";
-
-const writes = new SemanticAuthoringFacade(
-  semantic,
-  createCoreSemanticWritePort(async () => resolvedAuthoringContext),
-);
-
-const preview = await writes.preview({
-  type: "connect-resources",
-  operationId: "connect-1",
-  revision: workspaceRevision,
-  subject: { alias: "r12", revision: workspaceRevision },
-  predicate: { alias: "p4", revision: workspaceRevision },
-  object: { alias: "r19", revision: workspaceRevision },
+const preview = await semantic.preview({
+  kind: "add-relation",
+  source: sourceAlias,
+  predicate: predicateAlias,
+  target: targetAlias,
 });
 
-const result = await writes.apply(preview, {
-  revision: workspaceRevision,
-  confirmationId: preview.corePreview.confirmationId,
+const committed = await semantic.apply({
+  previewId: preview.previewId,
+  confirmationId: preview.confirmationId,
 });
 ```
 
-`apply`は同じrevisionのpreviewと完全一致するconfirmation IDを必須にします。Aliasが古い場合は`StaleSemanticRevisionError`、未知の場合は`UnknownSemanticAliasError`を返します。最終的な検証、canonical Turtle生成、全view reconciliation、保存はCoreまたはCloud側WritePortの責務です。
+Apply requires the same revision and exact preview binding. Stale and unknown aliases fail closed. Core or the Cloud write port remains responsible for final policy, canonical Turtle, all-view reconciliation, and atomic save.
 
-詳細な契約は[Semantic Access](../../docs/integration/semantic-access.md)を参照してください。
+See [Semantic Access](../../docs/integration/semantic-access.md).
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

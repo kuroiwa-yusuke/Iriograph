@@ -9,6 +9,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const NOT_FOUND_PATTERN = /(?:\bE404\b|404\s+Not\s+Found)/i;
+export const NPMJS_REGISTRY = "https://registry.npmjs.org/";
 
 async function defaultRunNpm(args) {
   try {
@@ -30,34 +31,26 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
-export function assertCodeArtifactRegistry(registry) {
+export function assertNpmjsRegistry(registry) {
   let parsed;
   try {
     parsed = new URL(registry);
   } catch {
-    throw new Error("@iriograph:registry must be an absolute CodeArtifact URL");
+    throw new Error("package registry must be the absolute npmjs registry URL");
   }
   if (
     parsed.protocol !== "https:"
-    || !parsed.hostname.includes(".d.codeartifact.")
-    || !parsed.hostname.endsWith(".amazonaws.com")
-    || !parsed.pathname.includes("/npm/")
+    || parsed.hostname !== "registry.npmjs.org"
+    || parsed.port !== ""
+    || parsed.username !== ""
+    || parsed.password !== ""
+    || parsed.pathname !== "/"
+    || parsed.search !== ""
+    || parsed.hash !== ""
   ) {
-    throw new Error("@iriograph:registry must point to an HTTPS AWS CodeArtifact npm repository");
+    throw new Error("package registry must point exactly to the npmjs registry https://registry.npmjs.org/");
   }
-  return parsed.href;
-}
-
-export async function resolveScopedRegistry(runNpm = defaultRunNpm) {
-  const result = await runNpm(["config", "get", "@iriograph:registry"]);
-  if (result.code !== 0) {
-    throw new Error("failed to read the authenticated @iriograph scope registry");
-  }
-  const registry = result.stdout.trim();
-  if (!registry || registry === "undefined" || registry === "null") {
-    throw new Error("@iriograph:registry is not configured; run CodeArtifact login and scope setup first");
-  }
-  return assertCodeArtifactRegistry(registry);
+  return NPMJS_REGISTRY;
 }
 
 export async function registryHasExactVersion({ name, version, registry, runNpm }) {
@@ -94,14 +87,14 @@ async function waitForExactVersion({
   registry,
   runNpm,
   wait,
-  attempts = 5,
+  attempts = 8,
 }) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (await registryHasExactVersion({ name, version, registry, runNpm })) {
       return true;
     }
     if (attempt < attempts) {
-      await wait(attempt * 250);
+      await wait(attempt * 500);
     }
   }
   return false;
@@ -113,9 +106,7 @@ export async function publishReleasePackages(options = {}) {
   const runNpm = options.runNpm ?? defaultRunNpm;
   const wait = options.wait ?? delay;
   const logger = options.logger ?? console;
-  const registry = options.registry
-    ? assertCodeArtifactRegistry(options.registry)
-    : await resolveScopedRegistry(runNpm);
+  const registry = assertNpmjsRegistry(options.registry ?? NPMJS_REGISTRY);
   const results = [];
 
   for (const { manifest } of packages) {
@@ -133,6 +124,9 @@ export async function publishReleasePackages(options = {}) {
       name,
       "--registry",
       registry,
+      "--access",
+      "public",
+      "--provenance",
     ]);
     if (publishResult.code !== 0) {
       const appearedAfterFailure = await waitForExactVersion({

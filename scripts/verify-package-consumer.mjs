@@ -168,6 +168,34 @@ async function verifyInstalledContract(consumer) {
   ) {
     throw new Error("all @iriograph package versions must match");
   }
+  for (const [packageDirectory, manifest] of [
+    [coreDirectory, corePackage],
+    [rdfIoDirectory, rdfIoPackage],
+    [profileResolverDirectory, profileResolverPackage],
+    [semanticAccessDirectory, semanticAccessPackage],
+    [layoutElkDirectory, layoutElkPackage],
+    [profileKitDirectory, profileKitPackage],
+    [presentationToolsDirectory, presentationToolsPackage],
+    [hostConformanceDirectory, hostConformancePackage],
+    [iconsAwsDirectory, iconsAwsPackage],
+    [agentBridgeDirectory, agentBridgePackage],
+    [editorDirectory, editorPackage],
+  ]) {
+    if (manifest.license !== "MIT") {
+      throw new Error(`${manifest.name} must declare the MIT license`);
+    }
+    const [license, englishReadme, japaneseReadme] = await Promise.all([
+      readFile(join(packageDirectory, "LICENSE"), "utf8"),
+      readFile(join(packageDirectory, "README.md"), "utf8"),
+      readFile(join(packageDirectory, "README_ja.md"), "utf8"),
+    ]);
+    if (!license.includes("MIT License") || !license.includes("Permission is hereby granted")) {
+      throw new Error(`${manifest.name} does not contain the MIT license text`);
+    }
+    if (englishReadme.trim().length === 0 || japaneseReadme.trim().length === 0) {
+      throw new Error(`${manifest.name} must ship non-empty English and Japanese READMEs`);
+    }
+  }
   if (semanticAccessPackage.dependencies?.["@iriograph/core"] !== corePackage.version) {
     throw new Error("@iriograph/semantic-access must depend on the exact packed core version");
   }

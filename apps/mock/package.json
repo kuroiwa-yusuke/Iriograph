@@ -10,14 +10,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@iriograph/agent-bridge": "0.11.1",
-    "@iriograph/core": "0.11.1",
-    "@iriograph/host-conformance": "0.11.1",
-    "@iriograph/layout-elk": "0.11.1",
-    "@iriograph/profile-kit": "0.11.1",
-    "@iriograph/profile-resolver": "0.11.1",
-    "@iriograph/semantic-access": "0.11.1",
-    "@iriograph/vue-editor": "0.11.1",
+    "@iriograph/agent-bridge": "0.11.2",
+    "@iriograph/core": "0.11.2",
+    "@iriograph/host-conformance": "0.11.2",
+    "@iriograph/layout-elk": "0.11.2",
+    "@iriograph/profile-kit": "0.11.2",
+    "@iriograph/profile-resolver": "0.11.2",
+    "@iriograph/semantic-access": "0.11.2",
+    "@iriograph/vue-editor": "0.11.2",
     "vue": "^3.5.16"
   },
   "devDependencies": {

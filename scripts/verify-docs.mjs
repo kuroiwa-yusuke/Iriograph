@@ -6,6 +6,9 @@ const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const markdownFiles = (await collectMarkdownFiles()).sort();
 const failures = [];
 
+await verifyBilingualDocumentation();
+await verifyPackageLicenseDocuments();
+
 for (const relativeFile of markdownFiles) {
   const source = await readFile(path.join(repositoryRoot, relativeFile), "utf8");
   for (const match of source.matchAll(/\[[^\]]*\]\(([^)]+)\)/gu)) {
@@ -82,4 +85,45 @@ async function collectMarkdownFiles() {
   }
   await visit(repositoryRoot);
   return files;
+}
+
+async function verifyBilingualDocumentation() {
+  const englishDocs = markdownFiles.filter((file) => file.startsWith("docs/") && file.endsWith(".md"));
+  const japaneseDocs = new Set(markdownFiles.filter((file) => file.startsWith("docs_ja/") && file.endsWith(".md")));
+  for (const english of englishDocs) {
+    const japanese = english.replace(/^docs\//u, "docs_ja/");
+    if (!japaneseDocs.has(japanese)) failures.push(`${english}: 対応する日本語文書 ${japanese} が必要`);
+  }
+  for (const japanese of japaneseDocs) {
+    const english = japanese.replace(/^docs_ja\//u, "docs/");
+    if (!englishDocs.includes(english)) failures.push(`${japanese}: 対応する英語正本文書 ${english} が必要`);
+  }
+  try {
+    await access(path.join(repositoryRoot, "README_ja.md"));
+  } catch {
+    failures.push("README.md: README_ja.md が必要");
+  }
+}
+
+async function verifyPackageLicenseDocuments() {
+  const packageRoot = path.join(repositoryRoot, "packages");
+  for (const entry of await readdir(packageRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const directory = path.join(packageRoot, entry.name);
+    let manifest;
+    try {
+      manifest = JSON.parse(await readFile(path.join(directory, "package.json"), "utf8"));
+    } catch {
+      continue;
+    }
+    if (!String(manifest.name ?? "").startsWith("@iriograph/")) continue;
+    if (manifest.license !== "MIT") failures.push(`${entry.name}/package.json: license はMITでなければならない`);
+    for (const required of ["LICENSE", "README.md", "README_ja.md"]) {
+      try {
+        await access(path.join(directory, required));
+      } catch {
+        failures.push(`packages/${entry.name}: ${required} が必要`);
+      }
+    }
+  }
 }

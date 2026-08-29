@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish packages to AWS CodeArtifact"
+        description: "Publish packages to npmjs with Trusted Publishing"
         required: true
         default: "false"
         type: choice
@@ -28,13 +28,6 @@ permissions:
 concurrency:
   group: iriograph-packages
   cancel-in-progress: false
-
-env:
-  AWS_REGION: ap-northeast-1
-  AWS_ROLE_TO_ASSUME: arn:aws:iam::571179238578:role/KuroxiomPackagesPublishRole
-  CODEARTIFACT_DOMAIN: kuroxiom
-  CODEARTIFACT_DOMAIN_OWNER: "571179238578"
-  CODEARTIFACT_REPOSITORY: kuroxiom-packages
 
 jobs:
   verify:
@@ -212,10 +205,11 @@ jobs:
       - id: publish_checkout
         uses: actions/checkout@v4
       - id: publish_setup
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24"
-          cache: npm
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
       - name: Install workspace dependencies
         id: publish_install
         run: npm ci
@@ -237,33 +231,47 @@ jobs:
             exit 1
           fi
           EXPECTED_PACKAGE_VERSION="${expected_version}" npm run verify:package-versions
-      - id: publish_aws_auth
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Login to CodeArtifact
-        id: publish_codeartifact_login
-        run: >-
-          aws codeartifact login
-          --tool npm
-          --domain "${CODEARTIFACT_DOMAIN}"
-          --domain-owner "${CODEARTIFACT_DOMAIN_OWNER}"
-          --repository "${CODEARTIFACT_REPOSITORY}"
-          --region "${AWS_REGION}"
-      - name: Configure @iriograph scope registry
-        id: publish_scope_config
+      - name: Verify npm CLI supports Trusted Publishing
+        id: publish_npm_cli
         shell: bash
         run: |
-          codeartifact_registry="$(npm config get registry)"
-          case "${codeartifact_registry}" in
-            https://*.d.codeartifact.*.amazonaws.com/npm/*/) ;;
+          set -euo pipefail
+          npm_version="$(npm --version)"
+          node --input-type=module -e '
+            const [major, minor, patch] = process.argv[1].split(/[.-]/u, 3).map(Number);
+            if (![major, minor, patch].every(Number.isInteger)
+              || major < 11
+              || (major === 11 && minor < 5)
+              || (major === 11 && minor === 5 && patch < 1)) {
+              throw new Error(`npm ${process.argv[1]} does not support Trusted Publishing; require >=11.5.1`);
+            }
+          ' "${npm_version}"
+      - name: Lock publishing to npmjs OIDC
+        id: publish_npm_registry
+        shell: bash
+        env:
+          EXPECTED_NPM_REGISTRY: "https://registry.npmjs.org/"
+        run: |
+          set -euo pipefail
+          if [[ -n "${NODE_AUTH_TOKEN:-}" || -n "${NPM_TOKEN:-}" ]]; then
+            echo "Long-lived npm publish tokens are forbidden; use GitHub OIDC" >&2
+            exit 1
+          fi
+          configured_registry="$(npm config get registry)"
+          if [[ "${configured_registry}" != "${EXPECTED_NPM_REGISTRY}" ]]; then
+            echo "npm registry must be exactly ${EXPECTED_NPM_REGISTRY}" >&2
+            exit 1
+          fi
+          scoped_registry="$(npm config get '@iriograph:registry')"
+          case "${scoped_registry}" in
+            undefined|null|"") npm config set '@iriograph:registry' "${EXPECTED_NPM_REGISTRY}" ;;
+            "${EXPECTED_NPM_REGISTRY}") ;;
             *)
-              echo "CodeArtifact npm registry was not configured" >&2
+              echo "@iriograph scope is configured for a forbidden registry" >&2
               exit 1
               ;;
           esac
-          npm config set "@iriograph:registry" "${codeartifact_registry}"
+          [[ "$(npm config get '@iriograph:registry')" == "${EXPECTED_NPM_REGISTRY}" ]]
       - name: Publish packages
         id: publish_packages
         run: npm run publish:packages
@@ -276,9 +284,8 @@ jobs:
           SETUP_OUTCOME: ${{ steps.publish_setup.outcome }}
           INSTALL_OUTCOME: ${{ steps.publish_install.outcome }}
           VERSION_OUTCOME: ${{ steps.publish_version.outcome }}
-          AWS_AUTH_OUTCOME: ${{ steps.publish_aws_auth.outcome }}
-          CODEARTIFACT_LOGIN_OUTCOME: ${{ steps.publish_codeartifact_login.outcome }}
-          SCOPE_CONFIG_OUTCOME: ${{ steps.publish_scope_config.outcome }}
+          NPM_CLI_OUTCOME: ${{ steps.publish_npm_cli.outcome }}
+          NPM_REGISTRY_OUTCOME: ${{ steps.publish_npm_registry.outcome }}
           PUBLISH_OUTCOME: ${{ steps.publish_packages.outcome }}
         run: |
           set -euo pipefail
@@ -292,15 +299,18 @@ jobs:
           record_failure "install" "${SETUP_OUTCOME}"
           record_failure "install" "${INSTALL_OUTCOME}"
           record_failure "version-check" "${VERSION_OUTCOME}"
-          record_failure "aws-auth" "${AWS_AUTH_OUTCOME}"
-          record_failure "codeartifact-login" "${CODEARTIFACT_LOGIN_OUTCOME}"
-          record_failure "scope-config" "${SCOPE_CONFIG_OUTCOME}"
-          record_failure "publish" "${PUBLISH_OUTCOME}"
+          record_failure "npm-cli" "${NPM_CLI_OUTCOME}"
+          record_failure "npm-registry" "${NPM_REGISTRY_OUTCOME}"
+          record_failure "npm-publish" "${PUBLISH_OUTCOME}"
           echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
 
   audit:
     needs: [verify, publish]
-    if: ${{ always() }}
+    if: >-
+      always() &&
+      (startsWith(github.ref, 'refs/tags/packages-v') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish == 'true'))
     runs-on: ubuntu-latest
     permissions:
       contents: write

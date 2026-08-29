@@ -1,15 +1,17 @@
-# Domain profile・vendor catalog
+# Domain profiles and vendor catalogs
 
-## Domain projection profile
+[日本語版](../../docs_ja/integration/domain-profiles.md)
 
-`@iriograph/profile-kit`はdomain ontology、authoring metadata、projection rule、template、assetをCore分岐なしで配布するmanifestとconformance kitを提供します。Manifestはimmutable ID/version、integrity、default locale、opaque role/Group-kind ID、依存profile、license metadataを持ちます。
+## Domain projection profiles
 
-Validatorはrole/rule/template/asset衝突、missing dependency、unknown fallback、exact provenance、profile-guided authoring、license欠落を検査します。Reference workflow profileとfixtureは、標準predicate catalog再利用、generic task port、Mock/Cloud読込みを証明します。BPMN-like等の見た目を提供しても規格互換importや完全な規格準拠は別adapter/testなしに主張しません。
+`@iriograph/profile-kit` provides a manifest and conformance kit for distributing domain ontologies, authoring metadata, projection rules, templates, and assets without adding domain-specific branches to Core. A manifest declares immutable identifiers and versions, integrity, default locale, opaque role and group-kind IDs, profile dependencies, and license metadata.
+
+The validator checks role, rule, template, and asset conflicts; missing dependencies; unknown fallbacks; exact provenance; profile-guided authoring; and license metadata. The reference workflow profile demonstrates reuse of the standard predicate catalog, generic task ports, and loading in both the Mock and Cloud. A BPMN-like appearance does not imply BPMN import compatibility or standards compliance without a dedicated adapter and conformance suite.
 
 ## AWS icon catalog
 
-`@iriograph/icons-aws`はAWS Architecture Iconsの画像bytesを再配布せず、公式archiveの版、出典、hash、archive内path、日本語category、service alias、rename/deprecation情報だけを固定する任意packageです。Hostが利用条件に同意して取得した公式archiveをlocal providerへmapするか、allowlist済みHTTPS signed URL providerを注入します。
+`@iriograph/icons-aws` is an optional metadata-only package. It does not redistribute AWS Architecture Icons. It pins the official archive release, provenance, hashes, paths within the archive, localized categories, service aliases, and rename/deprecation metadata. A host may map an officially downloaded archive to a local provider or inject an allowlisted HTTPS signed-URL provider.
 
-Portable overlayはversioned asset IRIだけを保存します。Resolverはexact catalog version/integrityを照合し、未導入、版不一致、rename、deprecated、missing asset、予約namespace衝突を別diagnosticとして返します。認証URLとbyteはdocumentへ入りません。
+Portable overlays store only versioned asset IRIs. The resolver distinguishes missing installation, version mismatch, rename, deprecation, missing asset, and reserved-namespace conflict. Authentication URLs and bytes never enter the portable document.
 
-Core同梱Lucide iconとvendor iconは別namespaceです。Vendor brandをCore既定集合へ複製せず、package削除時もdocumentは未知assetの安全fallbackで開けます。
+Bundled Lucide icons and vendor icons use separate namespaces. Vendor branding is not copied into the Core default set, and documents remain readable through a safe unknown-asset fallback when a vendor package is absent.

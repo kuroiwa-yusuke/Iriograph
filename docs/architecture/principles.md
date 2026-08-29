@@ -1,118 +1,109 @@
-# 設計原則
+# Architecture principles
 
-## 目的
+[日本語版](../../docs_ja/architecture/principles.md)
 
-Iriographは「意味グラフを図として編集・検証・再利用する」ための基盤です。TurtleはLLMやsemantic toolが扱う意味の正本、display overlayは人がWYSIWYGで調整した表示の正本です。
+## Purpose
 
-図は意味グラフの単純な可視化に限定しません。catalogが意味語彙を`node`、`edge`、`container`、`annotation`などの少数の空間primitiveへ写すことで、BPMN風のlane・包含、一般の関係図、iconを含む見た目を同じ投影機構で扱います。
+Iriograph exists to edit, validate, and reuse semantic graphs as diagrams. Turtle is the semantic source of truth for RDF tooling and LLM access. A sparse display overlay is the source of truth for intentional WYSIWYG presentation adjustments.
 
-## Turtleとdisplay overlay
+A diagram is not limited to a literal node-edge rendering. Catalog rules map semantic vocabulary to a small set of spatial primitives such as nodes, edges, containers, regions, groups, and annotations. The same projection mechanism can therefore support ordinary relationship diagrams, BPMN-like lanes and flows, containment, order and alternative groups, and icon-rich views.
 
-一つのportable JSON documentにTurtle文字列とview情報を持たせます。意味と表示を別ファイルにすると参照整合性や配布単位が複雑になり、display自体をtripleにすると座標変更がsemantic revisionへ混入します。JSON envelope内で分離すると、同じ配布単位のままtransaction境界を保てます。
+## Turtle and display overlay
 
-display overlayが保持するのは、geometry、pin、edge routing、明示的なtemplate/icon/style overrideなど、catalogとlayoutから復元できない、またはユーザーが意図的に固定した情報です。既定色や既定iconはcatalogを正本にし、利用者が個別に変更した安全な色・透明度・線幅等だけをsparse overrideとして保持します。任意CSSや実行可能なstyle文字列は保存しません。
+A portable JSON document contains both the Turtle string and named-view data. Keeping them in one envelope preserves a single distribution and revision unit; keeping them in separate fields preserves transaction boundaries.
 
-Turtleへ置くdomain resourceとdomain vocabularyも区別します。`rdf:type`は見た目を選ぶ印ではなく、LLM、validation、query、推論、再利用で必要な分類だけを表します。表示だけのstart/task/gateway種別は各named viewのoverlayからcatalog templateを参照し、appearanceを正当化するためだけのtypeをTurtleへ追加しません。詳細は[意味と表示notation](../semantics/notation.md)を正本とします。
+The overlay stores only presentation information that cannot be regenerated safely or that a user deliberately fixed:
 
-## 意味を作るリッチ編集
+- geometry and placement provenance;
+- pinning and manual routes;
+- explicit template, icon, and safe style overrides;
+- label, caption, and endpoint-anchor adjustments.
 
-リッチエディタでnode、属性、edge、包含を作る操作は、Sceneへの図形追加ではなくsemantic graphの編集です。Editorは操作をTurtleのgraph delta候補へ変換し、semantic transactionの検証に成功した場合だけ正本とSceneを更新します。Sceneに仮nodeを作り、後から意味を付けて保存する状態をdocumentには許容しません。
+Catalog defaults remain in the catalog. Arbitrary CSS and executable style strings are never portable data.
 
-- Standard editorの作成ではallocatorがopaque named IRIを決め、nodeは利用者が入力した`rdfs:label`とresolved profileから選んだnode-role type、groupは名前と包含・順序付き・候補等の業務構造typeを同じtransactionで作る。ClassはGroup Frame作成へ混ぜず型一覧で作成・編集する。Comment、domain property、既存resourceとの関係、位置は作成後の別操作で追加し、template選択だけを目的とするtypeは作らない。
-- 属性編集はpredicateとIRI/literal valueを持つtripleの追加、置換、削除として行う。
-- edge作成ではpredicateを必須とし、直接IRI-object tripleまたはprojection capabilityが定義するgraph patchを作る。便宜的な`:relation`のような語彙を暗黙に生成しない。
-- 包含編集では`rdf:Bag`resourceと`rdfs:member`等、選択したcapabilityの意味構造を書く。nodeをcontainer内へdragするだけの操作はpresentationであり、意味的所属を暗黙に追加しない。
+Domain resource identity and domain vocabulary are also separate concerns. `rdf:type` records classifications needed by validation, query, reasoning, reuse, or agents. It is not a visual-template selector. View-only task, event, gateway, color, or shape choices belong in a named view unless they carry domain meaning.
 
-これらの操作はCanvas選択中心の右Inspectorから開始します。常設する作成入口は`要素を追加`と`関係を追加`だけで、resource選択時に詳細・所属・並び順、direct edge選択時に関係の意味を段階表示します。右clickは選択objectのappearance入口に限定します。Canvas gestureは作成formのsource/targetをseedするだけで、意味を確定しません。非削除操作は利用者の実行一回の内部でcandidate graphの検証とsemantic transactionのcommitを続けて行います。未実行formはephemeral UI stateであり、Scene、overlay、undo対象documentへ保存しません。
+## Rich semantic editing
 
-利用者はTurtle、RDF/RDFS、完全IRIを知らなくても操作できることをUIの前提にします。Resource、class、predicateはlabelと説明を主表示し、Canvas上の対象選択を優先します。通常のpresentation DTO/DOMはopaque option IDとlabel/commentだけを持ち、生のIRIをtooltipやread-only Advanced情報へ渡しません。同名候補は説明、型、近傍とopaque identityで区別します。完全IRIはeditableなTurtle/Document sourceとHost/Core内部transaction・監査logに保持します。右Inspectorは選択対象の概要と「要素を追加」「関係を追加」から始め、対象別の詳細・所属・関係編集は選択後にだけ開きます。内部command名、ordinal、capability graph patchは通常UIへ露出せず、「順序」「選択肢」「定義済み操作」の利用者語彙へ翻訳します。
+Creating a resource, property, edge, membership, order, or alternative through the rich editor is a semantic-graph operation, not a temporary drawing operation. The editor builds a candidate graph delta and commits it only after semantic validation. A portable document never contains an untyped visual ghost waiting for semantics.
 
-Coreの低水準resource削除は、他resourceからの参照や構造membershipが残る場合にcascade省略を拒否します。標準Editorは現在の選択集合を一つの削除transactionとして扱い、選択外のedge、membership、Seq/Alt membershipへ波及する場合だけlabel付き影響一覧とCanvas上の変化を示して確認します。影響objectをすべて選択済みなら確認画面を挟まず一括削除します。`rdf:Seq`または`rdf:Alt`のmemberを削除する場合は、残るordinal predicateを一つのgraph patchで再採番し、欠番のある途中状態を正本にしません。Altの最低member数など、再構成後の制約を満たせなければtransaction全体を拒否します。
+- Resource creation uses a host allocator for an opaque named IRI and atomically writes a user-facing name plus a profile-approved node role.
+- Group creation atomically writes its name and selected business group kind. Type creation remains in the separate type catalog.
+- Property editing adds, replaces, or removes predicate/value triples.
+- Direct-edge creation requires an exact profile/catalog predicate; no generic `:relation` is minted implicitly.
+- Membership, order, and alternatives use a capability-defined graph patch such as `rdf:Bag`, `rdf:Seq`, or `rdf:Alt`.
+- Plain visual drag into a region never implies semantic membership.
 
-Resource作成とユーザー指定座標は別操作です。Standard editorはlabelのsemantic transactionを確定してgenerated geometryを補完し、その後のdragを独立したpresentation transactionとして記録します。作成失敗時に仮位置やghostを確定しません。
+Ordinary UI is label-first and selection-first. Users do not need to know Turtle, RDF terms, or complete IRIs. Presentation DTOs and DOM expose opaque option IDs, labels, and descriptions. Exact IRIs remain in editable source, internal transactions, and audit identity.
 
-semantic transaction成功後は、全viewをそれぞれのprofile、catalog、layoutで再投影します。存続するidentityのuser overlayは互換な範囲で維持し、新規要素は決定的layoutからgenerated provenanceの初期geometryを得ます。Catalogから再生成できるtemplate、style、iconはoverlayへ複製しません。このdisplay reconciliationはsemantic変更の結果を表示可能にする後処理であり、任意の見た目変更をsemantic transactionに混ぜることではありません。
+Non-deleting human actions validate and commit within one user action. Confirmation is reserved for deletion that affects unselected incident statements or structural memberships. Seq/Alt deletion and ordinal repair are one atomic patch.
 
-通常の再投影・layout更新で再配置するのは`placement: "generated"`の要素だけです。`placement: "user"`のgeometryは固定制約としてlayoutへ渡し、互換なidentityが存続する限り自動的に移動しません。自動再投影と全体layoutの発火源はsemantic sourceの確定変更だけです。Drag、resize、appearance、label位置、endpoint anchor、routing等のoverlay-only変更では全体layoutを再実行せず、変更geometryとincident edgeのderived routeだけを再計算します。
+Resource creation and user placement are distinct. Successful creation receives generated geometry; later drag is a presentation transaction. A failed creation leaves no portable ghost or position.
 
-右Inspector内のビュー編集はoverlay境界が明確なので、別の適用確認を挟まず一つのpresentation transactionへ直接確定します。連続値の入力中表示はsession previewですが、確定はchange時の一履歴です。操作の安全性はundoとsparse overlayで担保し、確認modalは選択外の関連objectへ波及する削除だけに限定します。Canvasの作業余白、grid、viewportはsession stateであり、意味・表示のいずれの正本にも加えません。
+## Reconciliation and layout
 
-## Turtleの再serialize
+After a semantic transaction, every named view is reprojected with its own profile, catalog, and layout. Compatible user overlays survive by stable identity. New identities receive deterministic generated geometry; removed identities lose their overlays. Regenerable templates, styles, and icons are not copied into the overlay.
 
-Turtle sourceを直接編集してsemantic transactionを適用した場合は、ユーザーが入力した妥当な原文をそのまま`semantic.source`へ保持します。一方、structured commandとLLM editはRDF datasetへのgraph patchとして検証した後、共通serializerでTurtleを決定的に再生成します。Serializerはblank node labelを決定し、expanded subject/predicate/object tupleでdedupe・sortしてからnotationを選びます。標準`rdf`/`rdfs`/`xsd`、base/default、妥当で実際に使う入力prefixの順でcompactし、`rdf:type`は`a`、有効なprefixed nameにできないIRIだけをfull IRIにします。同じparse済みdataset（blank node IDを含む）、prefix/base context、serializer versionからはquadの入力順やprefix mapの列挙順に依存せず同じsourceを得ます。v1は完全なRDF Dataset Canonicalizationをcontractに含めません。
+Automatic layout moves only elements with `placement: "generated"`. User placement is a hard constraint while that identity survives. Overlay-only edits never trigger global layout; they update the edited geometry and derived routes of incident edges.
 
-Comment、空白、改行位置、property listのまとめ方、triple記述順などはRDF graphの意味ではありません。直接編集直後には残りますが、structured commandまたはLLM editによる再serializeを一度でも通した後の保持は保証しません。Source reviewは文字列diffだけに依存せず、RDF term単位のsemantic diffも利用します。
+Inline view controls commit directly as one presentation transaction. Continuous input may use a session preview, but one completed gesture becomes one history entry. Grid, work-area expansion, viewport, hover, and temporary visibility are session state.
 
-## Projection、layout、renderer
+## Turtle serialization
 
-意味graphからScene primitiveとedit provenanceを作るprojection、Scene elementのgeometryとroutingを決めるlayout、SceneをDOM/SVG等へ描画するrendererを分離します。Coreは非同期layout adapter契約と、小規模・中規模graph向けの決定的な標準軽量layoutを提供します。Hostは同じ契約を実装するELK等の高機能adapterへ`layoutRef`単位で差し替えられます。
+A valid source entered through direct Turtle editing is retained byte-for-byte at that commit. Structured commands and LLM edits operate on an RDF dataset and then use one deterministic serializer.
 
-この分離により、layout engineの依存サイズやworker利用をportable documentとprojection規則へ混ぜません。Rendererはlayout algorithmを知る必要がなく、layout adapterは業務IRIを知る必要がありません。
+The serializer deduplicates and sorts expanded tuples, chooses stable blank-node labels, preserves valid used prefixes where possible, prefers standard RDF/RDFS/XSD abbreviations, and emits full IRIs only when compaction is invalid. Identical parsed input, prefix/base context, serializer version, and blank-node identity produce identical output.
 
-標準layoutとELK等のoptional adapterは同じProjectedSceneと一般的な品質指標で比較します。特定sampleでの比較結果はadapter改善の証拠であり、sampleのIRI、label、件数に反応する配置規則を追加する根拠にはしません。
+Whitespace, comments, property-list grouping, and statement order are not RDF semantics and are not guaranteed after a structured reserialization. Reviews therefore use semantic diffs in addition to source diffs.
 
-## 複数view
+## Projection, layout, and renderer
 
-一つのsemantic graphには複数のnamed viewを持てます。ユーザーは保存済みのviewを選択し、各viewのprofile、layout、locale、overlayを独立して利用します。どのsemantic構造をcontainer、sequence、alternative等として表示するかはview profileが決めます。
+Projection creates spatial primitives and edit provenance from the semantic graph. Layout assigns geometry and routes. Rendering maps the Scene to DOM/SVG. These responsibilities do not depend on each other’s implementation details.
 
-標準の新規documentとsampleは、通常のnode/edgeと重なり可能な領域を同時に表せる`region` viewを一つだけ持ちます。`node-link` viewは単一parentの階層containerが必要な既存documentと明示的な追加viewのために読み書き互換を維持します。利用者に「flowかregionsか」という実装上の空間文法を最初に選ばせません。
+Core defines an asynchronous layout-adapter contract and a deterministic lightweight default. Hosts may select an optional adapter such as ELK through `layoutRef` without putting engine-specific options into the portable document. Layout adapters do not know business IRIs, and renderers do not implement layout algorithms.
 
-v1はSPARQL queryや汎用filter editorをview定義へ持ちません。編集作業中に要素を一時的に隠す操作はeditor session stateであり、semantic graphやportable documentを変更しません。永続的に異なる意味範囲を切り出す仕組みは、named viewとprofileの実利用を確認してから拡張します。
+## Named views and spatial grammars
 
-包含relationは意味グラフ上で多対多になり得ます。一意parentを要求する階層container表示と、複数membershipを半透明の重なり領域として示すregion表示は別の空間文法として扱います。Node-link viewは互換な単一parentの場合だけ階層配置を使い、すべてのmembership自体は失いません。Region viewは各集合を独立した領域として置き、重なりへ配置されたresourceが複数集合に属することを表します。Geometryの重なりからsemantic membershipを推論せず、意味と見た目が食い違う場合は警告と明示修正を提示します。
+One semantic graph can have multiple named views, each with its own profile, layout, locale, and overlay. New documents default to one region-capable view that can show ordinary edges and overlapping memberships together. Node-link hierarchy remains supported for explicit views and legacy documents.
 
-## Mermaid、draw.ioとの違い
+Version 1 has no embedded SPARQL or arbitrary filter editor. Temporary hide/fold behavior is editor session state.
 
-Mermaidは軽量な図記述と自動layoutに優れますが、意味のidentity、外部ontologyとの接続、複数view、WYSIWYG調整の永続化を主目的にした形式ではありません。IriographはTurtleを意味層、catalogを表示文法、overlayを人の調整として独立させます。Mermaid風DSLをもう一つの正本として増やさない方針です。
+Membership can be many-to-many. A single-parent hierarchy and an overlapping-region projection are different spatial grammars over the same semantics. Geometry never creates membership. A visual/semantic mismatch produces a warning and explicit repair action.
 
-diagrams.net/draw.ioは自由な作図に優れますが、図形・接続・座標が中心で、意味推論に利用するtripleを正本にしません。Iriographは任意描画の自由度を制限する代わりに、意味変更後の再投影、規則検証、LLMとの往復を安定させます。
+## Extensibility
 
-## Catalogによる拡張
+Do not add renderer branches such as “if predicate equals X.” Domain classes, predicates, relation resources, containment, templates, icons, and projection bindings belong in versioned catalogs or domain profiles. Unknown IRI-object triples remain readable as ordinary arrows.
 
-rendererへ`if predicate == ...`を増やしません。意味のある業務class、predicate、relation resource、containmentはsemantic ruleとしてcatalogへ宣言できます。意味ruleを持たないtemplateとassetもappearance libraryとしてcatalogへ置き、view overlayから参照できます。未登録のIRI-object tripleは通常矢印として表示し、未知語彙でも最低限読める状態を保ちます。
+A new business domain does not justify a new Scene primitive. Add a primitive only for a genuinely new spatial grammar.
 
-primitiveを増やす基準は、新しい業務領域ではなく新しい空間文法が必要かどうかです。たとえば「経理タスク」は既存node templateで表現し、「領域による包含」はcontainerという空間文法として追加します。
+The base profile reuses standard RDF/RDFS structures where natural:
 
-## RDF/RDFSを基底にする理由
+- `rdf:Bag` and `rdfs:member` for unordered membership;
+- `rdf:Seq` and `rdf:_n` for order;
+- `rdf:Alt` for alternative members;
+- `rdfs:seeAlso` and `rdfs:isDefinedBy` for common references.
 
-ベースプロファイルは、包含に`rdf:Bag`と`rdfs:member`、順序に`rdf:Seq`と`rdf:_n`、選択に`rdf:Alt`、参照に`rdfs:seeAlso`または`rdfs:isDefinedBy`を利用できるようにします。これらはspecial projectionへopt-inする共通構造であり、すべての業務graphに使用を強制しません。その他のdomain語彙はgeneric node/edgeとして成立します。
+Iriograph adds deterministic application-profile constraints without redefining RDF semantics. Domain terms live in the domain namespace, not an Iriograph catch-all namespace. Labels never drive classification or projection rules.
 
-RDF/RDFSだけでBPMNの全概念を表すのではなく、RDF/RDFSの共通構造だけを制約付きで使う方針です。user taskとservice taskの違いをLLM、validation、query、再利用でも使うなら、既存のdomain ontologyまたは利用側が自己記述した語彙を追加catalogへ結びます。見た目しか変わらないならtypeを作らずoverlayでtemplateを選びます。標準語彙がないために独自語彙を導入する場合も、Iriograph coreのnamespaceではなく利用domainのnamespaceに置きます。
+## Assets
 
-この方針には二つの境界があります。
+An icon is identified by an IRI, not by its retrieval URL. A catalog or host-injected resolver maps the IRI to a temporary local or network source under scheme, origin, media-type, size, and lifetime policy. Credentials and expiring URLs never enter portable documents.
 
-- RDF/RDFS標準の意味は変更しない。連番の欠番禁止や一意な表示parentなど、作図の決定性に必要な条件をIriograph application profileとして追加する。
-- `rdfs:label`は表示名であり、分類規則ではない。「承認」「開始」などの文字列から構造やtemplateを推測しない。
+## LLM boundary
 
-具体的な語彙、制約、投影は[RDF/RDFS profile](../semantics/rdf-profile.md)を正本とします。
+Agents may receive semantic Turtle or an indexed relevant subgraph, allowed vocabulary, and relevant projection capabilities. They do not receive a portable document as arbitrary JSON and do not edit overlays.
 
-## Assetのidentityと取得
+The semantic-access layer indexes labels, descriptions, types, property hierarchy, neighborhoods, membership, and related subgraphs. Revision-bound short aliases improve tool efficiency but are resolved back to exact IRIs before Core transactions.
 
-iconはIRIで参照します。IRIと取得URLは同一視せず、catalogまたはhostが注入するresolverで実URLへ解決します。これによりcore catalogを小さく保ち、組織固有asset、署名URL、CDN、offline bundleをhost側で選べます。
+Renderer fallback for unknown terms is not permission for an LLM to mint them. LLM writes are constrained by a resolved authoring profile, parsed, diffed, structurally validated, and applied atomically. Presentation-only requests remain presentation transactions. A request for lanes, order, alternatives, or domain typing may become a profile-guided semantic rewrite only when the capability has explicit meaning.
 
-resolverは取得ポリシーの境界でもあります。許可scheme、origin、media type、サイズ、失敗時fallbackはhostが制御し、documentは認証情報や期限付きURLを正本として保持しません。
+## Stability criteria
 
-## LLMとの境界
-
-LLMへ渡す意味の正本は`semantic.source`のTurtleです。ただし毎回その全文だけをpromptへ詰めることをAPI契約にはしません。Semantic access層がTurtleをparseし、localeを考慮したlabel/comment、型、上下位property、近傍、包含、関連subgraphを索引化します。LLMは検索・説明・近傍取得で必要な範囲を読み、revisionに束縛された短いaliasを用いてstructured operationをpreview/applyできます。Aliasはidentityではなく、適用時には必ず完全IRIへ戻してCore transactionへ渡します。
-
-このaccess層にもauthoring profileから抽出した使用可能語彙と、必要なprojection capabilityだけを与えます。TurtleにはLLMの理解・検証・再利用に必要な意味だけを置き、template選択だけのtypeやoverlayを入力へ混ぜません。Rendererは未知語彙をgeneric node/edgeとして受け入れますが、LLMはprofile外のpredicate、class、namespaceを追加できません。Python MCP等はこの索引・transaction APIをtool protocolへ変換するadapterであり、別の書込み正本や独自RDF engineにはしません。
-
-LLMが返したTurtleはparse・語彙差分・構造規則を一つのsemantic transactionとして検証し、成功時だけ正本へ反映します。その後、存続IRIのユーザーoverlayを維持し、新規IRIへ決定的なlayoutを補完し、消滅IRIのoverlayを除去します。
-
-LLMに座標調整を求めません。人が調整したoverlayをプロンプトへ混ぜないことで、意味変更とレイアウト変更の競合を避けます。
-
-Lane、順序、選択など意味構造を伴う表示要求では、view profileとcatalogから関連capabilityを抽出し、authoring profileの範囲内でTurtleを書き直すことができます。位置、色、routing、icon overrideだけの要求はpresentation transactionで扱い、表示都合だけでsemantic graphを変更しません。詳細は[Authoring profile](../semantics/authoring-profile.md)を正本とします。
-
-## 安定性の判断基準
-
-- identityはIRIを優先し、label、配列index、Turtle行番号に依存しない
-- 人間とLLMの発見・理解にはlabel/commentを優先し、同名・無label時はIRIで曖昧さを解消する
-- semantic transactionとpresentation transactionを分ける
-- catalog ruleの競合を登録順で解決しない
-- 同じ入力、catalog version、layout versionから同じSceneを得る
-- 標準語彙で自然に表せる共通構造では標準語彙を優先する
-- labelをsemantic classや構造ruleの代用にしない
-- Rendererのunknown fallbackをLLMの語彙生成許可とみなさない
-- host固有の保存、権限、asset取得をcoreへ入れない
-- 保存schemaの変更はversionとmigration testを伴う
+- Stable identity is based on IRIs and statement identity, never labels, array indices, or source lines.
+- Labels and comments are the primary discovery language for humans and agents.
+- Semantic and presentation transactions remain separate.
+- Catalog conflicts are resolved by explicit priority and specificity, never registration order.
+- Equal input, catalog version, and layout version produce equal Scenes.
+- Standard vocabulary is preferred for common structures without forcing it onto arbitrary domain edges.
+- Host storage, permissions, networking, and asset retrieval remain outside Core.
+- Schema changes require explicit versions and migration tests.

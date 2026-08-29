@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   releasePackageNames,
   verifyReleasePackageVersions,
 } from "./package-release.mjs";
 import {
-  assertCodeArtifactRegistry,
+  assertNpmjsRegistry,
+  NPMJS_REGISTRY,
   publishReleasePackages,
-  resolveScopedRegistry,
 } from "./publish-packages.mjs";
 
-const registry = "https://example-111111111111.d.codeartifact.ap-northeast-1.amazonaws.com/npm/packages/";
+const registry = NPMJS_REGISTRY;
 const version = "0.6.0";
 const quietLogger = { log() {} };
 
@@ -65,7 +66,7 @@ test("release package validation rejects dependency drift before registry access
   );
 });
 
-test("an exact version already in CodeArtifact is skipped without overwrite", async () => {
+test("an exact version already on npmjs is skipped without overwrite", async () => {
   const exactVersions = releasePackageNames.map((name) => `${name}@${version}`);
   const runner = createRegistryRunner(exactVersions);
 
@@ -119,6 +120,17 @@ test("a partial release publishes only missing packages in dependency order", as
       .map((args) => args[2]),
     releasePackageNames.filter((name) => name !== "@iriograph/core" && name !== "@iriograph/layout-elk"),
   );
+  assert.equal(
+    runner.calls
+      .filter(([command]) => command === "publish")
+      .every((args) => (
+        args.includes("--access")
+        && args[args.indexOf("--access") + 1] === "public"
+        && args.includes("--provenance")
+        && args[args.indexOf("--registry") + 1] === registry
+      )),
+    true,
+  );
 });
 
 test("a publish race is accepted only after the exact version becomes visible", async () => {
@@ -152,6 +164,36 @@ test("a publish race is accepted only after the exact version becomes visible", 
   assert.deepEqual(result.results.map(({ name }) => name), releasePackageNames);
 });
 
+test("a failed publish without the exact version becoming visible fails closed", async () => {
+  const exactVersions = releasePackageNames
+    .filter((name) => name !== "@iriograph/semantic-access")
+    .map((name) => `${name}@${version}`);
+  const runner = createRegistryRunner(exactVersions);
+  const defaultRunNpm = runner.runNpm;
+  runner.runNpm = async (args) => {
+    if (args[0] === "publish") {
+      runner.calls.push(args);
+      return { code: 1, stdout: "", stderr: "npm error code E409" };
+    }
+    return defaultRunNpm(args);
+  };
+
+  await assert.rejects(
+    publishReleasePackages({
+      packages: createPackages(),
+      registry,
+      runNpm: runner.runNpm,
+      wait: async () => {},
+      logger: quietLogger,
+    }),
+    /exact version is still absent/,
+  );
+  assert.deepEqual(
+    runner.calls.filter(([command]) => command === "publish").map((args) => args[2]),
+    ["@iriograph/semantic-access"],
+  );
+});
+
 test("authentication and network failures fail closed without publishing or leaking details", async () => {
   const secret = "never-print-this-token";
   const calls = [];
@@ -177,20 +219,66 @@ test("authentication and network failures fail closed without publishing or leak
   assert.equal(calls.some(([command]) => command === "publish"), false);
 });
 
-test("publishing refuses registries outside AWS CodeArtifact", () => {
-  assert.throws(
-    () => assertCodeArtifactRegistry("https://registry.npmjs.org/"),
-    /AWS CodeArtifact/,
+test("publishing permits only the canonical npmjs registry", () => {
+  assert.equal(assertNpmjsRegistry("https://registry.npmjs.org"), registry);
+  assert.equal(assertNpmjsRegistry(registry), registry);
+
+  for (const candidate of [
+    "http://registry.npmjs.org/",
+    "https://registry.npmjs.org:444/",
+    "https://registry.npmjs.org/scope/",
+    "https://registry.npmjs.org/?write=true",
+    "https://registry.npmjs.org/#publish",
+    "https://user:password@registry.npmjs.org/",
+    "https://registry.npmjs.org.example.com/",
+    "https://npm.pkg.github.com/",
+    "not-a-registry",
+  ]) {
+    assert.throws(() => assertNpmjsRegistry(candidate), /npmjs registry/);
+  }
+});
+
+test("the default publisher never resolves or falls back to another configured registry", async () => {
+  const runner = createRegistryRunner(
+    releasePackageNames.map((name) => `${name}@${version}`),
+  );
+
+  const result = await publishReleasePackages({
+    packages: createPackages(),
+    runNpm: runner.runNpm,
+    wait: async () => {},
+    logger: quietLogger,
+  });
+
+  assert.equal(result.registry, registry);
+  assert.equal(runner.calls.some(([command]) => command === "config"), false);
+  assert.equal(
+    runner.calls.every((args) => args[args.indexOf("--registry") + 1] === registry),
+    true,
   );
 });
 
-test("the publisher resolves the authenticated @iriograph scope registry", async () => {
-  const calls = [];
-  const resolved = await resolveScopedRegistry(async (args) => {
-    calls.push(args);
-    return { code: 0, stdout: `${registry}\n`, stderr: "" };
-  });
+test("the release workflow and audit vocabulary are npmjs-only", async () => {
+  const [workflow, auditScript] = await Promise.all([
+    readFile(new URL("../.github/workflows/packages.yml", import.meta.url), "utf8"),
+    readFile(new URL("./write-package-publish-audit.sh", import.meta.url), "utf8"),
+  ]);
 
-  assert.equal(resolved, registry);
-  assert.deepEqual(calls, [["config", "get", "@iriograph:registry"]]);
+  assert.match(workflow, /id-token:\s*write/u);
+  assert.match(workflow, /registry-url:\s*"https:\/\/registry\.npmjs\.org"/u);
+  assert.match(workflow, /record_failure "npm-cli"/u);
+  assert.match(workflow, /record_failure "npm-registry"/u);
+  assert.match(workflow, /record_failure "npm-publish"/u);
+  assert.match(auditScript, /npm-cli\|npm-registry\|npm-publish/u);
+  assert.match(auditScript, /test-semantic-access\|test-extensions\|test-vue-editor/u);
+
+  for (const forbidden of [
+    /CodeArtifact/iu,
+    /codeartifact-login/iu,
+    /aws-auth/iu,
+    /npm\.pkg\.github\.com/iu,
+  ]) {
+    assert.doesNotMatch(workflow, forbidden);
+    assert.doesNotMatch(auditScript, forbidden);
+  }
 });

@@ -1,15 +1,17 @@
 # Host conformance
 
-`@iriograph/host-conformance`は参照HostであるLocal Mockとproduct HostであるKuroxiom Cloudが、同じ公開packageを欠落なく統合したことを検証します。
+[日本語版](../../docs_ja/integration/host-conformance.md)
 
-Versioned manifestはpackage version、CSS entry、baseline catalog、共通fixture SHA-256、必須capability、対応するcomponent/E2E test IDを固定します。Hostはroot elementの`data-iriograph-package-version`とcapability属性を公開し、実Chromium gateがmanifestと照合します。
+`@iriograph/host-conformance` verifies that the Local Mock and product hosts such as Kuroxiom Cloud integrate the same public packages without feature loss.
 
-共通gateは少なくとも初期表示、grid、矩形選択、context menu、意味/ビュー編集、membership、型、focus/keyboard、左右sidebar、workspace assetを確認します。Cloud固有catalog、permission、workspace asset resolver、layout adapterは宣言済みextensionとして許容します。Package/CSS version不一致、stale cache、共通fixture差異、Host overrideによる機能欠落、container/focus/event統合不良、service health不良はdeploy failureです。
+Its versioned manifest pins the package version, CSS entry, baseline catalog, shared-fixture SHA-256, required capabilities, and corresponding component/E2E test IDs. A host exposes `data-iriograph-package-version` and capability attributes on its editor root; a real-Chromium gate compares them with the manifest.
 
-Release順は次です。
+The common gate covers initial rendering, grid, marquee selection, context menus, semantic and view editing, membership, type editing, focus and keyboard behavior, collapsible sidebars, and workspace assets. Declared Cloud-specific catalogs, permissions, asset resolvers, and layout adapters are allowed extensions. Package/CSS drift, stale cache, fixture drift, lost capabilities, container/focus/event integration failures, and unhealthy services are deployment failures.
 
-1. 全packageをpackし、workspace外consumerでimport/type/CSS/fixtureを検証する
-2. CodeArtifactへ11 packageのexact lockstep versionを依存順に公開する
-3. Registryで全exact versionを確認してrelease tagを作る
-4. Cloudをそのexact versionへ更新し、build/test/local Chromium gateを通す
-5. OIDC/SSM workflowでdeployし、実行commit、health、production Chromium、console/service log、volume使用率を確認する
+Release order:
+
+1. Pack all packages and verify imports, types, CSS, fixtures, notices, and licenses in a consumer outside the workspace.
+2. Publish all eleven exact lockstep versions publicly to npmjs in dependency order.
+3. Verify every exact version and record the immutable release tag.
+4. Upgrade the Cloud host to that exact version and pass build, tests, and its local Chromium gate.
+5. Deploy through the host's OIDC/SSM workflow and verify the running commit, service health, production Chromium behavior, console and service logs, and disk usage.

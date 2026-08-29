@@ -1,5 +1,7 @@
 # @iriograph/layout-elk
 
+[日本語](./README_ja.md)
+
 Optional ELK.js Layered layout adapter for `@iriograph/core`. It keeps the
 semantic document and engine-specific ELK options separate: a document stores
 only a stable `layoutRef`, while this package translates the Core layout
@@ -66,6 +68,8 @@ deterministic fallback. This is the adapter's declared, backward-compatible
 different layout engine.
 
 ## License notice
+
+This Iriograph adapter is MIT licensed. See [LICENSE](./LICENSE).
 
 This package depends on ELK.js. ELK.js declares
 `EPL-2.0 OR GPL-3.0-or-later`; review the applicable license terms when

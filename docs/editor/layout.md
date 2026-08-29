@@ -1,202 +1,112 @@
-# Layout・routing・性能
+# Layout, routing, and performance
 
-## 1. 目的と責務境界
+[日本語版](../../docs_ja/editor/layout.md)
 
-Iriographのlayoutは、意味graphを解釈する処理でもrendererでもありません。Projection済みSceneのstable identity、包含、接続、size、pin、既存geometryを入力し、element geometryとedge routeを返す交換可能なadapterです。同じ入力、adapter version、layout policyからは同じ結果を返します。
+## Responsibility boundary
 
-Semantic Turtleと`.iriograph` documentにはengine固有optionを保存しません。Documentが持つのはstableな`layoutRef`と、ユーザーが確定したgeometry、pin、manual routeです。`elk.*`、Dagre ranker、force定数、Graphviz attribute等はhostまたはversioned adapter policyが解決します。これによりengineを交換しても意味graphとportable documentを移行せずに済みます。
+Projection creates an adapter-neutral Scene. Layout assigns generated geometry and derived routes. Rendering draws the result. Overlay-only edits do not invoke global layout.
 
-性能最適化でも次の境界を維持します。
+The default layout is deterministic, lightweight, and suitable for small and medium graphs. `@iriograph/layout-elk` provides an optional higher-capability layered adapter through the same contract.
 
-- labelや見た目から意味構造を推測しない
-- layoutの都合でTurtleやsemantic identityを書き換えない
-- user配置とpinを近似constraintへ弱めない
-- cache、Worker、LODを使ってもstale resultをdocumentへ適用しない
-- 未知domain語彙を特別扱いせず、投影後の汎用Sceneだけを処理する
+## Pipeline
 
-## 2. 段階的pipeline
+1. **Semantic projection:** build nodes, edges, groups, annotations, provenance, and constraints.
+2. **Structure analysis:** find containment, connected components, strongly connected components, and multi-membership intersections.
+3. **Measurement:** measure wrapped labels, icons, comments, badges, ports, and group headers.
+4. **Layered placement:** place generated resources along the view direction while preserving user geometry.
+5. **Routing:** select ports and routes under obstacle and crossing policy.
+6. **Component packing:** pack independent components and groups without unnecessary overlap.
+7. **Label and annotation placement:** avoid ordinary nodes and include visible comment bounds.
+8. **Reconciliation:** retain compatible user overlays and mark new placement as generated.
+9. **Validation:** verify finite geometry, containment, route bounds, and determinism.
 
-各段階はstable element IDでsortした入力と明示的な中間結果を持ちます。一つの巨大なheuristicへ統合せず、品質指標、cache invalidation、fallbackを段階ごとに観測可能にします。
+## Placement rules
 
-以下は最適化を進める実装順序です。現行の標準軽量adapterは責務分離、包含/SCC、size、membership band、基本layered配置、bounded crossing改善、pin保持、最大1中間点のroute completionまでを持ちます。高度なcomponent packing、label衝突、局所incremental、LODはこの順序に従う後続実装であり、P1-08初稿benchmarkが実装済みとみなすものではありません。
+- User placement is a hard constraint.
+- Automatic placement moves only generated elements.
+- Membership edits use local completion for newly constrained members/subtrees.
+- Independent regions without common members do not overlap.
+- Ungrouped resources stay outside generated regions.
+- Multi-membership resources remain inside the exact intersection.
+- Nested groups remain inside ancestors.
+- Fixed constraints that have no valid solution produce diagnostics rather than destructive rearrangement.
+- Layout direction defaults to left-to-right and may be top-to-bottom.
 
-### 2.1 意味投影
+Component ordering and tie-breaking use stable semantic/Scene identity, not labels or source order.
 
-Profile/catalogによりTurtleからnode、edge、containerを投影し、overlayをstable semantic identityへ対応付けます。Syntax、profile、domain validation errorがある場合はlayoutを開始しません。LayoutはRDF quadやpredicateを直接参照せず、`LayoutProjectedScene`だけを受け取ります。
+## Route selection
 
-### 2.2 包含、connected component、SCC
+For automatic direct edges, the preference is:
 
-Container membershipをforestへ正規化し、不正な親参照と包含cycleをdeterministicに診断します。各container直下でedge endpointを直近の子へ持ち上げ、connected componentを分離します。有向graphはstrongly connected component（SCC）へ縮約してDAGを作り、cycle内部の順序と外部layerを分けます。同率時はstable element IDをtie-breakにします。
+1. safe straight route;
+2. one-bend orthogonal route whose segments are horizontal/vertical;
+3. bounded cubic Bezier with interior angle at least 90 degrees.
 
-この段階の結果は、後段がgraph全体を繰り返し走査しないためのindexになります。Adjacency、parent/children、component、SCC、incident edgeは一度構築し、同一revision内で共有します。
+Arbitrary-angle polyline pivots are not emitted as automatic public routes. Manual routes are preserved and are not mixed with automatic candidates.
 
-### 2.3 Size測定
+A route candidate is scored for:
 
-Catalog templateのdefault size、明示size、container padding/header、labelとiconの測定値から配置boxを確定します。DOM測定をlayout engine内で行わず、hostが実fontの測定値を渡せない場合は決定的なfallback sizeを使います。
+- intersection with non-endpoint nodes, groups, labels, and visible comments;
+- edge crossings and overlap;
+- path length and bend complexity;
+- non-shortest or hidden endpoint attachment;
+- consistency with layout direction and selected ports.
 
-Container templateの`headerPosition`はCoreの共通content insetへ解決し、Projectionからlayout adapterへ明示して渡します。標準layout、ELK adapter、Canvas gesture、包含不一致検出は同じinset契約を使い、左headerを上header用余白で近似しません。Containerは子のnatural boundsをbottom-upに集約します。Size fingerprintが同じelementは再利用し、label、template、font metric、icon intrinsic sizeの変更だけを局所invalid化します。
+The endpoint lies on or immediately outside the node perimeter so terminal markers remain visible. Ports are chosen jointly with route geometry. Parallel edges and self-loops receive distinct hit areas and stable separation.
 
-### 2.4 Layered配置
+Automatic routing exposes at most one intermediate orthogonal point. Curve controls are represented as Bezier knots/handles rather than polyline waypoints. User-edited routes become manual sparse overlay.
 
-SCC縮約DAGへrankを割り当て、LR/TB方向、rank gap、item gapに従って配置します。独立componentとcontainer内部は別問題として処理します。標準軽量layoutはlongest-path相当の決定的配置を基準とし、高コストな探索を行いません。
+## Labels, comments, and content bounds
 
-順序候補が複数ある場合は、edge由来のbarycenter、以前の並び、stable IDの順で決定します。全探索で最少交差を求めず、規模に応じた固定回数のsweepに制限します。
+Node and group measurement includes selected font size, orientation, wrapping, icon natural size/scale, and offsets. Group header position and text direction are independent.
 
-Region viewでは、各resourceのmembership集合をstableなsignatureとしてcross-axis bandへ割り当てます。複数領域に属するresourceは対応する交差bandへ置きます。生成region同士は、共通memberがある場合またはancestor/descendantである場合だけ内部の重なりを許し、それ以外はcross-axisへ決定的に分離します。Region memberであるcontainerを動かす場合はabsolute座標を持つ配下subtreeも同じ差分で移動します。どのGroup Frameにも所属しないnodeはregionだけでなくBag、Seq、Alt等を含む全Group Frameのcontent bounds外へ配置し、他nodeやcontainerの表示領域とも重ねません。固定/user geometryまたは外部parent制約により解消できない場合は勝手に動かさず、固定解除、membership設定、手動移動のいずれかへつながるdiagnosticを返します。
+When comments are shown, their complete callout bounds participate in overlap avoidance and content bounds. Hidden comments do not consume display area, but hover targets remain available.
 
-生成された重ならない兄弟regionは共通の主軸spanを持ち、外側region配下のlaneはそのcontent spanへ揃えます。固定/user geometryと意味上必要な重なり集合にはこの正規化を適用しません。Layout adapterは`LayoutResult.direction`へ実行したLR/TB方向を返し、adapter-independent completionも同じ方向を使います。これにより標準、ELK、host固有adapterでregion分離と非所属node退避の軸が変わりません。
+Fit, reveal, minimap, and work-area bounds include nodes, groups, labels, terminal markers, annotations, manual points, and the control hull of generated or manual Bezier curves.
 
-Bag、旧classification互換、Seq、AltのGroup Frame補完、region分離、未所属node退避は、routing前にboundedかつ決定的なfixpointまで収束させます。Group Frameの名称とiconは同じheader/band content metricへ含め、memberやrouteの占有領域と衝突する候補を評価します。そのgeometryに対してrouteとBezier controlを生成したadapterは、transientな`LayoutResult.structuralCompletion`を性能hintとして返せます。ただし共通境界はこの印をskip条件にせず、すべてのadapter結果へ同じidempotent completionを必ず再適用します。正しいadapter結果は既に同じfixpointにあるためgeometryが一切変わらず、routing後にnode/groupだけが二重移動してrouteやBezier controlとずれることもありません。Third-party adapterも「共通completionをfixpointまで実行してからrouting」の順序を守り、印だけで検査を迂回できません。Seq/Altのderived guideはpredicate edgeとして生成しません。
+## Incremental behavior
 
-### 2.5 Crossing、port、orthogonal routing
+A semantic edit reprojects every named view but only generated/invalidated geometry is eligible for movement. Existing user placement and manual routes survive by stable identity.
 
-Layer内順序を上下sweepで改善し、交差数が改善しない時点または固定iteration上限で終了します。Source/target roleからport sideを解決できる場合はcatalog/profile由来の抽象port constraintを使用し、engine固有port IDは保存しません。Roleがないedgeはshape境界上の決定的なattachmentを使います。
+A presentation edit updates the selected element and derived routes of incident edges. It never starts full projection/layout and therefore remains responsive during drag, resize, route, icon, label, and color edits.
 
-Orthogonal routeはsource/target attachmentを必ず含み、parallel edgeとself-loopへstable laneを割り当てます。Manual waypointはhard constraintとして保持します。交差回避とroutingがbudgetを超える場合は、straightまたは単純なdogleg routeへ品質を段階的に落とし、要素欠落や非決定的timeoutにはしません。
+Async adapters are bound to document ID, revision, view ID, layout ref/version, catalog/profile fingerprints, measured input, and abort signal. Stale completion is discarded.
 
-Portable overlayの経路modeは`auto`、`straight`、`orthogonal`、`curve`、`manual`を区別します。自動routerが障害物を避けるために作る内部屈曲点または曲線制御点はSceneのderived routeであり、manual waypointとして保存しません。`straight`だけは中間点を持たないことを契約とし、障害物回避より利用者の明示指定を優先して必要ならdiagnosticを返します。
+## Adapter policy
 
-`curve`もportable waypointを持ちません。Endpoint、採用した障害物回避corridor、利用者が明示したsparseなcurvatureからrenderer用Bezier制御点を導出します。自動品質探索は内部候補として複数segmentを扱えますが、curveとして公開するderived routeはendpoint二点だけとし、Bezier controlは`LayoutResult.derivedRouteChoices`からSceneへ渡します。Polyline/orthogonalは中間点を最大一つにcompletionし、いずれもoverlayのwaypoint数を増やしません。利用者が明示した`manual`だけがwaypointを所有します。Parallel/reciprocal edgeはrouteまたはcurve controlを共有させず、個別選択可能なlaneを保ちます。
+### Standard layout
 
-`auto`のroute family選択は、障害物を横切らず既存候補よりedge交差・重複を悪化させない直線、水平・垂直の二線分と直角一回だけで成立する最大一中間点の直交折線、内角90度以上のcorridorをBezier smoothingした緩い曲線の辞書順です。障害物探索が見つけた任意角度のpivotや複数segmentは候補生成用の内部corridorに留め、自動polylineとしてrendererへ公開しません。曲線はcontrol polygonではなくflattenした実Bezierでnode、常時予約されるcomment領域、他edgeとの交差・重複、endpointからの外向き、parallel laneの同一化を評価します。安全な曲線を作れない固定配置では決定的な最小cost曲線とedge単位のwarningを返し、hard constraint未解消を安全な結果として黙認しません。`straight`、`curve`、`orthogonal`、`manual`の明示指定はfamilyを変更せず、`auto`だけを選択対象にします。
+Core's standard adapter has no DOM dependency, is deterministic, and provides the baseline behavior required by package and host-conformance tests.
 
-各edgeの採用結果は、`LayoutResult.derivedRouteChoices[edgeId]`の`family`、`source`、`reason`、`rejected`を正本とし、Sceneでは同じ値を`SceneEdge.derivedRouteChoice`として観測します。安全条件をすべて満たした曲線は`auto-curve-safe`、bounded探索で選ぶ決定的な退避曲線は`auto-curve-fallback`と区別します。これは選択結果の説明、品質・性能試験、adapter間の比較、Inspectorの必要時詳細が読む機械向けderived情報であり、portable overlayやmanual waypointへ逆書きしません。通常のstraight採用や障害物を横切らないcurve fallbackをedgeごとのuser diagnosticへ複製すると大規模graphでwarningを氾濫させるため、diagnosticは固定geometry、未解消のnode/comment障害物、明示route mode、manual hard constraintなど、利用者が修正しなければ解消しない失敗に限定します。StandardとELK adapterはいずれも同じCore route-only段階を通し、LR/TBで同じfamily選択規則と観測境界を提供します。Curve controlもscene boundsへ含めるため、fit/revealで曲線が切れません。
+### ELK adapter
 
-Rendererは`routeMode: auto`かつ`derivedRouteChoice.source: auto`のときだけこのtransientなfamily/controlを使います。明示modeからautoへ戻した直後にSceneへ残り得る`source: explicit`/`fixed`の古いchoiceは再利用せず、endpoint-inclusive routeの安全なpolylineへ戻します。採用したBezierは可視path、pointer hit path、labelの弧長中点、fit/reveal boundsで同じcontrolを使います。いずれかだけpolyline近似や別の自動controlへ戻して、見える線と操作対象をずらしません。
+The optional ELK package translates the same request into ELK Layered graph data. Engine-specific options and worker instances are injected by the host/package adapter and are not portable document fields. Hard user pins and overlap-region semantics remain Iriograph constraints around the engine.
 
-大規模グラフではflatten済みcurveと全peerの比較が二次計算かつendpoint pairごとの障害物複製になるため、既存のroute品質budgetと同じedge上限を超えた場合は、すでにbounded completionしたrouteを線形時間で分類します。この段階ではendpoint-onlyでbundle内一意な既存routeをstraight、一中間点で水平・垂直の直角一回ならorthogonal、それ以外を内角90度以上の決定的なbounded Bezierへ変換し、任意角度polylineを公開しません。これにより500 node/1,000 edgeと2,000 node/4,000 edgeの固定性能gateで全peer探索を増やさず、候補評価だけによるmemory増加を防ぎます。
+### Other engines
 
-User配置またはpinを含むSceneでも全体配置をfallbackでやり直さず、nodeを動かさないroute-only段階を実行します。通常node、外側label、表示中またはstable reservation対象のcomment calloutを障害物とし、region背景は障害物にしません。候補routeはhard constraint、node/annotation本体交差、endpoint共有を除くedge交差数、comment等のrenderer予約領域交差、edge重複長、距離、bend数の辞書順で比較します。本体交差と予約余白を一つの重みに潰さないため、comment余白を避ける代わりにnodeを横切るrouteは採用されません。Stable edge ID順と逆順を含む固定回数だけ、他の全routeを現在状態として混雑penalty付きrerouteを行います。各置換はgraph全体の辞書順品質を単調改善する場合だけ採用し、同一入力の決定性と計算上限を保ちます。
+A new engine is justified by a measurable capability gap under the common fixtures and quality metrics. It does not change semantic projection or document schema.
 
-Auto routeは実shape境界でclipし、境界から外向きのderived stubを経て障害物探索へ接続します。これによりsource/target nodeを中心点から出る偽の障害物として扱わず、最初と最後のsegmentがnode内部を通ることも防ぎます。Manual/user routeは表示polyline全体がhard constraintであり、node/commentや他edgeと衝突しても変更せずdiagnosticだけを返します。`straight`は古いmanual waypointが残っていても常にendpoint二点を優先します。
+## Quality metrics
 
-### 2.6 Component packing
+Fixed fixtures evaluate:
 
-独立component、container、SCC内部結果をrectangleとしてpackingします。面積だけでなく、希望direction、component間edge、既存位置を考慮します。まずstable size順とidentity順のshelf/skyline packingを行い、aspect ratioが閾値を外れる場合だけ別候補を評価します。
+- hard containment and finite-coordinate correctness;
+- deterministic output;
+- node/group/label/comment overlap;
+- edge-node intersection;
+- edge crossing and overlap;
+- route length and bend count;
+- endpoint visibility and shortest valid attachment;
+- generated versus user movement;
+- component packing;
+- settled time and interaction frame budget.
 
-### 2.7 Overlapとlabel
+Quality improvements must remain generic. Seed IRIs, labels, node counts, or reference-image-specific branches are prohibited.
 
-Node/containerのoverlapを空間indexで検出し、generated elementだけを最小量移動します。Pinnedまたはuser配置同士の矛盾は勝手に直さずdiagnosticにします。Node label、edge label、icon boundsは別boxとして扱い、重要度の低いlabelはLOD段階で省略できます。
+## Performance gates
 
-ProjectionまたはhostはDOMに依存しないtext/icon計測結果を`LayoutElement.minimumContentSize`としてadapterへ渡せます。Standard layoutはgenerated nodeとgroup frameの既定/明示sizeをこのminimum以上へ広げますが、pinned/user geometryを自動拡大しません。Nodeの外側comment calloutは`externalReservations`として別boxに保ち、node本体minimumへ二重計上せず、配置とroutingの衝突判定へ含めます。Edge caption/commentはedgeをelement boxへ変換せず、routeに追従するrenderer/hostの局所label boundsとして扱います。
+Pure Core fixtures cover normal and stress graphs and record phase timing. Prepared relation transactions avoid rebuilding unchanged context. Browser gates cover initial settle, pan, drag, route editing, and responsive widths.
 
-画像のintrinsic pixel sizeは初期表示boxの指定ではなくaspect ratioの検証情報です。明示sizeがなければCoreの共通content metricで自然比率をpackage既定の24×24 boxへcontainし、そのsafe boxへ`nodeIconScale`を適用します。1000×500画像はscale 1で24×12となり、元pixel数だけでnodeを巨大化させません。帳票や画面を大きく使う場合だけ、利用者が相互排他的な明示`nodeIconSize`を保存します。Rendererとlayout adapterは同じmetric関数を使い、別々の安全box計算を実装しません。
+Budgets and sample counts are fixed in tests. A budget change requires a documented reason and matching fixture/test change. Historical values and cross-machine comparisons belong in evaluation records rather than this normative document.
 
-Raster resolver metadataはbyte上限とは別に`AssetPolicy.maxDecodedPixels`でdecoded pixel面積を制限し、省略時もCore既定の64 Mi pixelを適用します。上限を超えたleaseはURLもSceneへ採用せず即時releaseします。SVGの`viewBox`はpixel数ではなくvector user unitなのでこの面積制限へ混ぜず、従来のfinite dimension・aspect比検査を使います。Asset refの解決は`maxConcurrentResolutions`で同時数を制限し、省略時4、設定可能なhard上限32とします。Batch中断時は解決済みだが未採用の全leaseをreleaseし、待機refはresolverを開始しません。
-
-CoreはScene全体のasset identity、policy、解決batchを管理しますが、browser viewportやDOM decode状態を知りません。Viewport内外の優先順位、`loading="lazy"`、`decoding`、virtualizationはVue rendererまたはhostの責務です。Coreのbounded concurrencyをviewport lazy loadingの代替として扱いません。
-
-Font size、label offset、icon scaleのようなoverlay-only編集は、このminimum入力が変わっても全体layoutを自動実行しません。Editorはpure content metricで選択要素だけをautogrow/clampし、既存routeと他geometryを維持します。次に意味変更などでlayoutを実行した場合は更新済みminimumが通常の衝突・包含計算へ入り、初期layoutと再計算後の整合を取ります。
-
-`rdfs:comment`から導出するcalloutは、全文をwrap・測定したannotation boxとして入力します。Stable comment layoutでは表示toggleがOFFでも同じboxを予約し、ON/OFFでnode geometryとedge routeを変えません。Projection、text measurement、annotation obstacle追加、node layout、routeの順で処理し、font実測を利用できないhostでは決定的な文字幅と行高を使います。
-
-全pair比較を避け、uniform gridまたはR-tree相当のindexで近傍だけを検査します。Overlap除去で新しいedge crossingが大幅に増える場合は、後段の品質scoreで候補を比較します。
-
-### 2.8 Pinと増分layout
-
-`pinned: true`と`placement: "user"`はhard constraintです。存続するgenerated elementには以前のcenterからのdisplacement penaltyを与え、新規・削除・接続変更の影響componentだけを再計算します。
-
-増分処理は、変更element、incident edge、ancestor container、同じSCC/componentから開始します。局所結果がoverlapやcontainer boundsを満たせない場合にだけcomponent全体、最後にfull layoutへ拡大します。Semantic revision、view ID、profile/catalog revision、layoutRef、size fingerprint、constraint fingerprintをresult keyへ含め、完了時にも現revisionと一致する場合だけ採用します。
-
-### 2.9 LOD
-
-通常規模を超えるviewではlayoutだけでなく描画量を抑えます。Viewport外elementのvirtualization、低zoom時のlabel/icon省略、edge bundle、container単位の折り畳みを段階的に適用します。
-
-LODは意味graphを削除しません。Session-onlyの可視集合とderived aggregateを作り、元のsemantic identityへ戻れる対応表を維持します。Validationは全graphへ行い、temporary hideやLODをerror回避に使いません。折り畳みと階層navigationはsession-onlyで実装済みで、shortcut edgeを生成せずdocument、overlay、dirty/historyを変更しません。
-
-## 3. Adapter方針
-
-### 3.1 標準軽量layout
-
-`@iriograph/core`は依存なしの決定的な軽量adapterを提供します。Clean checkout、server、test、小〜通常規模のhostで必ず利用でき、全element geometry、全edge route、diagnosticを返します。主目的はportable baseline、failure fallback、user geometryの厳密保持です。
-
-標準adapterは高コストな交差最小化や最適packingを無制限に行いません。P1-08の固定budgetを守り、品質改善は固定iterationと規模別cutoffの範囲に限定します。
-
-自動display補完はengine名にかかわらず、template/iconを含む実size、region labelの外周box、comment予約box、terminal stub、membership intersectionを同じrequestへ正規化してから実行します。結果はIriograph共通のcompletionと品質検査を通し、全element geometry、全edge route、hard containment、pin保持を満たした場合だけ採用します。Engineが返した座標を無検査でoverlayへ確定しません。
-
-Bag、classification、Seq、Altは`groupRole`を持つ共通Group Frameとして、container/regionの違いにかかわらず同じ後処理へ通します。Generated frameは全member boundsへ共通paddingを加えた外接枠とし、複数frameへ所属するmemberは全frameの共通intersection内へ収めます。Pinned/user frameは動かさず、intersectionが空またはmember全体を含めない場合に、固定解除・枠調整・所属見直しへ結び付くdiagnosticを返します。`groupRole`を持たない通常の階層containerはこの規則へ昇格させません。
-
-`LayoutResult.structuralCompletion`はadapter内で同じcompletionを先行実行したことを示す性能hintであり、検証免除ではありません。Coreは返却値へidempotentな共通completionを必ず再適用し、region分離、未所属nodeの全Group Frame content外配置、Group Frame包含とintersection、固定geometry、known ID、finite route point、generated routeの最大一中間点、`derivedRouteChoice`のfamily/source/reason/control整合をadapter非依存で検査します。違反する生成経路だけを一中間点へ縮約し、manual/user/fixed routeとvalid adapter結果は変更しません。修復不能なresultは部分Sceneとして公開しません。
-
-### 3.2 Optional ELK adapter
-
-複合graph、階層node、port、layered配置、orthogonal routingを重視するhostは`@iriograph/layout-elk`を明示的に導入できます。[ELK](https://eclipse.dev/elk/)は階層nodeとportを扱い、Layered algorithmはroutingを段階として構成できます。Bundle sizeと計算負荷をcoreへ持ち込まないためoptional packageとし、大規模実行はhost-managed Workerを推奨します。
-
-Worker requestにはrequest IDとrevision fingerprintを付け、abortまたは新revision到着後のresultを破棄します。ELKがhard pinを保証できない入力は、pinを動かして見かけ上成功させず、versioned adapter policyに標準adapter fallbackが宣言されている場合だけfallbackします。
-
-ELKは候補geometryとrouteを生成する既存engineとして利用し、その前後にIriograph固有のregion completion、実shape境界clip、comment obstacle、route refinement、品質検査を置きます。これらをELK optionやdomain predicate分岐として埋め込みません。ELKが多対多region intersectionを直接解けない場合も、membershipを単一parentへ縮約せずCore completionで補完します。
-
-Fallbackはadapter policyにversion付きで宣言された場合だけ実行し、同じrequest内でdiagnosticへ採用engineと理由を残します。`ElkLayeredLayoutAdapter`の互換既定は`fallbackPolicy: "standard"`であり、fallback時に`elk-standard-fallback-selected`を返します。Hostが`fallbackPolicy: "none"`でELKのみを指定した場合は`elk-fallback-disabled`を返し、標準adapterへ黙って切り替えません。Hard pin、全bounds containment、route欠落等のhard constraint違反は、別engineの見かけ上の成功よりerrorを優先します。
-
-### 3.3 他engineの位置付け
-
-- [Dagre](https://github.com/dagrejs/dagre)はbrowserで使いやすいdirected graph layoutで、flatな小規模flowのadapter候補です。一方、Iriographが必要とするcontainer階層、抽象port、orthogonal routing、hard pin、増分安定性を別処理で補う範囲が大きいため標準高機能adapterには選びません。
-- [fCoSE](https://github.com/iVis-at-Bilkent/cytoscape.js-fcose)はcompoundを含む一般networkやcycleのforce-directed配置候補です。業務flowで必要な明確なLR/TB rankと直交routeが主出力ではなく、反復計算と初期条件がmental mapと決定性へ影響するため既定にはしません。関係探索view向けの独立adapterとしては有効です。
-- [Graphviz](https://graphviz.org/docs/layouts/)は複数の成熟したlayout engineと高品質な静的出力を持ちます。BrowserでのWASM/Worker配布、font差、engine attribute、incremental editingとの境界が大きいため、server/exportまたはhost固有adapterに適します。Graphviz attributeをportable documentへコピーしません。
-
-Engine名ではなくview要求でadapterを選びます。単純flowとfallbackは標準、hierarchical business diagramの高品質自動整列はELK、自由な関係探索はforce-directed系、静的出版物はGraphviz系という役割分担です。
-
-最初の実用UIでは標準adapterを常時利用可能なbaselineとし、hostが`@iriograph/layout-elk`を導入した場合は階層flowと直交routeの高品質actionで明示選択します。Engine選択をportable document内の細かなoptionへ展開せず、stableな`layoutRef`からversioned adapter policyを解決します。自動配置のUIは採用engine名より、移動対象、pin保持、交差・重なりの改善見込み、失敗時のdiagnosticを利用者へ説明します。
-
-Adapter比較は同一ProjectedScene、同一viewport、同一品質指標で行い、hard constraintを満たす候補から選びます。Version別の実測と参照画像評価は[評価履歴](../evaluations/reference-reconstruction.md)へ分離し、fixtureのIRIやlabelを検出するruntime分岐には使いません。
-
-## 4. 品質指標
-
-性能だけを短縮すると読めない図になるため、layout品質benchmarkでは次を記録します。P1-08初稿は時間、cardinality、error不在を固定し、各品質値のbaseline追加は後続とします。Hard constraint違反とelement/route欠落はscoreではなく即時failureです。
-
-| 指標 | 定義 | 目的 |
-|---|---|---|
-| overlap | movable box同士の交差面積合計をbox面積合計で正規化 | node/containerの可読性 |
-| crossing | endpoint共有を除くedge segment交差数 | flow追跡の容易さ |
-| bends | non-collinearなroute内部点の総数 | routeの単純さ |
-| length | orthogonal routeのManhattan長をendpoint直線距離で正規化 | 不要な迂回の抑制 |
-| displacement | 存続element centerの旧位置からの移動量。pinは0必須 | 編集時のmental map維持 |
-| aspect | sceneの`max(width / height, height / width)` | 極端に細長い配置の抑制 |
-
-比較はhard constraint、node/route overlap、endpoint共有を除くcrossing、edge overlap、displacement、length/bends、aspectの順を基本とし、同scoreはstable ID由来の候補順で決めます。単一の重み付き合計だけにすると、小さな可読性改善とpin違反等が相殺されるため使いません。
-
-## 5. 固定benchmark
-
-`packages/core/src/layout/performance.test.ts`は通常のVitest suiteで次のfixtureを生成します。Fixture fileのI/Oと生成時間は測定に含めませんが、sourceは同じ入力からbyte-exactに再生成されることを検証します。
-
-- normal: 500 node、1,000 direct edge、50 nodeごとの10 `rdf:Bag` container
-- stress: 2,000 node、4,000 direct edge、50 nodeごとの40 `rdf:Bag` container
-- 全nodeに`rdfs:label`を持たせ、edgeは重複のない前方向pairとして生成する
-- Membershipはcontainment処理を通すが、edge数には含めない
-
-測定対象は次の二つです。
-
-1. Stress fixtureのTurtle parse、semantic projection、標準layout、route生成までを2,000 ms未満とする。
-2. Normal fixtureのlabel一件変更、candidate document作成、semantic再投影をlayoutなしで100 ms未満とする。
-
-JIT、module初期化、Docker/CI schedulingの揺らぎに対し、各operationを一回warmupした後に3回測定しmedianを使います。2,000/100 msをそのままCIのhard gateにし、実行環境による動的倍率、失敗時のskip、fixture縮小は行いません。固定runnerの時系列値も記録し、gateへ達する前の劣化を調査します。
-
-Fixtureとsample数を変更する場合はbudgetを暗黙に維持せず、同じcommitで本書、[開発・検証](../development/testing.md)、backlogを更新します。継続的な時系列比較では固定Node/Docker imageとrunner classを使い、異なるmachineの絶対値を直接比較しません。
-
-## 6. 小規模初期表示と関係transaction
-
-標準adapterは任意のobserverで`placement`、初期route、refinement、compaction、bounds、合計時間、visibility探索回数、候補数、実際に初期routeを生成したedge数、固定再利用したderived route数を計測できます。Observerは観測専用で、throwしてもlayoutを失敗させません。Route obstacleはendpoint pairでcacheし、route state Mapは他routeのboundsを初期化時と採用時だけ計算します。共有endpoint geometryもedge pair単位でcacheし、候補の辞書順第一成分であるnode本体交差をedge相互作用より先に計算します。本体交差0のrouteはpeer集合を構築せずrefinement対象外とし、交差ありの場合だけ従来どおり全peerを含む正逆passへ進みます。候補boundsとsignatureは各候補一回だけ求め、障害物bounds判定もsegmentごとに反復しません。この枝刈りは候補集合、正逆pass、同点時のroute signature、stable ID順を変更しません。
-
-Core CI gateはpizza、24 node/23 edgeの疎small、24 node/120 edgeの密smallを一回warmup後5回測り、projectionからsettled Sceneまでのp95を300 ms未満とします。全fixtureで非endpoint node交差0、endpoint内部進入0、edge overlap 0、生成route最大3点を要求し、保守的な曲線segment近似のcrossing上限もfixtureごとに固定します。96 edgeを超える密graphではbody/reservation衝突のない最大一pivot routeのquadratic exhaustive compactionを省き、最終family selectorへ委譲します。Pizzaは実SVG E2Eでも交差とroute-node交差を別に固定し、曲線samplingの近似差とrenderer結果を混同しません。
-
-Label置換、code-point順を保つopaque IRI写像、60 nodeを2つの`rdf:Bag`へ分けた非pizza包含fixtureでも同じ品質を検証します。Core layoutはTurtle、label、predicate、pizza namespaceを入力に取らず、Projection後のgeometry・membership・endpointだけで処理します。
-
-Relation add、predicate change、endpoint changeはpreviewで作ったidentity-bound prepared resultをapplyで再利用し、clone/deserialization、revision・context・confirmation不一致だけを保守的再検証へ戻します。20回warm後20 sampleのCore preview+apply p95は150 msをgateとします。Edge-onlyでは変更されたcandidate edgeだけをrerouteし、unaffected generated routeを`fixedDerivedRoutes`、familyとBezier制御点を`fixedDerivedRouteChoices`でexact維持します。Fixed peerはaffected routeの交差・重複costへ含めます。直前に同一runtimeでbuild済みのSceneは、document全体・view ID・catalog/layout/projection optionsのexact bindingに一致する場合だけ上限8件の内部cacheから防御的cloneで復元し、previous Sceneを得るための全layout重複を省きます。通常の`buildIriographView`はcacheを返さず常に入力を再投影します。StandardとELKの混在view、parallel/self-loop、explicit family、auto curve、12 node/36 edgeのdense fixtureでもaffected/fixed件数とunaffected route/choice完全一致を検証します。Optional fieldを無視するthird-party adapterも共通completionで復元します。Edge-only要求がvisible structure、membership、profile、layout、view kindの互換条件を満たさない場合は`reconcile-edge-only-fallback` diagnosticとobserver eventへ理由を残します。
-
-Direct Turtle、canonical dataset、structured authoringのどの入口でも、asserted deltaが
-`rdfs:subPropertyOf`だけならCoreが同じedge-only reconciliationを自動選択します。既存node/group geometryを
-全named viewで維持し、catalogのsubproperty matchingによって変わるtemplate/style/resolution traceを再投影した上で、
-template、route mode、anchorまたはincident setが変わるedgeだけをrerouteします。上位predicateの未asserted edgeは
-生成しません。Hierarchy追加がvisible node/groupやmembershipまで変える場合は通常の互換判定によりincrementalへ戻します。
-
-Core値とは別に、production buildをVite previewで配信する固定Docker Chromium testを実行します。Sceneの期待node/edgeと対象関係、asset decode、`aria-busy=false`、DOM mutation停止後2 frameをsettled条件とし、Navigation Timing、Resource/Paint Timing、Long Task、CDPのLayout/RecalcStyle/Script/Taskを同じsampleへ記録します。2026-08-28の実測は初期pizza Sceneのbody受領からsettledまでp95 275.6 ms、各20回warm後20 sampleのrelation追加、predicate変更、endpoint変更がp95 144.4、112.6、125.1 msで、300/150 ms gate内です。機能E2E、pan/drag frame gate、このproduction transaction gateは別configとし、失敗原因を分離します。
-
-## 7. Pan/dragの30 fps境界
-
-DOMなしのCore testは、実browserのpaint、SVG更新、pointer event、Vue scheduling、GC pauseを測れないため「pan/drag 30 fps」を証明しません。Test用だけのgeometry loopを作って30 fpsと呼ぶこともしません。
-
-Core側の契約は、pan中にsemantic projectionとlayoutを呼ばないこと、drag中は対象geometryとincident routeの純粋計算だけに限定することです。将来productionのgeometry commandをCoreへ切り出した場合は、通常規模の可視subsetに対して純粋計算p95 8 msを別budgetとして追加し、33.3 ms frame budgetのrenderer余白を確保します。
-
-実際の30 fpsは`performance/browser.spec.ts`で、Mockの固定500 node/1,000 edge Scene、固定viewport・pointer traceを使い、warmup後のpan/dragそれぞれの`requestAnimationFrame`間隔p95が33.3 ms以下かを判定します。通常E2E smokeと別config・別CI jobにし、機能失敗と性能回帰を混同しません。
-
-Vue rendererはviewportだけが変わるpanで静的Scene subtreeを再patchせず、要素ごとのmemo境界によりdrag時も変更nodeとincident edgeを中心に更新します。これは描画最適化であり、Scene identity、document revision、semantic/layout cacheの代替にはしません。
+The target interaction boundary is approximately 30 fps or better during pan/drag under the fixed browser fixture; correctness and atomicity remain mandatory even if a host chooses a heavier optional adapter.

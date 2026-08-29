@@ -1,0 +1,7 @@
+# @iriograph/profile-kit
+
+Domain ontology、authoring metadata、projection catalog、asset/licenseを一つの配布単位として
+検証するためのmanifestとconformance helperです。Catalogやontologyを一つのschemaへ
+平坦化せず、標準catalogはversioned dependencyとして再利用します。
+
+このkitが確認するのはIriographとの接続契約です。BPMN等の外部規格準拠を主張しません。

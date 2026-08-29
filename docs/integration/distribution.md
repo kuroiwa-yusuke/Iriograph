@@ -1,116 +1,109 @@
-# Package配布・version
+# Package distribution and versioning
 
-## 公開package
+[日本語版](../../docs_ja/integration/distribution.md)
 
-IriographはESM packageとして次を同時にreleaseします。
+## Public packages
 
-| Package | 公開contract |
+Iriograph releases eleven ESM packages together:
+
+| Package | Public contract |
 |---|---|
-| `@iriograph/core` | model、schema、projection、validation、layout、semantic transaction |
-| `@iriograph/rdf-io` | Turtle/JSON-LD dataset import、lossless export、merge、明示rebase |
-| `@iriograph/profile-resolver` | immutable authoring profile/vocabulary解決、integrity・循環・競合検査 |
-| `@iriograph/semantic-access` | label-first index、revision alias、read API、Core semantic transaction bridge |
-| `@iriograph/layout-elk` | ELK Layered layout adapter、bundled engine、host/Worker engine注入contract |
-| `@iriograph/profile-kit` | domain projection profile manifest、validator、conformance fixture |
-| `@iriograph/presentation-tools` | read-only Scene index、closed sparse presentation candidate、budget・telemetry |
-| `@iriograph/host-conformance` | Mock/Product host共通のversioned capability・browser gate |
-| `@iriograph/icons-aws` | AWS Architecture Iconsの再配布byteを含まないmetadata catalogとhost resolver |
-| `@iriograph/agent-bridge` | semantic/presentation routing、label-first transport、外部候補review contract |
-| `@iriograph/vue-editor` | Vue componentと`@iriograph/vue-editor/styles.css` |
+| `@iriograph/core` | model, schemas, projection, validation, layout, transactions |
+| `@iriograph/rdf-io` | Turtle/JSON-LD dataset import, merge, rebase, export |
+| `@iriograph/profile-resolver` | immutable authoring-profile/vocabulary resolution |
+| `@iriograph/semantic-access` | label-first index and revision-safe authoring facade |
+| `@iriograph/layout-elk` | optional ELK Layered layout adapter |
+| `@iriograph/profile-kit` | domain projection-profile manifest and conformance kit |
+| `@iriograph/presentation-tools` | read-only Scene index and closed presentation candidates |
+| `@iriograph/host-conformance` | shared versioned capability/browser gate |
+| `@iriograph/icons-aws` | metadata-only AWS Architecture Icons catalog/resolver |
+| `@iriograph/agent-bridge` | semantic/presentation routing and candidate review |
+| `@iriograph/vue-editor` | Vue components and `@iriograph/vue-editor/styles.css` |
 
-Package間dependencyは同じreleaseのexact versionへ固定し、Vue 3はhostが提供するpeer dependencyとします。
-0.x期間は11 packageをlockstep versionでreleaseします。Packageは
-Node.js 20.19以降でbuild・検証し、browser hostからESMとして利用します。
+The packages use one lockstep version and exact inter-package dependencies. Vue 3 is a host-provided peer dependency. Build and verification use Node.js 20.19 or later; release automation uses Node 24 and npm with Trusted Publishing support.
 
-`@iriograph/layout-elk`は任意導入packageで、runtime dependencyのELK.jsは
-`EPL-2.0 OR GPL-3.0-or-later`を宣言しています。配布bundleへ含めるhostはELK.jsの適用licenseを
-release前に確認します。CoreとVue editorはELKへ依存しません。
+Iriograph code is [MIT licensed](../../LICENSE). Every package tarball contains the license. Dependencies, bundled Lucide icons, and vendor catalogs retain their own licenses and notices. `@iriograph/layout-elk` depends on ELK.js under `EPL-2.0 OR GPL-3.0-or-later`; hosts that bundle it must review the applicable terms.
 
-現時点では著作権ライセンスが未決定のため、package metadataは`UNLICENSED`とします。
-`publishConfig.access=public`はnpm上の可視性だけを定めるもので、利用許諾を意味しません。
-実release前に権利者がlicenseを決定し、metadataとlicense本文を同時に更新します。
+`@iriograph/icons-aws` distributes metadata only, not AWS artwork. Official icon bytes remain user/host supplied under AWS terms.
 
-Release前には各packageを`npm pack`し、repository workspace外の一時consumerへtarballだけを
-installします。そのconsumerで全11 packageのimport、CSS/fixture/catalog/notice subpath、型宣言、Vue peer、
-production buildを検証します。Workspace symlinkや`development` conditionでpackage内sourceを
-参照することは配布contractに含めません。Core、semantic access、ELK adapterの公開ESMは
-Node.jsからbundlerなしでも直接importできることを検証し、配布JavaScript内の相対specifierは
-`.js`拡張子を含めます。
+## Tarball verification
 
-Core tarballは`assets/icons/*.svg`と`THIRD_PARTY_NOTICES.md`を含み、
-`@iriograph/core/icons/<name>.svg`から同梱SVGを参照できます。既定icon catalogのref、埋込みsource、
-配布SVGはbyte-equivalent testで固定します。同梱Lucide iconはsource commit、個別icon名、ISC/MIT noticeを
-配布物へ記録し、brand iconや再配布条件が不明なassetは同梱しません。現在の既定集合は日本語label付きの
-汎用Lucide SVG 74個です。AWS等のvendor固有iconは再配布条件と更新周期を独立して固定できるversioned catalogと
-host resolverを使い、package予約namespaceを上書きしません。
+Before release, every workspace is packed and installed only from its tarball into a temporary consumer outside the monorepo. Verification covers:
 
-Private releaseはAWS CodeArtifactの`kuroxiom/kuroxiom-packages`へ`@iriograph` scopeで公開します。
-`packages-v<version>` tag、明示workflow dispatch、またはmain上の
-`.github/package-release-version` release marker pushをtriggerとします。公開workflow自身の変更も、main用OIDC境界のまま
-同じexact versionを冪等に再検証するためtriggerに含めます。Markerの内容は11 packageのlockstep versionと一致しなければ
-publish前に拒否し、その他の通常のmain pushやdocs変更ではpublishしません。
-利用hostはregistry上の公開確認後にexact versionで依存します。Hostへpackage sourceを複製しません。
+- all public imports and TypeScript declarations;
+- CSS, fixture, manifest, icon, notice, and license subpaths;
+- Vue peer dependency behavior;
+- production bundling;
+- direct Node ESM imports without workspace aliases;
+- exact lockstep dependencies;
+- absence of repository-only source imports.
 
-Publish jobはCodeArtifact login後に、そのrepositoryを`@iriograph` scopeのregistryとして明示設定します。
-公開scriptはlockstep versionとpackage間のexact依存を最初に検証したうえで、
-core、rdf-io、profile-resolver、semantic-access、layout-elk、profile-kit、presentation-tools、
-host-conformance、icons-aws、agent-bridge、Vue editorの依存順に、各`name@version`を同じscope registryへ問い合わせます。
-Exact versionが既に存在すればskipし、
-404で存在しない場合だけpublishします。認証失敗、network error、不正なregistry応答は未公開とはみなさず、
-上書きや別registryへのfallbackを行わずに停止します。
+Generated JavaScript relative specifiers include `.js`. Packaged assets and notices are byte-checked where the contract requires immutability.
 
-Publish直前の別jobとの競合などでpublishが失敗した場合も、同じregistryでexact versionが確認できた場合だけ
-既公開として後続packageへ進みます。このため11 packageの途中まで公開されたjobを再実行しても、既公開versionを
-変更せず未公開packageだけを依存順に補完できます。Repositoryやscriptは認証tokenを保持・出力せず、認証情報は
-CodeArtifact loginが生成するnpm設定だけに委ねます。
+## npmjs publication
 
-11 packageすべてのexact versionがCodeArtifactで確認できた後、監査jobは対象commitへ
-`packages-published-v<version>` lightweight tagを作ります。このtagは公開完了の不変な監査標識であり、
-GitHub Actionsの実行履歴を閲覧できない環境からも、repositoryのread権限があれば次のように確認できます。
+Public releases target only the canonical registry:
 
-```sh
-git ls-remote --refs origin refs/tags/packages-published-v0.1.0
+```text
+https://registry.npmjs.org/
 ```
 
-表示されたcommit IDがrelease対象commitと一致することを確認します。再実行時にtagが同じcommitを指していれば
-成功済みとして何も変更せず、別commitを指していればpublish jobを失敗させます。tagのforce更新や付け替えは
-行いません。各実行はさらに`packages-publish-success-<commit>`または
-`packages-publish-failure-<commit>`と、verify/publish jobの結果だけを持つannotated
-`packages-publish-diagnostic-<commit>`を残します。Diagnostic JSONの`failedStage`は固定語彙で、verifyでは
-`verify.install`、`verify.version-check`、`verify.test-build`、各workspaceを示す`verify.test-*`、
-`verify.typecheck`、`verify.build`、`verify.package-consumer`、publishでは`publish.install`、
-`publish.version-check`、`publish.aws-auth`、`publish.codeartifact-login`、`publish.scope-config`、
-`publish.publish`のいずれかです。成功時は`none`、jobがstep outcomeを残せなかった場合だけ
-`verify.unknown`または`publish.unknown`、実行条件でskipされた場合は`verify.skipped`または
-`publish.skipped`になります。いずれもcredential、registry token、失敗messageを含みません。失敗時は次で
-段階を切り分けられます。
+The npm organization and scope are `iriograph` / `@iriograph`. The publishing script rejects any different scheme, host, port, path, query, fragment, embedded credential, or fallback registry.
 
-```sh
-git ls-remote --refs origin "refs/tags/packages-publish-*-<commit>"
-git fetch --no-tags origin "refs/tags/packages-publish-diagnostic-<commit>:refs/tags/packages-publish-diagnostic-<commit>"
-git cat-file tag "refs/tags/packages-publish-diagnostic-<commit>"
-```
+Triggers are a `packages-v<version>` tag, an explicit workflow dispatch, or a main-branch change to the release marker `.github/package-release-version`. The marker must exactly equal all eleven package versions.
 
-verify内の各段階が失敗したときだけ、同じJSONの`verifyLogTailBase64`へANSI escapeを除去し、credential関連語を
-含む行をredactした失敗出力末尾を最大1,200 bytesで記録します。`base64 -d`で復号してtest名やbudget値を
-切り分けられます。他stage、成功時、logがない場合は空文字です。完全logや無加工出力はtagへ保存しません。
+The publish job uses GitHub Actions Trusted Publishing:
 
-Repository全体とpublish jobの`contents`権限はread-onlyのまま保ち、tagを作る独立audit jobだけへ
-`contents: write`を付与します。GitHub tokenやAWS・CodeArtifact credentialをscript引数、tag、logへ出力しません。
+- GitHub-hosted runner;
+- Node 24;
+- npm >= 11.5.1;
+- `contents: read`;
+- `id-token: write`;
+- no long-lived `NPM_TOKEN` or `NODE_AUTH_TOKEN`;
+- `npm publish --access public --provenance`.
 
-## SemVer 0.x
+Each npm package configures the exact trusted publisher `kuroiwa-yusuke/Iriograph` and workflow `packages.yml`.
 
-- 公開TypeScript API、runtime挙動、保存・読込境界、CSS contractのbreaking changeはminorを上げます。
-- 後方互換な機能追加もminorを上げ、可能な場合はbreaking changeの前にdeprecation期間を設けます。
-- 後方互換なbug fix、性能改善、文書修正はpatchを上げます。
-- 1.0まではminor間の自動upgradeを前提にせず、hostは利用versionを明示的に固定します。
+Publication order is Core, RDF I/O, profile resolver, semantic access, ELK adapter, profile kit, presentation tools, host conformance, AWS icons, agent bridge, then Vue editor.
 
-## 保存schema・catalog versionとの分離
+For each `name@version`, the script:
 
-Package SemVer、`.iriograph`の`schemaVersion`、projection catalogの`catalogVersion`は別の
-version軸です。Package minorを上げても保存schemaを暗黙変更せず、schema変更には明示的な
-schema versionとmigration方針を伴わせます。同じpackageが複数schema versionを読める場合も
-あります。
+1. queries that exact version from npmjs;
+2. skips it if already present;
+3. publishes only a genuine 404;
+4. treats authentication, network, and malformed responses as failures;
+5. after a publish error, accepts a race only if the exact version becomes visible;
+6. never overwrites a version or falls back to another registry.
 
-Catalogは`catalogId@catalogVersion`でimmutableに参照します。Package patch/minorはcatalogの
-identityを変更せず、ruleやtemplateの意味が変わる場合だけcatalogVersionを更新します。
+A partially completed release is therefore safely resumable.
+
+## Release audit
+
+After all exact versions are visible, an audit job records:
+
+- `packages-published-v<version>`;
+- `packages-publish-success-<commit>` or `packages-publish-failure-<commit>`;
+- an annotated `packages-publish-diagnostic-<commit>` JSON tag.
+
+The immutable version tag must point to the release commit and is never force-moved. Diagnostic stages use a closed vocabulary. Publish stages are `install`, `version-check`, `npm-cli`, `npm-registry`, and `npm-publish`. Verify stages distinguish install, version checks, package test groups, type checking, build, and tarball consumer verification.
+
+Only the independent audit job receives `contents: write`; the publish job remains read-only except for its short-lived OIDC identity. Tokens and OIDC assertions never enter script arguments, tags, or stored diagnostics. Failed verify output may include only a small redacted base64 tail under the existing audit contract.
+
+## Consumer hosts
+
+Hosts install exact public versions from npmjs and do not copy package source. Package/CSS/fixture/capability parity is checked by `@iriograph/host-conformance` before and after deployment.
+
+A product may deploy the consuming host to AWS or elsewhere. That deployment is separate from Iriograph package publication and must not reintroduce a private package registry mapping for `@iriograph`.
+
+## SemVer during 0.x
+
+- Breaking public TypeScript APIs, runtime behavior, persistence boundaries, or CSS contracts increment minor.
+- Backward-compatible features also normally increment minor.
+- Compatible bug fixes, performance improvements, documentation, and release-metadata corrections increment patch.
+- Hosts pin exact versions; automatic upgrades across minor versions are not assumed before 1.0.
+
+## Independent version axes
+
+Package SemVer, portable `schemaVersion`, and projection `catalogVersion` are independent. A package release does not implicitly change the document schema. Schema changes require explicit migration policy and tests.
+
+Catalog identity is immutable `catalogId@catalogVersion`. Package patches or minors do not change catalog identity unless rule/template meaning changes.

@@ -1,10 +1,12 @@
 # Semantic validation
 
-この文書は、Iriographのdomain constraint検証境界を定義します。RDF/RDFS構造検証はCoreに残し、SHACL等のdomain validatorはhostが解決して注入します。SHACLは有力なadapter実装ですが、Core、Vue editor、portable documentの依存条件ではありません。
+[日本語版](../../docs_ja/semantics/validation.md)
 
-## 責務と注入単位
+Core validates RDF/RDFS structure. Domain validators such as SHACL are resolved and injected by the host. SHACL is a strong adapter option, but it is not a dependency of Core, the Vue editor, or the portable document.
 
-Hostは`ResolvedSemanticValidationContext`を注入します。
+## Responsibility and injection
+
+A host injects:
 
 ```ts
 type ResolvedSemanticValidationContext = {
@@ -14,54 +16,54 @@ type ResolvedSemanticValidationContext = {
 };
 ```
 
-`contextId`は検証profile集合のidentity、`contextRevision`は同じidentity内の規則revisionです。どちらも空文字列を許しません。Editorは独立した`semanticValidationContext` prop、または`ResolvedAuthoringContext.semanticValidation`から受け取ります。URIからprofileを取得するresolverはHost注入transportと`@iriograph/profile-resolver`の責務で、Coreは取得やSHACL engine選択を行いません。
+Both identifiers are required. The editor receives the context directly or through `ResolvedAuthoringContext.semanticValidation`. Profile retrieval and validator-engine selection belong to host transport and `@iriograph/profile-resolver`.
 
-Validator requestはN3 `Store`等のengine objectではなく、次を含むserializable dataです。
+A validator request contains serializable data rather than an engine-specific store:
 
-- exact Turtle文字列に対する`sourceFingerprint`。Source range offsetはJavaScript文字列のUTF-16 code unit単位
-- `canonicalQuad`のcode-point順で並べたstatement snapshot
-- statement順に依存しない`datasetFingerprint`
-- 各statementのstable `statementRef`、RDF term kind、value、language、datatype
-- validation context identity/revision
+- `sourceFingerprint` for the exact Turtle string; offsets use JavaScript UTF-16 code units
+- statements sorted by canonical-quad code-point order
+- an order-independent `datasetFingerprint`
+- stable `statementRef` values and RDF term kind/value/language/datatype
+- validation context identity and revision
 
-Responseはcontext identity/revision、source fingerprint、dataset fingerprintをechoします。Coreは不一致、adapter throw、不正response、未知の`statementRef`、範囲外source offsetをinternal errorとしてfail closedにします。
+The response echoes context identity/revision and both fingerprints. Mismatch, adapter failure, malformed response, unknown statement references, or invalid source offsets are internal errors and fail closed.
 
-## Diagnostic identityとsource location
+## Finding identity and source location
 
-Validatorは各findingへ、resolved context内で一つのconstraint resultを識別する安定した`findingId`を付けます。`findingId`は表示文や行番号ではなく、constraint identityとfocus/path/value相当から構成します。同じresponse内の重複を許しません。
+Each result has a stable `findingId` derived from constraint identity and focus/path/value equivalents rather than text or line number. Duplicate IDs in one response are invalid.
 
-Coreの`diagnosticId`はcontext identity/revision、`findingId`、code、`semanticRef`、`statementRef`から導出します。severity、message、Turtle書式、source offsetはidentityへ含めないため、空白やprefix表記を変えても同じfindingを追跡できます。
+Core derives `diagnosticId` from context identity/revision, finding ID, code, semantic reference, and statement reference. Severity, message, formatting, and offsets are excluded, so a finding remains trackable after whitespace or prefix changes.
 
-`sourceFingerprint`と`sourceLocation`は別のexact-source bindingです。Source navigationは現在のTurtle draft fingerprintが一致する場合だけoffsetを使います。不一致時に古いoffsetを推測適用せず、`semanticRef`または`statementRef`とScene provenanceによるnavigationだけを残します。Adapterが正確な範囲を確定できない場合、`sourceRange`は省略します。
+Source offsets are used only when the current Turtle draft fingerprint still matches. Otherwise navigation falls back to semantic/statement references and Scene provenance. Adapters omit a range they cannot determine exactly.
 
-Diagnostic categoryは少なくとも次を区別します。
+Diagnostic categories include:
 
-- `syntax`: Turtle parse
-- `structure`: RDF/RDFS profileのBag、Seq、Alt、包含等
-- `profile`: catalog/profile解決・宣言
-- `domain`: 注入validatorのconstraint finding
-- `projection` / `layout` / `asset` / `internal`: 後続処理またはadapter contract故障
+- `syntax`: Turtle parsing
+- `structure`: RDF/RDFS profile structures such as Bag, Seq, Alt, and containment
+- `profile`: catalog/profile resolution and declarations
+- `domain`: injected validator findings
+- `projection`, `layout`, `asset`, and `internal`: later phases or adapter-contract failures
 
-Diagnosticは安定したmachine `code`と詳細`message`に加え、任意のpresentation hintを返せます。Hintは`title`、利用者向け`reason`、一つ以上の`nextActions`、対象resource/statementを持ちます。Actionは`open-vocabulary-manager`、`choose-existing-term`、`open-region-picker`、`show-source`等の汎用IDとseed dataであり、validatorがVue componentや業務predicateを指定しません。Editorは既知actionをbuttonとして表示し、未知actionもreasonを失わず表示します。
+A diagnostic has a stable machine code, detailed message, and optional presentation hint. Hints may contain a user-facing title, reason, next actions, and resource/statement targets. Action IDs are generic, for example `open-vocabulary-manager`, `choose-existing-term`, `open-region-picker`, or `show-source`; a validator never names Vue components or domain predicates.
 
-選択時点で判定できる無効なclass、region、predicateは候補から除外または理由付きdisableにし、Apply後のdiagnosticだけへ依存しません。Machine codeと完全IRIはHost/Core内部diagnostic・監査logのexact identityとして保持し、通常のpresentation item/DOMやAdvanced詳細へ生IRIを渡しません。利用者には「何ができなかったか」「なぜか」「次に何をすればよいか」をlabel中心で示します。
+Invalid classes, groups, and predicates that can be rejected before application are filtered or disabled with a reason. Ordinary UI explains what failed, why, and what to do next using labels. Raw IRIs remain internal diagnostic and audit identities.
 
-## Transactionとwarning
+## Transactions and warnings
 
-Turtle直接編集、structured command、LLM source/canonical datasetは、全view reconciliation後に同じdomain validation portを通ります。Candidateのdomain errorはTurtleとoverlayを元documentへatomic rollbackします。既に読み込まれたdomain-invalid documentはSceneを表示したままdiagnosticを重ね、該当node/container/edgeを`semanticRef`、`statementRef`、projection provenanceでannotationします。
+Direct Turtle editing, structured commands, and LLM source/canonical datasets use the same domain-validation port after all-view reconciliation. A domain error rolls back Turtle and overlay atomically. A previously loaded domain-invalid document remains readable, with findings projected through semantic/statement references and provenance.
 
-Domain warningを含むcandidateは初回に適用せず、`SemanticWarningConfirmation`を返します。確認は次の全値へ束縛します。
+A candidate with domain warnings is not applied on its first pass. `SemanticWarningConfirmation` binds approval to:
 
-- validation context identity/revision
+- validation context identity and revision
 - exact source fingerprint
-- code-point順にsortしたwarning diagnostic ID集合
+- the code-point-sorted warning diagnostic ID set
 
-再実行時に一つでも変われば確認は無効です。Structured authoring previewは同じtokenをpreview confirmationへ含め、Apply時にcandidateを再構成・再検証します。
+Any change invalidates approval. Structured authoring reconstructs and revalidates the candidate on application.
 
-Abortはvalidation failureではなくcontrol flowです。Coreは`aborted: true`と空の追加diagnosticsを返し、Editorはrequest tokenと`AbortSignal`でstale resultを破棄します。中断をユーザー向けdomain errorとして表示しません。
+Abort is control flow rather than a validation failure. Core returns `aborted: true` without new diagnostics, and the editor discards stale results through request tokens and `AbortSignal`.
 
 ## Cache identity
 
-P1-08のvalidation task/cache keyは`contextId + contextRevision + datasetFingerprint + sourceFingerprint`から作ります。同じgraphでもTurtleの空白、prefix、statement記述順が違えばsource rangeを再取得するため別keyです。一方、`datasetFingerprint`と`diagnosticId`は書式変更で維持されます。将来findingだけをdataset単位でcacheする場合は、source rangeの再mappingを別層に分離します。
+Validation work is keyed by `contextId + contextRevision + datasetFingerprint + sourceFingerprint`. Equivalent graphs with different Turtle formatting use separate source-location work, while dataset fingerprints and diagnostic IDs remain stable. A future dataset-only findings cache must remap source ranges in a separate layer.
 
-Mockはstatic TypeScript validatorで「業務フロー要素には空でない`rdfs:label`が必要」というfixture規則を実装します。SHACL dependencyを追加せず、port差し替えとUI lifecycleを検証するための実装です。
+The Mock uses a static TypeScript validator requiring a non-empty `rdfs:label` on workflow resources. This validates the port and UI lifecycle without adding a SHACL runtime dependency.

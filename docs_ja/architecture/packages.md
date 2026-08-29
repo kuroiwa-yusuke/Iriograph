@@ -1,0 +1,181 @@
+# Package・実装構成
+
+## Package責務
+
+| Package | 責務 | 持たない責務 |
+|---|---|---|
+| `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、human semantic commandの内部prepare/apply安全境界、非同期layout adapter契約と標準軽量layout、asset lease/policy検証 | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
+| `@iriograph/rdf-io` | Turtle/JSON-LD dataset import、merge差分・loss/collision report、明示rebase、semantic-only export | Diagram形式推測、overlay変換、永続化 |
+| `@iriograph/profile-resolver` | Immutable authoring profile/vocabulary importのidentity・integrity・循環・競合検証と解決済みcontext構築 | Network、tenant認証、registry cache |
+| `@iriograph/semantic-access` | Turtle由来のlabel/comment/構造索引、検索・describe・近傍/subgraph、revision alias、Core commandへcompileする注入WritePort | LLM provider、MCP transport、overlay、永続化、認証 |
+| `@iriograph/layout-elk` | ELK.js Layeredへのoptional adapter、compound hierarchy、直交route、host engine/Worker注入 | semantic解釈、document内のengine固有option、hard pinの近似 |
+| `@iriograph/profile-kit` | Domain profile manifest、validator、fixture/conformanceとreference workflow profile | Core分岐、規格互換の暗黙主張 |
+| `@iriograph/presentation-tools` | Opaque Scene bridge、closed sparse patch、budget、diff/render/score/telemetry contract | Apply、Turtle、任意CSS/URL、画像bytes |
+| `@iriograph/host-conformance` | Versioned package/CSS/fixture/capability manifestとHost report検証 | Product固有deploy実行 |
+| `@iriograph/icons-aws` | AWS公式icon archiveのversioned metadataとHost注入resolver | AWS icon bytesの再配布、認証URL保存 |
+| `@iriograph/agent-bridge` | Semantic/presentation/mixed routing、label-first transport DTO、外部候補review model | 分類結果による権限付与、model SDK、永続化 |
+| `@iriograph/vue-editor` | Scene描画、annotation/port/folding/scope、overlay編集、Turtle draft、history、structured semantic authoring、外部候補review UI | 語彙判定、永続化、認証、catalog取得 |
+
+11 packageは公開境界です。`apps/mock`は配布packageではなく、sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocatorを実装するreference hostです。投影規則やEditor内部stateは持ちません。
+
+## 投影処理
+
+1. `semantic.source`をN3でparseする
+2. RDF/RDFSベースプロファイルの構造制約を検証する
+3. 明示された`rdfs:subClassOf`と`rdfs:subPropertyOf`からrule matching用の限定的なclosureを作る
+4. catalog ruleをpriorityとspecificityで一意に解決する
+5. `membership-container`、`ordinal-sequence`、`alternative`等の汎用operatorでgeometry未確定のScene構造とedit provenanceを導出する。Membershipは多対多の全組を保持し、node-linkの単一parent階層とregionの重なり表現をviewごとに選ぶ。`ordinal-sequence`は通常edgeを作らず、選択可能なgroupとordinal付きmembershipを導出する
+6. 消費されていないIRI-object tripleをfallback edgeへ投影する
+7. view overlayをsemanticRefで照合し、user geometry、appearance、manual routingを制約として構成する
+8. `layoutRef`に対応する非同期layout adapterを呼び、generated elementのgeometryとendpoint込みrouteを決定する
+9. asset resolverでicon IRIを表示URLへ解決する
+
+Sceneは毎回導出します。`projectSemanticView`はStep 1〜7だけを行ってgeometry未確定の`ProjectedScene`を同期的に返します。`buildIriographView`はviewのprofileに対応する解決済みcatalogを選択し、Step 8を非同期に実行して`DiagramScene`を返します。Step 9は`resolveDiagramSceneAssets`による別の非同期enrichmentであり、projection、layout、semantic reconciliationへasset取得を混ぜません。RendererはTurtle store、layout engine、asset resolverを直接問い合わせず、完成SceneのURLだけを使います。Coreには決定的な標準軽量layoutを同梱し、Vue editorはこれをdefaultにします。Hostは明示注入した同じadapter契約で高機能layoutへ差し替えます。通常の再layoutはgenerated elementだけを移動し、user geometryとpinned geometryはfixed constraintにします。Containerのheader位置から導くcontent insetはCoreを正本とし、標準/ELK layout、Canvas境界制約、包含不一致検出で共有します。
+
+## Catalog解決
+
+Portable documentの`imports`はhost境界の`ProjectionCatalogResolver`でraw bytesへ解決します。Coreの`resolveProjectionCatalogImports`はversion付き`catalogRef`、任意のSHA-256 integrity、取得結果のcatalog identity、runtime schemaを検証してから、同じprofileのcatalogを`catalogRef`順に結合します。Rule IDはorigin catalogとlocal IDから修飾し、template、asset、rule IDの衝突やprofile内のdefaults欠落・複数定義をlast-winsにせずerrorにします。解決済みcatalog、rule origin、実取得元の`sourceCatalogRefs`は`ProjectionRuntimeContext`へ渡し、projection provenanceでは元のcatalogRefとlocal rule IDを復元します。`imports`を宣言したdocumentでは、全named viewのruntime取得元集合が宣言集合とexact一致しない限りSceneを生成しません。同じprofileのHost既定catalogへ黙って落としてappearanceを変える経路を作らず、未宣言・未解決refをdiagnosticにします。
+
+Named viewのpresentation transactionはCoreの`applyViewCommand`へ集約します。追加・設定・resetは
+対象viewだけを切り出してreconciliation/layoutし、candidate採用時にだけ元documentへ戻します。
+Semantic transactionの`reconcileIriographDocumentViews`は引き続き全viewを処理し、両経路を
+混同しません。Editorはactive view切替ごとにScene/asset/validation request tokenを更新し、遅延した
+旧view結果を採用しません。Session-only filterはprojection前のqueryではなく、完成Sceneのexact ID
+subsetとして適用します。
+
+Local mockはnetwork resolverを持たないstatic fixtureなので、Coreが公開する自己完結`standardWorkflow*Catalog`をexact ref付きでeditorへ注入します。Mock固有catalogやmerge処理は持たず、同じpublished packageを使うHostとtemplate、style、package iconを共有します。Libraryのtemplate/assetは各named view overlayから明示参照し、見た目だけのdomain type ruleを作りません。URIからの取得、cache、認証をmock固有のprojection処理へ混ぜません。
+
+## Asset解決
+
+Normalized projectionはcatalogまたはoverlayから`iconRef`だけをSceneへ導出し、catalog URLを直接使いません。Coreのasset enrichmentは同一Scene内のassetRefをdedupeし、host resolverが返したleaseのabsolute URL、実media type、catalog宣言との一致、byte上限、schemeとoriginを検証します。失敗はwarningとiconなしfallbackにし、all-view semantic reconciliationのaccept/rejectへ影響させません。
+
+Vue editorはScene requestごとにAbortSignalとgenerationを発行します。新しいrequest開始時に古い取得をabortし、staleになってから返ったleaseは即時releaseします。新Scene採用時に旧Scene batch、component unmount時にcurrent batchをreleaseします。Host resolverはassetRefからworkspace mappingを引き、認証fetch、cache、Blob URL生成とref count、revision変更時のinvalidatonを所有します。
+
+Pickerもhost注入の非同期callbackです。Editorはcancel・stale・不正IRIをdocumentへ入れず、妥当なassetRefだけを一つのpresentation transactionとしてoverlayへ保存します。Pickerとresolverのどちらもworkspace path、URL、bytesをportable documentへ書きません。
+
+## 編集transaction
+
+drag、resize、waypoint/Bezier control変更、template/icon overrideはpresentation transactionです。選択elementのoverlay entryだけを更新し、Turtleを変更しません。一つのpointer gestureを一つのundo履歴として扱います。
+
+Edge routingはCore Sceneのderived `route`とportable overlayのmanual `waypoints`を分けます。
+Layout adapterの全routeはsource/target attachment込み2点以上で、Canvasはこれを直接描画します。
+Waypointの初回編集ではderived routeの中間点をseedし、追加位置はpolylineのnearest segmentへ射影します。
+Label baseはpolyline arc-length 50%で、overlayには相対`labelOffset`だけを保存します。CanvasからEditorへは
+waypointとlabel offsetをまとめたsparse `routingUpdate`を渡し、Editorはnested routing extensionを保持しつつ
+空waypointとzero offsetを省略します。Edge overlayへgeometry、pinned、placementを混入させません。
+Public Canvasのlegacy `routingChange`はwaypoint操作時だけ併発し、Editorは購読しません。
+
+Curve routingは`routing.curve`へ、endpointからの相対handleと絶対座標のon-curve knotだけを保存します。
+描画時は0 knotならlayoutのguide routeから一組のcubic controlを補完し、1個以上なら隣接anchorから
+Catmull-Rom相当の接線を補完して、全segmentを一つの`M ... C ... C ...` pathへ連結します。利用者が
+knot handleを動かすと反対側を鏡映し、明示controlがない部分は常に自動補完へ戻ります。Curveのlabel baseは
+cubicを区分サンプリングした弧長50%であり、polyline midpointを流用しません。Canvasのpointer中は
+`previewRouting`だけを更新し、pointerupで一度だけsparse routingを確定します。Inspectorは座標表を持たず、
+knot追加・削除・全manual controlのresetだけを提供します。Projection、Scene、presentation-only reconciliationは
+curveとcurve内PointのIRI-keyed `extensions`をdeep copyし、座標丸め後も保持します。Turtle、node geometry、
+他edge routeは変更しません。Canvas content boundsはknot、実座標へ解決した明示handle、automatic補完した
+Bezier control/bowのcontrol hullも含めるため、負座標、拡大縮小、fit/reveal、保存再読込後も曲線と操作点をclipしません。
+Catalog既定curveは通常どおりroute modeをoverlayへ複製しませんが、初めてcurve controlを保存する場合だけ、
+`curve`には`routeMode: "curve"`が必須というportable schema不変条件を満たすため同じrouting entryへ明示します。
+Curve controlはCanvas compositeへtab stopを増やさず、既存active edgeとrouting keyboard commandで循環・編集します。
+
+標準軽量layoutはunordered endpoint pairごとにedgeを束ね、code-point順element IDから20 unit laneを
+決定します。Attachmentはnode辺内へclampし、外側stub/middle laneはclampせず多数edgeでも一意性を
+保ちます。Self-loopは右側36 unit、同一nodeの兄弟ごとに18 unit広げます。Routeの右・下方向の張り出しは
+Scene boundsへ加えます。新規manual waypointはCanvasの8 unit insetへclampし、既存負座標は読み込み時に
+破壊的変換せず、clipされる場合はユーザー編集またはautomatic resetを要求します。
+
+SelectionはVue editor内のordered element ID集合とprimary element IDで表し、portable document、overlay、historyへ保存しません。Canvasはgroup drag中のgeometryをephemeral previewとして描画し、pointerupで`geometryBatchChange`を一度だけ発行します。Editorはbatch内の全geometry overlayを一つのdocument cloneへ適用し、同じgesture snapshotを一つのhistory itemへ積みます。選択containerは子孫を同deltaで移動し、generated childを含む確定participantをuser geometryとして保存するため、Scene再投影後にpreviewから戻りません。Pointer cancelではpreviewを破棄しdocumentを変更しません。
+
+Group translationは選択ancestorをrootとして正規化し、各root subtreeの許容delta intervalを交差します。親が選択されていないnode/nested containerは親containerのheaderを除くcontent bounds、top-level elementはScene insetを境界とします。異なるcontainerを跨ぐ操作でも共通deltaだけを適用し、`parentElementId`やsemantic membershipを変更しません。整列は6方向、等間隔は水平・垂直のbounding-box間gapを対象とし、各toolbar commandを一つのbatch transactionにします。
+
+Snap policyはDOM非依存のgeometry operationとして実装し、標準grid 8 unit、target tolerance 6 screen pxを使います。Target候補はedge/centerの距離、座標、code-point順element identityで決定し、target、grid、bounds clampの順に適用します。設定はEditor sessionだけに置き、単体dragとgroup dragで同じpolicyを使います。
+
+Turtle textareaは未適用draftを持ちます。「検証して適用」または保存前の非同期`flushPendingEdits()`でsemantic transactionを開始します。現行実装はparseとRDF/RDFS構造検証後、全viewをそれぞれのprofile/catalog/layoutで再構成し、一つでもblocking errorがあれば元documentへrollbackします。Parse error時はdraftを残してdocument正本を変更しません。
+
+Controlled source transactionは`applyAuthoringSource`でactorを`human`または`llm`として必須受領し、元graphとの差分にauthoring profileを適用します。不明actorはfail closedです。Rendererのfallback投影はunknown termを許容しますが、LLM transactionはprofile外term、新規semantic term、許可外namespaceを拒否します。
+
+Rich editorのnode、属性、edge、包含、順序、選択編集は次のパイプラインで実行します。
+
+1. Editorが入力中のformをephemeral UI stateとして持つ。Sceneやdocument overlayに仮node/edgeを保存しない
+2. Canvas gestureまたは右Inspector操作からcommand draftを作る。Canvasはsource/target、候補container等をseedするだけでsemantic transactionを開始しない。`要素を追加`はCanvas位置を受け取らない
+3. 解決済みauthoring contextとprojection capabilityから選択できるclass、predicate、構造操作を提示する
+4. ユーザーの実行一回の内部で、Coreがstructured command群をcandidate graphへ変換して検証し、成功時だけ同じ操作のatomic graph patchとして確定する。`create-resource`はnamed IRIと少なくとも1triple、`connect-resources`はpredicateを必須にする。選択外へ影響する削除だけは候補差分を確認modalへ渡す
+5. Graph patchからcandidate datasetを構成する。Structured commandまたはLLM editはversioned serializerで決定的なcandidate Turtleへ再生成し、Turtle直接編集は入力原文をcandidate sourceとして保持してprepared pipelineへ合流する
+6. Parse、authoring profileの差分検証、RDF/RDFS構造検証を行う
+7. 影響する全viewを個別のprofile、catalog、layoutで投影し、旧Sceneと新Sceneをstable identityで照合する。存続user overlay、新規elementのgenerated geometry、消滅・非互換overlayをviewごとにcandidate上でreconcileする
+8. Reconcile済みcandidate datasetをhost注入のengine-independent portでdomain validationする。Domain errorまたはadapter contract errorならcandidate全体をrollbackする
+9. Candidate Turtleとreconcile済みoverlayを一つのdocument revisionとして確定し、semantic diffとpresentation diffを別々に返す
+
+右Inspectorの意味編集は初期blur状態に`新しい要素を作る`、`関係を作る`、`要素を変更する`、`関係を変更する`の4入口だけを表示します。入口選択後は一段ずつ必要な種類、Canvas対象、predicate、member、順序または既定候補を入力し、raw IRIを表示しません。新規nodeは名前とprofileのnode-role、新規groupは名前とgroup kindをallocatorのopaque IRIと同じatomic transactionへcompileします。Meaning authoringとdisplay overlay編集は`意味`/`ビュー`tabの片方だけを表示し、縦に併置しません。右click、Context Menu key、Shift+F10は対象別menuを開き、menu項目は対象に応じた意味flow、ビューInspector、Canvas commandへfocusするだけで直接mutationしません。Style editorは右Inspector内へinline表示します。Inline style editorのcheckbox、select、preset、resetは直接一つのpresentation transactionへ確定し、color/range/numberは`input`をsession preview、`change`を一つのhistory commitにします。別のApply/Cancel段階は設けず、`閉じる`は確定済み変更を維持してsectionだけを畳みます。Resource/class/predicateはopaque option IDとlabel/commentだけをpresentation DTO/DOMへ返し、完全IRIを内部value、tooltip、read-only Advanced参照情報へ渡しません。Opaque IDはresolved contextとScene provenanceからHost/Core内部でexact IRIへ戻し、生IRIを表示・編集できる標準入口はeditableなTurtle/Document sourceだけです。Canvas pickerは明示modeで既存resource identityをdraftへseedするだけで、新規resourceの位置やmembershipを補完しません。
+
+Direct edgeのendpoint haloはtabでgestureを分けます。`ビュー`では同一node外周上のanchorだけをrouting overlayへ保存します。`意味`では別nodeへのdropを、既存statement削除、新statement追加、exact statement comment移行を含む一つのsemantic transactionとして確定します。空白・region・container・現在と同じnodeへのdropは拒否し、未接続の中間状態を作りません。
+
+Geometryとsemantic parentの不一致はVue editorのderived warningです。Node/container centerが意味上無関係なcontainer content上にある場合、またはsemantic child全体がparent contentから外れる場合に警告し、通常dragからmembershipを自動生成しません。表示位置の修正はpresentation historyだけへ入り、包含の追加・削除はprovenance/catalogから作るstructured commandを一回のsemantic transactionとして実行します。
+
+Step 7で新規geometryを保存する場合は`placement: "generated"`とし、作成後にuserがdrag、resizeした`placement: "user"`と区別します。Template、style、iconなどcatalog由来のappearanceはSceneへ導出し、overlayには複製しません。P1-08でprepared pipeline内のparse結果共有やvalidation/projection順を最適化しても、phase別diagnostic、domain error時のatomic rollback、warning確認、最終documentの結果契約は変えません。
+
+再serializeはcanonical blank node labelを決定し、expanded subject/predicate/object tupleでdedupe・sortしてから表記をcompactします。`rdf`/`rdfs`/`xsd`の固定binding、base IRI由来のdefault prefix、妥当な入力prefixの優先順を固定し、実際に使用する宣言だけを出力します。`rdf:type`は`a`、Turtleの有効なprefixed nameへ変換できないIRIだけをfull IRIにします。Prefix alias/collisionやquad入力順がstatement順を変えてはなりません。Comment、空白、property list、source上のtriple順は保持保証しません。v1はRDF Dataset Canonicalizationを実装せず、構造的に区別できないblank node間では入力IDをtie-breakに使います。Human textareaのdirect sourceはこのserializerを通さず、妥当な原文を保持します。
+
+Standard editorはresource作成と位置指定を一つのUI操作へ結合しません。Label作成のsemantic resultを確定してgenerated geometryを得た後、利用者のdragをpresentation historyへ別に記録します。一般hostが低水準`create-resource.initialPosition`を使う場合、root配置は現在のScene boundsを越えてCanvas work areaを拡張できますが、`resourcePolicy.maxInitialPositionExtent`（既定32768）を越えるright/bottomは拒否します。Group配下では従来どおりcontainer content boundsを越えられません。一般hostがsemantic commandとpresentation patchを協調させる場合も、片方の失敗で部分commitしてはなりません。
+
+Canvasからのedge削除やcontainerからの取り出しは、Scene elementを直接消去する処理ではありません。Projection operatorは元statement identityとsemantic edit capabilityをScene provenanceとして返し、Editorはそれを直接triple削除、`rdfs:member`削除、Seq/Altのatomic再構成などのcommandへ戻します。Seqの`rdf:_n`はedgeでなくordinal membershipなので、groupまたはmemberの選択から`set-sequence`を開始します。これにより表示要素の削除がTurtleの孤立した不整合な削除になることを防ぎます。
+
+Resource自体の削除では、そのresourceをsubjectとするtype、label、property等を削除対象に含めます。低水準Core commandは別subjectからの参照やstructure membershipが残る場合にcascade省略を拒否します。標準Editorは現在の選択集合からcascade候補を構成し、選択外のincident edge、membership、Seq/Alt membershipへ波及する場合だけ削除modalを開き、Canvasの赤線と人向け影響一覧を示します。影響objectもすべて選択済みならmodalなしで一つのgraph patchを確定します。Seq/Alt memberを除く場合は残る`rdf:_n`も同じpatchで連番へ再構成し、最終candidateが構造制約を満たさなければ全体をrollbackします。
+
+P1のrich authoringは、hostから解決済みの`ResolvedAuthoringContext`とresource IRI allocatorを受け取ります。Editorはcommand draftをportable documentと別のsession stateとして保持し、Coreのprepare APIでcandidate dataset、graph patch、diagnostic、confirmation IDと全viewの検証済みSceneを得ます。Prepared resultはprocess-localなpreview object identityにだけ結び付け、document fingerprint、context identity/revision、confirmation ID、warning tokenを含むpreview coreが一致するときだけapplyで再利用します。Cloneまたはserializeされたpreview、stale document、context変更、core改変はprepared resultを実行データとして信用せず、従来のcompile、policy、reconciliationを再実行する保守経路へ戻します。標準Editorは同じrevisionの確定時にprepared Sceneをasset enrichmentへ直接渡し、publishで同じprojection/layoutを再実行しません。この2段階は一回の利用者action内で連続実行し、Preview/Apply画面として露出しません。
+
+既存direct edgeの追加、削除、predicate/endpoint置換、個別statement comment変更は、全viewの可視node・container・region集合、template、parent、membership、Seq/Alt ordinalが不変な場合だけedge-only reconciliationを使います。旧Sceneのgeometry、pinned、placementをelement identityでcandidate overlayへ移し、layout adapterへは既存geometryを全て固定した`route-only` requestを一回だけ渡します。追加・削除・identity/endpoint変更edgeの旧新endpointをseedに、そのendpointへ接続するcandidate edgeまでを決定的な一段のaffected集合とします。存続するunaffected generated edgeの旧Scene routeはoptional `fixedDerivedRoutes`へ、familyとBezier制御点等は対になる`fixedDerivedRouteChoices`へ渡し、標準adapterではinitial route、refinement、compactionの対象から除外します。Fixed routeは他のaffected routeの交差・重複costには含め、共通completion層がoptional fieldを無視するthird-party adapterの結果にも旧routeとchoiceを復元します。この一時情報はSceneのderived値でありportable overlayやwaypointへ保存しません。Manual/user routeは従来のhard constraintです。返却Sceneのpinned/placementは元の値へ戻し、固定指定をportable overlayへ漏らしません。`rdf:type`、`rdfs:member`、ordinal、profileでstructuralと宣言されたpredicate、可視primitive/template/parent/membershipの差分、初期位置の後適用はfull reconciliationまたは通常refreshへfallbackします。Fallback時は`reconcile-edge-only-fallback`のinfo diagnosticへ固定理由codeを残し、任意observerへview ID、要求mode、実行mode、fallback理由を通知します。成功したroute-onlyはaffected/fixed件数、標準layout observerは実際に初期routeを計算した件数も通知し、observer例外はtransactionの成否へ影響させません。Direct Turtle適用は常に全view reconciliationを行い、そのtransactionで得たSceneだけをpublishへ再利用します。
+
+Allocatorは内部prepare時だけ呼び、返したIRIを正規化commandへ固定します。Coreはallowed namespaceだけでなく、graphのsubject、predicate、objectに同じIRIが既に使われていないことも検査します。Allocatorのcancel、error、古い非同期resultはdocumentへ入りません。Turtle textareaの未適用draftとstructured command draftは同時に有効にせず、どちらかが存在する間はもう一方のwrite入口を無効にします。
+
+Delete cascadeはresourceをsubject、object、predicateに含むexact statement setをpreviewし、その集合をconfirmation IDへ含めます。Seq/Alt member削除では古いordinal削除と残るmemberの連番追加を一つのpatchにし、Seq 1件以上、Alt 2件以上とdefault memberを最終candidateで検証します。Ordinal predicateはcatalog prefixに続く正規の正整数suffixだけを構造として扱い、prefixが似た通常propertyを削除・再採番しません。Scene provenanceがない場合、Editorはpredicateや構造を見た目から推測せず逆編集actionを無効にします。
+
+`set-property`は値集合の完全置換で、空配列だけを削除とします。空文字列literalとIRI/literal複数値を区別し、参照を外したことで孤立するblank-node closureを推測削除しません。Capability optional bindingは参照するtemplate statement単位でadd/remove双方からskipします。`set-alternatives`は`memberIris`を最終ordinal順として重複を保ち、default ordinal slotとの一致を検証します。
+
+Mockは同梱profile/vocabularyを使い、Cloud等のhostは`@iriograph/profile-resolver`へ認証付きartifact resolverを注入できます。Version、cache、integrity、offline policyはhost transportの責務とし、editor/coreからresolverやnetworkへ逆依存させません。
+
+Domain validationのrequest/response、diagnostic identity、warning confirmation、abort、P1-08 cache identityは[Semantic validation](../semantics/validation.md)を正本とします。Validation requestはparse済みdatasetをserializable statement snapshotへ変換し、Core内部のN3 `Store`をadapterへ公開しません。Loaded documentのdomain errorはprojectionを止めずScene annotationとして重ね、candidate transactionのdomain errorだけをatomic rollbackします。
+
+## Semantic access
+
+`@iriograph/semantic-access`はportable documentを別形式の正本へ変換せず、対象revisionのTurtleからread modelを構築します。Index entryは完全IRI、locale別label/comment、型、class/property hierarchy、incoming/outgoing statement、membershipを持ちます。検索順位と同順位のsortは入力triple順や実行環境localeへ依存させません。
+
+Resource/predicateの短いaliasは一つのindex revision内だけで有効です。LLM adapterはlabelで候補を検索し、aliasでdescribe/subgraph/writeを要求できますが、semantic-accessは適用前にaliasを完全IRIへ解決し、revision一致を検証します。Writeはstructured operationをCore `AuthoringCommand`へcompileし、host注入のpreview/apply portへ委譲します。確認済みpreview、authoring context、workspace revisionの照合はwrite port側のCore transactionを通り、semantic-accessはraw SPARQL Updateやoverlay mutationを提供しません。
+
+Browser、Node、Python MCP、AgentCore等は同じAPIへtransportを被せるhost adapterです。MCP serverをPythonで実装しても、RDFの別正本、IRIとは別のidentity、検証を迂回する書込み経路を作りません。詳細は[Semantic Access](../integration/semantic-access.md)を正本とします。
+
+## Named viewとsession表示状態
+
+P1では同じTurtleに複数のnamed viewを持ち、ユーザーがviewを選択、追加、複製、削除できます。各viewはprofile、layout、locale、overlayを独立して持ち、profileが表示するsemantic構造を選択します。SPARQLや汎用filter editorは実装しません。一時hideはVue editorのsession stateにだけ保持し、保存documentやsemantic transactionへ含めません。
+
+ViewportもVue editorのsession stateです。`DiagramCanvas`がscroll metrics、mouse/keyboard pan、fit計算、minimapとelement boundsへのrevealを所有し、`IriographEditor`はtoolbarとhost向けnavigation methodを接続します。Navigationはdocument clone、overlay、undo historyを経由せず、Scene再投影後もそのsession内のviewportを維持します。Primary pointerのblank canvasまたは未選択Group Frame interior dragはsession-onlyの矩形複数選択とし、nodeは矩形との交差、edgeは描画経路との交差、背景になり得るGroup Frameは枠全体の包含で判定します。選択済みGroup Frameの空内部dragはselect/pan modeよりgeometry移動を優先し、選択集合を一gestureで更新します。完全なCanvas空白の4px以内の単clickだけ選択解除とし、Canvas外controlのclickは選択を維持します。Shiftは現在選択へ追加、Ctrl/Cmdは反転し、意味編集の複数対象pickerでも同じ矩形と対象kind filterを使います。Middle pointerまたはAlt+blank dragはread-onlyを含めてpan専用です。Group Frameの枠・headerとScene element、編集handleは既存gestureへ渡します。Keyboard panはfocusされたscroll viewport自身でeventを停止し、node focusからbubbleするArrow keyはEditorのpresentation editへ渡します。
+
+Rendererのsemantic object本体は固定したz bandへ分け、選択中も`region/sequence group < edge < node`をDOM順やclassで越えないようにします。Region/Seqのselection frontと`regionZOrder`は構造band内だけで解決します。一方、waypoint、endpoint halo、resize handle、draft markerはobjectではないtransient interaction layerへ分離し、nodeと重なっても操作可能にします。通常edge線とterminal markerは複製せずedge bandへ留めます。Editor rootはhost幅を押し広げる固定最小幅を持たず、compact Inspector、三列layoutの横scroll、sidebar折り畳みを組み合わせます。Canvasは実content外周へsession-onlyの初期320 unit作業余白を持ち、drag/resize previewが端へ達した時点で正負の必要方向へ160 unitずつ単調に拡張します。負方向拡張では同じ画面位置を保つようscrollを補正し、fitは作業領域でなくrouteを含む実content boundsを使います。作業領域はoverlayへ保存せず、確定した負座標を含むgeometryだけをpresentation transactionへ渡します。Seq・region・containerの幾何操作は`parentElementId`だけでなく全`memberships`を参照し、共有memberの全所属先content intersectionをhard constraintにします。
+
+## 性能基準
+
+500 node / 1,000 edgeを通常規模、2,000 node / 4,000 edgeをstress規模とします。通常規模ではlayout以外の編集再投影を100ms未満、実Chromiumのpan/drag frame間隔p95を33.3ms以下、stress規模では初回projectionと標準軽量layoutを合計2秒未満とする固定benchmarkをCIで監視します。測定環境、fixture scale、warm-up回数を固定し、絶対budgetを動的倍率なしで判定します。意味編集時は同一runtime・exact document/view bindingのpre-asset Sceneだけを上限付き内部cacheで再利用し、通常build、別catalog、別layoutへは流用しません。Vue Canvasはviewport変更とScene要素変更を別のmemo境界で扱い、pan時の静的Scene全体のDOM patchとdrag時の無関係要素更新を避けます。Version別の測定値は[評価履歴](../evaluations/reference-reconstruction.md)へ分離します。
+
+表示要求をLLMへ接続するhostは、まずpresentationだけで達成できるか判定します。意味構造が必要な場合だけ、view profile/catalogからprojection capability summaryを導出し、許可語彙とともにLLM adapterへ渡します。分類、検証、失敗時rollbackは[Authoring profile](../semantics/authoring-profile.md)に従います。
+
+## 現在のlocal mock
+
+標準Editorは`図`、`型一覧`、`Turtle`、`Document`の4 surfaceを持ちます。通常の`instance-flow` projectionはClass resourceとschema edgeを図へ出さず、型一覧がsemantic sourceからClass DAG、直接・継承instance、未使用型を導出します。図上は代表直接型一件のcompact tagだけを持ち、型一覧からの強調はsession stateに留めます。Class CRUDと複数要素への型付与はCore authoring transactionへcompileし、cycleとstale opaque IDを適用前に拒否します。
+単一要素の意味Inspectorは同じlabel-first型候補とtransactionを再利用し、一覧に出ない未知の既存直接型を保持したcomplete replacementにします。
+
+初期workspaceは、顧客、店員、調理担当、配達担当のlane、注文から完了までの左から右の主フロー、問い合わせbranch/loop、注文・問い合わせ内容・ピザ・料金・領収書のcross-lane連携を表すピザ注文・配送semantic seedを開きます。Seedはlabel/comment付きTurtleを意味正本とし、初期view overlayを空にして個別geometry、appearance、manual routeを写経しません。標準projection/layoutの結果を実browserで参照図の構造へ照らして評価します。標準layoutとoptional ELKを同じProjectedSceneで比較した結果は一般的なadapter選択と品質改善の証拠に使い、seed IRI、label、特定documentを検出する配置ruleには使いません。Catalog外のIRI-object tripleは通常矢印へfallbackできます。
+
+Editorはdrag、resize、edge route mode・waypoint追加/削除/移動、edge label位置、source/target endpoint anchor、self-loop/parallel edge選択、multi-selection、一括移動、整列、等間隔、grid/target snap、座標入力、template/icon override、region label位置、undo/redo、mouse/keyboard pan、fit、minimap、selection reveal、zoom、Turtle編集、document/catalog参照を提供します。加えて、host注入のstatic authoring context/allocatorを使い、node/group作成、直接edge、包含、Seq、Alt、profile定義済み操作、resource削除をCanvas選択中心の右Inspectorから実行できます。非削除操作は一回の実行内で検証・確定し、選択外へ影響する削除だけlabel付き影響modalで確認します。Node作成は名前と一件以上のprofile node-role、group作成は名前とgroup kindをallocatorのopaque IRIと同時に確定します。上位概念、edge、membershipは作成後の別actionとし、見た目と意味の包含不一致はCanvasとInspectorに警告します。名前・説明は複数言語・複数行をdetails dialogから編集でき、commentはhover/全表示を切り替えます。Turtleの適用、semantic authoring、保存、書出は非同期reconciliationの完了を待ちます。Mock hostはrepository内の`public/workspace`をmanifestからtree表示し、runtime schemaで検証した`.iriograph`を読み込みます。旧schemaまたは不正なlocalStorage working copyは採用せずrepository上のsampleへ戻します。保存はsource fileを直接変更せずpath別のlocalStorage working copyへ行い、取込・書出もhostで提供します。
+
+同じworkspaceの画像はmanifest上でasset IRIとhost-owned source URLを対応付けます。Mock resolverはmanifestにないcatalog URLを直接取得せず、同一originのworkspace sourceだけをfetchし、Blob URL leaseへ変換します。Core policyは実media type、byte上限、Blob URLのscheme/originを検証します。Sample documentのcatalog外icon overrideも同じ経路で表示され、treeを使うhost pickerはassetRefだけをoverlayへ返します。
+
+現在の標準軽量layoutはLR/TBのgraph topology、Bag container、generated/user/pinned geometry、5種のroute mode、endpoint anchor、parallel edge、reciprocal edge、self-loopを決定的に扱います。配置後のbounded routerはnode本体とcomment reservationを区別し、候補を本体交差、共有endpointを除くedge交差、reservation交差、edge重複長、距離、bend数の辞書順で比較します。Route state Mapは各routeのboundsを初期化時に一回計算し、route採用時だけ更新します。共有endpoint geometryもedge pair単位でcacheし、boundsが交差しない障害物・routeはexactに候補比較から除外します。自動生成routeはsource/target以外の中間点を最大1個とし、品質を満たす直線は0個にします。Obstacle fallbackは固定720 unitに閉じず、実際に遮るnode spanと一pivotの接線条件から決定的な探索範囲を求め、巨大resize nodeでも本体回避を優先します。探索格子は各軸最大41点に制限します。Manual waypointは通過必須のhard gateで、CanvasまたはInspectorから個別削除でき、最後の削除でautomaticへ戻ります。自動補助点はportable overlayへ保存しません。`@iriograph/layout-elk`はcompound graphと直交routing向けのoptional adapterとして実装済みで、固定user geometryをhard constraintとして保証できない入力では標準adapterへ保守的にfallbackします。ELK配置後もcommentがあるSceneはgeometry固定のroute-only refinementを行い、同じ最大1中間点のcompletionを通します。大規模browser実行ではhost-managed Worker engineを注入できます。
+
+## Editor回帰test境界
+
+標準layout completionは意味上所属しないgenerated resourceを全Group Frameのcontent bounds外へ移し、固定配置等で移動不能な場合だけ修正行動付きdiagnosticを返します。自動route familyはhard constraintを満たす候補からstraight、水平・垂直の二線分だけで作れる一直角orthogonal、内角90度以上のbounded Bezier curveの順に選び、任意角度pivotは内部探索にだけ使ってrendererへpolylineとして出しません。`derivedRouteChoice`へ採用familyと棄却理由を残し、解消不能な障害物交差はedge単位のwarningにします。Group Frameの名称は内外周bandへ置き、既定21px、icon参照・offset・scaleをappearance overlayとして扱います。
+
+Canvasのpointer座標変換とgesture eventはhappy-dom上の`DiagramCanvas` component testで検証し、document mutation、history、semantic transaction、保存flushは`IriographEditor` integration component testで検証します。Core sourceへのtest aliasは未build checkoutでtestを独立実行するためだけに使い、配布buildでは従来どおり`@iriograph/core`をexternalにします。Test sourceはpackageの型宣言とtarballから除外します。
+
+実browser DOMのpointer event、SVG waypoint、mock hostのlocalStorage保存、console errorはPlaywright E2Eへ分けます。通常の`npm run verify`はbrowser binaryを要求せず、UI変更時は[開発・検証](../development/testing.md)の`npm run verify:e2e`または固定Docker imageを追加で実行します。

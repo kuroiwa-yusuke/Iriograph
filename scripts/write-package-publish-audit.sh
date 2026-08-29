@@ -28,14 +28,14 @@ for job_result in "${VERIFY_RESULT}" "${PUBLISH_RESULT}"; do
 done
 
 case "${VERIFY_FAILED_STAGE}" in
-  none|install|version-check|test-build|test-mock|test-core|test-layout-elk|test-semantic-access|test-vue-editor|typecheck|build|package-consumer) ;;
+  none|install|version-check|test-build|test-mock|test-core|test-layout-elk|test-semantic-access|test-extensions|test-vue-editor|typecheck|build|package-consumer) ;;
   *)
     echo "Invalid verify failed stage" >&2
     exit 1
     ;;
 esac
 case "${PUBLISH_FAILED_STAGE}" in
-  none|install|version-check|aws-auth|codeartifact-login|scope-config|publish) ;;
+  none|install|version-check|npm-cli|npm-registry|npm-publish) ;;
   *)
     echo "Invalid publish failed stage" >&2
     exit 1

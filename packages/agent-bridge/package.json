@@ -1,9 +1,9 @@
 {
   "name": "@iriograph/agent-bridge",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Revision-safe semantic transport, request routing, and external candidate review for Iriograph hosts.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
@@ -13,7 +13,7 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "README_ja.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -31,9 +31,9 @@
   "publishConfig": { "access": "public" },
   "engines": { "node": ">=20.19" },
   "dependencies": {
-    "@iriograph/core": "0.11.1",
-    "@iriograph/profile-resolver": "0.11.1",
-    "@iriograph/semantic-access": "0.11.1"
+    "@iriograph/core": "0.11.2",
+    "@iriograph/profile-resolver": "0.11.2",
+    "@iriograph/semantic-access": "0.11.2"
   },
   "devDependencies": { "typescript": "^5.8.3", "vitest": "^4.1.8" }
 }
