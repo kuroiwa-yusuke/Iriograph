@@ -2,10 +2,15 @@ import { hasBlockingDiagnostics, sortDiagnostics } from "./diagnostics.js";
 import type {
   DiagramView,
   IriographDocument,
+  IriographDocumentV1,
+  NamedViewScope,
   ProjectionDiagnostic,
 } from "./model.js";
 import { reconcileIriographDocumentViews } from "./reconciliation.js";
-import { isBcp47LanguageTag } from "./schema.js";
+import {
+  isBcp47LanguageTag,
+  validateIriographDocumentV1,
+} from "./schema.js";
 import {
   buildIriographView,
   type ProjectionRuntimeContext,
@@ -17,6 +22,7 @@ export type AddViewCommand = {
   profileRef: string;
   layoutRef: string;
   locale?: string;
+  scope?: NamedViewScope;
 };
 
 export type DuplicateViewCommand = {
@@ -32,6 +38,8 @@ export type ConfigureViewCommand = {
   layoutRef?: string;
   /** null removes the optional locale. undefined keeps the current locale. */
   locale?: string | null;
+  /** null removes the scope. undefined keeps the current scope. */
+  scope?: NamedViewScope | null;
 };
 
 export type DeleteViewCommand = {
@@ -101,6 +109,7 @@ export async function applyViewCommand(
       profileRef: command.profileRef,
       layoutRef: command.layoutRef,
       ...(command.locale === undefined ? {} : { locale: command.locale }),
+      ...(command.scope === undefined ? {} : { scope: clone(command.scope) }),
       overlay: {},
     };
     const shapeError = validateViewConfiguration(view);
@@ -136,20 +145,25 @@ export async function applyViewCommand(
   const oldProfileRef = current.profileRef;
   const oldLayoutRef = current.layoutRef;
   const oldLocale = current.locale;
+  const oldScope = JSON.stringify(current.scope);
   if (command.profileRef !== undefined) current.profileRef = command.profileRef;
   if (command.layoutRef !== undefined) current.layoutRef = command.layoutRef;
   if (command.locale === null) delete current.locale;
   else if (command.locale !== undefined) current.locale = command.locale;
+  if (command.scope === null) delete current.scope;
+  else if (command.scope !== undefined) current.scope = clone(command.scope);
   const shapeError = validateViewConfiguration(current);
   if (shapeError) return rejected(document, shapeError.code, shapeError.message, command.viewId);
 
   const localeOnly = current.profileRef === oldProfileRef
     && current.layoutRef === oldLayoutRef
+    && JSON.stringify(current.scope) === oldScope
     && current.locale !== oldLocale;
   if (localeOnly || (
     current.profileRef === oldProfileRef
     && current.layoutRef === oldLayoutRef
     && current.locale === oldLocale
+    && JSON.stringify(current.scope) === oldScope
   )) {
     const checked = await validateExactTargetView(document, candidate, command.viewId, context);
     return options.signal?.aborted ? aborted(document) : checked;
@@ -165,6 +179,10 @@ async function validateExactTargetView(
   viewId: string,
   context: ProjectionRuntimeContext,
 ): Promise<ViewCommandResult> {
+  const contractDiagnostics = targetViewContractDiagnostics(candidate, viewId);
+  if (contractDiagnostics.length > 0) {
+    return rejectedWithDiagnostics(previous, contractDiagnostics, viewId);
+  }
   const scene = await buildIriographView(candidate, viewId, context, "incremental");
   if (hasBlockingDiagnostics(scene.diagnostics)) {
     return rejectedWithDiagnostics(previous, scene.diagnostics, viewId);
@@ -184,6 +202,10 @@ async function regenerateTargetView(
   context: ProjectionRuntimeContext,
   preserveCompatibleOverlay: boolean,
 ): Promise<ViewCommandResult> {
+  const contractDiagnostics = targetViewContractDiagnostics(candidate, viewId);
+  if (contractDiagnostics.length > 0) {
+    return rejectedWithDiagnostics(previous, contractDiagnostics, viewId);
+  }
   const target = candidate.views.find((view) => view.viewId === viewId)!;
   // A one-view transaction prevents unrelated or already-invalid sibling views
   // from being rebuilt by a presentation command.
@@ -211,6 +233,27 @@ async function regenerateTargetView(
     diagnostics: sortDiagnostics(reconciled.diagnostics),
     affectedViewId: viewId,
   };
+}
+
+function targetViewContractDiagnostics(
+  document: IriographDocument,
+  viewId: string,
+): ProjectionDiagnostic[] {
+  // Legacy documents deliberately remain accepted by the migration-only API.
+  if (!("authoringProfileRef" in document.semantic)) return [];
+  const target = document.views.find((view) => view.viewId === viewId);
+  if (!target) return [];
+  const slice = clone(document) as IriographDocumentV1;
+  slice.views = [clone(target)];
+  const validation = validateIriographDocumentV1(slice);
+  if (validation.valid) return [];
+  return validation.issues.map((issue) => ({
+    severity: "error",
+    category: "projection",
+    code: "view-schema-invalid",
+    message: `${issue.instancePath || "/views/0"}: ${issue.message}`,
+    semanticRef: viewId,
+  }));
 }
 
 function validateNewViewId(

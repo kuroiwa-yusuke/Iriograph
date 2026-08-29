@@ -64,7 +64,7 @@ Top-levelの`imports`はTurtle/RDF graph importではなく、表示規則を持
 それぞれhost注入のprofile、catalog、asset resolverが取得先へ解決します。IRIとURL、workspace path、
 取得bytesは別責務であり、絶対`https:` IRIであってもCoreが直接fetchすることはありません。
 
-`semantic.authoringProfileRef`はv1の必須値で、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。P1のhostは解決済み`ResolvedAuthoringContext`を注入し、この参照からprofile/vocabularyを取得・検証するresolverはP2-01で追加します。
+`semantic.authoringProfileRef`はv1の必須値で、semantic transactionに適用する語彙・IRI生成policyを参照します。Viewの投影方式を選ぶ`views[].profileRef`とは別の責務です。Hostは`@iriograph/profile-resolver`でprofile/vocabularyを取得・検証した`ResolvedAuthoringContext`を注入します。
 
 `views[].locale`はv1の任意BCP 47 language tagで、label選択を決定的にします。省略時はlanguage tagのない`rdfs:label`を優先し、実行環境のlocaleで結果を変えません。
 
@@ -285,11 +285,19 @@ trusted pathであり、hostの`AssetPolicy`を拡張・緩和しません。そ
 resolverと元のpolicyを必ず通ります。`withPackageDefaultIconAccess(hostAccess)`もhost policy objectを
 そのまま維持します。
 
-0.10.1は業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
+0.11.0は業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
+
+### Annotationとrole付きport
+
+Catalogは明示したliteral predicateだけをstatement-bound annotationへ投影します。Scene annotationは本文、language/datatype、source statement identity、対象resource、exact provenanceを保持し、本文をoverlayへ複製しません。未登録literal predicateはdatasetへ保持しても自動annotationにしません。
+
+Named viewはsemanticと独立したstable annotation ID、本文、geometry、style、任意elementへの表示anchorをoverlayに持てます。これはpresentation transactionだけで編集し、対象消滅時はdetachします。Semantic commentへの変換は別の明示semantic commandです。
+
+Node templateはstable `portId`、source/target role、配置候補、接続可能predicate/classを宣言できます。Edge overlayの`sourcePortId`/`targetPortId`は端子位置だけを変え、S/Oを変えません。未登録、role不適合、catalog変更後のportは外周anchorへfallbackしdiagnosticを返します。別nodeへの付け替えは引き続きsemantic transactionです。
 
 ## Semantic transaction
 
-`applySemanticSource(document, source, context)`は、authoring policyを伴わない互換用semantic source APIです。Controlled writeは`applyAuthoringSource(document, source, resolvedAuthoringContext, { actor, signal })`を使い、Turtleをparseしてactor policy、RDF/RDFS構造、全viewの非同期layoutを検証した`Promise<SemanticSourceUpdate>`を返します。`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Human structured authoringにも、hostが解決済み語彙・policy・元revisionを束ねた`ResolvedAuthoringContext`を注入します。Profile URIからこのcontextを取得するresolverはP2-01の責務です。
+`applySemanticSource(document, source, context)`は、authoring policyを伴わない互換用semantic source APIです。Controlled writeは`applyAuthoringSource(document, source, resolvedAuthoringContext, { actor, signal })`を使い、Turtleをparseしてactor policy、RDF/RDFS構造、全viewの非同期layoutを検証した`Promise<SemanticSourceUpdate>`を返します。`ProjectionRuntimeContext`はprofile別の解決済みcatalog、layout adapter registry、projection optionsを含みます。Human structured authoringにも、hostが解決済み語彙・policy・元revisionを束ねた`ResolvedAuthoringContext`を注入します。Profile URIからこのcontextを取得するresolverは`@iriograph/profile-resolver`の責務です。
 
 Domain constraintは任意の`ResolvedSemanticValidationContext`としてhostが注入します。`applySemanticSource`、canonical source/dataset、`ResolvedAuthoringContext.semanticValidation`は[semantic-validation.md](./semantic-validation.md)の同じ非同期portへ合流します。Portable documentへvalidator設定や結果を保存せず、SHACL engineへ直接依存しません。`SemanticSourceUpdate`は通常の`accepted/document/diagnostics`に加え、control flowとしての`aborted`と、domain warning再確認用`warningConfirmation`を返す場合があります。
 
@@ -536,7 +544,7 @@ class、属性predicate、edge predicate、包含・順序・選択操作を提�
 注入できます。Authoring context未解決時はstructured semantic commandを無効化し、
 source参照・presentation編集の許可まで失わせません。
 
-`ResolvedAuthoringContext`はauthoring profile identity、vocabulary term index、projection capability、resource namespace、actor policyが解決済みであることを要求します。Predicate termは任意に`objectKinds`、許可datatype、許可language、`minCount`、`maxCount`を持てます。人間が未登録termを使う場合はpolicyに従ってwarningまたはerrorとします。標準Editorは未登録IRIを入力させず、非削除warningは該当fieldのinline guidanceとして返して同じ操作を確定しません。低水準Coreのcontrolled source APIはhost向けwarning confirmation contractを維持しますが、標準UIに確認modalを追加する理由にはしません。Resource IRIを自動生成するhostは同期または非同期allocatorを注入します。Mockはstatic fixtureのcontextとallocatorを利用します。`authoringProfileRef`やvocabulary URIからcontextを取得するresolver、cache、integrity検証はP2-01の責務であり、P1 editorへ取得処理を入れません。
+`ResolvedAuthoringContext`はauthoring profile identity、vocabulary term index、projection capability、resource namespace、actor policyが解決済みであることを要求します。Predicate termは任意に`objectKinds`、許可datatype、許可language、`minCount`、`maxCount`を持てます。人間が未登録termを使う場合はpolicyに従ってwarningまたはerrorとします。標準Editorは未登録IRIを入力させず、非削除warningは該当fieldのinline guidanceとして返して同じ操作を確定しません。低水準Coreのcontrolled source APIはhost向けwarning confirmation contractを維持しますが、標準UIに確認modalを追加する理由にはしません。Resource IRIを自動生成するhostは同期または非同期allocatorを注入します。Mockはstatic fixtureのcontextとallocatorを利用します。`authoringProfileRef`やvocabulary URIからcontextを取得するresolverとintegrity検証は`@iriograph/profile-resolver`、取得cacheはHost transportの責務であり、Editorへ取得処理を入れません。
 
 Host asset pickerは選択したabsolute asset IRIだけを返し、Editorは`appearance.iconRef`のpresentation transactionとして保存します。URLやbytesをpicker resultへ含めません。Cancel、stale response、不正IRIではdocumentを変更しません。
 

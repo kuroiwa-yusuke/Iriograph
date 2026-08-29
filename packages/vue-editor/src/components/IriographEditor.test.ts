@@ -2135,6 +2135,31 @@ describe("IriographEditor transaction regression", () => {
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
 
+  it("ビュー注記をTurtleから分離して追加・編集・複製・削除・undoできる", async () => {
+    wrapper = await mountEditor();
+    const turtle = documentFixture().semantic.source;
+    await buttonWithText(wrapper, "注記").trigger("click");
+    await waitUntil(() => Object.keys(latestDocument(wrapper!).views[0]!.annotations ?? {}).length === 1);
+    await waitUntil(() => wrapper!.find(".iriograph-scene-annotation").exists());
+    expect(latestDocument(wrapper).semantic.source).toBe(turtle);
+    expect(wrapper.find(".iriograph-scene-annotation").exists()).toBe(true);
+    const textarea = wrapper.get<HTMLTextAreaElement>('.iriograph-annotation-inspector textarea');
+    await textarea.setValue("確認用\nメモ");
+    await textarea.trigger("change");
+    await settle();
+    expect(Object.values(latestDocument(wrapper).views[0]!.annotations ?? {})[0]?.text)
+      .toBe("確認用\nメモ");
+
+    await buttonWithText(wrapper.get(".iriograph-annotation-inspector"), "複製").trigger("click");
+    await waitUntil(() => Object.keys(latestDocument(wrapper!).views[0]!.annotations ?? {}).length === 2);
+    await wrapper.get("article.iriograph-editor").trigger("keydown", { key: "Delete" });
+    await waitUntil(() => Object.keys(latestDocument(wrapper!).views[0]!.annotations ?? {}).length === 1);
+    exposedHistoryApi(wrapper).undo();
+    await settle();
+    expect(Object.keys(latestDocument(wrapper).views[0]!.annotations ?? {})).toHaveLength(2);
+    expect(latestDocument(wrapper).semantic.source).toBe(turtle);
+  });
+
   it("direct edge端子dropは空接続を作らず有効nodeへの置換をatomic commitする", async () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
@@ -2605,6 +2630,19 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("update:modelValue")).toHaveLength(beforeRejected);
   });
 
+  it("Hostのprofile解決失敗時はsemantic sourceだけをfail closedにする", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      authoringContext: testAuthoringContext(fixture),
+      semanticWriteDisabledReason: "編集profileを検証できません。",
+    });
+    await buttonWithText(wrapper, "Turtle").trigger("click");
+    const source = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    expect(source.attributes("readonly")).toBeDefined();
+    expect(wrapper.text()).toContain("編集profileを検証できません。");
+  });
+
   it("readOnly途中切替でasync Wizard transactionをabortし結果を公開しない", async () => {
     const fixture = documentFixture();
     let request: ResourceIriAllocationRequest | undefined;
@@ -3068,6 +3106,27 @@ describe("IriographEditor transaction regression", () => {
     await nextTick();
     expect(wrapper.find(".iriograph-view-dialog").exists()).toBe(false);
     expect(document.activeElement).toBe(opener.element);
+  });
+
+  it("名前付きビューの閉じた表示範囲をlabel選択で保存しTurtleを変更しない", async () => {
+    const fixture = documentFixture();
+    wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
+    await openViewManager(wrapper);
+    await viewDialogButtonWithText(wrapper, "設定").trigger("click");
+    const scopeToggle = wrapper.get<HTMLInputElement>('.iriograph-view-scope-form input[type="checkbox"]');
+    await scopeToggle.setValue(true);
+    const selects = wrapper.findAll<HTMLSelectElement>('.iriograph-view-scope-form select[multiple]');
+    expect(selects.length).toBeGreaterThanOrEqual(2);
+    await selects[0]!.setValue([`${NS}a`]);
+    await wrapper.get<HTMLInputElement>('.iriograph-view-scope-form input[type="number"]').setValue(1);
+    await wrapper.get<HTMLButtonElement>('.iriograph-view-dialog button[type="submit"]').trigger("click");
+    await waitUntil(() => latestDocument(wrapper!).views[0]!.scope?.depth === 1);
+    expect(latestDocument(wrapper).views[0]!.scope).toMatchObject({
+      rootSemanticRefs: [`${NS}a`],
+      direction: "both",
+      depth: 1,
+    });
+    expect(latestDocument(wrapper).semantic.source).toBe(fixture.semantic.source);
   });
 });
 

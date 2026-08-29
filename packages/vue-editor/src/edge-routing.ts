@@ -15,6 +15,8 @@ export type EditableEdgeRouting = {
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
+  sourcePortId?: string;
+  targetPortId?: string;
   sourceMarker?: EdgeTerminalMarker;
   targetMarker?: EdgeTerminalMarker;
 };
@@ -565,15 +567,23 @@ export function normalizeEditableRouting(
   const targetAnchor = isValidEdgeEndpointAnchor(routing.targetAnchor)
     ? { ...routing.targetAnchor }
     : undefined;
+  const sourcePortId = typeof routing.sourcePortId === "string" && routing.sourcePortId.trim()
+    ? routing.sourcePortId.trim()
+    : undefined;
+  const targetPortId = typeof routing.targetPortId === "string" && routing.targetPortId.trim()
+    ? routing.targetPortId.trim()
+    : undefined;
   const sourceMarker = isEdgeTerminalMarker(routing.sourceMarker) ? routing.sourceMarker : undefined;
   const targetMarker = isEdgeTerminalMarker(routing.targetMarker) ? routing.targetMarker : undefined;
-  if (!waypoints && !curve && !labelOffset && !sourceAnchor && !targetAnchor && !sourceMarker && !targetMarker) return undefined;
+  if (!waypoints && !curve && !labelOffset && !sourceAnchor && !targetAnchor && !sourcePortId && !targetPortId && !sourceMarker && !targetMarker) return undefined;
   return {
     ...(waypoints ? { waypoints } : {}),
     ...(curve ? { curve } : {}),
     ...(labelOffset ? { labelOffset } : {}),
     ...(sourceAnchor ? { sourceAnchor } : {}),
     ...(targetAnchor ? { targetAnchor } : {}),
+    ...(sourcePortId ? { sourcePortId } : {}),
+    ...(targetPortId ? { targetPortId } : {}),
     ...(sourceMarker ? { sourceMarker } : {}),
     ...(targetMarker ? { targetMarker } : {}),
   };

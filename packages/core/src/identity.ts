@@ -57,7 +57,7 @@ export function alternativeBranchIdentity(
 }
 
 export function generatedElementId(
-  structuralKind: "node" | "container" | "region" | "edge",
+  structuralKind: "node" | "container" | "region" | "edge" | "annotation",
   semanticRef: string,
 ): string {
   return `${structuralKind}:${encodeURIComponent(semanticRef)}`;

@@ -1,0 +1,1402 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.catalog",
+  "catalogId": "urn:iriograph:catalog:vendor:aws:architecture-icons",
+  "catalogVersion": "2026-q3",
+  "profileRef": "urn:iriograph:profile:rdf-rdfs:instance-flow:1",
+  "rules": [],
+  "templates": {
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-ec2": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-ec2",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-ec2",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon EC2",
+          "summaryJa": "仮想サーバー",
+          "categoryLabelJa": "コンピューティング",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-ec2",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-ec2",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "EC2",
+              "labelJa": "Amazon EC2",
+              "categoryId": "compute",
+              "categoryLabelJa": "コンピューティング",
+              "fill": "#eaf2ff",
+              "textColor": "#1d4ed8",
+              "ariaLabelJa": "Amazon EC2（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-lambda": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-lambda",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-lambda",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "AWS Lambda",
+          "summaryJa": "サーバーレス関数",
+          "categoryLabelJa": "コンピューティング",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-lambda",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-lambda",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "λ",
+              "labelJa": "AWS Lambda",
+              "categoryId": "compute",
+              "categoryLabelJa": "コンピューティング",
+              "fill": "#eaf2ff",
+              "textColor": "#1d4ed8",
+              "ariaLabelJa": "AWS Lambda（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-s3": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-s3",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-s3",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon S3",
+          "summaryJa": "オブジェクトストレージ",
+          "categoryLabelJa": "ストレージ",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-s3",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-s3",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "S3",
+              "labelJa": "Amazon S3",
+              "categoryId": "storage",
+              "categoryLabelJa": "ストレージ",
+              "fill": "#ecfdf5",
+              "textColor": "#047857",
+              "ariaLabelJa": "Amazon S3（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-rds": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-rds",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-rds",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon RDS",
+          "summaryJa": "マネージドリレーショナルデータベース",
+          "categoryLabelJa": "データベース",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-rds",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-rds",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "RDS",
+              "labelJa": "Amazon RDS",
+              "categoryId": "databases",
+              "categoryLabelJa": "データベース",
+              "fill": "#f5f3ff",
+              "textColor": "#6d28d9",
+              "ariaLabelJa": "Amazon RDS（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-dynamodb": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-dynamodb",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-dynamodb",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon DynamoDB",
+          "summaryJa": "NoSQL データベース",
+          "categoryLabelJa": "データベース",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-dynamodb",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-dynamodb",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "DDB",
+              "labelJa": "Amazon DynamoDB",
+              "categoryId": "databases",
+              "categoryLabelJa": "データベース",
+              "fill": "#f5f3ff",
+              "textColor": "#6d28d9",
+              "ariaLabelJa": "Amazon DynamoDB（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-eks": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-eks",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-eks",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon EKS",
+          "summaryJa": "マネージド Kubernetes",
+          "categoryLabelJa": "コンテナ",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-eks",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-eks",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "EKS",
+              "labelJa": "Amazon EKS",
+              "categoryId": "containers",
+              "categoryLabelJa": "コンテナ",
+              "fill": "#fff7ed",
+              "textColor": "#c2410c",
+              "ariaLabelJa": "Amazon EKS（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-vpc": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-vpc",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-vpc",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon VPC",
+          "summaryJa": "仮想ネットワーク",
+          "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-vpc",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-vpc",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "VPC",
+              "labelJa": "Amazon VPC",
+              "categoryId": "networking",
+              "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+              "fill": "#ecfeff",
+              "textColor": "#0e7490",
+              "ariaLabelJa": "Amazon VPC（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-cloudfront": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-cloudfront",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-cloudfront",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon CloudFront",
+          "summaryJa": "コンテンツ配信ネットワーク",
+          "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-cloudfront",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-cloudfront",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "CF",
+              "labelJa": "Amazon CloudFront",
+              "categoryId": "networking",
+              "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+              "fill": "#ecfeff",
+              "textColor": "#0e7490",
+              "ariaLabelJa": "Amazon CloudFront（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-api-gateway": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-api-gateway",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-api-gateway",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon API Gateway",
+          "summaryJa": "API 管理",
+          "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-api-gateway",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-api-gateway",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "API",
+              "labelJa": "Amazon API Gateway",
+              "categoryId": "networking",
+              "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+              "fill": "#ecfeff",
+              "textColor": "#0e7490",
+              "ariaLabelJa": "Amazon API Gateway（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sqs": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sqs",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sqs",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon SQS",
+          "summaryJa": "メッセージキュー",
+          "categoryLabelJa": "アプリケーション統合",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sqs",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sqs",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "SQS",
+              "labelJa": "Amazon SQS",
+              "categoryId": "integration",
+              "categoryLabelJa": "アプリケーション統合",
+              "fill": "#fff1f2",
+              "textColor": "#be123c",
+              "ariaLabelJa": "Amazon SQS（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-iam": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-iam",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-iam",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "AWS IAM",
+          "summaryJa": "アクセス管理",
+          "categoryLabelJa": "セキュリティ、アイデンティティ、コンプライアンス",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-iam",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-iam",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "IAM",
+              "labelJa": "AWS IAM",
+              "categoryId": "security",
+              "categoryLabelJa": "セキュリティ、アイデンティティ、コンプライアンス",
+              "fill": "#fef2f2",
+              "textColor": "#b91c1c",
+              "ariaLabelJa": "AWS IAM（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-bedrock": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-bedrock",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-bedrock",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon Bedrock",
+          "summaryJa": "生成 AI 基盤",
+          "categoryLabelJa": "人工知能",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-bedrock",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-bedrock",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "BR",
+              "labelJa": "Amazon Bedrock",
+              "categoryId": "ai",
+              "categoryLabelJa": "人工知能",
+              "fill": "#fdf4ff",
+              "textColor": "#a21caf",
+              "ariaLabelJa": "Amazon Bedrock（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    },
+    "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sagemaker-ai": {
+      "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sagemaker-ai",
+      "structuralKind": "node",
+      "shape": "rounded-rectangle",
+      "iconRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai",
+      "labelPlacement": "bottom",
+      "style": {
+        "fill": "#ffffff",
+        "stroke": "#cbd5e1",
+        "text": "#0f172a"
+      },
+      "defaultSize": {
+        "width": 112,
+        "height": 104
+      },
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-preview:1": {
+          "labelJa": "Amazon SageMaker AI",
+          "summaryJa": "機械学習・AI 開発",
+          "categoryLabelJa": "人工知能",
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sagemaker-ai",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "SM",
+              "labelJa": "Amazon SageMaker AI",
+              "categoryId": "ai",
+              "categoryLabelJa": "人工知能",
+              "fill": "#fdf4ff",
+              "textColor": "#a21caf",
+              "ariaLabelJa": "Amazon SageMaker AI（AWS 公式 icon は未導入）"
+            }
+          }
+        }
+      }
+    }
+  },
+  "assets": {
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-ec2": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-ec2",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-ec2",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-ec2",
+          "label": {
+            "ja": "Amazon EC2",
+            "en": "Amazon EC2"
+          },
+          "category": {
+            "id": "compute",
+            "labelJa": "コンピューティング",
+            "labelEn": "Compute"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-ec2",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-ec2",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "EC2",
+              "labelJa": "Amazon EC2",
+              "categoryId": "compute",
+              "categoryLabelJa": "コンピューティング",
+              "fill": "#eaf2ff",
+              "textColor": "#1d4ed8",
+              "ariaLabelJa": "Amazon EC2（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Compute/64/Arch_Amazon-EC2_64.svg",
+          "sourceSha256": "5a7a0cef7a9f44ccdd544564ce9076abec3024090be0d6454504c49d149ce9ec",
+          "byteLength": 1969,
+          "lifecycle": "active",
+          "aliases": [
+            "ec2",
+            "amazon elastic compute cloud",
+            "elastic compute cloud"
+          ],
+          "summaryJa": "仮想サーバー",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-lambda": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-lambda",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:aws-lambda",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "aws-lambda",
+          "label": {
+            "ja": "AWS Lambda",
+            "en": "AWS Lambda"
+          },
+          "category": {
+            "id": "compute",
+            "labelJa": "コンピューティング",
+            "labelEn": "Compute"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-lambda",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-lambda",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "λ",
+              "labelJa": "AWS Lambda",
+              "categoryId": "compute",
+              "categoryLabelJa": "コンピューティング",
+              "fill": "#eaf2ff",
+              "textColor": "#1d4ed8",
+              "ariaLabelJa": "AWS Lambda（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Compute/64/Arch_AWS-Lambda_64.svg",
+          "sourceSha256": "5818c80cd8e7d08891a2492c7694f472ca914fb3a99d9ef8e597db0b37ad7f13",
+          "byteLength": 1810,
+          "lifecycle": "active",
+          "aliases": [
+            "lambda",
+            "amazon lambda"
+          ],
+          "summaryJa": "サーバーレス関数",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-s3": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-s3",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-s3",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-s3",
+          "label": {
+            "ja": "Amazon S3",
+            "en": "Amazon S3"
+          },
+          "category": {
+            "id": "storage",
+            "labelJa": "ストレージ",
+            "labelEn": "Storage"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-s3",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-s3",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "S3",
+              "labelJa": "Amazon S3",
+              "categoryId": "storage",
+              "categoryLabelJa": "ストレージ",
+              "fill": "#ecfdf5",
+              "textColor": "#047857",
+              "ariaLabelJa": "Amazon S3（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Storage/64/Arch_Amazon-Simple-Storage-Service_64.svg",
+          "sourceSha256": "b92c5101cc6565dd12df37655802279f8fba0c719279f62f93106d26750b36c6",
+          "byteLength": 2010,
+          "lifecycle": "active",
+          "aliases": [
+            "s3",
+            "amazon simple storage service",
+            "simple storage service"
+          ],
+          "summaryJa": "オブジェクトストレージ",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-rds": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-rds",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-rds",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-rds",
+          "label": {
+            "ja": "Amazon RDS",
+            "en": "Amazon RDS"
+          },
+          "category": {
+            "id": "databases",
+            "labelJa": "データベース",
+            "labelEn": "Databases"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-rds",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-rds",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "RDS",
+              "labelJa": "Amazon RDS",
+              "categoryId": "databases",
+              "categoryLabelJa": "データベース",
+              "fill": "#f5f3ff",
+              "textColor": "#6d28d9",
+              "ariaLabelJa": "Amazon RDS（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Databases/64/Arch_Amazon-RDS_64.svg",
+          "sourceSha256": "1b24caf4baf274a12164053f05bf0cba331f4d5e30fdd4164000702c1ec192a6",
+          "byteLength": 2520,
+          "lifecycle": "active",
+          "aliases": [
+            "rds",
+            "amazon relational database service",
+            "relational database service"
+          ],
+          "summaryJa": "マネージドリレーショナルデータベース",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-dynamodb": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-dynamodb",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-dynamodb",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-dynamodb",
+          "label": {
+            "ja": "Amazon DynamoDB",
+            "en": "Amazon DynamoDB"
+          },
+          "category": {
+            "id": "databases",
+            "labelJa": "データベース",
+            "labelEn": "Databases"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-dynamodb",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-dynamodb",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "DDB",
+              "labelJa": "Amazon DynamoDB",
+              "categoryId": "databases",
+              "categoryLabelJa": "データベース",
+              "fill": "#f5f3ff",
+              "textColor": "#6d28d9",
+              "ariaLabelJa": "Amazon DynamoDB（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Databases/64/Arch_Amazon-DynamoDB_64.svg",
+          "sourceSha256": "ed169f049cc24c954cfbe3d14695d5b022558c45e5605936a565d1347c14b664",
+          "byteLength": 6016,
+          "lifecycle": "active",
+          "aliases": [
+            "dynamodb",
+            "amazon dynamo db",
+            "dynamo db"
+          ],
+          "summaryJa": "NoSQL データベース",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-eks": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-eks",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-eks",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-eks",
+          "label": {
+            "ja": "Amazon EKS",
+            "en": "Amazon Elastic Kubernetes Service"
+          },
+          "category": {
+            "id": "containers",
+            "labelJa": "コンテナ",
+            "labelEn": "Containers"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-eks",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-eks",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "EKS",
+              "labelJa": "Amazon EKS",
+              "categoryId": "containers",
+              "categoryLabelJa": "コンテナ",
+              "fill": "#fff7ed",
+              "textColor": "#c2410c",
+              "ariaLabelJa": "Amazon EKS（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Containers/64/Arch_Amazon-Elastic-Kubernetes-Service_64.svg",
+          "sourceSha256": "abda372bab3e7e0e873edf2b078972625b2cff255d8626fbf955546e71bdf9cb",
+          "byteLength": 2566,
+          "lifecycle": "active",
+          "aliases": [
+            "eks",
+            "amazon elastic kubernetes service",
+            "elastic kubernetes service"
+          ],
+          "summaryJa": "マネージド Kubernetes",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-vpc": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-vpc",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-vpc",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-vpc",
+          "label": {
+            "ja": "Amazon VPC",
+            "en": "Amazon Virtual Private Cloud"
+          },
+          "category": {
+            "id": "networking",
+            "labelJa": "ネットワーキングとコンテンツ配信",
+            "labelEn": "Networking and Content Delivery"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-vpc",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-vpc",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "VPC",
+              "labelJa": "Amazon VPC",
+              "categoryId": "networking",
+              "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+              "fill": "#ecfeff",
+              "textColor": "#0e7490",
+              "ariaLabelJa": "Amazon VPC（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Networking-Content-Delivery/64/Arch_Amazon-Virtual-Private-Cloud_64.svg",
+          "sourceSha256": "4a2c292527ce28a95d9038ab7e6be818751ffef0a91aabb5de2e61045150a98d",
+          "byteLength": 3565,
+          "lifecycle": "active",
+          "aliases": [
+            "vpc",
+            "amazon virtual private cloud",
+            "virtual private cloud"
+          ],
+          "summaryJa": "仮想ネットワーク",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-cloudfront": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-cloudfront",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-cloudfront",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-cloudfront",
+          "label": {
+            "ja": "Amazon CloudFront",
+            "en": "Amazon CloudFront"
+          },
+          "category": {
+            "id": "networking",
+            "labelJa": "ネットワーキングとコンテンツ配信",
+            "labelEn": "Networking and Content Delivery"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-cloudfront",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-cloudfront",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "CF",
+              "labelJa": "Amazon CloudFront",
+              "categoryId": "networking",
+              "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+              "fill": "#ecfeff",
+              "textColor": "#0e7490",
+              "ariaLabelJa": "Amazon CloudFront（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Networking-Content-Delivery/64/Arch_Amazon-CloudFront_64.svg",
+          "sourceSha256": "664919982792a69058077eaf39240afd320bbcbd082d36a9148184ec32708cd5",
+          "byteLength": 3819,
+          "lifecycle": "active",
+          "aliases": [
+            "cloudfront"
+          ],
+          "summaryJa": "コンテンツ配信ネットワーク",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-api-gateway": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-api-gateway",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-api-gateway",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-api-gateway",
+          "label": {
+            "ja": "Amazon API Gateway",
+            "en": "Amazon API Gateway"
+          },
+          "category": {
+            "id": "networking",
+            "labelJa": "ネットワーキングとコンテンツ配信",
+            "labelEn": "Networking and Content Delivery"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-api-gateway",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-api-gateway",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "API",
+              "labelJa": "Amazon API Gateway",
+              "categoryId": "networking",
+              "categoryLabelJa": "ネットワーキングとコンテンツ配信",
+              "fill": "#ecfeff",
+              "textColor": "#0e7490",
+              "ariaLabelJa": "Amazon API Gateway（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Networking-Content-Delivery/64/Arch_Amazon-API-Gateway_64.svg",
+          "sourceSha256": "a91afd652b8d3412179d0257a818165149224d521e4e1906ee8ea0cd28666a31",
+          "byteLength": 1915,
+          "lifecycle": "active",
+          "aliases": [
+            "api gateway",
+            "amazon apigateway"
+          ],
+          "summaryJa": "API 管理",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sqs": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sqs",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-sqs",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-sqs",
+          "label": {
+            "ja": "Amazon SQS",
+            "en": "Amazon Simple Queue Service"
+          },
+          "category": {
+            "id": "integration",
+            "labelJa": "アプリケーション統合",
+            "labelEn": "Application Integration"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sqs",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sqs",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "SQS",
+              "labelJa": "Amazon SQS",
+              "categoryId": "integration",
+              "categoryLabelJa": "アプリケーション統合",
+              "fill": "#fff1f2",
+              "textColor": "#be123c",
+              "ariaLabelJa": "Amazon SQS（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Application-Integration/64/Arch_Amazon-Simple-Queue-Service_64.svg",
+          "sourceSha256": "bbab2545dccba2e11aff74e42c7f8078a9051b14b16114e539da1c4b09bdbdcd",
+          "byteLength": 6056,
+          "lifecycle": "active",
+          "aliases": [
+            "sqs",
+            "amazon simple queue service",
+            "simple queue service"
+          ],
+          "summaryJa": "メッセージキュー",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-iam": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-iam",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:aws-iam",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "aws-iam",
+          "label": {
+            "ja": "AWS IAM",
+            "en": "AWS Identity and Access Management"
+          },
+          "category": {
+            "id": "security",
+            "labelJa": "セキュリティ、アイデンティティ、コンプライアンス",
+            "labelEn": "Security, Identity, and Compliance"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-iam",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:aws-iam",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "IAM",
+              "labelJa": "AWS IAM",
+              "categoryId": "security",
+              "categoryLabelJa": "セキュリティ、アイデンティティ、コンプライアンス",
+              "fill": "#fef2f2",
+              "textColor": "#b91c1c",
+              "ariaLabelJa": "AWS IAM（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Security-Identity/64/Arch_AWS-Identity-and-Access-Management_64.svg",
+          "sourceSha256": "3135793557c065d0481a3985ccc0574b36278d56a2e2c5d59107d0d28f51b827",
+          "byteLength": 2027,
+          "lifecycle": "active",
+          "aliases": [
+            "iam",
+            "identity and access management",
+            "aws identity and access management"
+          ],
+          "summaryJa": "アクセス管理",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-bedrock": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-bedrock",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-bedrock",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-bedrock",
+          "label": {
+            "ja": "Amazon Bedrock",
+            "en": "Amazon Bedrock"
+          },
+          "category": {
+            "id": "ai",
+            "labelJa": "人工知能",
+            "labelEn": "Artificial Intelligence"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-bedrock",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-bedrock",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "BR",
+              "labelJa": "Amazon Bedrock",
+              "categoryId": "ai",
+              "categoryLabelJa": "人工知能",
+              "fill": "#fdf4ff",
+              "textColor": "#a21caf",
+              "ariaLabelJa": "Amazon Bedrock（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Artificial-Intelligence/64/Arch_Amazon-Bedrock_64.svg",
+          "sourceSha256": "80fa4190bb55bde5c3004ed8d2f16bf25db28d230cf46760813f2171636ea105",
+          "byteLength": 4266,
+          "lifecycle": "active",
+          "aliases": [
+            "bedrock"
+          ],
+          "summaryJa": "生成 AI 基盤",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    },
+    "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai": {
+      "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai",
+      "mediaType": "image/svg+xml",
+      "url": "urn:iriograph:asset-source:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai",
+      "extensions": {
+        "urn:iriograph:extension:vendor-icon-metadata:1": {
+          "vendor": "aws",
+          "vendorDistribution": "2026-Q3",
+          "slug": "amazon-sagemaker-ai",
+          "label": {
+            "ja": "Amazon SageMaker AI",
+            "en": "Amazon SageMaker AI"
+          },
+          "category": {
+            "id": "ai",
+            "labelJa": "人工知能",
+            "labelEn": "Artificial Intelligence"
+          },
+          "preview": {
+            "kind": "consumer-supplied-official-svg",
+            "actualShapeWhenResolved": true,
+            "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai",
+            "templateRef": "urn:iriograph:template:vendor:aws:architecture-icons:2026-q3:amazon-sagemaker-ai",
+            "viewBox": "0 0 80 80",
+            "intrinsicWidth": 80,
+            "intrinsicHeight": 80,
+            "background": "#ffffff",
+            "fit": "contain",
+            "fallback": {
+              "kind": "category-initial",
+              "text": "SM",
+              "labelJa": "Amazon SageMaker AI",
+              "categoryId": "ai",
+              "categoryLabelJa": "人工知能",
+              "fill": "#fdf4ff",
+              "textColor": "#a21caf",
+              "ariaLabelJa": "Amazon SageMaker AI（AWS 公式 icon は未導入）"
+            }
+          },
+          "sourceArchivePath": "Architecture-Service-Icons_07312026/Arch_Artificial-Intelligence/64/Arch_Amazon-SageMaker-AI_64.svg",
+          "sourceSha256": "0f20b8580a9caee9e15be0f866112e29c44c73900869e76df3cd197eaf778684",
+          "byteLength": 5488,
+          "lifecycle": "active",
+          "aliases": [
+            "sagemaker ai",
+            "amazon sagemaker",
+            "sagemaker"
+          ],
+          "summaryJa": "機械学習・AI 開発",
+          "assetDelivery": "consumer-supplied"
+        }
+      }
+    }
+  },
+  "extensions": {
+    "urn:iriograph:extension:vendor-icon-catalog:1": {
+      "packageName": "@iriograph/icons-aws",
+      "packageVersion": "0.11.0",
+      "vendor": {
+        "id": "aws",
+        "name": "Amazon Web Services",
+        "ownership": "AWS and its affiliates retain all rights in the referenced official artwork.",
+        "affiliationDisclaimer": "Iriograph is not affiliated with, sponsored by, or endorsed by AWS."
+      },
+      "distribution": {
+        "name": "AWS Architecture Icons",
+        "version": "2026-Q3",
+        "releaseIdentifier": "07312026",
+        "archiveUrl": "https://d1.awsstatic.com/onedam/marketing-channels/website/public/shared/architecture-icon-release/Icon-package_07312026.5846e92413caa21490223536cc97f1269e44fa92.zip",
+        "archiveSha256": "d2d166c453526471749d520e0db022c459abef759d2946cf2dd1d1c992dc6526",
+        "archiveByteLength": 13988918,
+        "archiveLastModified": "2026-08-06T07:01:09Z",
+        "retrievedAt": "2026-08-29",
+        "releaseCadence": "Q1/Q2/Q3 quarterly; no Q4 release",
+        "bundledAssets": false,
+        "assetDelivery": "consumer-supplied",
+        "officialArchiveAcquisition": "user-managed"
+      },
+      "sources": [
+        {
+          "purpose": "official-download-and-diagram-use",
+          "url": "https://aws.amazon.com/architecture/icons/",
+          "retrievedAt": "2026-08-29"
+        },
+        {
+          "purpose": "site-terms-and-copyright",
+          "url": "https://aws.amazon.com/terms/",
+          "retrievedAt": "2026-08-29"
+        },
+        {
+          "purpose": "trademark-guidelines",
+          "url": "https://aws.amazon.com/trademark-guidelines/",
+          "retrievedAt": "2026-08-29"
+        },
+        {
+          "purpose": "rename-amazon-sagemaker-ai",
+          "url": "https://docs.aws.amazon.com/sagemaker/latest/dg/whatis.html",
+          "retrievedAt": "2026-08-29"
+        },
+        {
+          "purpose": "full-shutdown-services",
+          "url": "https://docs.aws.amazon.com/general/latest/gr/full_shutdown_services.html",
+          "retrievedAt": "2026-08-29"
+        },
+        {
+          "purpose": "official-sample-terms-aware-user-download-pattern",
+          "url": "https://github.com/aws-samples/sample-architecture-diagram-mcp-server",
+          "retrievedAt": "2026-08-29"
+        }
+      ],
+      "usage": {
+        "diagramUse": "AWS states that customers and partners may use the toolkits and assets to create architecture diagrams and may place icons in whitepapers, presentations, data sheets, and posters.",
+        "rawRedistribution": "AWS Site Terms and the Architecture Icons page do not provide this package an express right to redistribute raw SVG files.",
+        "packagePolicy": "This npm package contains metadata only. It never downloads or bundles AWS icon bytes. Users obtain the official archive from AWS and configure a host-owned local mapping or signed URL provider.",
+        "affiliation": "Iriograph is not affiliated with, sponsored by, or endorsed by AWS."
+      },
+      "curatedEntryCount": 13,
+      "categories": [
+        {
+          "id": "compute",
+          "labelJa": "コンピューティング",
+          "labelEn": "Compute"
+        },
+        {
+          "id": "storage",
+          "labelJa": "ストレージ",
+          "labelEn": "Storage"
+        },
+        {
+          "id": "databases",
+          "labelJa": "データベース",
+          "labelEn": "Databases"
+        },
+        {
+          "id": "containers",
+          "labelJa": "コンテナ",
+          "labelEn": "Containers"
+        },
+        {
+          "id": "networking",
+          "labelJa": "ネットワーキングとコンテンツ配信",
+          "labelEn": "Networking and Content Delivery"
+        },
+        {
+          "id": "integration",
+          "labelJa": "アプリケーション統合",
+          "labelEn": "Application Integration"
+        },
+        {
+          "id": "security",
+          "labelJa": "セキュリティ、アイデンティティ、コンプライアンス",
+          "labelEn": "Security, Identity, and Compliance"
+        },
+        {
+          "id": "ai",
+          "labelJa": "人工知能",
+          "labelEn": "Artificial Intelligence"
+        }
+      ],
+      "reservedNamespaces": [
+        "urn:iriograph:catalog:vendor:aws:architecture-icons",
+        "urn:iriograph:asset:vendor:aws:architecture-icons:",
+        "urn:iriograph:template:vendor:aws:architecture-icons:",
+        "urn:iriograph:asset-source:vendor:aws:architecture-icons:"
+      ],
+      "renames": [
+        {
+          "fromAssetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker",
+          "toAssetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:amazon-sagemaker-ai",
+          "effectiveDate": "2024-12-03",
+          "labelJa": "Amazon SageMaker は Amazon SageMaker AI に名称変更されました。",
+          "sourceUrl": "https://docs.aws.amazon.com/sagemaker/latest/dg/whatis.html",
+          "fromAliases": [
+            "amazon sagemaker",
+            "sagemaker"
+          ]
+        }
+      ],
+      "deprecations": [
+        {
+          "assetRef": "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:service:aws-iot-1-click",
+          "status": "full-shutdown",
+          "endOfSupportDate": "2025-01-29",
+          "labelJa": "AWS IoT 1-Click は完全終了済みで、現行 curated asset には含まれません。",
+          "sourceUrl": "https://docs.aws.amazon.com/general/latest/gr/full_shutdown_services.html"
+        }
+      ]
+    }
+  }
+}

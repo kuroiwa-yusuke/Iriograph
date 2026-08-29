@@ -397,6 +397,15 @@ describe("edge routing helpers", () => {
       labelOffset: { x: 2, y: 3 },
     });
   });
+
+  it("catalog port IDを閉じたrouting fieldとして保持し空値を除去する", () => {
+    expect(normalizeEditableRouting({
+      sourcePortId: " output ",
+      targetPortId: "input",
+    })).toEqual({ sourcePortId: "output", targetPortId: "input" });
+    expect(normalizeEditableRouting({ sourcePortId: "", targetPortId: "  " }))
+      .toBeUndefined();
+  });
 });
 
 function edgeFor(overrides: Partial<SceneEdge>): SceneEdge {

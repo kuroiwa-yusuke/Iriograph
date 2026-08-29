@@ -13,10 +13,12 @@ export * from "./structured-authoring-flow";
 export * from "./target-context-menu";
 export * from "./view-session";
 export * from "./type-system";
+export * from "./version";
 export { default as IriographDiagramCanvas } from "./components/DiagramCanvas.vue";
 export { default as IriographTargetContextMenu } from "./components/TargetContextMenu.vue";
 export { default as IriographStructuredAuthoringWizard } from "./components/StructuredAuthoringWizard.vue";
 export { default as IriographTypeListPanel } from "./components/TypeListPanel.vue";
+export { default as IriographExternalCandidateReviewPanel } from "./components/ExternalCandidateReviewPanel.vue";
 export type {
   StructuredAuthoringCanvasOption,
   StructuredAuthoringCanvasSelectionRequest,

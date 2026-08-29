@@ -113,10 +113,62 @@ export const iriographDocumentSchema = {
         profileRef: { type: "string", format: "iri" },
         layoutRef: { type: "string", format: "iri" },
         locale: { type: "string", format: "language-tag" },
+        scope: { $ref: "#/$defs/viewScope" },
         overlay: {
           type: "object",
           propertyNames: { type: "string", minLength: 1 },
           additionalProperties: { $ref: "#/$defs/overlay" },
+        },
+        annotations: {
+          type: "object",
+          propertyNames: { type: "string", minLength: 1 },
+          additionalProperties: { $ref: "#/$defs/viewAnnotation" },
+        },
+        extensions: extensionProperty,
+      },
+    },
+    viewScope: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        rootSemanticRefs: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", format: "iri" },
+        },
+        typeIris: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", format: "iri" },
+        },
+        predicateIris: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", format: "iri" },
+        },
+        direction: { enum: ["incoming", "outgoing", "both"] },
+        depth: { type: "integer", minimum: 0, maximum: 64 },
+        extensions: extensionProperty,
+      },
+    },
+    viewAnnotation: {
+      type: "object",
+      additionalProperties: false,
+      required: ["annotationId", "text", "geometry"],
+      properties: {
+        annotationId: { type: "string", minLength: 1 },
+        text: { type: "string", maxLength: 20000 },
+        geometry: { $ref: "#/$defs/geometry" },
+        style: { $ref: "#/$defs/styleOverride" },
+        anchor: {
+          type: "object",
+          additionalProperties: false,
+          required: ["elementId"],
+          properties: {
+            elementId: { type: "string", minLength: 1 },
+            offset: { $ref: "#/$defs/point" },
+            extensions: extensionProperty,
+          },
         },
         extensions: extensionProperty,
       },
@@ -295,6 +347,8 @@ export const iriographDocumentSchema = {
         labelOffset: { $ref: "#/$defs/point" },
         sourceAnchor: { $ref: "#/$defs/endpointAnchor" },
         targetAnchor: { $ref: "#/$defs/endpointAnchor" },
+        sourcePortId: { type: "string", minLength: 1 },
+        targetPortId: { type: "string", minLength: 1 },
         sourceMarker: { enum: ["none", "arrow", "open-arrow", "triangle", "diamond", "circle"] },
         targetMarker: { enum: ["none", "arrow", "open-arrow", "triangle", "diamond", "circle"] },
         extensions: extensionProperty,
@@ -410,6 +464,26 @@ export const projectionCatalogSchema = {
         {
           type: "object",
           additionalProperties: false,
+          required: ["operator", "anchorPosition"],
+          properties: {
+            operator: { const: "literal-annotation" },
+            anchorPosition: { const: "subject" },
+            languages: {
+              type: "array",
+              uniqueItems: true,
+              items: { type: "string", format: "language-tag" },
+            },
+            datatypes: {
+              type: "array",
+              uniqueItems: true,
+              items: { type: "string", format: "iri" },
+            },
+            extensions: extensionProperty,
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
           required: ["operator"],
           properties: {
             operator: { const: "direct-edge" },
@@ -495,8 +569,35 @@ export const projectionCatalogSchema = {
         routeMode: { enum: ["auto", "straight", "orthogonal", "curve", "manual"] },
         sourceMarker: { $ref: "#/$defs/edgeTerminalMarker" },
         targetMarker: { $ref: "#/$defs/edgeTerminalMarker" },
+        ports: {
+          type: "array",
+          items: { $ref: "#/$defs/visualPort" },
+        },
         style: { $ref: "#/$defs/style" },
         defaultSize: { $ref: "#/$defs/size" },
+        extensions: extensionProperty,
+      },
+    },
+    visualPort: {
+      type: "object",
+      additionalProperties: false,
+      required: ["portId", "role", "side", "position"],
+      properties: {
+        portId: { type: "string", minLength: 1 },
+        label: { type: "string", maxLength: 2000 },
+        role: { enum: ["source", "target", "both"] },
+        side: { enum: ["top", "right", "bottom", "left"] },
+        position: { type: "number", minimum: 0, maximum: 1 },
+        predicateIris: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", format: "iri" },
+        },
+        classIris: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", format: "iri" },
+        },
         extensions: extensionProperty,
       },
     },
@@ -580,7 +681,10 @@ export function validateIriographDocumentV1(value: unknown): RuntimeValidationRe
   if (schemaIssues.length > 0) return { valid: false, issues: schemaIssues };
 
   const document = value as IriographDocumentV1;
-  const issues = duplicateKeyIssues(document.views, "viewId", "/views");
+  const issues = [
+    ...duplicateKeyIssues(document.views, "viewId", "/views"),
+    ...validateAnnotationMapKeys(document),
+  ];
   return issues.length > 0
     ? { valid: false, issues }
     : { valid: true, value: document, issues: [] };
@@ -605,6 +709,7 @@ export function validateProjectionCatalogV1(value: unknown): RuntimeValidationRe
     ...duplicateKeyIssues(catalog.rules, "ruleId", "/rules"),
     ...validateRuleEntailments(catalog),
     ...validateCatalogReferences(catalog),
+    ...validateTemplatePorts(catalog),
   ];
   return issues.length > 0
     ? { valid: false, issues }
@@ -656,6 +761,35 @@ function duplicateKeyIssues<T extends Record<K, string>, K extends keyof T>(
     ));
   });
   return issues;
+}
+
+function validateAnnotationMapKeys(document: IriographDocumentV1): RuntimeValidationIssue[] {
+  return document.views.flatMap((view, viewIndex) => Object.entries(view.annotations ?? {})
+    .flatMap(([annotationKey, annotation]) => annotation.annotationId === annotationKey
+      ? []
+      : [customIssue(
+          `/views/${viewIndex}/annotations/${escapeJsonPointer(annotationKey)}/annotationId`,
+          "map-key",
+          "annotationId must equal its annotations map key",
+          { key: annotationKey, annotationId: annotation.annotationId },
+        )]));
+}
+
+function validateTemplatePorts(catalog: ProjectionCatalogV1): RuntimeValidationIssue[] {
+  return Object.entries(catalog.templates).flatMap(([templateRef, template]) => {
+    const basePath = `/templates/${escapeJsonPointer(templateRef)}/ports`;
+    const ports = template.ports ?? [];
+    const issues = duplicateKeyIssues(ports, "portId", basePath);
+    if (ports.length > 0 && (template.structuralKind === "edge" || template.structuralKind === "annotation")) {
+      issues.push(customIssue(
+        basePath,
+        "template-port-kind",
+        "ports are supported only by resource endpoint templates",
+        { structuralKind: template.structuralKind },
+      ));
+    }
+    return issues;
+  });
 }
 
 function validateRuleEntailments(catalog: ProjectionCatalogV1): RuntimeValidationIssue[] {
@@ -718,6 +852,16 @@ function validateCatalogReferences(catalog: ProjectionCatalogV1): RuntimeValidat
     }
     if (rule.templateRef && !templateRefs.has(rule.templateRef)) {
       issues.push(missingTemplateIssue(`/rules/${index}/templateRef`, rule.templateRef));
+    } else if (rule.templateRef && rule.project.operator === "literal-annotation") {
+      const actualKind = catalog.templates[rule.templateRef]!.structuralKind;
+      if (actualKind !== "annotation") {
+        issues.push(customIssue(
+          `/rules/${index}/templateRef`,
+          "template-kind",
+          "literal-annotation requires an annotation template",
+          { templateRef: rule.templateRef, expectedKind: "annotation", actualKind },
+        ));
+      }
     }
   });
   if (catalog.defaults) {

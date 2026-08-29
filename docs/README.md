@@ -9,6 +9,10 @@ Iriographの目的は、tripleを単にnode-link図へ変換することでは�
 - [implementation.md](./implementation.md): package境界と処理構成
 - [semantic-notation.md](./semantic-notation.md): 意味Turtleと表示notationの分離、serializer表記規則
 - [semantic-access.md](./semantic-access.md): label-first索引、revision alias、LLM向けread/write wrapper
+- [agent-integration.md](./agent-integration.md): profile解決、Cloud transport、agent routing、外部候補review
+- [rdf-io.md](./rdf-io.md): Turtle/JSON-LD import、merge、rebase、export
+- [domain-profiles.md](./domain-profiles.md): domain profile kitとvendor icon catalog
+- [host-conformance.md](./host-conformance.md): Mock/Cloud共通のpackage・deploy gate
 - [spatial-membership.md](./spatial-membership.md): 階層containerと多対多regionの空間文法
 - [editor-interactions.md](./editor-interactions.md): 4入口の段階的意味flow、対象別context menu、details、ビュー操作のinteraction規則
 - [layout-optimization.md](./layout-optimization.md): 混雑最適化pipeline、layout adapter選択、性能・品質指標

@@ -3132,6 +3132,7 @@ const ROUTE_GRID_OBSTACLE_LIMIT = 24;
 const ROUTE_GRID_COMMITTED_LIMIT = 16;
 const ROUTE_GRID_ELEMENT_LIMIT = 256;
 const ROUTE_GRID_EDGE_LIMIT = 512;
+const ROUTE_EXHAUSTIVE_COMPACTION_EDGE_LIMIT = 96;
 const ROUTE_REFINEMENT_PASSES = 2;
 const ROUTE_ENDPOINT_STUB = ROUTE_OBSTACLE_PADDING + 2;
 
@@ -4462,9 +4463,28 @@ function compactDerivedRoutes(
       if (!base || base.length < 2 || isImmutableRoute(edge) || edge.routeMode === "straight") {
         continue;
       }
-      const others = routedOthers(sorted, routeStates, edge, state);
       const obstacles = routeObstacles(edge, state);
-      const baseCost = routeCost(base, edge, obstacles, others);
+      const baseBounds = pointBounds(base);
+      const baseObstacleCost = routeObstacleCost(base, baseBounds, obstacles);
+      // A body-clear bounded route already satisfies the public cardinality
+      // and obstacle contracts. Past the bounded exhaustive-compaction graph
+      // size, peer rescoring grows quadratically without improving obstacle
+      // safety, so defer the final family decision to the bounded selector.
+      if (
+        state.edges.length > ROUTE_EXHAUSTIVE_COMPACTION_EDGE_LIMIT
+        &&
+        base.length <= 3
+        && baseObstacleCost.bodyIntersections === 0
+        && baseObstacleCost.reservationIntersections === 0
+      ) continue;
+      const others = routedOthers(sorted, routeStates, edge, state);
+      const baseCost = routeCostWithObstacleIntersections(
+        base,
+        baseBounds,
+        baseObstacleCost,
+        edge,
+        others,
+      );
       if (
         base.length <= 3
         && baseCost[0] === 0

@@ -53,7 +53,34 @@ export type DiagramView = {
   profileRef: string;
   layoutRef: string;
   locale?: string;
+  /** Optional closed semantic visibility query. It never changes the graph. */
+  scope?: NamedViewScope;
   overlay: Record<string, ViewElementOverlay>;
+  /** View-local notes, deliberately separate from semantic-bound overlay entries. */
+  annotations?: Record<string, ViewAnnotation>;
+  extensions?: IriographExtensions;
+};
+
+export type NamedViewScope = {
+  rootSemanticRefs?: string[];
+  typeIris?: string[];
+  predicateIris?: string[];
+  direction?: "incoming" | "outgoing" | "both";
+  depth?: number;
+  extensions?: IriographExtensions;
+};
+
+export type ViewAnnotation = {
+  /** Must equal its key in DiagramView.annotations. */
+  annotationId: string;
+  text: string;
+  geometry: ElementGeometry;
+  style?: VisualStyleOverride;
+  anchor?: {
+    elementId: string;
+    offset?: Point;
+    extensions?: IriographExtensions;
+  };
   extensions?: IriographExtensions;
 };
 
@@ -116,6 +143,9 @@ export type ViewElementOverlay = {
     labelOffset?: Point;
     sourceAnchor?: EdgeEndpointAnchor;
     targetAnchor?: EdgeEndpointAnchor;
+    /** Stable catalog port IDs; omitted values use the perimeter anchor fallback. */
+    sourcePortId?: string;
+    targetPortId?: string;
     /** Sparse terminal overrides; omitted values resolve from the catalog template. */
     sourceMarker?: EdgeTerminalMarker;
     targetMarker?: EdgeTerminalMarker;
@@ -278,6 +308,14 @@ export type ProjectionOperator =
       ordinalPredicatePrefix: string;
       defaultOrdinal: number;
       extensions?: IriographExtensions;
+    }
+  | {
+      /** Projects each matching subject/literal statement as a statement-bound note. */
+      operator: "literal-annotation";
+      anchorPosition: "subject";
+      languages?: string[];
+      datatypes?: string[];
+      extensions?: IriographExtensions;
     };
 
 /** @deprecated Prototype catalog accepted until projection moves to ProjectionCatalogV1. */
@@ -338,12 +376,24 @@ export type VisualTemplate = {
   /** Meaningful for edge templates; omitted values resolve to none/arrow. */
   sourceMarker?: EdgeTerminalMarker;
   targetMarker?: EdgeTerminalMarker;
+  ports?: VisualPort[];
   style: VisualStyle;
   defaultSize?: {
     width: number;
     height: number;
     extensions?: IriographExtensions;
   };
+  extensions?: IriographExtensions;
+};
+
+export type VisualPort = {
+  portId: string;
+  label?: string;
+  role: "source" | "target" | "both";
+  side: "top" | "right" | "bottom" | "left";
+  position: number;
+  predicateIris?: string[];
+  classIris?: string[];
   extensions?: IriographExtensions;
 };
 
@@ -505,6 +555,8 @@ export type ProjectedScene = {
   memberships?: ProjectedMembership[];
   /** Display-only guides for ordered/alternative group grammar; never RDF edges. */
   groupGuides?: ProjectedGroupGuide[];
+  /** Semantic literal notes and view-only notes; optional for legacy fixtures. */
+  annotations?: ProjectedAnnotation[];
   edges: ProjectedEdge[];
   diagnostics: ProjectionDiagnostic[];
 };
@@ -548,6 +600,19 @@ export type GroupFrame = {
     statementRef: string;
     provenance: ProjectionProvenance;
   };
+  /** Frame retained because a scoped visible member requires its owner context. */
+  scopeClosure?: {
+    reason: "visible-member";
+    memberElementIds: string[];
+    provenance: ProjectionProvenance;
+  };
+  /** Explicit marker that a scoped Seq/Alt omits one or more semantic members. */
+  scopeTruncation?: {
+    marker: "truncated";
+    hiddenMemberCount: number;
+    hiddenStatementRefs: string[];
+    provenance: ProjectionProvenance;
+  };
 };
 
 export type ProjectedGroupGuide = {
@@ -588,6 +653,36 @@ export type ProjectedNode = {
   pinned: boolean;
   placement: "generated" | "user";
   provenance: ProjectionProvenance;
+};
+
+export type ViewAnnotationProvenance = {
+  kind: "view-annotation";
+  viewId: string;
+  annotationId: string;
+};
+
+export type ProjectedAnnotation = {
+  elementId: string;
+  annotationId: string;
+  /** Statement identity for semantic annotations; absent for view-local annotations. */
+  semanticRef?: string;
+  structuralKind: "annotation";
+  annotationKind: "semantic-literal" | "view";
+  text: string;
+  language?: string;
+  datatypeIri?: string;
+  statementRef?: string;
+  anchorSemanticRef?: string;
+  anchorElementId?: string;
+  detachedAnchorElementId?: string;
+  anchorOffset?: Point;
+  templateRef?: string;
+  defaultSize: { width: number; height: number };
+  geometry?: ElementGeometry;
+  style: VisualStyle;
+  pinned: boolean;
+  placement: "generated" | "user";
+  provenance: ProjectionProvenance | ViewAnnotationProvenance;
 };
 
 export type ProjectedContainer = {
@@ -671,6 +766,8 @@ export type ProjectedEdge = {
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
+  sourcePortId?: string;
+  targetPortId?: string;
   routeMode?: EdgeRouteMode;
   sourceMarker?: EdgeTerminalMarker;
   targetMarker?: EdgeTerminalMarker;
@@ -691,12 +788,17 @@ export type DiagramScene = {
   memberships?: SceneMembership[];
   /** Optional for backwards-compatible hand-authored Scene fixtures. */
   groupGuides?: SceneGroupGuide[];
+  /** Semantic literal notes and view-only notes; optional for legacy fixtures. */
+  annotations?: SceneAnnotation[];
   edges: SceneEdge[];
   diagnostics: ProjectionDiagnostic[];
 };
 
 export type SceneMembership = ProjectedMembership;
 export type SceneGroupGuide = ProjectedGroupGuide;
+export type SceneAnnotation = Omit<ProjectedAnnotation, "geometry"> & {
+  geometry: ElementGeometry;
+};
 
 export type SceneNode = {
   elementId: string;
@@ -813,6 +915,8 @@ export type SceneEdge = {
   labelOffset?: Point;
   sourceAnchor?: EdgeEndpointAnchor;
   targetAnchor?: EdgeEndpointAnchor;
+  sourcePortId?: string;
+  targetPortId?: string;
   routeMode?: EdgeRouteMode;
   sourceMarker?: EdgeTerminalMarker;
   targetMarker?: EdgeTerminalMarker;

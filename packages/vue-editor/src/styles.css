@@ -4310,3 +4310,187 @@
   .iriograph-editor-layout.left-sidebar-collapsed { --iriograph-left-sidebar-width: 0px; }
   .iriograph-editor-layout.right-sidebar-collapsed { --iriograph-right-sidebar-width: 0px; }
 }
+
+.iriograph-external-review {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  color: #183a38;
+  background: #f7fbfa;
+  border: 1px solid #bfd4d1;
+  border-radius: 12px;
+}
+
+.iriograph-external-review h3,
+.iriograph-external-review h4,
+.iriograph-external-review p { margin: 0; }
+
+.iriograph-review-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #d5e2e0;
+  border-radius: 10px;
+}
+
+.iriograph-review-section > header,
+.iriograph-review-actions,
+.iriograph-review-change-list > p:not(:first-child) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iriograph-review-section > header { justify-content: space-between; }
+
+.iriograph-review-actions button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid #87a7a3;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.iriograph-review-actions button.is-primary {
+  color: #fff;
+  background: #176b62;
+  border-color: #176b62;
+}
+
+.iriograph-review-change-list {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  background: #edf8f3;
+  border-radius: 7px;
+}
+
+.iriograph-review-change-list.is-removed { background: #fff2ef; }
+
+.iriograph-review-section img {
+  display: block;
+  width: min(100%, 640px);
+  height: auto;
+  border: 1px solid #d5e2e0;
+}
+
+.iriograph-collapsed-group-badge {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  color: #214d49;
+  font-size: 10px;
+  font-weight: 700;
+  background: #e9f6f3;
+  border: 1px solid #71aaa3;
+  border-radius: 999px;
+  box-shadow: 0 1px 3px rgb(21 74 68 / 14%);
+}
+
+.iriograph-scene-annotation {
+  position: absolute;
+  z-index: 28;
+  display: grid;
+  align-content: start;
+  gap: 0.2rem;
+  overflow: auto;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid;
+  border-radius: 0.45rem;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 12%);
+  white-space: pre-wrap;
+  text-align: left;
+}
+
+.iriograph-scene-annotation small {
+  font-size: 0.68em;
+  opacity: 0.7;
+}
+
+.iriograph-scene-annotation.selected {
+  outline: 3px solid rgb(37 99 235 / 55%);
+  outline-offset: 2px;
+}
+
+.iriograph-scene-annotation.detached {
+  border-style: dashed;
+}
+
+.iriograph-annotation-inspector,
+.iriograph-semantic-annotation-inspector {
+  display: grid;
+  gap: .65rem;
+  padding: .8rem;
+  border: 1px solid var(--iriograph-border, #ccd8d5);
+  border-radius: .65rem;
+  background: var(--iriograph-panel, #fff);
+}
+
+.iriograph-annotation-inspector label,
+.iriograph-semantic-annotation-inspector {
+  min-width: 0;
+}
+
+.iriograph-annotation-inspector label {
+  display: grid;
+  gap: .25rem;
+}
+
+.iriograph-annotation-inspector textarea,
+.iriograph-annotation-inspector select,
+.iriograph-annotation-inspector input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.iriograph-annotation-colors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .5rem;
+}
+
+.iriograph-annotation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: .5rem;
+}
+
+.iriograph-annotation-readonly-text {
+  white-space: pre-wrap;
+}
+
+.iriograph-view-scope-form {
+  display: grid;
+  gap: .65rem;
+  margin: 0;
+  padding: .75rem;
+  border: 1px solid var(--iriograph-border, #ccd8d5);
+  border-radius: .6rem;
+}
+
+.iriograph-view-scope-form label {
+  display: grid;
+  gap: .25rem;
+}
+
+.iriograph-view-scope-form .iriograph-check-row {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.iriograph-view-scope-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(5rem, .4fr);
+  gap: .5rem;
+}
+
+.iriograph-scene-annotation.kind-semantic-literal {
+  border-left-width: 4px;
+}

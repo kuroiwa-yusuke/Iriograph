@@ -5,9 +5,16 @@
 | Package | 責務 | 持たない責務 |
 |---|---|---|
 | `@iriograph/core` | model、Turtle parseと決定的serialize、catalog投影、検証、reconciliation、human semantic commandの内部prepare/apply安全境界、非同期layout adapter契約と標準軽量layout、asset lease/policy検証 | Vue、DOM、HTTP、workspace、高機能layout engine固有依存 |
+| `@iriograph/rdf-io` | Turtle/JSON-LD dataset import、merge差分・loss/collision report、明示rebase、semantic-only export | Diagram形式推測、overlay変換、永続化 |
+| `@iriograph/profile-resolver` | Immutable authoring profile/vocabulary importのidentity・integrity・循環・競合検証と解決済みcontext構築 | Network、tenant認証、registry cache |
 | `@iriograph/semantic-access` | Turtle由来のlabel/comment/構造索引、検索・describe・近傍/subgraph、revision alias、Core commandへcompileする注入WritePort | LLM provider、MCP transport、overlay、永続化、認証 |
-| `@iriograph/vue-editor` | Scene描画、overlay編集、Turtle draft、history、4入口の段階的structured semantic authoring、対象別context menu、条件付き削除modal | 語彙判定、永続化、認証、catalog取得 |
 | `@iriograph/layout-elk` | ELK.js Layeredへのoptional adapter、compound hierarchy、直交route、host engine/Worker注入 | semantic解釈、document内のengine固有option、hard pinの近似 |
+| `@iriograph/profile-kit` | Domain profile manifest、validator、fixture/conformanceとreference workflow profile | Core分岐、規格互換の暗黙主張 |
+| `@iriograph/presentation-tools` | Opaque Scene bridge、closed sparse patch、budget、diff/render/score/telemetry contract | Apply、Turtle、任意CSS/URL、画像bytes |
+| `@iriograph/host-conformance` | Versioned package/CSS/fixture/capability manifestとHost report検証 | Product固有deploy実行 |
+| `@iriograph/icons-aws` | AWS公式icon archiveのversioned metadataとHost注入resolver | AWS icon bytesの再配布、認証URL保存 |
+| `@iriograph/agent-bridge` | Semantic/presentation/mixed routing、label-first transport DTO、外部候補review model | 分類結果による権限付与、model SDK、永続化 |
+| `@iriograph/vue-editor` | Scene描画、annotation/port/folding/scope、overlay編集、Turtle draft、history、structured semantic authoring、外部候補review UI | 語彙判定、永続化、認証、catalog取得 |
 | `@iriograph/mock` | repository内sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocator例 | 投影規則、editor内部state |
 
 ## 投影処理
@@ -125,7 +132,7 @@ Delete cascadeはresourceをsubject、object、predicateに含むexact statement
 
 `set-property`は値集合の完全置換で、空配列だけを削除とします。空文字列literalとIRI/literal複数値を区別し、参照を外したことで孤立するblank-node closureを推測削除しません。Capability optional bindingは参照するtemplate statement単位でadd/remove双方からskipします。`set-alternatives`は`memberIris`を最終ordinal順として重複を保ち、default ordinal slotとの一致を検証します。
 
-Mockではstatic context fixtureを使います。Profile/vocabulary URIの取得、version・cache・integrity解決はP2-01まで実装せず、editor/coreからresolverへ逆依存させません。
+Mockは同梱profile/vocabularyを使い、Cloud等のhostは`@iriograph/profile-resolver`へ認証付きartifact resolverを注入できます。Version、cache、integrity、offline policyはhost transportの責務とし、editor/coreからresolverやnetworkへ逆依存させません。
 
 Domain validationのrequest/response、diagnostic identity、warning confirmation、abort、P1-08 cache identityは[semantic-validation.md](./semantic-validation.md)を正本とします。Validation requestはparse済みdatasetをserializable statement snapshotへ変換し、Core内部のN3 `Store`をadapterへ公開しません。Loaded documentのdomain errorはprojectionを止めずScene annotationとして重ね、candidate transactionのdomain errorだけをatomic rollbackします。
 

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1",
+  "kind": "iriograph.document",
+  "documentId": "iriograph-host-conformance-baseline",
+  "semantic": {
+    "format": "text/turtle",
+    "baseIri": "urn:iriograph:conformance:",
+    "authoringProfileRef": "urn:iriograph:authoring-profile:rdf-rdfs:1",
+    "source": "@prefix : <urn:iriograph:conformance:> .\n@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n:group a rdf:Bag ; rdfs:label \"領域\"@ja ; rdfs:member :a, :b .\n:a rdfs:label \"開始\"@ja ; :next :b .\n:b rdfs:label \"完了\"@ja .\n:next a rdf:Property ; rdfs:label \"次の工程\"@ja .\n"
+  },
+  "imports": [{ "catalogRef": "urn:iriograph:catalog:workflow-instance-flow@1" }],
+  "views": [{
+    "viewId": "main",
+    "kind": "region",
+    "profileRef": "urn:iriograph:profile:rdf-rdfs:instance-flow:1",
+    "layoutRef": "urn:iriograph:layout:hierarchical-lr:1",
+    "locale": "ja",
+    "overlay": {}
+  }]
+}

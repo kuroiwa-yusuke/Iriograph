@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DiagramScene } from "@iriograph/core";
 
-import { createDiagramViewSession, sceneWithTemporaryHiddenElements } from "./view-session";
+import { createDiagramViewSession, sceneWithCollapsedGroups, sceneWithTemporaryHiddenElements } from "./view-session";
 
 describe("temporary view hiding", () => {
   it("creates session-only selection/viewport/drag defaults", () => {
@@ -11,6 +11,7 @@ describe("temporary view hiding", () => {
       primaryElementId: "",
       viewport: { zoom: 1, scrollLeft: 0, scrollTop: 0 },
       dragMode: "select",
+      collapsedGroupElementIds: new Set(),
     });
   });
 
@@ -34,6 +35,21 @@ describe("temporary view hiding", () => {
     expect(edgeFiltered.nodes).toHaveLength(3);
     expect(edgeFiltered.containers).toHaveLength(2);
     expect(edgeFiltered.edges.map((item) => item.elementId)).toEqual(["edge:outside"]);
+  });
+
+  it("keeps a folded group and removes members without shortcut edges", () => {
+    const source = sceneFixture();
+    source.memberships = [{
+      semanticRef: "membership:outside",
+      containerElementId: "container:a",
+      memberElementId: "node:outside",
+      provenance: { sourceStatementRefs: [], operator: "membership-container", derivation: "derived" },
+    }];
+    const result = sceneWithCollapsedGroups(source, new Set(["container:a"]));
+    expect(result.scene.containers.map((item) => item.elementId)).toContain("container:a");
+    expect(result.scene.nodes).toEqual([]);
+    expect(result.scene.edges).toEqual([]);
+    expect(result.summaries["container:a"]?.hiddenLabels).toEqual(["Child", "Grandchild", "Outside"]);
   });
 });
 

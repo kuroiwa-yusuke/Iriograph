@@ -26,6 +26,7 @@ import {
   validateProjectionCatalog,
 } from "./rule-resolution.js";
 import { rdfRdfsVocabulary } from "./standard-catalog.js";
+import { resolveNamedViewScope } from "./view-scope.js";
 
 const { namedNode } = DataFactory;
 
@@ -99,6 +100,8 @@ export function projectSemanticView(
   if (hasBlockingDiagnostics(diagnostics)) {
     return emptyProjectedScene(view.viewId, diagnostics);
   }
+  const scope = resolveNamedViewScope(graph, view.scope, closure);
+  diagnostics.push(...scope?.diagnostics ?? []);
   const projected = executeProjectionOperators({
     graph,
     view,
@@ -106,6 +109,7 @@ export function projectSemanticView(
     closure,
     vocabulary: rdfRdfsVocabulary,
     options,
+    scope,
   });
   const allDiagnostics = sortDiagnostics([
     ...diagnostics,
@@ -349,6 +353,8 @@ function emptyProjectedScene(
     containers: [],
     regions: [],
     memberships: [],
+    groupGuides: [],
+    annotations: [],
     edges: [],
     diagnostics: sortDiagnostics(diagnostics),
   };

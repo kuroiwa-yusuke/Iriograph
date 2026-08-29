@@ -12,6 +12,7 @@ import type {
   DiagramView,
   EdgeCurveRouting,
   Point,
+  ProjectedAnnotation,
   ProjectedContainer,
   ProjectedEdge,
   ProjectedNode,
@@ -28,6 +29,8 @@ import type {
   ProjectionRule,
   SceneSemanticText,
   ViewElementOverlay,
+  ViewAnnotation,
+  VisualPort,
   VisualTemplate,
 } from "./model.js";
 import {
@@ -51,6 +54,10 @@ import {
   collectStatementComments,
   namedStatementReifierIris,
 } from "./statement-reification.js";
+import {
+  scopeAllowsPredicate,
+  type ResolvedNamedViewScope,
+} from "./view-scope.js";
 
 type OverlayEntry = { elementId: string; overlay: ViewElementOverlay };
 const LEGACY_REGION_LABEL_ANCHOR = "urn:iriograph:vue-editor:region-label-anchor";
@@ -76,6 +83,7 @@ export type ProjectionOperatorInput = {
   closure: RdfsClosure;
   vocabulary: RdfRdfsVocabulary;
   options?: ProjectionOptions;
+  scope?: ResolvedNamedViewScope;
 };
 
 export function executeProjectionOperators(
@@ -108,9 +116,23 @@ export function executeProjectionOperators(
     closure,
   );
 
+  const scopeClosureGroups = applyScopeResourceClosure(
+    input.scope,
+    candidates,
+    parentsByChild,
+  );
+
   const directEdges: DirectEdgePlan[] = [];
   for (const quad of graph.quads) {
     if (!isNamedNode(quad.subject) || !isNamedNode(quad.predicate) || !isNamedNode(quad.object)) continue;
+    if (
+      input.scope
+      && (
+        !scopeAllowsPredicate(input.scope, quad.predicate.value)
+        || !input.scope.resourceIris.has(quad.subject.value)
+        || !input.scope.resourceIris.has(quad.object.value)
+      )
+    ) continue;
     const statementRef = statementIdentityFromQuad(quad);
     if (consumed.has(statementRef)) continue;
     const resolution = resolveStatementRule(
@@ -169,6 +191,21 @@ export function executeProjectionOperators(
     parentsByChild,
     diagnostics,
   );
+  const projectedResources = new Map<string, ProjectedNode | ProjectedContainer | ProjectedRegion>([
+    ...nodes,
+    ...containers,
+    ...regions,
+  ]);
+
+  applyScopedGroupMetadata(
+    containers,
+    regions,
+    memberships,
+    parentsByChild,
+    scopeClosureGroups,
+    input.scope !== undefined,
+    semanticToElement,
+  );
 
   const edges: ProjectedEdge[] = [];
   for (const plan of directEdges) {
@@ -181,9 +218,35 @@ export function executeProjectionOperators(
       semanticToElement,
       overlays,
       diagnostics,
+      closure,
+      projectedResources,
     );
     if (edge) edges.push(edge);
   }
+  const semanticAnnotations = projectLiteralAnnotations(
+    graph,
+    view,
+    catalog,
+    closure,
+    semanticToElement,
+    overlays,
+    diagnostics,
+    input.scope,
+  );
+  const annotations = [
+    ...semanticAnnotations,
+    ...projectViewAnnotations(
+      view,
+      catalog,
+      new Set([
+        ...semanticToElement.values(),
+        ...edges.map(({ elementId }) => elementId),
+        ...semanticAnnotations.map(({ elementId }) => elementId),
+        ...Object.keys(view.annotations ?? {}),
+      ]),
+      diagnostics,
+    ),
+  ].sort(compareElements);
   const groupGuides = projectGroupGuides(containers, memberships);
 
   return {
@@ -193,6 +256,7 @@ export function executeProjectionOperators(
     regions: [...regions.values()].sort(compareElements),
     memberships,
     groupGuides,
+    annotations,
     edges: edges.sort(compareElements),
     diagnostics,
   };
@@ -279,6 +343,119 @@ function collectStructuralStatements(
       }
     }
   }
+}
+
+function applyScopeResourceClosure(
+  scope: ResolvedNamedViewScope | undefined,
+  candidates: Set<string>,
+  parentsByChild: ReadonlyMap<string, ParentBinding[]>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  if (!scope) return new Map();
+  const visible = new Set(scope.resourceIris);
+  const closureMembers = new Map<string, Set<string>>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [childIri, bindings] of [...parentsByChild.entries()].sort(([left], [right]) => (
+      compareCodePoints(left, right)
+    ))) {
+      if (!visible.has(childIri)) continue;
+      for (const binding of [...bindings].sort((left, right) => (
+        compareCodePoints(left.parentIri, right.parentIri)
+      ))) {
+        if (!visible.has(binding.parentIri)) {
+          visible.add(binding.parentIri);
+          changed = true;
+        }
+        if (!scope.resourceIris.has(binding.parentIri)) {
+          const members = closureMembers.get(binding.parentIri) ?? new Set<string>();
+          members.add(childIri);
+          closureMembers.set(binding.parentIri, members);
+        }
+      }
+    }
+  }
+  for (const candidate of [...candidates]) {
+    if (!visible.has(candidate)) candidates.delete(candidate);
+  }
+  return closureMembers;
+}
+
+function applyScopedGroupMetadata(
+  containers: ReadonlyMap<string, ProjectedContainer>,
+  regions: ReadonlyMap<string, ProjectedRegion>,
+  memberships: readonly ProjectedMembership[],
+  parentsByChild: ReadonlyMap<string, ParentBinding[]>,
+  closureGroups: ReadonlyMap<string, ReadonlySet<string>>,
+  scoped: boolean,
+  semanticToElement: ReadonlyMap<string, string>,
+): void {
+  if (!scoped) return;
+  const visibleMembershipRefs = new Set(memberships.map(({ semanticRef }) => semanticRef));
+  for (const [containerIri, container] of [...containers.entries(), ...regions.entries()]
+    .sort(([left], [right]) => (
+      compareCodePoints(left, right)
+    ))) {
+    const frame = container.groupFrame;
+    if (!frame) continue;
+    const closureMemberIris = closureGroups.get(containerIri);
+    if (closureMemberIris?.size) {
+      const closureMemberships = memberships.filter((membership) => (
+        membership.containerElementId === container.elementId
+        && [...closureMemberIris].some((memberIri) => (
+          membership.memberElementId === semanticToElement.get(memberIri)
+        ))
+      ));
+      const relevant = closureMemberships.length > 0
+        ? closureMemberships
+        : memberships.filter(({ containerElementId }) => containerElementId === container.elementId);
+      frame.scopeClosure = {
+        reason: "visible-member",
+        memberElementIds: [...new Set(relevant.map(({ memberElementId }) => memberElementId))]
+          .sort(compareCodePoints),
+        provenance: combineProjectionProvenance(
+          relevant.map(({ provenance }) => provenance),
+          container.provenance,
+        ),
+      };
+    }
+    if (frame.kind !== "sequence" && frame.kind !== "alternative") continue;
+    const allBindings = [...parentsByChild.values()]
+      .flat()
+      .filter(({ parentIri }) => parentIri === containerIri);
+    const hidden = allBindings
+      .filter(({ quad }) => !visibleMembershipRefs.has(statementIdentityFromQuad(quad)))
+      .sort((left, right) => compareCodePoints(
+        statementIdentityFromQuad(left.quad),
+        statementIdentityFromQuad(right.quad),
+      ));
+    if (hidden.length === 0) continue;
+    const hiddenStatementRefs = hidden.map(({ quad }) => statementIdentityFromQuad(quad));
+    frame.scopeTruncation = {
+      marker: "truncated",
+      hiddenMemberCount: hidden.length,
+      hiddenStatementRefs,
+      provenance: {
+        sourceStatementRefs: hiddenStatementRefs,
+        operator: frame.kind === "sequence" ? "ordinal-sequence" : "alternative",
+        rule: frame.provenance.rule,
+        derivation: "derived",
+        resolutionTrace: frame.provenance.resolutionTrace,
+      },
+    };
+  }
+}
+
+function combineProjectionProvenance(
+  values: readonly ProjectionProvenance[],
+  fallback: ProjectionProvenance,
+): ProjectionProvenance {
+  if (values.length === 0) return fallback;
+  return {
+    ...values[0]!,
+    sourceStatementRefs: [...new Set(values.flatMap(({ sourceStatementRefs }) => sourceStatementRefs))]
+      .sort(compareCodePoints),
+  };
 }
 
 function projectResource(
@@ -449,6 +626,8 @@ function projectDirectEdge(
   semanticToElement: ReadonlyMap<string, string>,
   overlays: ReadonlyMap<string, OverlayEntry>,
   diagnostics: ProjectionDiagnostic[],
+  closure: RdfsClosure,
+  projectedResources: ReadonlyMap<string, ProjectedNode | ProjectedContainer | ProjectedRegion>,
 ): ProjectedEdge | undefined {
   if (!isNamedNode(plan.quad.subject) || !isNamedNode(plan.quad.object)) return undefined;
   const sourceElementId = semanticToElement.get(plan.quad.subject.value);
@@ -486,6 +665,30 @@ function projectDirectEdge(
   );
   const routeMode = overlay?.overlay.routing?.routeMode
     ?? (manualWaypoints ? "manual" : template.routeMode ?? "auto");
+  const sourcePort = resolveEdgePort({
+    requestedPortId: overlay?.overlay.routing?.sourcePortId,
+    endpointRole: "source",
+    resourceIri: plan.quad.subject.value,
+    predicateIri: plan.quad.predicate.value,
+    resourceTemplateRef: projectedResources.get(plan.quad.subject.value)?.templateRef,
+    graph,
+    closure,
+    catalog,
+    semanticRef,
+    diagnostics,
+  });
+  const targetPort = resolveEdgePort({
+    requestedPortId: overlay?.overlay.routing?.targetPortId,
+    endpointRole: "target",
+    resourceIri: plan.quad.object.value,
+    predicateIri: plan.quad.predicate.value,
+    resourceTemplateRef: projectedResources.get(plan.quad.object.value)?.templateRef,
+    graph,
+    closure,
+    catalog,
+    semanticRef,
+    diagnostics,
+  });
   return {
     elementId: overlay?.elementId ?? generatedElementId("edge", semanticRef),
     semanticRef,
@@ -516,8 +719,10 @@ function projectDirectEdge(
     waypoints: manualWaypoints,
     curve: copyCurveRouting(overlay?.overlay.routing?.curve),
     labelOffset: overlay?.overlay.routing?.labelOffset,
-    sourceAnchor: overlay?.overlay.routing?.sourceAnchor,
-    targetAnchor: overlay?.overlay.routing?.targetAnchor,
+    sourceAnchor: sourcePort?.anchor ?? overlay?.overlay.routing?.sourceAnchor,
+    targetAnchor: targetPort?.anchor ?? overlay?.overlay.routing?.targetAnchor,
+    ...(sourcePort ? { sourcePortId: sourcePort.port.portId } : {}),
+    ...(targetPort ? { targetPortId: targetPort.port.portId } : {}),
     routeMode,
     sourceMarker: overlay?.overlay.routing?.sourceMarker ?? template.sourceMarker ?? "none",
     targetMarker: overlay?.overlay.routing?.targetMarker ?? template.targetMarker ?? "arrow",
@@ -538,6 +743,290 @@ function projectDirectEdge(
       },
     },
   };
+}
+
+function projectLiteralAnnotations(
+  graph: SemanticGraph,
+  view: DiagramView,
+  catalog: ProjectionCatalogV1,
+  closure: RdfsClosure,
+  semanticToElement: ReadonlyMap<string, string>,
+  overlays: ReadonlyMap<string, OverlayEntry>,
+  diagnostics: ProjectionDiagnostic[],
+  scope: ResolvedNamedViewScope | undefined,
+): ProjectedAnnotation[] {
+  const annotations: ProjectedAnnotation[] = [];
+  for (const statement of graph.quads) {
+    if (
+      !isNamedNode(statement.subject)
+      || !isNamedNode(statement.predicate)
+      || statement.object.termType !== "Literal"
+      || (scope && !scope.resourceIris.has(statement.subject.value))
+      || !scopeAllowsPredicate(scope, statement.predicate.value)
+    ) continue;
+    const statementRef = statementIdentityFromQuad(statement);
+    const resolution = resolveStatementRule(
+      catalog,
+      statement.predicate.value,
+      closure,
+      statementRef,
+      "literal",
+    );
+    diagnostics.push(...resolution.diagnostics);
+    const rule = resolution.resolved?.rule;
+    if (
+      !rule
+      || rule.match.kind !== "predicate"
+      || rule.project.operator !== "literal-annotation"
+      || !literalMatches(rule.project, statement.object)
+    ) continue;
+    const anchorElementId = semanticToElement.get(statement.subject.value);
+    if (!anchorElementId) {
+      diagnostics.push({
+        severity: "warning",
+        code: "literal-annotation-anchor-not-visible",
+        message: `Literal annotation anchor is not visible: ${statement.subject.value}`,
+        semanticRef: statement.subject.value,
+        statementRef,
+      });
+      continue;
+    }
+    const overlay = overlays.get(statementRef);
+    const template = selectTemplate(
+      catalog,
+      overlay?.overlay.appearance?.templateRef ?? rule.templateRef!,
+      "annotation",
+      statementRef,
+      diagnostics,
+      rule.templateRef!,
+    );
+    annotations.push({
+      elementId: overlay?.elementId ?? generatedElementId("annotation", statementRef),
+      annotationId: statementRef,
+      semanticRef: statementRef,
+      structuralKind: "annotation",
+      annotationKind: "semantic-literal",
+      text: statement.object.value,
+      ...(statement.object.language ? { language: statement.object.language } : {}),
+      datatypeIri: statement.object.datatype.value,
+      statementRef,
+      anchorSemanticRef: statement.subject.value,
+      anchorElementId,
+      templateRef: template.templateRef,
+      defaultSize: template.defaultSize ?? { width: 220, height: 88 },
+      geometry: overlay?.overlay.geometry,
+      style: resolveAppearance(
+        template.style,
+        overlay?.overlay.appearance,
+        catalog,
+        statementRef,
+        diagnostics,
+      ).style,
+      pinned: overlay?.overlay.pinned ?? false,
+      placement: overlay?.overlay.placement ?? "generated",
+      provenance: {
+        sourceStatementRefs: [statementRef],
+        operator: "literal-annotation",
+        rule: resolution.resolved ? ruleReference(resolution.resolved) : undefined,
+        derivation: "direct",
+        resolutionTrace: resolution.trace,
+      },
+    });
+  }
+  return annotations;
+}
+
+function literalMatches(
+  operator: Extract<ProjectionOperator, { operator: "literal-annotation" }>,
+  value: Literal,
+): boolean {
+  if (operator.languages?.length && (
+    !value.language
+    || !operator.languages.some((language) => language.toLowerCase() === value.language.toLowerCase())
+  )) return false;
+  if (operator.datatypes?.length && !operator.datatypes.includes(value.datatype.value)) return false;
+  return true;
+}
+
+const VIEW_ANNOTATION_STYLE = {
+  fill: "#fff8cc",
+  stroke: "#8a7120",
+  text: "black",
+} as const;
+
+function projectViewAnnotations(
+  view: DiagramView,
+  catalog: ProjectionCatalogV1,
+  visibleElementIds: ReadonlySet<string>,
+  diagnostics: ProjectionDiagnostic[],
+): ProjectedAnnotation[] {
+  return Object.entries(view.annotations ?? {})
+    .sort(([left], [right]) => compareCodePoints(left, right))
+    .map(([annotationKey, annotation]) => projectViewAnnotation(
+      view,
+      catalog,
+      annotationKey,
+      annotation,
+      visibleElementIds,
+      diagnostics,
+    ));
+}
+
+function projectViewAnnotation(
+  view: DiagramView,
+  catalog: ProjectionCatalogV1,
+  annotationKey: string,
+  annotation: ViewAnnotation,
+  visibleElementIds: ReadonlySet<string>,
+  diagnostics: ProjectionDiagnostic[],
+): ProjectedAnnotation {
+  if (annotation.annotationId !== annotationKey) {
+    diagnostics.push({
+      severity: "error",
+      code: "view-annotation-id-mismatch",
+      message: `View annotation key and annotationId differ: ${annotationKey}`,
+      semanticRef: annotationKey,
+    });
+  }
+  const requestedAnchorId = annotation.anchor?.elementId;
+  const anchorElementId = requestedAnchorId && visibleElementIds.has(requestedAnchorId)
+    ? requestedAnchorId
+    : undefined;
+  if (requestedAnchorId && !anchorElementId) {
+    diagnostics.push({
+      severity: "warning",
+      code: "view-annotation-anchor-detached",
+      message: `View annotation anchor is no longer visible: ${requestedAnchorId}`,
+      semanticRef: annotationKey,
+    });
+  }
+  const style = resolveAppearance(
+    VIEW_ANNOTATION_STYLE,
+    annotation.style ? { style: annotation.style } : undefined,
+    catalog,
+    annotationKey,
+    diagnostics,
+  ).style;
+  return {
+    elementId: annotationKey,
+    annotationId: annotation.annotationId,
+    structuralKind: "annotation",
+    annotationKind: "view",
+    text: annotation.text,
+    ...(anchorElementId ? { anchorElementId } : {}),
+    ...(requestedAnchorId && !anchorElementId ? { detachedAnchorElementId: requestedAnchorId } : {}),
+    ...(annotation.anchor?.offset ? { anchorOffset: { ...annotation.anchor.offset } } : {}),
+    defaultSize: {
+      width: annotation.geometry.width,
+      height: annotation.geometry.height,
+    },
+    geometry: { ...annotation.geometry },
+    style,
+    pinned: true,
+    placement: "user",
+    provenance: {
+      kind: "view-annotation",
+      viewId: view.viewId,
+      annotationId: annotation.annotationId,
+    },
+  };
+}
+
+type ResolvedEdgePort = {
+  port: VisualPort;
+  anchor: { position: number };
+};
+
+function resolveEdgePort(input: {
+  requestedPortId: string | undefined;
+  endpointRole: "source" | "target";
+  resourceIri: string;
+  predicateIri: string;
+  resourceTemplateRef: string | undefined;
+  graph: SemanticGraph;
+  closure: RdfsClosure;
+  catalog: ProjectionCatalogV1;
+  semanticRef: string;
+  diagnostics: ProjectionDiagnostic[];
+}): ResolvedEdgePort | undefined {
+  if (!input.requestedPortId) return undefined;
+  const template = input.resourceTemplateRef
+    ? input.catalog.templates[input.resourceTemplateRef]
+    : undefined;
+  const port = template?.ports?.find(({ portId }) => portId === input.requestedPortId);
+  if (!port) {
+    input.diagnostics.push(portDiagnostic(
+      input,
+      "edge-port-unresolved",
+      `Port is not declared by the endpoint template: ${input.requestedPortId}`,
+    ));
+    return undefined;
+  }
+  if (port.role !== "both" && port.role !== input.endpointRole) {
+    input.diagnostics.push(portDiagnostic(
+      input,
+      "edge-port-role-mismatch",
+      `Port ${port.portId} cannot be used as the ${input.endpointRole} endpoint.`,
+    ));
+    return undefined;
+  }
+  if (port.predicateIris?.length && !port.predicateIris.some((predicateIri) => (
+    input.closure.subpropertyDistance(input.predicateIri, predicateIri) !== undefined
+  ))) {
+    input.diagnostics.push(portDiagnostic(
+      input,
+      "edge-port-predicate-mismatch",
+      `Port ${port.portId} does not accept predicate ${input.predicateIri}.`,
+    ));
+    return undefined;
+  }
+  if (port.classIris?.length) {
+    const assertedTypes = input.graph.store.getObjects(
+      input.resourceIri,
+      "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+      null,
+    ).filter(isNamedNode);
+    const compatible = assertedTypes.some((assertedType) => port.classIris!.some((classIri) => (
+      input.closure.subclassDistance(assertedType.value, classIri) !== undefined
+    )));
+    if (!compatible) {
+      input.diagnostics.push(portDiagnostic(
+        input,
+        "edge-port-class-mismatch",
+        `Port ${port.portId} does not accept the endpoint resource type.`,
+      ));
+      return undefined;
+    }
+  }
+  return { port, anchor: { position: portAnchorPosition(port) } };
+}
+
+function portDiagnostic(
+  input: {
+    endpointRole: "source" | "target";
+    semanticRef: string;
+    diagnostics: ProjectionDiagnostic[];
+  },
+  code: string,
+  message: string,
+): ProjectionDiagnostic {
+  return {
+    severity: "warning",
+    code,
+    message,
+    semanticRef: input.semanticRef,
+    statementRef: input.semanticRef,
+  };
+}
+
+function portAnchorPosition(port: VisualPort): number {
+  const start = port.side === "top"
+    ? .875
+    : port.side === "right"
+      ? .125
+      : port.side === "bottom" ? .375 : .625;
+  const position = start + port.position * .25;
+  return position >= 1 ? position - 1 : position;
 }
 
 function applyMembershipBindings(
@@ -785,7 +1274,7 @@ function overlaysForSemantic(
 function selectTemplate(
   catalog: ProjectionCatalogV1,
   requestedRef: string,
-  expectedKind: "node" | "container" | "region" | "edge",
+  expectedKind: "node" | "container" | "region" | "edge" | "annotation",
   semanticRef: string,
   diagnostics: ProjectionDiagnostic[],
   fallbackRef: string,

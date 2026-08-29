@@ -14,7 +14,7 @@ type ResolvedSemanticValidationContext = {
 };
 ```
 
-`contextId`は検証profile集合のidentity、`contextRevision`は同じidentity内の規則revisionです。どちらも空文字列を許しません。Editorは独立した`semanticValidationContext` prop、または`ResolvedAuthoringContext.semanticValidation`から受け取ります。URIからprofileを取得するresolverはhost/P2-01の責務で、Coreは取得やSHACL engine選択を行いません。
+`contextId`は検証profile集合のidentity、`contextRevision`は同じidentity内の規則revisionです。どちらも空文字列を許しません。Editorは独立した`semanticValidationContext` prop、または`ResolvedAuthoringContext.semanticValidation`から受け取ります。URIからprofileを取得するresolverはHost注入transportと`@iriograph/profile-resolver`の責務で、Coreは取得やSHACL engine選択を行いません。
 
 Validator requestはN3 `Store`等のengine objectではなく、次を含むserializable dataです。
 

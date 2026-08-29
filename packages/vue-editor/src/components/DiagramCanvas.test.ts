@@ -108,6 +108,65 @@ describe("DiagramCanvas pointer gestures", () => {
     expect(wrapper.emitted("routingUpdate")).toBeUndefined();
   });
 
+  it("意味注記とビュー注記を区別し、ビュー注記だけをdrag候補として通知する", async () => {
+    const scene = sceneFixture();
+    scene.annotations = [{
+      elementId: "annotation-note-1",
+      annotationId: "note-1",
+      structuralKind: "annotation",
+      annotationKind: "view",
+      text: "このビューだけの注意",
+      anchorElementId: "node-a",
+      templateRef: "urn:test:annotation",
+      defaultSize: { width: 180, height: 72 },
+      geometry: { x: 180, y: 40, width: 180, height: 72 },
+      style: { fill: "#fff8cc", stroke: "#b78b22", text: "#302814" },
+      pinned: true,
+      placement: "user",
+      provenance: { kind: "view-annotation", viewId: "main", annotationId: "note-1" },
+    }, {
+      elementId: "annotation-comment-1",
+      annotationId: "literal-1",
+      structuralKind: "annotation",
+      annotationKind: "semantic-literal",
+      text: "意味側の説明",
+      language: "ja",
+      anchorElementId: "node-a",
+      templateRef: "urn:test:annotation",
+      defaultSize: { width: 180, height: 72 },
+      geometry: { x: 180, y: 130, width: 180, height: 72 },
+      style: { fill: "#eef6ff", stroke: "#4b82c3", text: "#123" },
+      pinned: false,
+      placement: "generated",
+      provenance: {
+        sourceStatementRefs: ["urn:test:statement:comment"],
+        operator: "literal-annotation",
+        derivation: "derived",
+      },
+    }];
+    wrapper = mount(DiagramCanvas, { props: { scene, selectedAnnotationId: "note-1" } });
+    const notes = wrapper.findAll(".iriograph-scene-annotation");
+    expect(notes).toHaveLength(2);
+    expect(notes[0]!.classes()).toContain("selected");
+    await notes[0]!.trigger("click");
+    expect(wrapper.emitted("annotationRequest")?.at(-1)).toEqual([{
+      annotationId: "note-1",
+      annotationKind: "view",
+      anchorElementId: "node-a",
+    }]);
+    await notes[0]!.trigger("pointerdown", { button: 0, clientX: 180, clientY: 40 });
+    dispatchPointer("pointermove", 212, 56);
+    dispatchPointer("pointerup", 212, 56);
+    expect(wrapper.emitted("annotationGeometryChange")?.at(-1)).toEqual([{
+      annotationId: "note-1",
+      geometry: { x: 212, y: 56, width: 180, height: 72 },
+    }]);
+    await notes[1]!.trigger("pointerdown", { button: 0, clientX: 180, clientY: 130 });
+    dispatchPointer("pointermove", 220, 150);
+    dispatchPointer("pointerup", 220, 150);
+    expect(wrapper.emitted("annotationGeometryChange")).toHaveLength(1);
+  });
+
   it("削除previewはresourceとexact provenanceの影響edge・membershipを一時表示する", async () => {
     const scene = sceneFixture();
     const directProvenance = (statementRef: string) => ({

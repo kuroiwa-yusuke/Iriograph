@@ -31,3 +31,4 @@ export * from "./authoring.js";
 export * from "./structured-authoring.js";
 export * from "./semantic-validation.js";
 export * from "./view-commands.js";
+export * from "./view-scope.js";

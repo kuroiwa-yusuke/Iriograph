@@ -5,7 +5,11 @@ import {
   createStandardLayoutRegistry,
   parseSemanticGraph,
   rdfRdfsVocabulary,
+  standardRdfRdfsCatalog,
+  standardRdfRdfsClassificationRegionCatalog,
+  standardRdfRdfsInstanceFlowCatalog,
   type IriographDocumentV1,
+  type ProjectionRuntimeContext,
   type ResolvedAuthoringContext,
   type ResolvedAuthoringTerm,
   type ResourceIriAllocator,
@@ -92,6 +96,32 @@ export const mockProjectionRuntimeContext = createProjectionRuntimeContext([
   ruleOrigins: [],
 })), mockLayoutRegistry);
 
+const mockAvailableCatalogs = [
+  standardRdfRdfsCatalog,
+  standardRdfRdfsInstanceFlowCatalog,
+  standardRdfRdfsClassificationRegionCatalog,
+  mockProjectionCatalog,
+  mockInstanceFlowProjectionCatalog,
+  mockClassificationRegionProjectionCatalog,
+] as const;
+
+/** Selects the exact declared catalog instead of letting same-profile presets shadow each other. */
+export function createMockProjectionRuntimeContext(document: IriographDocumentV1): ProjectionRuntimeContext {
+  const declared = new Set(document.imports?.map((item) => item.catalogRef) ?? []);
+  const catalogs = [...new Set(document.views.map((view) => view.profileRef))].map((profileRef) => {
+    const candidates = mockAvailableCatalogs.filter((catalog) => catalog.profileRef === profileRef);
+    return candidates.find((catalog) => declared.has(catalogRef(catalog)))
+      ?? candidates.find((catalog) => catalogRef(catalog).includes("workflow"))
+      ?? candidates[0];
+  }).filter((catalog): catalog is typeof mockAvailableCatalogs[number] => Boolean(catalog));
+  return createProjectionRuntimeContext(catalogs.map((catalog) => ({
+    profileRef: catalog.profileRef,
+    sourceCatalogRefs: [catalogRef(catalog)],
+    catalog,
+    ruleOrigins: [],
+  })), mockLayoutRegistry);
+}
+
 export function createMockResourceIriAllocator(baseIri: string): ResourceIriAllocator {
   return {
     allocate(request) {
@@ -160,7 +190,7 @@ export function createMockAuthoringContext(
     documentRevision: shortHash(JSON.stringify(document)),
     defaultLocale: "ja",
     authoringProfileRef: document.semantic.authoringProfileRef,
-    runtime: mockProjectionRuntimeContext,
+    runtime: createMockProjectionRuntimeContext(document),
     resourcePolicy: { allowedMintNamespaces: [localNamespace] },
     termPolicy: {
       existingUnknown: "preserve",

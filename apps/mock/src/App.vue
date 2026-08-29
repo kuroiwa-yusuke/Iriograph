@@ -21,8 +21,8 @@ import {
 import { mockInstanceFlowProjectionCatalog } from "./mock/catalog";
 import {
   createMockAuthoringContext,
+  createMockProjectionRuntimeContext,
   createMockResourceIriAllocator,
-  mockProjectionRuntimeContext,
 } from "./mock/authoring";
 import { mockSemanticValidationContext } from "./mock/semantic-validation";
 import { createMockPerformanceDocument } from "./mock/performance-fixture";
@@ -117,6 +117,7 @@ const resetUnavailableReason = computed(() => (
 const documentTitle = computed(() => activeFilePath.value.split("/").at(-1)
   ?.replace(/\.iriograph$/, "") ?? document.value.documentId);
 const authoringContext = computed(() => createMockAuthoringContext(document.value));
+const projectionRuntimeContext = computed(() => createMockProjectionRuntimeContext(document.value));
 const resourceIriAllocator = computed(() => (
   createMockResourceIriAllocator(document.value.semantic.baseIri)
 ));
@@ -576,7 +577,7 @@ function emptyDocument(): IriographDocumentV1 {
           ref="editor"
           v-model="document"
           hide-header
-          :runtime-context="mockProjectionRuntimeContext"
+          :runtime-context="projectionRuntimeContext"
           :title="documentTitle"
           :file-path="activeFilePath"
           :dirty="dirty"

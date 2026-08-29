@@ -149,7 +149,7 @@ Domain validationは[semantic-validation.md](./semantic-validation.md)のhost注
 
 Capability parameterは省略時をrequiredとし、`required: false`だけをoptionalとします。Optional bindingが省略された場合、そのbindingを参照するtemplate statementをadd/removeの双方で一文単位にskipします。値の推測や空文字列への置換は行いません。
 
-P1 editorはhostから取得処理ではなく、解決済みの`ResolvedAuthoringContext`と任意のresource IRI allocatorを受け取ります。Mockはstatic fixtureを注入します。Profile/vocabulary URIからcontextを取得するresolverはP2-01で実装します。
+Editorはhostから取得処理ではなく、解決済みの`ResolvedAuthoringContext`と任意のresource IRI allocatorを受け取ります。Mockはstatic fixtureを注入します。Profile/vocabulary URIからcontextを取得するresolverは`@iriograph/profile-resolver`で提供し、Hostのnetwork、tenant認証、immutable cacheは注入transportに留めます。
 
 Structured commandとLLM editが成功した場合は、candidate datasetを共通のversioned serializerで決定的なTurtleへ再生成します。LLMを含む直接source editは`applyAuthoringSource`へactorを明示して入力し、`actor: "llm"`はversioned serializerを通します。`actor: "human"`のTurtle textarea直接編集だけは妥当な原文をbyte単位で保持します。Comment、空白、改行、triple記述順は後のstructured commandまたはLLM再serialize時には保持を保証せず、reviewにはgraph単位のsemantic diffを用います。
 

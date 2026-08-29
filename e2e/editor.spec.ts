@@ -1213,8 +1213,8 @@ test("parallel/self-loopを個別選択しstraight/curve・端子・manual routi
   const connection = page.getByText("接続点と端子", { exact: true })
     .locator("xpath=ancestor::details");
   await connection.locator("summary").click();
-  await connection.locator("select").nth(0).selectOption("diamond");
-  await connection.locator("select").nth(1).selectOption("circle");
+  await connection.getByRole("combobox", { name: "始点の端子形状" }).selectOption("diamond");
+  await connection.getByRole("combobox", { name: "終点の端子形状" }).selectOption("circle");
   await expect(selfLoop.locator(".iriograph-edge-path")).toHaveAttribute("marker-start", /diamond/u);
   await expect(selfLoop.locator(".iriograph-edge-path")).toHaveAttribute("marker-end", /circle/u);
   expect(await readTurtle(page)).toBe(turtleBefore);

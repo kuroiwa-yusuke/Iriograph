@@ -146,7 +146,7 @@ header・message dash・timer/envelope iconの表現上限が残りました。�
 現行empty-overlayの42±5からは29点改善しており、閉じたoverlayだけで意味正本を変えず参照図へ寄せる実現性は再確認できました。
 この二結果はCore既定layoutへ逆輸入せず、モデル差・指示差・renderer capability差を分けるP2-09の証拠とします。
 
-残差のうち、封筒・timerの専用icon、色付き縦lane header、semantic predicate由来edge labelのview単位hideは、現行catalog/template・renderer契約だけでは参照図どおりに指定できません。これらを座標調整で偽装せず、catalog/profile/rendererの表現上限としてBPMN visual languageとconnector geometryから減点しています。P2-09の完了条件である3種類以上の参照図を各3回評価する検証は未達であり、この1図3反復の結果だけでbacklogを完了扱いにしません。
+残差のうち、封筒・timerの専用icon、色付き縦lane header、semantic predicate由来edge labelのview単位hideは、現行catalog/template・renderer契約だけでは参照図どおりに指定できません。これらを座標調整で偽装せず、catalog/profile/rendererの表現上限としてBPMN visual languageとconnector geometryから減点しています。この時点の1図3反復だけでは完了条件に達していなかったため、後述の3資料×3回を別実験として実施しました。
 
 #### 画像だけからTurtleとviewを作る独立再構成実験
 
@@ -220,7 +220,65 @@ message点線、短い直交connectorは現行catalogと生成overlayで再現�
 
 計測は初期指示1回、追加指示3回、tool call約29回、Playwright render 6回、画像確認3回、wall time約22分です。
 Agent runtimeはinput、cached/non-cached input、output、reasoning tokenと内部model cycleを公開しなかったため推測しません。
-この再実験も一画像一回の証拠に留まり、P2-12の完了条件である3資料以上を各3回には達していません。
+この再実験も当時は一画像一回の証拠に留まったため、後述の3資料×3回では同じ失敗分類を含む統一評価へ置き換えました。
+
+## P2-09・P2-12 3資料×3回の確定実験
+
+旧Pizza単体の試行とは別に、Pizza注文、購買承認、service architectureの3画像を固定し、medium 1回、高推論2回の各3runで再実験しました。参照assetとSHA-256は`docs/experiments/references`に置きます。既存`.iriograph`、Turtle、overlay、SVG原本は画像再構成agentへ見せていません。
+
+共通の画像再構成初期指示は一回だけです。
+
+```text
+指定した3枚のraster画像だけをdomain/visual evidenceとし、Iriograph v1 documentを各1件、一から作成する。
+既存.iriograph/Turtle/overlay/fixture/test/docs/SVG/過去成果物を読まない・検索しない。
+許可したRDF/RDFS profile、document/schema、validate/render contractだけを使い、Turtleとsparse overlayを分離する。
+要素、label、Group/membership、関係方向、resource連携、geometry/styleを画像から復元し、正規runtimeで検証する。
+不明値と取得不能なtelemetryを推測しない。
+```
+
+構造点はnode label F1 40、Group label F1 20、directed relation F1 30、membership F1 10です。画像点は正規化した同名landmark geometry 70、Group geometry 20、palette 10の決定的proxyで、perceptual modelの評価ではありません。
+
+| run | model/effort | 資料 | schema/runtime | 構造 | 画像 | error/warning |
+|---|---|---|---|---:|---:|---:|
+| medium-1 | gpt-5.6-terra / medium | Pizza | schema可・Scene拒否 | 0.00 | 0.00 | 1/0 |
+| medium-1 | 同上 | 購買承認 | schema可・Scene拒否 | 0.00 | 0.00 | 1/0 |
+| medium-1 | 同上 | Architecture | schema可・Scene拒否 | 0.00 | 0.00 | 1/0 |
+| high-1 | gpt-5.6-terra / high | Pizza | accepted | 67.09 | 62.80 | 0/0 |
+| high-1 | 同上 | 購買承認 | accepted | 94.78 | 57.06 | 0/0 |
+| high-1 | 同上 | Architecture | accepted | 86.57 | 42.11 | 0/0 |
+| high-2 | gpt-5.6-terra / high | Pizza | accepted | 73.07 | 45.61 | 0/9 |
+| high-2 | 同上 | 購買承認 | accepted | 93.33 | 55.82 | 0/0 |
+| high-2 | 同上 | Architecture | accepted | 78.50 | 51.60 | 0/0 |
+
+Mediumは3件とも存在しない`urn:iriograph:layout:standard-lr:1`を生成し、正規runtimeの`layout-adapter-unresolved`で拒否されました。Agent自身の簡易検証を合格扱いせず、構造・画像点を0とします。High-2 Pizzaの9 warningは8件の`region-member-outside`と1件のroute未解決です。High-1/2もfull profileでpredicate定義を可視nodeにした例があり、画像上にない語彙nodeは構造precisionとbrowser目視で減点します。
+
+再構成の追加指示は全run 0回です。Tool/validationはmediumが16 outer exec・19 nested call・4 cycle、high-1がexec 15・画像3・patch 3・1 validation cycle、high-2がouter exec 25・nested exec 26・画像3・patch 9・6 validation cycleです。High-2は成果物生成時刻基準で4分18秒、他のwall timeは取得不能です。Input/cached/output/reasoning tokenは全3runでruntimeから公開されず、推測しません。
+
+P2-09はHigh-1の意味document/Sceneを共通baselineにし、reference画像とopaque Scene index、閉じたcapabilityだけを別agentへ渡しました。共通指示は次です。
+
+```text
+Turtleとsemantic structureを変更せず、read-only Sceneと参照画像からsparse presentation candidateだけを作る。
+任意CSS/URL、未登録asset、semantic writeを使わず、指定binding・field・routing budget内に収める。
+公式validatePresentationCandidateを通し、対象外情報やsource IRIを外部DTOへ出さない。
+```
+
+Raw SceneのIRI-shaped IDがopaque境界に合わない問題は`PresentationSceneBridge`で確定的aliasへ変換し、承認patchだけをHost内部でsource overlay IDへ戻しました。初期指示は各run 1回、利用者のfollow-upは0回です。Validator適合の追加指示はmedium/high-1/high-2で3/2/2回でした。Token、medium/high-1のcycle・wall timeは取得不能です。High-2 reportはtool 22回、1 cycleです。
+
+| run | 資料 | accepted changes/fields | 画像 before | after | 差 |
+|---|---|---:|---:|---:|---:|
+| medium-1 | Pizza | 11/48 | 62.80 | 66.33 | +3.53 |
+| medium-1 | 購買承認 | 11/56 | 57.06 | 61.75 | +4.69 |
+| medium-1 | Architecture | 12/60 | 42.11 | 74.35 | +32.24 |
+| high-1 | Pizza | 19/19 | 62.80 | 85.14 | +22.34 |
+| high-1 | 購買承認 | 13/13 | 57.06 | 92.19 | +35.13 |
+| high-1 | Architecture | 12/12 | 42.11 | 91.79 | +49.68 |
+| high-2 | Pizza | 19/104 | 62.80 | 63.21 | +0.41 |
+| high-2 | 購買承認 | 13/73 | 57.06 | 57.06 | +0.00 |
+| high-2 | Architecture | 12/81 | 42.11 | 60.48 | +18.37 |
+
+全9 candidateは公式validatorでaccepted、Turtle SHA-256不変です。Local Mock実Chromiumへ全9件を取り込み、全て`valid`、console/page/request error 0でした。P2-12も全9件を実Browserで確認し、High-1/2の6件はvalid、mediumの3件は期待どおりlayout errorで空Scene、browser error 0でした。Screenshot/reportは`.tmp/experiments/mock-runs`に生成し、再現scriptは`scripts/experiments`に置きます。
+
+High-2がhigh-1を常に上回らず、style fieldを大量に変更してもgeometry proxyが改善しないrunがあります。Model effortやpatch量を精度の代理にせず、closed validation、構造点、画像点、browser結果を併記します。生成物、prompt、座標をCore layout/catalogの既定規則へ逆輸入しません。
 
 ## Test追加規則
 

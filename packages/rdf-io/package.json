@@ -1,0 +1,60 @@
+{
+  "name": "@iriograph/rdf-io",
+  "version": "0.11.0",
+  "description": "Framework-independent RDF dataset import, merge, rebase, and semantic export for Iriograph.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
+    "directory": "packages/rdf-io"
+  },
+  "homepage": "https://github.com/kuroiwa-yusuke/Iriograph#readme",
+  "bugs": {
+    "url": "https://github.com/kuroiwa-yusuke/Iriograph/issues"
+  },
+  "keywords": [
+    "rdf",
+    "turtle",
+    "json-ld",
+    "dataset",
+    "semantic-graph"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@types/n3": "^1.26.0",
+    "jsonld": "^9.0.0",
+    "n3": "^1.26.0"
+  },
+  "devDependencies": {
+    "@types/jsonld": "^1.5.15"
+  }
+}

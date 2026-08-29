@@ -218,6 +218,8 @@ Region、Seq、通常containerの移動と8-handle resizeは、意味上のmembe
 
 `rdfs:comment`は意味graphから導出するannotationであり、view overlayへ本文を複製しません。既定はhoverまたはkeyboard focusで全文tooltipを表示し、session/viewの「コメントをすべて表示」で折り返したcalloutを表示します。Stable comment layoutを選んだviewは非表示時も同じcallout boundsをlayout obstacleとして予約し、表示toggleでnodeやedgeが動かないようにします。Region背景は障害物にせず、通常nodeとcomment calloutの重なりを避けます。
 
+View-local注記はtoolbarまたは空白context menuから追加し、Canvas上で移動・resize・編集します。Semantic commentとは見た目と編集入口を分け、削除してもTurtleを変更しません。Semantic literal annotationはcatalog許可時だけ表示し、locale別値の編集は意味Inspectorへ戻します。
+
 ## 順序と分岐
 
 `rdf:Seq`は薄い外枠の順序付きgroupと各memberの番号badgeで表示し、通常の関係線とは区別します。`rdfs:label`はgroup headerへ一度だけ表示し、member間のedgeやAlt branch edgeのlabelへ転記しません。`所属・並び順を編集`を開く前は順序・包含候補を展開せず、Seq groupまたはそのmemberをCanvasで選択した後だけ、label付きcardの追加・上下移動・除外を表示します。利用者に`rdf:_1`等のpredicateやIRI改行textareaを表示せず、確定時は標準`rdf:Seq`/`rdf:_n`を`set-sequence`で一括再構成します。

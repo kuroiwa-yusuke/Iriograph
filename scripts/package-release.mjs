@@ -2,15 +2,29 @@ import { readFile } from "node:fs/promises";
 
 export const releasePackagePaths = Object.freeze([
   "packages/core/package.json",
+  "packages/rdf-io/package.json",
+  "packages/profile-resolver/package.json",
   "packages/semantic-access/package.json",
   "packages/layout-elk/package.json",
+  "packages/profile-kit/package.json",
+  "packages/presentation-tools/package.json",
+  "packages/host-conformance/package.json",
+  "packages/icons-aws/package.json",
+  "packages/agent-bridge/package.json",
   "packages/vue-editor/package.json",
 ]);
 
 export const releasePackageNames = Object.freeze([
   "@iriograph/core",
+  "@iriograph/rdf-io",
+  "@iriograph/profile-resolver",
   "@iriograph/semantic-access",
   "@iriograph/layout-elk",
+  "@iriograph/profile-kit",
+  "@iriograph/presentation-tools",
+  "@iriograph/host-conformance",
+  "@iriograph/icons-aws",
+  "@iriograph/agent-bridge",
   "@iriograph/vue-editor",
 ]);
 
@@ -45,9 +59,10 @@ export function verifyReleasePackageVersions(packages, requestedVersion) {
     if (manifest.version !== expectedVersion) {
       throw new Error(`${path} must use lockstep version ${expectedVersion}, got ${manifest.version}`);
     }
-    const coreVersion = manifest.dependencies?.["@iriograph/core"];
-    if (manifest.name !== "@iriograph/core" && coreVersion !== expectedVersion) {
-      throw new Error(`${path} must depend on exact @iriograph/core ${expectedVersion}`);
+    for (const [dependencyName, dependencyVersion] of Object.entries(manifest.dependencies ?? {})) {
+      if (releasePackageNames.includes(dependencyName) && dependencyVersion !== expectedVersion) {
+        throw new Error(`${path} must depend on exact ${dependencyName} ${expectedVersion}`);
+      }
     }
   }
 

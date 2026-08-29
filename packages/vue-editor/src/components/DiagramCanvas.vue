@@ -20,6 +20,7 @@ import type {
   Point,
   ProjectionDiagnostic,
   SceneContainer,
+  SceneAnnotation,
   SceneEdge,
   SceneGroupGuide,
   SceneNode,
@@ -110,7 +111,7 @@ import {
   constrainIconPresentationResize,
   constrainMembershipRegionMovement,
 } from "../region-membership-constraints";
-import type { CanvasDragMode } from "../view-session";
+import type { CanvasDragMode, CollapsedGroupSummary } from "../view-session";
 import type { DiagramNodeTypeTagPresentation } from "../type-system";
 
 const props = withDefaults(defineProps<{
@@ -119,6 +120,7 @@ const props = withDefaults(defineProps<{
   sceneSessionKey?: string;
   selectedElementId?: string;
   selectedElementIds?: string[];
+  selectedAnnotationId?: string;
   zoom?: number;
   readOnly?: boolean;
   snap?: DiagramSnapSettings;
@@ -142,6 +144,8 @@ const props = withDefaults(defineProps<{
   nodeTypeTags?: Readonly<Record<string, DiagramNodeTypeTagPresentation>>;
   /** Session-only highlight; never copied into Scene or view overlay. */
   typeHighlightElementIds?: readonly string[];
+  /** Session-only aggregate badges for folded group frames. */
+  collapsedGroupSummaries?: Readonly<Record<string, CollapsedGroupSummary>>;
   /** Session-only meaning of primary blank/group-interior drag. */
   dragMode?: CanvasDragMode;
   /** Ephemeral semantic preview only; never part of Scene or the document. */
@@ -153,6 +157,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   selectedElementId: "",
   selectedElementIds: () => [],
+  selectedAnnotationId: "",
   zoom: 1,
   readOnly: false,
   snap: () => normalizeDiagramSnapSettings(),
@@ -171,6 +176,7 @@ const props = withDefaults(defineProps<{
   showGrid: true,
   nodeTypeTags: () => ({}),
   typeHighlightElementIds: () => [],
+  collapsedGroupSummaries: () => ({}),
   dragMode: "select",
   deletionPreviewResourceRefs: () => [],
   deletionPreviewStatementRefs: () => [],
@@ -226,6 +232,8 @@ const emit = defineEmits<{
     typeId: string;
     resourceId: string;
   }];
+  annotationRequest: [payload: { annotationId: string; annotationKind: "semantic-literal" | "view"; anchorElementId?: string }];
+  annotationGeometryChange: [payload: { annotationId: string; geometry: ElementGeometry }];
   /** @deprecated Use routingUpdate for the complete sparse routing value. */
   routingChange: [payload: { elementId: string; waypoints: Point[] }];
 }>();
@@ -946,6 +954,43 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
     if (pendingChanges.length > 0) {
       emit("geometryBatchChange", pendingChanges);
       for (const change of pendingChanges) emit("geometryChange", change);
+    }
+  });
+}
+
+function annotationGeometry(annotation: SceneAnnotation): ElementGeometry {
+  return previewGeometries.value[annotation.elementId] ?? annotation.geometry;
+}
+
+function startAnnotationMove(event: PointerEvent, annotation: SceneAnnotation): void {
+  event.preventDefault();
+  event.stopPropagation();
+  emit("annotationRequest", {
+    annotationId: annotation.annotationId,
+    annotationKind: annotation.annotationKind,
+    anchorElementId: annotation.anchorElementId,
+  });
+  if (props.readOnly || event.button !== 0 || annotation.annotationKind !== "view") return;
+  emit("gestureStart");
+  const origin = { x: event.clientX, y: event.clientY };
+  const initial = { ...annotation.geometry };
+  let pending = initial;
+  trackPointer((moveEvent) => {
+    pending = {
+      ...initial,
+      x: Math.max(0, initial.x + (moveEvent.clientX - origin.x) / props.zoom),
+      y: Math.max(0, initial.y + (moveEvent.clientY - origin.y) / props.zoom),
+    };
+    previewGeometries.value = {
+      ...previewGeometries.value,
+      [annotation.elementId]: pending,
+    };
+  }, (cancelled) => {
+    const next = { ...previewGeometries.value };
+    delete next[annotation.elementId];
+    previewGeometries.value = next;
+    if (!cancelled && (pending.x !== initial.x || pending.y !== initial.y)) {
+      emit("annotationGeometryChange", { annotationId: annotation.annotationId, geometry: pending });
     }
   });
 }
@@ -3563,6 +3608,11 @@ defineExpose<DiagramCanvasNavigationApi>({
             </span>
             <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(' ／ ') }}</span>
             <span v-if="commentsFor(region.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: region.style.labelFontSize ? `${region.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(region.semanticRef) }}</span>
+            <span
+              v-if="collapsedGroupSummaries[region.elementId]"
+              class="iriograph-collapsed-group-badge"
+              :title="collapsedGroupSummaries[region.elementId]!.hiddenLabels.join('、')"
+            >{{ collapsedGroupSummaries[region.elementId]!.hiddenElementIds.length }}件</span>
           </div>
 
           <div
@@ -3640,6 +3690,11 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span v-if="commentsFor(container.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: container.style.labelFontSize ? `${container.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(container.semanticRef) }}</span>
             <span v-if="sequenceMemberBadges(container.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(container.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
             <span v-if="defaultAlternativeBadges(container.elementId).length" class="iriograph-alternative-default-badges" :aria-label="`${defaultAlternativeBadges(container.elementId).map((badge) => badge.label).join('、')}の既定候補`"><span v-for="badge in defaultAlternativeBadges(container.elementId)" :key="badge.key" :title="`${badge.label}の既定候補`">既定</span></span>
+            <span
+              v-if="collapsedGroupSummaries[container.elementId]"
+              class="iriograph-collapsed-group-badge"
+              :title="collapsedGroupSummaries[container.elementId]!.hiddenLabels.join('、')"
+            >{{ collapsedGroupSummaries[container.elementId]!.hiddenElementIds.length }}件</span>
           </div>
 
           <svg
@@ -3911,6 +3966,37 @@ defineExpose<DiagramCanvasNavigationApi>({
             <span v-if="sequenceMemberBadges(node.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
             <span v-if="defaultAlternativeBadges(node.elementId).length" class="iriograph-alternative-default-badges" :aria-label="`${defaultAlternativeBadges(node.elementId).map((badge) => badge.label).join('、')}の既定候補`"><span v-for="badge in defaultAlternativeBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の既定候補`">既定</span></span>
           </div>
+
+          <button
+            v-for="annotation in scene.annotations ?? []"
+            :key="annotation.elementId"
+            type="button"
+            class="iriograph-scene-annotation"
+            :class="[
+              `kind-${annotation.annotationKind}`,
+              { selected: selectedAnnotationId === annotation.annotationId, detached: Boolean(annotation.detachedAnchorElementId) },
+            ]"
+            :style="{
+              left: `${canvasPosition(annotationGeometry(annotation)).x}px`,
+              top: `${canvasPosition(annotationGeometry(annotation)).y}px`,
+              width: `${annotationGeometry(annotation).width}px`,
+              minHeight: `${annotationGeometry(annotation).height}px`,
+              background: annotation.style.fill,
+              borderColor: annotation.style.stroke,
+              color: annotation.style.text,
+              fontSize: annotation.style.labelFontSize ? `${annotation.style.labelFontSize}px` : undefined,
+            }"
+            :title="annotation.detachedAnchorElementId ? '接続先が見つからないため注記を単独表示しています' : undefined"
+            @pointerdown="startAnnotationMove($event, annotation)"
+            @click.stop="emit('annotationRequest', {
+              annotationId: annotation.annotationId,
+              annotationKind: annotation.annotationKind,
+              anchorElementId: annotation.anchorElementId,
+            })"
+          >
+            <small>{{ annotation.annotationKind === 'semantic-literal' ? (annotation.language || annotation.datatypeIri || '意味の注記') : 'ビュー注記' }}</small>
+            <span>{{ annotation.text }}</span>
+          </button>
 
           <svg class="iriograph-edge-interaction-layer" :width="workArea.width" :height="workArea.height" :viewBox="workAreaViewBox()">
             <path

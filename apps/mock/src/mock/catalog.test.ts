@@ -8,6 +8,7 @@ import {
   standardWorkflowCatalog,
   standardWorkflowClassificationRegionCatalog,
   standardWorkflowInstanceFlowCatalog,
+  standardRdfRdfsCatalog,
   workflowIconRefs,
 } from "@iriograph/core";
 
@@ -15,15 +16,31 @@ import {
   mockProjectionCatalog,
   mockClassificationRegionProjectionCatalog,
   mockInstanceFlowProjectionCatalog,
+  mockReferenceWorkflowFixture,
+  mockReferenceWorkflowProfile,
 } from "./catalog";
+import { runDomainProfileConformance } from "@iriograph/profile-kit";
 
 describe("normalized RDF/RDFS mock", () => {
+  it("配布可能なdomain profileを共通kitから読み込める", async () => {
+    const result = await runDomainProfileConformance(
+      mockReferenceWorkflowProfile,
+      mockReferenceWorkflowFixture,
+      [{
+        catalogRef: catalogRef(standardWorkflowInstanceFlowCatalog),
+        catalog: standardWorkflowInstanceFlowCatalog,
+      }],
+    );
+    expect(result.accepted).toBe(true);
+  });
+
   it("package-owned workflow catalog presetをそのまま利用する", () => {
     expect(mockProjectionCatalog).toBe(standardWorkflowCatalog);
     expect(mockInstanceFlowProjectionCatalog).toBe(standardWorkflowInstanceFlowCatalog);
     expect(mockClassificationRegionProjectionCatalog).toBe(
       standardWorkflowClassificationRegionCatalog,
     );
+    expect(catalogRef(standardRdfRdfsCatalog)).toBe("urn:iriograph:catalog:rdf-rdfs@1");
     expect(catalogRef(mockProjectionCatalog)).toBe("urn:iriograph:catalog:workflow@1");
     expect(catalogRef(mockInstanceFlowProjectionCatalog))
       .toBe("urn:iriograph:catalog:workflow-instance-flow@1");

@@ -20,11 +20,23 @@ describe("atomic ViewCommand", () => {
       profileRef: standardRdfRdfsCatalog.profileRef,
       layoutRef: STANDARD_LAYOUT_REFS.hierarchicalTb,
       locale: "en",
+      scope: {
+        rootSemanticRefs: ["urn:test:view:a"],
+        direction: "outgoing",
+        depth: 0,
+      },
     }, runtimeContext());
 
     expect(result.accepted).toBe(true);
     expect(result.affectedViewId).toBe("review");
     expect(result.document.views).toHaveLength(2);
+    expect(result.document.views[1]!.scope).toEqual({
+      rootSemanticRefs: ["urn:test:view:a"],
+      direction: "outgoing",
+      depth: 0,
+    });
+    expect(Object.values(result.document.views[1]!.overlay).map(({ semanticRef }) => semanticRef))
+      .toEqual(["urn:test:view:a"]);
     expect(Object.keys(result.document.views[1]!.overlay).length).toBeGreaterThan(0);
     expect(source.views).toHaveLength(1);
   });
@@ -61,6 +73,54 @@ describe("atomic ViewCommand", () => {
     expect(result.accepted).toBe(true);
     expect(result.document.views[0]!.locale).toBe("en-US");
     expect(JSON.stringify(result.document.views[0]!.overlay)).toBe(overlayJson);
+  });
+
+  it("configures, keeps, and removes scope while rebuilding only the target view", async () => {
+    const source = documentFor();
+    source.views.push({
+      ...structuredClone(source.views[0]!),
+      viewId: "broken-sibling",
+      profileRef: "urn:test:profile:missing",
+    });
+    const siblingJson = JSON.stringify(source.views[1]);
+    const context = runtimeContext();
+    const scope = {
+      rootSemanticRefs: ["urn:test:view:a"],
+      predicateIris: ["urn:test:view:p"],
+      direction: "outgoing" as const,
+      depth: 0,
+    };
+
+    const scoped = await applyViewCommand(source, {
+      command: "configure",
+      viewId: "main",
+      scope,
+    }, context);
+    expect(scoped.accepted).toBe(true);
+    expect(scoped.document.views[0]!.scope).toEqual(scope);
+    expect(Object.values(scoped.document.views[0]!.overlay).map(({ semanticRef }) => semanticRef))
+      .toEqual(["urn:test:view:a"]);
+    expect(JSON.stringify(scoped.document.views[1])).toBe(siblingJson);
+
+    const kept = await applyViewCommand(scoped.document, {
+      command: "configure",
+      viewId: "main",
+      locale: "en",
+    }, context);
+    expect(kept.accepted).toBe(true);
+    expect(kept.document.views[0]!.scope).toEqual(scope);
+    expect(kept.document.views[0]!.overlay).toEqual(scoped.document.views[0]!.overlay);
+
+    const unscoped = await applyViewCommand(kept.document, {
+      command: "configure",
+      viewId: "main",
+      scope: null,
+    }, context);
+    expect(unscoped.accepted).toBe(true);
+    expect(unscoped.document.views[0]!.scope).toBeUndefined();
+    expect(Object.values(unscoped.document.views[0]!.overlay)
+      .some(({ semanticRef }) => semanticRef === "urn:test:view:b")).toBe(true);
+    expect(JSON.stringify(unscoped.document.views[1])).toBe(siblingJson);
   });
 
   it("reconciles only the configured target and leaves an invalid sibling byte-exact", async () => {
@@ -219,6 +279,18 @@ describe("atomic ViewCommand", () => {
     }, runtimeContext());
     expect(locale.accepted).toBe(false);
     expect(locale.document).toEqual(source);
+
+    const scope = await applyViewCommand(source, {
+      command: "configure",
+      viewId: "main",
+      scope: { depth: -1 },
+    }, runtimeContext());
+    expect(scope.accepted).toBe(false);
+    expect(scope.document).toEqual(source);
+    expect(scope.diagnostics).toContainEqual(expect.objectContaining({
+      code: "view-schema-invalid",
+      semanticRef: "main",
+    }));
   });
 });
 

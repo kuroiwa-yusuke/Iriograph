@@ -102,7 +102,7 @@ Font size、label offset、icon scaleのようなoverlay-only編集は、このm
 
 通常規模を超えるviewではlayoutだけでなく描画量を抑えます。Viewport外elementのvirtualization、低zoom時のlabel/icon省略、edge bundle、container単位の折り畳みを段階的に適用します。
 
-LODは意味graphを削除しません。Session-onlyの可視集合とderived aggregateを作り、元のsemantic identityへ戻れる対応表を維持します。Validationは全graphへ行い、temporary hideやLODをerror回避に使いません。折り畳みやsubgraph navigationのdocument契約はP3-03で確定します。
+LODは意味graphを削除しません。Session-onlyの可視集合とderived aggregateを作り、元のsemantic identityへ戻れる対応表を維持します。Validationは全graphへ行い、temporary hideやLODをerror回避に使いません。折り畳みと階層navigationはsession-onlyで実装済みで、shortcut edgeを生成せずdocument、overlay、dirty/historyを変更しません。
 
 ## 3. Adapter方針
 
@@ -177,7 +177,7 @@ Fixtureとsample数を変更する場合はbudgetを暗黙に維持せず、同�
 
 標準adapterは任意のobserverで`placement`、初期route、refinement、compaction、bounds、合計時間、visibility探索回数、候補数、実際に初期routeを生成したedge数、固定再利用したderived route数を計測できます。Observerは観測専用で、throwしてもlayoutを失敗させません。Route obstacleはendpoint pairでcacheし、route state Mapは他routeのboundsを初期化時と採用時だけ計算します。共有endpoint geometryもedge pair単位でcacheし、候補の辞書順第一成分であるnode本体交差をedge相互作用より先に計算します。本体交差0のrouteはpeer集合を構築せずrefinement対象外とし、交差ありの場合だけ従来どおり全peerを含む正逆passへ進みます。候補boundsとsignatureは各候補一回だけ求め、障害物bounds判定もsegmentごとに反復しません。この枝刈りは候補集合、正逆pass、同点時のroute signature、stable ID順を変更しません。
 
-Core CI gateはpizza、24 node/23 edgeの疎small、24 node/120 edgeの密smallを一回warmup後5回測り、projectionからsettled Sceneまでのp95を300 ms未満とします。2026-08-28の固定Docker実測はpizza 45.08 ms、疎small 6.47 ms、密small 218.11 msです。全fixtureで非endpoint node交差0、endpoint内部進入0、edge overlap 0、生成route最大3点を要求し、保守的な曲線segment近似のcrossing上限はpizza 11、疎small 0、密small 398です。現結果は順に11、0、357です。Pizzaは別の実SVG E2Eでも交差10、route-node交差0を固定し、曲線samplingの近似差とrenderer結果を混同しません。
+Core CI gateはpizza、24 node/23 edgeの疎small、24 node/120 edgeの密smallを一回warmup後5回測り、projectionからsettled Sceneまでのp95を300 ms未満とします。2026-08-29の固定Docker実測はpizza 68.89 ms、疎small 10.21 ms、密small 230.26 msです。全fixtureで非endpoint node交差0、endpoint内部進入0、edge overlap 0、生成route最大3点を要求し、保守的な曲線segment近似のcrossing上限はpizza 11、疎small 0、密small 398です。現結果は順に11、0、364です。96 edgeを超える密graphではbody/reservation衝突のない最大一pivot routeのquadratic exhaustive compactionを省き、最終family selectorへ委譲します。Pizzaは別の実SVG E2Eでも交差10、route-node交差0を固定し、曲線samplingの近似差とrenderer結果を混同しません。
 
 Label置換、code-point順を保つopaque IRI写像、60 nodeを2つの`rdf:Bag`へ分けた非pizza包含fixtureでも同じ品質を検証します。Core layoutはTurtle、label、predicate、pizza namespaceを入力に取らず、Projection後のgeometry・membership・endpointだけで処理します。
 

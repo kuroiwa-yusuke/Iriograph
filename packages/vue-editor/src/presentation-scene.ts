@@ -10,6 +10,7 @@ import {
   type ProjectedEdge,
   type ProjectedScene,
   type SceneContainer,
+  type SceneAnnotation,
   type SceneEdge,
   type SceneNode,
   type SceneRegion,
@@ -85,7 +86,18 @@ export function reconcilePresentationScene(
     currentElements,
     nextElements,
   ));
-  const dimensions = presentationDimensions(current, [...nextElements.values()], edges);
+  const currentAnnotations = new Map((current.annotations ?? []).map((annotation) => [annotation.elementId, annotation]));
+  const annotations: SceneAnnotation[] = (projected.annotations ?? []).map((annotation) => {
+    const previous = currentAnnotations.get(annotation.elementId);
+    return {
+      ...annotation,
+      geometry: copyGeometry(annotation.geometry ?? previous?.geometry ?? defaultGeometry(annotation.defaultSize)),
+      anchorOffset: copyPoint(annotation.anchorOffset),
+      style: structuredClone(annotation.style),
+      provenance: structuredClone(annotation.provenance),
+    };
+  });
+  const dimensions = presentationDimensions(current, [...nextElements.values(), ...annotations], edges);
   return {
     viewId: projected.viewId,
     width: dimensions.width,
@@ -97,6 +109,8 @@ export function reconcilePresentationScene(
       ...membership,
       provenance: { ...membership.provenance },
     })),
+    groupGuides: (projected.groupGuides ?? []).map((guide) => structuredClone(guide)),
+    annotations,
     edges,
     // Presentation-only reconciliation deliberately does not run the layout
     // adapter. Carry semantic/projection diagnostics forward, but drop layout
@@ -142,6 +156,8 @@ function reconcileEdge(
     labelOffset: copyPoint(projected.labelOffset),
     sourceAnchor: copyAnchor(projected.sourceAnchor),
     targetAnchor: copyAnchor(projected.targetAnchor),
+    sourcePortId: projected.sourcePortId,
+    targetPortId: projected.targetPortId,
     routeMode: projected.routeMode,
     sourceMarker: projected.sourceMarker,
     targetMarker: projected.targetMarker,
@@ -304,19 +320,23 @@ function sameRouting(left: SceneEdge, right: SceneEdge): boolean {
     curve: left.curve,
     sourceAnchor: left.sourceAnchor,
     targetAnchor: left.targetAnchor,
+    sourcePortId: left.sourcePortId,
+    targetPortId: left.targetPortId,
     routeMode: left.routeMode,
   }) === JSON.stringify({
     waypoints: right.waypoints,
     curve: right.curve,
     sourceAnchor: right.sourceAnchor,
     targetAnchor: right.targetAnchor,
+    sourcePortId: right.sourcePortId,
+    targetPortId: right.targetPortId,
     routeMode: right.routeMode,
   });
 }
 
 function presentationDimensions(
   current: DiagramScene,
-  elements: readonly GeometrySceneElement[],
+  elements: readonly { geometry: ElementGeometry }[],
   edges: readonly SceneEdge[],
 ): { width: number; height: number } {
   const points = edges.flatMap((edge) => edge.route ?? []);

@@ -72,6 +72,10 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 - `docs/editor-interactions.md`: context menu、details dialog、appearance、意味操作の人間向けinteraction仕様。
 - `docs/spatial-membership.md`: 階層containerと多対多region membershipの空間文法。
 - `docs/semantic-access.md`: label-first索引、revision alias、LLM read/write wrapperの仕様。
+- `docs/agent-integration.md`: profile解決、semantic transport、agent routing、外部候補reviewの仕様。
+- `docs/rdf-io.md`: Turtle/JSON-LD import、merge、明示rebase、exportの仕様。
+- `docs/domain-profiles.md`: domain profile kitとvendor icon catalogの配布境界。
+- `docs/host-conformance.md`: packageとhostの共通deploy gate。
 - `docs/distribution.md`: package配布、lockstep version、依存licenseの方針。
 - `docs/backlog.md`: 未実装事項、優先度、依存、完了条件。
 
@@ -104,7 +108,7 @@ Iriographは、Turtleで保持する意味グラフをcatalog規則で表示Scen
 
 Package公開と利用hostへの反映まで依頼された場合は、上記に続けて次を行う。
 
-7. 公開packageをlockstep versionへ更新し、tarball consumer検証後にprivate registryへpublishする。CodeArtifact login後は`@iriograph` scope registryを明示し、core、semantic access、ELK adapter、Vue editorの順にexact versionを確認する。既公開versionは変更せずskipし、未公開packageだけをpublishする。認証・network・不正応答を未公開扱いにせず、上書きや別registryへのfallbackを行わない。
+7. 公開packageをlockstep versionへ更新し、tarball consumer検証後にprivate registryへpublishする。CodeArtifact login後は`@iriograph` scope registryを明示し、`core`、`rdf-io`、`profile-resolver`、`semantic-access`、`layout-elk`、`profile-kit`、`presentation-tools`、`host-conformance`、`icons-aws`、`agent-bridge`、`vue-editor`の依存順でexact versionを確認する。既公開versionは変更せずskipし、未公開packageだけをpublishする。認証・network・不正応答を未公開扱いにせず、上書きや別registryへのfallbackを行わない。
 8. 利用hostは公開済みexact versionへ更新し、package sourceを複製しない。Host自身のtest/build/local起動を通してcommit/pushする。
 9. Deploy手順が依頼範囲なら、対象環境へdeployし、実行中commit、service health、公開画面の対象操作、browser consoleとservice logを確認する。
 

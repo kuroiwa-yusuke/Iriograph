@@ -75,6 +75,14 @@ exact IDだけを起点とし、containerの場合だけ全structural descendant
 新しいedgeを生成しません。Work areaは一つのgesture中も正負方向へ単調に拡張し、負方向では
 viewport位置を補正します。Fitはwork area全体でなく、負座標とrouteを含む実content boundsを使います。
 
+Group Frameの折り畳みもsession-onlyです。折り畳んだgroupはmemberとincident edgeを描画集合から外し、集約badgeとlabel-first一覧を示します。非表示nodeを跨ぐshortcut edgeは作らず、展開時にselection、diagnostic、comment、viewportを同じsemantic identityへ復元します。`[`/`]`と階層focus commandはCanvas composite内で動き、Turtle、overlay、dirty/historyを変更しません。
+
+## 永続scope
+
+Named viewの`scope`はroot、type、predicate、direction、depthの閉じた宣言です。全semantic graphを先に検証してから可視集合を決め、任意SPARQL/scriptや非表示nodeを跨ぐedgeを保存しません。Groupはownerと可視memberに必要な構造closureだけを残します。Seq/Altの一部しか見えない場合は`scopeTruncation`をSceneへ明示し、完全なGroupとして装いません。
+
+Scope変更は対象viewだけのpresentation commandで、Turtleと非対象viewを変更しません。Session折り畳みと違いscopeはportable documentへ保存されます。
+
 ## 標準Editorの管理UI
 
 左sidebarはactive viewを切り替えるcompact selectorだけを常時表示します。Viewが一件だけならselectorを
@@ -88,7 +96,7 @@ CancelまたはEscapeで閉じた場合は管理dialogへ戻して先頭control�
 
 ## 制限
 
-v1はviewごとのSPARQL、filter DSL、predicate条件式、非表示nodeを跨ぐedge再接続を持ちません。
+View scopeは閉じたroot/type/predicate/direction/depthだけを持ち、SPARQL、任意filter式、非表示nodeを跨ぐedge再接続を持ちません。
 表示構造の違いはcatalog profileで宣言し、個別要素の表示調整はoverlay、一時的な絞り込みは
 session-only hideで扱います。Structured authoringの構造候補はactive viewの
 profile/catalog/viewIdへbindします。Standard editorの`要素を追加`は初期位置を入力せず、

@@ -1,0 +1,60 @@
+{
+  "name": "@iriograph/icons-aws",
+  "version": "0.11.0",
+  "description": "Publishable metadata catalog and host-supplied resolvers for AWS Architecture Icons in Iriograph.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuroiwa-yusuke/Iriograph.git",
+    "directory": "packages/icons-aws"
+  },
+  "homepage": "https://github.com/kuroiwa-yusuke/Iriograph#readme",
+  "bugs": {
+    "url": "https://github.com/kuroiwa-yusuke/Iriograph/issues"
+  },
+  "keywords": [
+    "aws",
+    "architecture-icons",
+    "diagram",
+    "iriograph",
+    "metadata"
+  ],
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "catalog.manifest.json",
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "NOTICE.md"
+  ],
+  "scripts": {
+    "build": "node --check index.js",
+    "test:unit": "node --test test/catalog.test.mjs",
+    "test:core-compat": "node --test test/core-compat.test.mjs",
+    "test:types": "../../node_modules/.bin/tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext test/types.test.ts",
+    "test:tarball": "node test/tarball-consumer.mjs",
+    "test": "npm run test:unit && npm run test:tarball",
+    "verify": "node --check index.js && npm run test:types && npm run test:core-compat && npm test",
+    "prepack": "npm run test:unit"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./catalog.manifest.json": "./catalog.manifest.json",
+    "./NOTICE.md": "./NOTICE.md",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

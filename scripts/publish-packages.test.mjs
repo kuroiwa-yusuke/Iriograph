@@ -108,18 +108,16 @@ test("a partial release publishes only missing packages in dependency order", as
 
   assert.deepEqual(
     result.results.map(({ name, status }) => [name, status]),
-    [
-      ["@iriograph/core", "skipped"],
-      ["@iriograph/semantic-access", "published"],
-      ["@iriograph/layout-elk", "skipped"],
-      ["@iriograph/vue-editor", "published"],
-    ],
+    releasePackageNames.map((name) => [
+      name,
+      name === "@iriograph/core" || name === "@iriograph/layout-elk" ? "skipped" : "published",
+    ]),
   );
   assert.deepEqual(
     runner.calls
       .filter(([command]) => command === "publish")
       .map((args) => args[2]),
-    ["@iriograph/semantic-access", "@iriograph/vue-editor"],
+    releasePackageNames.filter((name) => name !== "@iriograph/core" && name !== "@iriograph/layout-elk"),
   );
 });
 
@@ -147,7 +145,10 @@ test("a publish race is accepted only after the exact version becomes visible", 
     logger: quietLogger,
   });
 
-  assert.equal(result.results[1].status, "skipped-after-race");
+  assert.equal(
+    result.results.find(({ name }) => name === "@iriograph/semantic-access")?.status,
+    "skipped-after-race",
+  );
   assert.deepEqual(result.results.map(({ name }) => name), releasePackageNames);
 });
 

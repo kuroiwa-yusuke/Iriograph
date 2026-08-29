@@ -6,12 +6,14 @@ import type {
   DiagramView,
   IriographDocument,
   Point,
+  ProjectedAnnotation,
   ProjectedContainer,
   ProjectedEdge,
   ProjectedNode,
   ProjectedRegion,
   ProjectionCatalogV1,
   ProjectionDiagnostic,
+  SceneAnnotation,
   SceneContainer,
   SceneEdge,
   SceneNode,
@@ -28,8 +30,16 @@ import {
 import { cachedIncrementalIriographView } from "./scene-cache.js";
 
 type GeometryElement = ProjectedNode | ProjectedContainer | ProjectedRegion;
-type ProjectedElement = GeometryElement | ProjectedEdge;
-type SceneElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
+type SemanticProjectedAnnotation = ProjectedAnnotation & {
+  annotationKind: "semantic-literal";
+  semanticRef: string;
+};
+type SemanticSceneAnnotation = SceneAnnotation & {
+  annotationKind: "semantic-literal";
+  semanticRef: string;
+};
+type ProjectedElement = GeometryElement | ProjectedEdge | SemanticProjectedAnnotation;
+type SceneElement = SceneNode | SceneContainer | SceneRegion | SceneEdge | SemanticSceneAnnotation;
 
 export type DisplayReconciliationResult = {
   accepted: boolean;
@@ -221,6 +231,7 @@ function preservedReconciledElementIds(
     nodes: ProjectedNode[];
     containers: ProjectedContainer[];
     regions?: ProjectedRegion[];
+    annotations?: ProjectedAnnotation[];
   },
   overlay: Readonly<Record<string, ViewElementOverlay>>,
 ): string[] {
@@ -228,11 +239,17 @@ function preservedReconciledElementIds(
     ...previous.nodes,
     ...previous.containers,
     ...(previous.regions ?? []),
+    ...semanticSceneAnnotations(previous),
   ].map((element) => [element.semanticRef, element.structuralKind]));
   const elementIdBySemantic = new Map(Object.entries(overlay).flatMap(([elementId, entry]) => (
     entry.geometry ? [[entry.semanticRef, elementId] as const] : []
   )));
-  return [...next.nodes, ...next.containers, ...(next.regions ?? [])]
+  return [
+    ...next.nodes,
+    ...next.containers,
+    ...(next.regions ?? []),
+    ...semanticProjectedAnnotations(next),
+  ]
     .flatMap((element) => (
       previousKindBySemantic.get(element.semanticRef) === element.structuralKind
         && elementIdBySemantic.has(element.semanticRef)
@@ -408,6 +425,7 @@ function edgeOnlyFallbackReason(
     nodes: ProjectedNode[];
     containers: ProjectedContainer[];
     regions?: ProjectedRegion[];
+    annotations?: ProjectedAnnotation[];
     memberships?: DiagramScene["memberships"];
   },
 ): DisplayReconciliationEvent["fallbackReason"] {
@@ -425,6 +443,7 @@ function sameVisibleStructure(
     nodes: ProjectedNode[];
     containers: ProjectedContainer[];
     regions?: ProjectedRegion[];
+    annotations?: ProjectedAnnotation[];
     memberships?: DiagramScene["memberships"];
   },
 ): boolean {
@@ -436,8 +455,10 @@ function sameVisibleStructure(
       structuralKind: element.structuralKind,
       parentElementId: "parentElementId" in element ? element.parentElementId : undefined,
       templateRef: element.templateRef,
-      label: element.label,
-      semanticText: element.semanticText,
+      label: "label" in element ? element.label : undefined,
+      semanticText: "semanticText" in element ? element.semanticText : undefined,
+      annotationKind: element.structuralKind === "annotation" ? element.annotationKind : undefined,
+      text: element.structuralKind === "annotation" ? element.text : undefined,
       shape: element.structuralKind === "node" ? element.shape : undefined,
       groupRole: element.structuralKind === "container" ? element.groupRole : undefined,
       headerPosition: element.structuralKind === "container" ? element.headerPosition : undefined,
@@ -463,10 +484,12 @@ function sameVisibleStructure(
     ...previous.containers,
     ...(previous.regions ?? []),
     ...previous.nodes,
+    ...semanticSceneAnnotations(previous),
   ])) === JSON.stringify(elementSignature([
     ...next.containers,
     ...(next.regions ?? []),
     ...next.nodes,
+    ...semanticProjectedAnnotations(next),
   ]))
     && JSON.stringify(membershipSignature(previous.memberships))
       === JSON.stringify(membershipSignature(next.memberships));
@@ -479,6 +502,7 @@ function preservePreviousGeometry(
     nodes: ProjectedNode[];
     containers: ProjectedContainer[];
     regions?: ProjectedRegion[];
+    annotations?: ProjectedAnnotation[];
   },
 ): Record<string, ViewElementOverlay> {
   const result = clone(overlay);
@@ -486,8 +510,14 @@ function preservePreviousGeometry(
     ...previous.containers,
     ...(previous.regions ?? []),
     ...previous.nodes,
+    ...semanticSceneAnnotations(previous),
   ].map((element) => [element.elementId, element]));
-  for (const element of [...next.containers, ...(next.regions ?? []), ...next.nodes]) {
+  for (const element of [
+    ...next.containers,
+    ...(next.regions ?? []),
+    ...next.nodes,
+    ...semanticProjectedAnnotations(next),
+  ]) {
     const oldElement = previousByElementId.get(element.elementId);
     if (!oldElement || oldElement.structuralKind !== element.structuralKind) continue;
     const existing = result[element.elementId];
@@ -510,6 +540,7 @@ function reconcileViewOverlay(
     containers: ProjectedContainer[];
     regions?: ProjectedRegion[];
     edges: ProjectedEdge[];
+    annotations?: ProjectedAnnotation[];
   },
   catalog: ProjectionCatalogV1,
 ): { overlay: Record<string, ViewElementOverlay>; diagnostics: ProjectionDiagnostic[] } {
@@ -520,6 +551,7 @@ function reconcileViewOverlay(
     ...previousScene.containers,
     ...(previousScene.regions ?? []),
     ...previousScene.edges,
+    ...semanticSceneAnnotations(previousScene),
   ].map((element) => [element.semanticRef, element]));
   const previousSemanticByElementId = new Map(
     [...previousElements.values()].map((element) => [element.elementId, element.semanticRef]),
@@ -529,6 +561,7 @@ function reconcileViewOverlay(
     ...(projected.regions ?? []),
     ...projected.nodes,
     ...projected.edges,
+    ...semanticProjectedAnnotations(projected),
   ];
   const nextSemanticByElementId = new Map(
     nextElements.map((element) => [element.elementId, element.semanticRef]),
@@ -836,7 +869,12 @@ function persistLayoutGeometry(
     ]),
   );
   const overlay: Record<string, ViewElementOverlay> = {};
-  for (const element of [...scene.containers, ...(scene.regions ?? []), ...scene.nodes]) {
+  for (const element of [
+    ...scene.containers,
+    ...(scene.regions ?? []),
+    ...scene.nodes,
+    ...semanticSceneAnnotations(scene),
+  ]) {
     const previous = bySemantic.get(element.semanticRef);
     const elementId = previous?.elementId ?? element.elementId;
     overlay[elementId] = {
@@ -859,6 +897,22 @@ function persistLayoutGeometry(
     overlay[previous.elementId] = entry;
   }
   return overlay;
+}
+
+function semanticProjectedAnnotations(
+  scene: { annotations?: ProjectedAnnotation[] },
+): SemanticProjectedAnnotation[] {
+  return (scene.annotations ?? []).filter((annotation): annotation is SemanticProjectedAnnotation => (
+    annotation.annotationKind === "semantic-literal" && annotation.semanticRef !== undefined
+  ));
+}
+
+function semanticSceneAnnotations(
+  scene: { annotations?: SceneAnnotation[] },
+): SemanticSceneAnnotation[] {
+  return (scene.annotations ?? []).filter((annotation): annotation is SemanticSceneAnnotation => (
+    annotation.annotationKind === "semantic-literal" && annotation.semanticRef !== undefined
+  ));
 }
 
 function normalizeRouting(

@@ -83,10 +83,13 @@ describe("target context menu", () => {
     const group = targetContextMenuEntries({ kind: "sequence-group", elementId: "seq-1" }, {
       hasGroupMembers: false,
       canChangeGroupOrder: false,
+      isGroupCollapsed: true,
     });
     expect(reason(group, "fit-group")).toContain("所属する要素");
     expect(reason(group, "bring-group-forward")).toContain("移動できません");
     expect(reason(group, "send-group-backward")).toContain("移動できません");
+    expect(reason(group, "collapse-group")).toContain("折り畳まれています");
+    expect(reason(group, "expand-group")).toBeUndefined();
   });
 
   it("pointer/keyboardで同じanchor modelを使いContextMenuとShift+F10を認識する", () => {
@@ -140,6 +143,8 @@ function groupActions(semanticAction: string): string[] {
     semanticAction,
     "group-view",
     "fit-group",
+    "collapse-group",
+    "expand-group",
     "bring-group-forward",
     "send-group-backward",
     "delete-group",

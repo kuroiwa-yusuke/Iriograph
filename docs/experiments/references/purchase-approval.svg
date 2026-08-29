@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs><marker id="a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0L9 4.5L0 9Z" fill="#334155"/></marker></defs>
+  <rect width="1200" height="760" fill="#f8fafc"/>
+  <g font-family="sans-serif" fill="#0f172a">
+    <rect x="40" y="40" width="1120" height="200" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="3"/><text x="62" y="76" font-size="24" font-weight="700">申請者</text>
+    <rect x="40" y="280" width="1120" height="200" rx="14" fill="#f0fdf4" stroke="#22c55e" stroke-width="3"/><text x="62" y="316" font-size="24" font-weight="700">上長</text>
+    <rect x="40" y="520" width="1120" height="200" rx="14" fill="#fff7ed" stroke="#f97316" stroke-width="3"/><text x="62" y="556" font-size="24" font-weight="700">経理</text>
+    <g fill="#fff" stroke="#64748b" stroke-width="2">
+      <circle cx="120" cy="150" r="30" fill="#dbeafe"/><rect x="205" y="105" width="180" height="90" rx="12"/><rect x="475" y="105" width="180" height="90" rx="12"/>
+      <rect x="205" y="335" width="180" height="90" rx="12"/><path d="M565 325L640 380L565 435L490 380Z" fill="#fef3c7"/><rect x="735" y="335" width="180" height="90" rx="12"/>
+      <rect x="475" y="575" width="180" height="90" rx="12"/><rect x="735" y="575" width="180" height="90" rx="12"/><circle cx="1050" cy="620" r="30" fill="#dcfce7"/>
+    </g>
+    <g text-anchor="middle" font-size="20"><text x="120" y="156">開始</text><text x="295" y="157">申請を書く</text><text x="565" y="145">証憑を添付</text><text x="565" y="171" font-size="15">PDF / 領収書</text><text x="295" y="387">内容を確認</text><text x="565" y="387">承認できる?</text><text x="825" y="387">差戻し通知</text><text x="565" y="627">予算を確認</text><text x="825" y="627">支払を登録</text><text x="1050" y="626">完了</text></g>
+    <g fill="none" stroke="#334155" stroke-width="3" marker-end="url(#a)"><path d="M150 150H205"/><path d="M385 150H475"/><path d="M565 195V335H385"/><path d="M385 380H490"/><path d="M640 380H735"/><path d="M565 435V575"/><path d="M655 620H735"/><path d="M915 620H1020"/><path d="M825 335V250H295V335"/></g>
+    <g font-size="16" font-weight="700"><text x="680" y="368">いいえ</text><text x="580" y="510">はい</text><text x="510" y="270">提出する</text><text x="490" y="238">差戻す</text></g>
+    <rect x="940" y="86" width="175" height="86" rx="10" fill="#fff" stroke="#94a3b8" stroke-dasharray="7 5"/><text x="1027" y="119" text-anchor="middle" font-size="16" font-weight="700">申請書</text><text x="1027" y="146" text-anchor="middle" font-size="14">金額・目的・証憑</text>
+    <path d="M655 150H940" fill="none" stroke="#64748b" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#a)"/>
+  </g>
+</svg>

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, toRaw, useId, watch } from "vue";
 
 import { SemanticAccessIndex } from "@iriograph/semantic-access";
+import { IRIOGRAPH_EDITOR_CAPABILITIES, IRIOGRAPH_EDITOR_PACKAGE_VERSION } from "../version";
 
 import {
   applyAuthoringSource,
@@ -52,6 +53,7 @@ import {
   type IriographDocument,
   type LayoutAdapterRegistry,
   type LayoutDirection,
+  type NamedViewScope,
   type NodeLabelWritingDirection,
   type Point,
   type ProjectionCatalogV1,
@@ -69,6 +71,7 @@ import {
   type SceneEdge,
   type SceneNode,
   type SceneRegion,
+  type SceneAnnotation,
   type StructuredAuthoringPresentation,
   type StructuredAuthoringRequest,
   type StructuredCanvasSelection,
@@ -79,7 +82,9 @@ import {
   type ViewElementOverlay,
   type VisualStyle,
   type VisualTemplate,
+  type VisualPort,
   type ViewCommand,
+  type ViewAnnotation,
 } from "@iriograph/core";
 
 import SemanticIntentPanel, {
@@ -144,6 +149,7 @@ import {
 } from "../viewport";
 import {
   createDiagramViewSession,
+  sceneWithCollapsedGroups,
   sceneWithTemporaryHiddenElements,
   type CanvasDragMode,
   type DiagramViewSession,
@@ -271,6 +277,8 @@ const props = withDefaults(defineProps<{
   pickAsset?: AssetPicker;
   snapSettings?: DiagramSnapSettingsInput;
   authoringContext?: ResolvedAuthoringContext;
+  /** Host-owned fail-closed reason for semantic writes; presentation editing remains available. */
+  semanticWriteDisabledReason?: string;
   semanticValidationContext?: ResolvedSemanticValidationContext;
   resourceIriAllocator?: ResourceIriAllocator;
   /** Host-owned identity allocator used only by "duplicate as a new diagram". */
@@ -297,6 +305,7 @@ const props = withDefaults(defineProps<{
   layoutRegistry: undefined,
   snapSettings: undefined,
   authoringContext: undefined,
+  semanticWriteDisabledReason: "",
   semanticValidationContext: undefined,
   resourceIriAllocator: undefined,
   documentIdentityAllocator: undefined,
@@ -343,6 +352,7 @@ const documentRebaseApplyButton = ref<HTMLButtonElement>();
 const documentRebaseDialogTitleId = `${useId()}-document-rebase-dialog-title`;
 const selectedElementId = ref("");
 const selectedElementIds = ref<string[]>([]);
+const selectedAnnotationId = ref("");
 const snapSettings = ref<DiagramSnapSettings>(normalizeDiagramSnapSettings(props.snapSettings));
 const zoom = ref(1);
 const zoomPresets = [.25, .5, .75, 1, 1.25, 1.5, 2] as const;
@@ -392,7 +402,17 @@ const viewForm = ref<{
   layoutRef: string;
   layoutDirection: LayoutDirection | "";
   locale: string;
-}>({ viewId: "", profileToken: "", layoutRef: "", layoutDirection: "LR", locale: "" });
+  scopeEnabled: boolean;
+  scopeRootSemanticRefs: string[];
+  scopeTypeIris: string[];
+  scopePredicateIris: string[];
+  scopeDirection: NonNullable<NamedViewScope["direction"]>;
+  scopeDepth: number;
+}>({
+  viewId: "", profileToken: "", layoutRef: "", layoutDirection: "LR", locale: "",
+  scopeEnabled: false, scopeRootSemanticRefs: [], scopeTypeIris: [], scopePredicateIris: [],
+  scopeDirection: "both", scopeDepth: 3,
+});
 const viewDialog = ref<HTMLFormElement>();
 const viewDialogInitialFocus = ref<HTMLElement>();
 const viewDialogTitleId = `${useId()}-view-dialog-title`;
@@ -496,10 +516,18 @@ const zoomListValue = computed(() => {
   const preset = zoomPresets.find((value) => Math.abs(value - zoom.value) < .001);
   return preset === undefined ? `current:${zoom.value}` : `zoom:${preset}`;
 });
+const collapsedSceneResult = computed(() => {
+  viewSessionRevision.value;
+  return sceneWithCollapsedGroups(
+    rawScene.value,
+    sessionFor(activeView.value?.viewId ?? "").collapsedGroupElementIds,
+  );
+});
+const collapsedGroupSummaries = computed(() => collapsedSceneResult.value.summaries);
 const scene = computed(() => {
   viewSessionRevision.value;
   return sceneWithTemporaryHiddenElements(
-    rawScene.value,
+    collapsedSceneResult.value.scene,
     sessionFor(activeView.value?.viewId ?? "").temporaryHiddenElementIds,
   );
 });
@@ -617,6 +645,19 @@ function profileDisplayLabel(profileRef: string | undefined): string {
 const selectedEdge = computed(() => selectedElement.value?.structuralKind === "edge"
   ? selectedElement.value
   : undefined);
+const selectedAnnotation = computed<SceneAnnotation | undefined>(() => (
+  (scene.value.annotations ?? []).find((annotation) => annotation.annotationId === selectedAnnotationId.value)
+));
+const selectedViewAnnotation = computed<ViewAnnotation | undefined>(() => (
+  activeView.value?.annotations?.[selectedAnnotationId.value]
+));
+const annotationAnchorOptions = computed(() => [
+  ...scene.value.nodes,
+  ...scene.value.containers,
+  ...(scene.value.regions ?? []),
+  ...scene.value.edges,
+].map((element) => ({ elementId: element.elementId, label: element.label || "名前なし" }))
+  .sort((left, right) => left.label.localeCompare(right.label, "ja")));
 const semanticMetadata = computed(() => semanticDisplayMetadata(draft.value));
 const edgeRouteModes = computed<Record<string, EdgeRouteMode>>(() => Object.fromEntries(
   scene.value.edges.map((edge) => [edge.elementId, routeModeFor(edge)]),
@@ -657,6 +698,25 @@ const selectedEdgeEndpointLabels = computed(() => {
     target: edgeEndpointLabel(edge.targetElementId, "終点"),
   };
 });
+function portOptionsFor(endpoint: "source" | "target"): VisualPort[] {
+  const edge = selectedEdge.value;
+  const catalog = activeCatalog.value;
+  if (!edge || !catalog) return [];
+  const elementId = endpoint === "source" ? edge.sourceElementId : edge.targetElementId;
+  const element = [
+    ...scene.value.nodes,
+    ...scene.value.containers,
+    ...(scene.value.regions ?? []),
+  ].find((candidate) => candidate.elementId === elementId);
+  return (element ? catalog.templates[element.templateRef]?.ports ?? [] : [])
+    .filter((port) => port.role === "both" || port.role === endpoint);
+}
+const selectedSourcePortOptions = computed(() => portOptionsFor("source"));
+const selectedTargetPortOptions = computed(() => portOptionsFor("target"));
+function portSideLabel(port: VisualPort): string {
+  const side = { top: "上", right: "右", bottom: "下", left: "左" }[port.side];
+  return `${port.label ?? "名称なし"}（${side} ${Math.round(port.position * 100)}%）`;
+}
 const regionZOrders = computed<Record<string, number>>(() => Object.fromEntries(
   (scene.value.regions ?? []).map((region, index) => [region.elementId, regionZOrderFor(region.elementId, index)]),
 ));
@@ -718,6 +778,7 @@ const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
 });
 const authoringBlockedReason = computed(() => {
   if (props.readOnly) return "読み取り専用のため意味グラフを編集できません。";
+  if (props.semanticWriteDisabledReason) return props.semanticWriteDisabledReason;
   if (!authoringContext.value) return "Hostからauthoring contextが提供されていません。";
   if (portableDocumentPending.value) return "Document全体のdraftを適用または破棄してください。";
   if (overlayPending.value) return "DocumentのView overlay draftを適用または破棄してください。";
@@ -737,11 +798,33 @@ const structuredPresentation = computed<StructuredAuthoringPresentation>(() => (
     ? structuredAuthoringPresentation(authoringContext.value)
     : EMPTY_STRUCTURED_AUTHORING_PRESENTATION
 ));
+const viewScopeRootOptions = computed(() => {
+  const graph = parseSemanticGraph(draft.value);
+  const iris = new Set<string>();
+  for (const quad of graph.quads) {
+    if (quad.subject.termType === "NamedNode") iris.add(quad.subject.value);
+    if (quad.object.termType === "NamedNode") iris.add(quad.object.value);
+  }
+  return [...iris].map((iri) => ({
+    iri,
+    label: semanticMetadata.value[iri]?.labels[0]?.value
+      ?? authoringContext.value?.terms.find((term) => term.iri === iri)?.label
+      ?? "名称未設定の要素",
+  })).sort((left, right) => left.label.localeCompare(right.label, "ja"));
+});
 const typeSystemIndex = computed(() => deriveTypeSystem(draft.value, {
   authoringProfile: authoringContext.value?.structuredAuthoring,
   locale: activeView.value?.locale ?? authoringContext.value?.defaultLocale,
   resourceIris: scene.value.nodes.map((node) => node.semanticRef),
 }));
+const viewScopeTypeOptions = computed(() => typeSystemIndex.value.presentation.types.flatMap((type) => {
+  const iri = typeSystemIndex.value.resolveTypeId(type.typeId);
+  return iri ? [{ iri, label: type.label }] : [];
+}));
+const viewScopePredicateOptions = computed(() => (authoringContext.value?.terms ?? [])
+  .filter((term) => term.kind === "property")
+  .map((term) => ({ iri: term.iri, label: term.label ?? "名称未設定の関係" }))
+  .sort((left, right) => left.label.localeCompare(right.label, "ja")));
 const typeSystemTypeById = computed(() => new Map(
   typeSystemIndex.value.presentation.types.map((item) => [item.typeId, item]),
 ));
@@ -1730,6 +1813,21 @@ const temporaryHiddenCount = computed(() => {
   viewSessionRevision.value;
   return sessionFor(activeView.value?.viewId ?? "").temporaryHiddenElementIds.size;
 });
+const collapsedGroupCount = computed(() => {
+  viewSessionRevision.value;
+  return sessionFor(activeView.value?.viewId ?? "").collapsedGroupElementIds.size;
+});
+const selectedCollapsibleGroupIds = computed(() => {
+  const groupIds = new Set([
+    ...rawScene.value.containers.map((item) => item.elementId),
+    ...(rawScene.value.regions ?? []).map((item) => item.elementId),
+  ]);
+  const membersByGroup = new Set((rawScene.value.memberships ?? []).map((item) => item.containerElementId));
+  for (const item of [...rawScene.value.nodes, ...rawScene.value.containers]) {
+    if (item.parentElementId) membersByGroup.add(item.parentElementId);
+  }
+  return selectedElementIds.value.filter((id) => groupIds.has(id) && membersByGroup.has(id));
+});
 const selectedElementDiagnostics = computed(() => {
   const element = selectedElement.value;
   return element ? diagnostics.value.filter((diagnostic) => diagnosticTargetsElement(diagnostic, element)) : [];
@@ -2300,6 +2398,7 @@ function applySelectionRequest(request: DiagramSelectionRequest): void {
 }
 
 function setSelection(elementIds: readonly string[]): void {
+  selectedAnnotationId.value = "";
   const next = normalizeSceneSelection(scene.value, elementIds);
   const primary = next.at(-1) ?? "";
   if (primary !== selectedElementId.value) {
@@ -2413,6 +2512,144 @@ function changeGeometryBatch(changes: readonly GeometryChange[], recordHistory =
   }, recordHistory);
 }
 
+function selectAnnotation(payload: {
+  annotationId: string;
+  annotationKind: "semantic-literal" | "view";
+  anchorElementId?: string;
+}): void {
+  if (payload.annotationKind === "semantic-literal" && payload.anchorElementId) {
+    setSelection([payload.anchorElementId]);
+  } else setSelection([]);
+  selectedAnnotationId.value = payload.annotationId;
+  inspectorMode.value = payload.annotationKind === "view" ? "appearance" : "semantic";
+}
+
+function allocateAnnotationId(): string {
+  const existing = new Set(Object.keys(activeView.value?.annotations ?? {}));
+  let index = 1;
+  while (existing.has(`note-${index}`)) index += 1;
+  return `note-${index}`;
+}
+
+function addViewAnnotation(): void {
+  const view = activeView.value;
+  if (!view || props.readOnly) return;
+  const annotationId = allocateAnnotationId();
+  const anchor = selectedElement.value && "geometry" in selectedElement.value
+    ? selectedElement.value
+    : undefined;
+  const geometry = anchor
+    ? { x: anchor.geometry.x + anchor.geometry.width + 24, y: anchor.geometry.y, width: 220, height: 96 }
+    : { x: Math.max(40, scene.value.width / 2 - 110), y: Math.max(40, scene.value.height / 2 - 48), width: 220, height: 96 };
+  void mutateDocument((document) => {
+    const target = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!target) return;
+    target.annotations ??= {};
+    target.annotations[annotationId] = {
+      annotationId,
+      text: "新しい注記",
+      geometry: roundGeometry(geometry),
+      ...(anchor ? { anchor: { elementId: anchor.elementId } } : {}),
+    };
+  }, true)?.then(() => {
+    selectedAnnotationId.value = annotationId;
+    inspectorMode.value = "appearance";
+  });
+}
+
+function updateSelectedViewAnnotation(
+  mutation: (annotation: ViewAnnotation) => void,
+  recordHistory = true,
+): void {
+  const annotationId = selectedAnnotationId.value;
+  if (!annotationId || !selectedViewAnnotation.value) return;
+  void mutateDocument((document) => {
+    const annotation = document.views
+      .find((candidate) => candidate.viewId === currentActiveViewId.value)
+      ?.annotations?.[annotationId];
+    if (annotation) mutation(annotation);
+  }, recordHistory);
+}
+
+function changeAnnotationGeometry(payload: { annotationId: string; geometry: ElementGeometry }): void {
+  if (payload.annotationId !== selectedAnnotationId.value) selectedAnnotationId.value = payload.annotationId;
+  updateSelectedViewAnnotation((annotation) => {
+    annotation.geometry = roundGeometry(payload.geometry);
+  }, false);
+}
+
+function updateAnnotationText(event: Event): void {
+  const text = (event.target as HTMLTextAreaElement).value;
+  if (!text.trim()) return;
+  updateSelectedViewAnnotation((annotation) => { annotation.text = text; });
+}
+
+function updateAnnotationGeometryField(field: keyof ElementGeometry, event: Event): void {
+  const value = Number((event.target as HTMLInputElement).value);
+  if (!Number.isFinite(value)) return;
+  updateSelectedViewAnnotation((annotation) => {
+    annotation.geometry = roundGeometry({
+      ...annotation.geometry,
+      [field]: field === "width" || field === "height" ? Math.max(24, value) : Math.max(0, value),
+    });
+  });
+}
+
+function updateAnnotationStyle(field: "fill" | "stroke" | "text", event: Event): void {
+  const value = (event.target as HTMLInputElement).value;
+  updateSelectedViewAnnotation((annotation) => {
+    annotation.style = { ...annotation.style, [field]: value };
+  });
+}
+
+function updateAnnotationFontSize(event: Event): void {
+  const value = Math.min(96, Math.max(8, Number((event.target as HTMLInputElement).value)));
+  if (!Number.isFinite(value)) return;
+  updateSelectedViewAnnotation((annotation) => {
+    annotation.style = { ...annotation.style, labelFontSize: value };
+  });
+}
+
+function updateAnnotationAnchor(event: Event): void {
+  const elementId = (event.target as HTMLSelectElement).value;
+  updateSelectedViewAnnotation((annotation) => {
+    if (!elementId) delete annotation.anchor;
+    else annotation.anchor = { elementId };
+  });
+}
+
+function duplicateSelectedAnnotation(): void {
+  const source = selectedViewAnnotation.value;
+  if (!source) return;
+  const annotationId = allocateAnnotationId();
+  void mutateDocument((document) => {
+    const target = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!target) return;
+    target.annotations ??= {};
+    target.annotations[annotationId] = {
+      ...clone(source),
+      annotationId,
+      geometry: { ...source.geometry, x: source.geometry.x + 24, y: source.geometry.y + 24 },
+    };
+  }, true)?.then(() => { selectedAnnotationId.value = annotationId; });
+}
+
+function deleteSelectedAnnotation(): void {
+  const annotationId = selectedAnnotationId.value;
+  if (!annotationId || !selectedViewAnnotation.value) return;
+  void mutateDocument((document) => {
+    const annotations = document.views
+      .find((candidate) => candidate.viewId === currentActiveViewId.value)
+      ?.annotations;
+    if (!annotations) return;
+    delete annotations[annotationId];
+    if (Object.keys(annotations).length === 0) {
+      const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+      if (view) delete view.annotations;
+    }
+  }, true)?.then(() => { selectedAnnotationId.value = ""; });
+}
+
 function alignSelected(alignment: DiagramAlignment): void {
   if (!canAlignSelection.value) return;
   changeGeometryBatch(
@@ -2476,12 +2713,20 @@ function changeRouting(
     const targetMarker = preserveRouteMode
       ? routingValue?.targetMarker ?? current.routing?.targetMarker
       : routingValue?.targetMarker;
-    const routing = routingValue || current.routing?.extensions || routeMode || sourceMarker || targetMarker
+    const sourcePortId = preserveRouteMode
+      ? routingValue?.sourcePortId ?? current.routing?.sourcePortId
+      : routingValue?.sourcePortId;
+    const targetPortId = preserveRouteMode
+      ? routingValue?.targetPortId ?? current.routing?.targetPortId
+      : routingValue?.targetPortId;
+    const routing = routingValue || current.routing?.extensions || routeMode || sourceMarker || targetMarker || sourcePortId || targetPortId
       ? {
           ...routingValue,
           ...(routeMode ? { routeMode } : {}),
           ...(sourceMarker ? { sourceMarker } : {}),
           ...(targetMarker ? { targetMarker } : {}),
+          ...(sourcePortId ? { sourcePortId } : {}),
+          ...(targetPortId ? { targetPortId } : {}),
           ...(current.routing?.extensions ? { extensions: clone(current.routing.extensions) } : {}),
         }
       : undefined;
@@ -2504,6 +2749,33 @@ function changeRouting(
     }
     view.overlay[payload.elementId] = entry;
   }, recordHistory);
+}
+
+function setSelectedPort(endpoint: "source" | "target", event: Event): void {
+  const edge = selectedEdge.value;
+  if (!edge) return;
+  const portId = (event.target as HTMLSelectElement).value || undefined;
+  void mutateDocument((document) => {
+    const view = document.views.find((candidate) => candidate.viewId === currentActiveViewId.value);
+    if (!view) return;
+    const current = view.overlay[edge.elementId] ?? { semanticRef: edge.semanticRef };
+    const routing = { ...current.routing };
+    if (endpoint === "source") {
+      if (portId) {
+        routing.sourcePortId = portId;
+        delete routing.sourceAnchor;
+      } else delete routing.sourcePortId;
+    } else if (portId) {
+      routing.targetPortId = portId;
+      delete routing.targetAnchor;
+    } else delete routing.targetPortId;
+    const entry: ViewElementOverlay = { ...current };
+    if (Object.keys(routing).length) entry.routing = routing;
+    else delete entry.routing;
+    if (!entry.routing && !entry.appearance && !entry.geometry && !entry.extensions) {
+      delete view.overlay[edge.elementId];
+    } else view.overlay[edge.elementId] = entry;
+  }, true);
 }
 
 function changeNodeContentOffset(
@@ -4774,6 +5046,8 @@ const targetContextEntries = computed(() => {
     ))),
     canChangeGroupOrder: Boolean(targetElement && targetElement.structuralKind !== "node"
       && targetElement.groupFrame && groupFrames.length > 1),
+    isGroupCollapsed: Boolean(targetElementId
+      && sessionFor(currentActiveViewId.value).collapsedGroupElementIds.has(targetElementId)),
     deleteDisabledReason: authoringBlockedReason.value || undefined,
   });
 });
@@ -4836,6 +5110,8 @@ function selectTargetContextDestination(destination: TargetContextDestination): 
     void pasteStructuredClipboard();
   } else if (destination.command === "reset-route") resetSelectedRouting();
   else if (destination.command === "fit-group") fitSelectedGroupToMembers();
+  else if (destination.command === "collapse-group" && destination.elementId) collapseGroups([destination.elementId]);
+  else if (destination.command === "expand-group" && destination.elementId) expandGroups([destination.elementId]);
   else if (destination.command === "bring-forward") moveSelectedGroupLayer("front");
   else if (destination.command === "send-backward") moveSelectedGroupLayer("back");
 }
@@ -5310,7 +5586,7 @@ function layoutPurposeLabel(layoutRef: string | undefined): string {
 }
 
 async function applyTurtleDraft(): Promise<boolean> {
-  if (props.readOnly) return false;
+  if (props.readOnly || props.semanticWriteDisabledReason) return false;
   if (portableDocumentPending.value) {
     panel.value = "document";
     portableDocumentEditorIssues.value = [{
@@ -5955,6 +6231,35 @@ function handleKeydown(event: KeyboardEvent): void {
     void requestSave();
     return;
   }
+  if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) {
+    event.preventDefault();
+    void navigateGroupHierarchy(event.key === "ArrowUp" ? "parent" : "child");
+    return;
+  }
+  if (event.key === "[" && selectedCollapsibleGroupIds.value.length > 0) {
+    event.preventDefault();
+    collapseSelectedGroups();
+    return;
+  }
+  if (event.key === "]" && collapsedGroupCount.value > 0) {
+    event.preventDefault();
+    const selectedCollapsed = selectedElementIds.value.filter((id) => (
+      sessionFor(currentActiveViewId.value).collapsedGroupElementIds.has(id)
+    ));
+    if (selectedCollapsed.length) expandGroups(selectedCollapsed);
+    else expandAllGroups();
+    return;
+  }
+  if (event.key === "Enter") {
+    const selectedCollapsed = selectedElementIds.value.filter((id) => (
+      sessionFor(currentActiveViewId.value).collapsedGroupElementIds.has(id)
+    ));
+    if (selectedCollapsed.length) {
+      event.preventDefault();
+      expandGroups(selectedCollapsed);
+      return;
+    }
+  }
   if (command && event.key.toLowerCase() === "a") {
     event.preventDefault();
     selectAll();
@@ -5967,6 +6272,11 @@ function handleKeydown(event: KeyboardEvent): void {
       return;
     }
     clearSelection();
+    return;
+  }
+  if ((event.key === "Delete" || event.key === "Backspace") && selectedViewAnnotation.value) {
+    event.preventDefault();
+    deleteSelectedAnnotation();
     return;
   }
   if ((event.key === "Delete" || event.key === "Backspace") && selectedElementIds.value.length > 0) {
@@ -6014,6 +6324,12 @@ function openAddViewDialog(): void {
     layoutRef: standardLayoutRefForDirection("LR"),
     layoutDirection: "LR",
     locale: activeView.value?.locale ?? "",
+    scopeEnabled: false,
+    scopeRootSemanticRefs: [],
+    scopeTypeIris: [],
+    scopePredicateIris: [],
+    scopeDirection: "both",
+    scopeDepth: 3,
   };
   openViewDialog("add", parentMode);
 }
@@ -6033,6 +6349,12 @@ function openConfigureViewDialog(): void {
     layoutRef: view.layoutRef,
     layoutDirection: layoutDirectionForRef(view.layoutRef) ?? "",
     locale: view.locale ?? "",
+    scopeEnabled: Boolean(view.scope),
+    scopeRootSemanticRefs: [...(view.scope?.rootSemanticRefs ?? [])],
+    scopeTypeIris: [...(view.scope?.typeIris ?? [])],
+    scopePredicateIris: [...(view.scope?.predicateIris ?? [])],
+    scopeDirection: view.scope?.direction ?? "both",
+    scopeDepth: view.scope?.depth ?? 3,
   };
   openViewDialog("configure", parentMode);
 }
@@ -6105,6 +6427,15 @@ async function submitViewDialog(): Promise<void> {
       ? standardLayoutRefForDirection(form.layoutDirection)
       : layoutRefForDirection(form.layoutRef, form.layoutDirection) ?? form.layoutRef
     : form.layoutRef;
+  const scope: NamedViewScope | null = form.scopeEnabled
+    ? {
+        ...(form.scopeRootSemanticRefs.length ? { rootSemanticRefs: [...form.scopeRootSemanticRefs] } : {}),
+        ...(form.scopeTypeIris.length ? { typeIris: [...form.scopeTypeIris] } : {}),
+        ...(form.scopePredicateIris.length ? { predicateIris: [...form.scopePredicateIris] } : {}),
+        direction: form.scopeDirection,
+        depth: Math.min(12, Math.max(0, Math.round(form.scopeDepth))),
+      }
+    : null;
   const command: ViewCommand = viewDialogMode.value === "add"
     ? {
         command: "add",
@@ -6112,6 +6443,7 @@ async function submitViewDialog(): Promise<void> {
         profileRef,
         layoutRef,
         ...(form.locale.trim() ? { locale: form.locale.trim() } : {}),
+        ...(scope ? { scope } : {}),
       }
     : {
         command: "configure",
@@ -6119,6 +6451,7 @@ async function submitViewDialog(): Promise<void> {
         profileRef,
         layoutRef,
         locale: form.locale.trim() || null,
+        scope,
       };
   if (await executeViewCommand(command)) finishViewDialog();
 }
@@ -6269,6 +6602,60 @@ function showAllTemporaryHidden(): void {
   if (session.temporaryHiddenElementIds.size === 0) return;
   session.temporaryHiddenElementIds.clear();
   viewSessionRevision.value += 1;
+}
+
+function collapseSelectedGroups(): void {
+  collapseGroups(selectedCollapsibleGroupIds.value);
+}
+
+function collapseGroups(elementIds: readonly string[]): void {
+  const session = sessionFor(currentActiveViewId.value);
+  for (const elementId of elementIds) session.collapsedGroupElementIds.add(elementId);
+  viewSessionRevision.value += 1;
+}
+
+function expandGroups(elementIds: readonly string[]): void {
+  const session = sessionFor(currentActiveViewId.value);
+  let changed = false;
+  for (const elementId of elementIds) changed = session.collapsedGroupElementIds.delete(elementId) || changed;
+  if (changed) viewSessionRevision.value += 1;
+}
+
+function expandAllGroups(): void {
+  const session = sessionFor(currentActiveViewId.value);
+  if (session.collapsedGroupElementIds.size === 0) return;
+  session.collapsedGroupElementIds.clear();
+  viewSessionRevision.value += 1;
+}
+
+async function navigateGroupHierarchy(direction: "parent" | "child"): Promise<boolean> {
+  const currentId = selectedElementId.value;
+  if (!currentId) return false;
+  const source = rawScene.value;
+  if (direction === "parent") {
+    const geometry = [...source.nodes, ...source.containers]
+      .find((item) => item.elementId === currentId);
+    const membershipParent = (source.memberships ?? [])
+      .filter((item) => item.memberElementId === currentId)
+      .map((item) => item.regionElementId ?? item.containerElementId)
+      .sort()[0];
+    const parentId = geometry?.parentElementId ?? membershipParent;
+    return parentId ? focusElement(parentId) : false;
+  }
+  const childIds = new Set<string>();
+  for (const item of [...source.nodes, ...source.containers]) {
+    if (item.parentElementId === currentId) childIds.add(item.elementId);
+  }
+  for (const membership of source.memberships ?? []) {
+    if ((membership.regionElementId ?? membership.containerElementId) === currentId) {
+      childIds.add(membership.memberElementId);
+    }
+  }
+  const childId = [...childIds].sort()[0];
+  if (!childId) return false;
+  expandGroups([currentId]);
+  await nextTick();
+  return focusElement(childId);
 }
 
 function mutateDocument(
@@ -6749,7 +7136,13 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
 </script>
 
 <template>
-  <article class="iriograph-editor" tabindex="-1" @keydown="handleKeydown">
+  <article
+    class="iriograph-editor"
+    tabindex="-1"
+    :data-iriograph-package-version="IRIOGRAPH_EDITOR_PACKAGE_VERSION"
+    :data-iriograph-capabilities="IRIOGRAPH_EDITOR_CAPABILITIES.join(',')"
+    @keydown="handleKeydown"
+  >
     <header v-if="!hideHeader" class="iriograph-editor-header">
       <div class="iriograph-editor-heading">
         <small>IRIOGRAPH DOCUMENT</small>
@@ -6854,6 +7247,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 :title="showAllComments ? '説明をhover時だけ表示' : 'すべての説明を表示'"
                 @click="showAllComments = !showAllComments"
               >{{ showAllComments ? '説明を隠す' : '説明を表示' }}</button>
+              <button type="button" :disabled="readOnly" title="このビューだけの注記を追加" @click="addViewAnnotation">＋ 注記</button>
               <button type="button" aria-label="全体を表示" title="Fit to view" @click="fitToView">▣</button>
               <button
                 type="button"
@@ -6885,6 +7279,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               <button type="button" :disabled="selectedElementIds.length === 0" @click="hideSelectionTemporarily">一時非表示</button>
               <button type="button" :disabled="temporaryHiddenCount === 0" @click="showAllTemporaryHidden">
                 再表示<span v-if="temporaryHiddenCount"> ({{ temporaryHiddenCount }})</span>
+              </button>
+              <button type="button" :disabled="selectedCollapsibleGroupIds.length === 0" @click="collapseSelectedGroups">折り畳む</button>
+              <button type="button" :disabled="collapsedGroupCount === 0" @click="expandAllGroups">
+                展開<span v-if="collapsedGroupCount"> ({{ collapsedGroupCount }})</span>
               </button>
             </div>
             <div class="iriograph-arrange-actions">
@@ -6929,6 +7327,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           >
             <b>{{ sceneLoading ? "図を更新中…" : "図を表示できません" }}</b>
             <span v-if="!sceneLoading && sceneError">{{ diagnosticGuidance(sceneError).title }} {{ diagnosticGuidance(sceneError).action }}</span>
+            <details v-if="!sceneLoading && sceneError">
+              <summary>技術情報</summary>
+              <code>{{ sceneError.code }}</code> {{ sceneError.message }}
+            </details>
           </div>
           <DiagramCanvas
             ref="diagramCanvas"
@@ -6936,6 +7338,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :scene-session-key="`${draft.documentId}\u0000${currentActiveViewId}`"
             :selected-element-id="selectedElementId"
             :selected-element-ids="selectedElementIds"
+            :selected-annotation-id="selectedAnnotationId"
             :zoom="zoom"
             :snap="snapSettings"
             :read-only="readOnly || sceneLoading || applyingTurtle || authoringBusy || portableDocumentPending || applyingPortableDocument"
@@ -6959,9 +7362,12 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :deletion-preview-statement-refs="authoringDeletionPreview?.statementRefs"
             :node-type-tags="nodeTypeTags"
             :type-highlight-element-ids="typeHighlightElementIds"
+            :collapsed-group-summaries="collapsedGroupSummaries"
             @zoom-change="setZoomState"
             @selection-request="applySelectionRequest"
             @selection-set-request="selectElements"
+            @annotation-request="selectAnnotation"
+            @annotation-geometry-change="changeAnnotationGeometry"
             @gesture-start="beginGesture"
             @gesture-end="endGesture"
             @resize-change="changeGeometry"
@@ -7008,7 +7414,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <textarea
               ref="turtleTextarea"
               v-model="turtleDraft"
-              :readonly="readOnly || structuredAuthoringPending || portableDocumentPending"
+              :readonly="readOnly || Boolean(semanticWriteDisabledReason) || structuredAuthoringPending || portableDocumentPending"
               spellcheck="false"
               aria-label="Turtle source"
             />
@@ -7020,7 +7426,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               </div>
               <div>
                 <button type="button" :disabled="!turtlePending" @click="revertTurtleDraft">元に戻す</button>
-                <button type="button" class="primary" :disabled="!turtlePending || readOnly || applyingTurtle || structuredAuthoringPending" @click="applyTurtleDraft">
+                <button type="button" class="primary" :disabled="!turtlePending || readOnly || Boolean(semanticWriteDisabledReason) || applyingTurtle || structuredAuthoringPending" @click="applyTurtleDraft">
                   {{ applyingTurtle ? "適用中…" : semanticWarningConfirmation ? "警告を確認して適用" : "検証して適用" }}
                 </button>
               </div>
@@ -7089,6 +7495,13 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <button type="button" :class="{ selected: inspectorMode === 'semantic' }" :aria-pressed="inspectorMode === 'semantic'" @click="inspectorMode = 'semantic'">意味</button>
           <button type="button" :class="{ selected: inspectorMode === 'appearance' }" :aria-pressed="inspectorMode === 'appearance'" @click="inspectorMode = 'appearance'">ビュー</button>
         </nav>
+        <section v-if="inspectorMode === 'semantic' && selectedAnnotation?.annotationKind === 'semantic-literal'" class="iriograph-semantic-annotation-inspector">
+          <small>意味グラフの注記</small>
+          <strong>{{ selectedAnnotation.text }}</strong>
+          <span v-if="selectedAnnotation.language">言語: {{ selectedAnnotation.language }}</span>
+          <span v-if="selectedAnnotation.datatypeIri">データ型: {{ selectedAnnotation.datatypeIri }}</span>
+          <p>本文はTurtleのliteralが正本です。接続先の要素詳細からlabel/commentを編集できます。</p>
+        </section>
         <SemanticIntentPanel
           v-if="inspectorMode === 'semantic' && semanticDestination"
           ref="semanticIntentPanel"
@@ -7150,8 +7563,33 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <label><span>Canvasグリッド</span><button type="button" :aria-pressed="showCanvasGrid" @click="showCanvasGrid = !showCanvasGrid">{{ showCanvasGrid ? '表示中' : '非表示' }}</button></label>
           <small>Snap間隔 {{ snapSettings.grid.size }}。表示設定はファイルへ保存しません。</small>
         </section>
+        <section v-if="selectedAnnotation" class="iriograph-annotation-inspector" aria-label="注記の編集">
+          <header>
+            <div><small>{{ selectedAnnotation.annotationKind === 'view' ? 'このビューだけの注記' : '意味グラフの注記' }}</small><strong>注記</strong></div>
+          </header>
+          <template v-if="selectedViewAnnotation">
+            <label><span>本文</span><textarea :value="selectedViewAnnotation.text" rows="5" :disabled="readOnly" @change="updateAnnotationText" /></label>
+            <label><span>表示上の接続先</span><select :value="selectedViewAnnotation.anchor?.elementId ?? ''" :disabled="readOnly" @change="updateAnnotationAnchor"><option value="">接続しない</option><option v-for="option in annotationAnchorOptions" :key="option.elementId" :value="option.elementId">{{ option.label }}</option></select></label>
+            <div class="iriograph-geometry-grid">
+              <label v-for="field in (['x', 'y', 'width', 'height'] as const)" :key="field"><span>{{ field }}</span><input type="number" :min="field === 'width' || field === 'height' ? 24 : 0" :value="Math.round(selectedViewAnnotation.geometry[field])" :disabled="readOnly" @change="updateAnnotationGeometryField(field, $event)" /></label>
+            </div>
+            <div class="iriograph-annotation-colors">
+              <label><span>背景</span><input type="color" :value="selectedViewAnnotation.style?.fill ?? '#fff8cc'" :disabled="readOnly" @change="updateAnnotationStyle('fill', $event)" /></label>
+              <label><span>枠線</span><input type="color" :value="selectedViewAnnotation.style?.stroke ?? '#b78b22'" :disabled="readOnly" @change="updateAnnotationStyle('stroke', $event)" /></label>
+              <label><span>文字</span><input type="color" :value="selectedViewAnnotation.style?.text ?? '#302814'" :disabled="readOnly" @change="updateAnnotationStyle('text', $event)" /></label>
+              <label><span>文字サイズ</span><input type="number" min="8" max="96" step="1" :value="selectedViewAnnotation.style?.labelFontSize ?? 14" :disabled="readOnly" @change="updateAnnotationFontSize" /></label>
+            </div>
+            <p>Canvas上でドラッグして移動できます。意味グラフやLLM向け索引には含まれません。</p>
+            <div class="iriograph-annotation-actions"><button type="button" :disabled="readOnly" @click="duplicateSelectedAnnotation">複製</button><button type="button" class="danger" :disabled="readOnly" @click="deleteSelectedAnnotation">削除</button></div>
+          </template>
+          <template v-else>
+            <p class="iriograph-annotation-readonly-text">{{ selectedAnnotation.text }}</p>
+            <dl><div v-if="selectedAnnotation.language"><dt>言語</dt><dd>{{ selectedAnnotation.language }}</dd></div><div v-if="selectedAnnotation.datatypeIri"><dt>データ型</dt><dd>{{ selectedAnnotation.datatypeIri }}</dd></div></dl>
+            <small>本文はTurtleのliteralが正本です。「意味」タブで接続先の要素詳細から編集できます。</small>
+          </template>
+        </section>
         <header>
-          <div><small>ビュー</small><strong>{{ selectedElement?.label ?? "選択なし" }}</strong></div>
+          <div><small>ビュー</small><strong>{{ selectedAnnotation ? '注記' : selectedElement?.label ?? "選択なし" }}</strong></div>
           <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択` : selectedElement.structuralKind === 'edge' ? '関係' : selectedElement.structuralKind === 'node' ? '要素' : '領域' }}</span>
         </header>
         <template v-if="selectedElement">
@@ -7479,6 +7917,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @toggle="handleDisplayInspectorSectionToggle('edge-connection', $event)"
           >
             <summary :id="displayInspectorSectionDomId('edge-connection')"><span><strong>接続点と端子</strong><small>{{ selectedEdgeEndpointLabels.source }} → {{ selectedEdgeEndpointLabels.target }}</small></span></summary>
+            <div class="iriograph-port-fields">
+              <label><span>始点の接続口</span><select aria-label="始点の接続口" :value="selectedElement.sourcePortId ?? ''" :disabled="readOnly" @change="setSelectedPort('source', $event)"><option value="">外周の自由位置</option><option v-for="port in selectedSourcePortOptions" :key="port.portId" :value="port.portId">{{ portSideLabel(port) }}</option></select></label>
+              <label><span>終点の接続口</span><select aria-label="終点の接続口" :value="selectedElement.targetPortId ?? ''" :disabled="readOnly" @change="setSelectedPort('target', $event)"><option value="">外周の自由位置</option><option v-for="port in selectedTargetPortOptions" :key="port.portId" :value="port.portId">{{ portSideLabel(port) }}</option></select></label>
+              <small v-if="selectedSourcePortOptions.length === 0 && selectedTargetPortOptions.length === 0">現在の形には専用の接続口がありません。外周の任意位置を利用します。</small>
+            </div>
             <label>端子の形</label>
             <div class="iriograph-endpoint-marker-fields">
               <label v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
@@ -7593,7 +8036,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <section class="iriograph-view-manager-current" aria-label="管理中のビュー">
             <label v-if="draft.views.length > 1">管理するビュー<select ref="viewDialogInitialFocus" :value="activeView?.viewId ?? ''" aria-label="管理する名前付きビュー" @change="requestActiveView"><option v-for="view in draft.views" :key="view.viewId" :value="view.viewId">{{ view.viewId }}</option></select></label>
             <p v-else ref="viewDialogInitialFocus" tabindex="-1"><small>現在のビュー</small><strong>{{ activeView?.viewId }}</strong></p>
-            <dl><div><dt>表示対象</dt><dd>{{ profileDisplayLabel(activeView?.profileRef) }}</dd></div><div><dt>配置</dt><dd>{{ layoutPurposeLabel(activeView?.layoutRef) }}</dd></div><div><dt>表示差分</dt><dd>{{ Object.keys(activeView?.overlay ?? {}).length }}件</dd></div></dl>
+            <dl><div><dt>表示対象</dt><dd>{{ profileDisplayLabel(activeView?.profileRef) }}</dd></div><div><dt>表示範囲</dt><dd>{{ activeView?.scope ? '絞り込みあり' : 'グラフ全体' }}</dd></div><div><dt>配置</dt><dd>{{ layoutPurposeLabel(activeView?.layoutRef) }}</dd></div><div><dt>表示差分</dt><dd>{{ Object.keys(activeView?.overlay ?? {}).length }}件</dd></div></dl>
           </section>
           <div class="iriograph-view-manager-actions">
             <button type="button" :disabled="readOnly || viewCommandBusy" @click="openAddViewDialog">ビューを追加</button>
@@ -7636,6 +8079,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           Locale (BCP 47)
           <input v-model="viewForm.locale" placeholder="ja" />
         </label>
+        <fieldset class="iriograph-view-scope-form">
+          <legend>表示範囲</legend>
+          <label class="iriograph-check-row"><input v-model="viewForm.scopeEnabled" type="checkbox" /> このビューだけ表示対象を絞る</label>
+          <template v-if="viewForm.scopeEnabled">
+            <label>起点となる要素<select v-model="viewForm.scopeRootSemanticRefs" multiple size="5"><option v-for="option in viewScopeRootOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select><small>Ctrl/Cmdを押しながら複数選択できます。未選択なら型だけで絞れます。</small></label>
+            <label>含める型<select v-model="viewForm.scopeTypeIris" multiple size="4"><option v-for="option in viewScopeTypeOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select></label>
+            <label>辿る関係<select v-model="viewForm.scopePredicateIris" multiple size="5"><option v-for="option in viewScopePredicateOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select><small>未選択ならすべての関係を辿ります。</small></label>
+            <div class="iriograph-view-scope-row"><label>方向<select v-model="viewForm.scopeDirection"><option value="outgoing">外向き</option><option value="incoming">内向き</option><option value="both">両方向</option></select></label><label>深さ<input v-model.number="viewForm.scopeDepth" type="number" min="0" max="12" step="1" /></label></div>
+            <small>意味グラフ全体を検証した後、表示集合だけを作ります。非表示要素を飛び越す線は作りません。</small>
+          </template>
+        </fieldset>
         <footer>
           <button type="button" :disabled="viewCommandBusy" @click="closeViewDialog">キャンセル</button>
           <button type="submit" class="primary" :disabled="viewCommandBusy">

@@ -12,6 +12,13 @@
     "forceConsistentCasingInFileNames": true,
     "paths": {
       "@iriograph/core": ["packages/core/src/index.ts"],
+      "@iriograph/agent-bridge": ["packages/agent-bridge/src/index.ts"],
+      "@iriograph/host-conformance": ["packages/host-conformance/src/index.ts"],
+      "@iriograph/presentation-tools": ["packages/presentation-tools/src/index.ts"],
+      "@iriograph/profile-kit": ["packages/profile-kit/src/index.ts"],
+      "@iriograph/profile-resolver": ["packages/profile-resolver/src/index.ts"],
+      "@iriograph/rdf-io": ["packages/rdf-io/src/index.ts"],
+      "@iriograph/semantic-access": ["packages/semantic-access/src/index.ts"],
       "@iriograph/vue-editor": ["packages/vue-editor/src/index.ts"]
     }
   }

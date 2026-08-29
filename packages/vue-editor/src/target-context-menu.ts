@@ -30,6 +30,8 @@ export type TargetContextActionId =
   | "group-details"
   | "group-view"
   | "fit-group"
+  | "collapse-group"
+  | "expand-group"
   | "bring-group-forward"
   | "send-group-backward"
   | "delete-group";
@@ -48,7 +50,7 @@ export type TargetContextDestination =
     }
   | {
       surface: "canvas-command";
-      command: "paste" | "reset-route" | "fit-group" | "bring-forward" | "send-backward";
+      command: "paste" | "reset-route" | "fit-group" | "collapse-group" | "expand-group" | "bring-forward" | "send-backward";
       elementId?: string;
     }
   | {
@@ -74,6 +76,7 @@ export type TargetContextMenuOptions = {
   hasManualRoute?: boolean;
   hasGroupMembers?: boolean;
   canChangeGroupOrder?: boolean;
+  isGroupCollapsed?: boolean;
   deleteDisabledReason?: string;
   actionDisabledReasons?: Partial<Record<TargetContextActionId, string>>;
 };
@@ -288,6 +291,12 @@ function groupEntries(
     entry("fit-group", "要素に合わせる", "arrange", {
       surface: "canvas-command", command: "fit-group", elementId,
     }, "fit"),
+    entry("collapse-group", "内容を折り畳む", "arrange", {
+      surface: "canvas-command", command: "collapse-group", elementId,
+    }, "collapse"),
+    entry("expand-group", "内容を展開", "arrange", {
+      surface: "canvas-command", command: "expand-group", elementId,
+    }, "expand"),
     entry("bring-group-forward", "一つ前へ", "arrange", {
       surface: "canvas-command", command: "bring-forward", elementId,
     }, "forward"),
@@ -336,6 +345,12 @@ function disabledReason(
   if (entry.actionId === "fit-group" && !options.hasGroupMembers) {
     return "グループに所属する要素がありません。";
   }
+  if (entry.actionId === "collapse-group" && options.isGroupCollapsed) {
+    return "このグループは折り畳まれています。";
+  }
+  if (entry.actionId === "expand-group" && !options.isGroupCollapsed) {
+    return "このグループは展開されています。";
+  }
   if (
     (entry.actionId === "bring-group-forward" || entry.actionId === "send-group-backward")
     && options.canChangeGroupOrder === false
@@ -357,6 +372,8 @@ function requiresWrite(actionId: TargetContextActionId): boolean {
     "element-icon",
     "relation-view",
     "group-view",
+    "collapse-group",
+    "expand-group",
   ]).has(actionId);
 }
 

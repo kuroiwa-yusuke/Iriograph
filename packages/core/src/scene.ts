@@ -24,6 +24,8 @@ import type {
   ProjectionDiagnostic,
   ProjectionOptions,
   ProjectionProvenance,
+  ProjectedAnnotation,
+  SceneAnnotation,
   SceneContainer,
   SceneEdge,
   SceneRegion,
@@ -223,14 +225,20 @@ export async function layoutProjectedDiagramScene(
     newlyConstrainedElementIds,
     preservedElementIds,
     scene: {
-      elements: [...projected.containers, ...(projected.regions ?? []), ...projected.nodes].map((element) => ({
+      elements: [
+        ...projected.containers,
+        ...(projected.regions ?? []),
+        ...projected.nodes,
+        ...(projected.annotations ?? []),
+      ].map((element) => ({
         elementId: element.elementId,
         structuralKind: element.structuralKind,
-        groupRole: element.structuralKind === "node"
-          ? undefined
-          : element.groupFrame?.kind
-            ?? (element.structuralKind === "container" ? element.groupRole : undefined),
-        parentElementId: element.structuralKind === "region" ? undefined : element.parentElementId,
+        groupRole: element.structuralKind === "container"
+          ? element.groupFrame?.kind ?? element.groupRole
+          : element.structuralKind === "region" ? element.groupFrame?.kind : undefined,
+        parentElementId: element.structuralKind === "node" || element.structuralKind === "container"
+          ? element.parentElementId
+          : undefined,
         geometry: element.geometry,
         size: element.defaultSize,
         minimumContentSize: minimumContentSize(element),
@@ -241,7 +249,9 @@ export async function layoutProjectedDiagramScene(
         placement: mode === "route-only" ? "user" : element.placement,
         shape: element.structuralKind === "container"
           ? "container"
-          : element.structuralKind === "region" ? "region" : element.shape,
+          : element.structuralKind === "region"
+            ? "region"
+            : element.structuralKind === "annotation" ? "rectangle" : element.shape,
         contentInsets: element.structuralKind === "container"
           ? containerContentInsets(element.headerPosition)
           : undefined,
@@ -385,6 +395,8 @@ export async function layoutProjectedDiagramScene(
       labelOffset: edge.labelOffset ? { ...edge.labelOffset } : undefined,
       sourceAnchor: edge.sourceAnchor ? { ...edge.sourceAnchor } : undefined,
       targetAnchor: edge.targetAnchor ? { ...edge.targetAnchor } : undefined,
+      ...(edge.sourcePortId ? { sourcePortId: edge.sourcePortId } : {}),
+      ...(edge.targetPortId ? { targetPortId: edge.targetPortId } : {}),
       routeMode: edge.routeMode,
       sourceMarker: edge.sourceMarker,
       targetMarker: edge.targetMarker,
@@ -392,6 +404,13 @@ export async function layoutProjectedDiagramScene(
       provenance: edge.provenance,
     };
   });
+  const annotations: SceneAnnotation[] = (projected.annotations ?? []).map((annotation) => ({
+    ...annotation,
+    geometry: layout.geometries[annotation.elementId]!,
+    anchorOffset: annotation.anchorOffset ? { ...annotation.anchorOffset } : undefined,
+    style: structuredClone(annotation.style),
+    provenance: structuredClone(annotation.provenance),
+  }));
   return {
     viewId: projected.viewId,
     width: layout.width,
@@ -404,6 +423,7 @@ export async function layoutProjectedDiagramScene(
       provenance: { ...membership.provenance },
     })),
     groupGuides: (projected.groupGuides ?? []).map((guide) => structuredClone(guide)),
+    annotations,
     edges,
     diagnostics,
   };
@@ -440,8 +460,16 @@ const COMMENT_CALLOUT_GAP = 10;
 function minimumContentSize(
   element: ProjectedScene["nodes"][number]
     | ProjectedScene["containers"][number]
-    | NonNullable<ProjectedScene["regions"]>[number],
+    | NonNullable<ProjectedScene["regions"]>[number]
+    | ProjectedAnnotation,
 ): { width: number; height: number } {
+  if (element.structuralKind === "annotation") {
+    const text = measureTextContent(element.text, {
+      style: element.style,
+      maxWidth: 320,
+    });
+    return { width: text.width + 24, height: text.height + 20 };
+  }
   if (element.structuralKind === "node") {
     return measureNodeContent({
       label: element.label,
@@ -548,6 +576,18 @@ export function remapProjectedRuleOrigins(
                 provenance: remap(frame.defaultMember.provenance)!,
               } }
             : {}),
+          ...(frame.scopeClosure
+            ? { scopeClosure: {
+                ...frame.scopeClosure,
+                provenance: remap(frame.scopeClosure.provenance)!,
+              } }
+            : {}),
+          ...(frame.scopeTruncation
+            ? { scopeTruncation: {
+                ...frame.scopeTruncation,
+                provenance: remap(frame.scopeTruncation.provenance)!,
+              } }
+            : {}),
         }
       : undefined
   );
@@ -576,6 +616,12 @@ export function remapProjectedRuleOrigins(
     groupGuides: (projected.groupGuides ?? []).map((guide) => ({
       ...guide,
       provenance: remap(guide.provenance)!,
+    })),
+    annotations: (projected.annotations ?? []).map((annotation) => ({
+      ...annotation,
+      provenance: "kind" in annotation.provenance
+        ? annotation.provenance
+        : remap(annotation.provenance)!,
     })),
     edges: projected.edges.map((edge) => ({
       ...edge,
@@ -606,6 +652,8 @@ function emptyScene(
     containers: [],
     regions: [],
     memberships: [],
+    groupGuides: [],
+    annotations: [],
     edges: [],
     diagnostics: sortDiagnostics(diagnostics),
   };

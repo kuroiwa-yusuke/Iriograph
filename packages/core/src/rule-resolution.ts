@@ -88,9 +88,11 @@ export function resolveStatementRule(
   predicateIri: string,
   closure: RdfsClosure,
   semanticRef: string,
+  objectKind: "iri" | "literal" = "iri",
 ): RuleResolution {
   const candidates: ResolvedProjectionRule[] = [];
   for (const rule of catalog.rules) {
+    if ((rule.project.operator === "literal-annotation") !== (objectKind === "literal")) continue;
     if (rule.match.kind === "any-iri-object") {
       candidates.push(candidateFor(catalog, rule, Number.MAX_SAFE_INTEGER));
       continue;
@@ -111,13 +113,45 @@ export function validateProjectionCatalog(
   const seenRuleIds = new Set<string>();
 
   for (const [templateRef, template] of Object.entries(catalog.templates)) {
-    if (isSafeVisualStyleOverride(template.style)) continue;
-    diagnostics.push({
-      severity: "error",
-      code: "unsafe-template-style",
-      message: `templateに安全でないstyle値があります: ${templateRef}`,
-      catalogRef: ref,
-    });
+    if (!isSafeVisualStyleOverride(template.style)) {
+      diagnostics.push({
+        severity: "error",
+        code: "unsafe-template-style",
+        message: `templateに安全でないstyle値があります: ${templateRef}`,
+        catalogRef: ref,
+      });
+    }
+    const portIds = new Set<string>();
+    for (const port of template.ports ?? []) {
+      if (portIds.has(port.portId)) {
+        diagnostics.push({
+          severity: "error",
+          code: "duplicate-template-port-id",
+          message: `template portIdが重複しています: ${templateRef}#${port.portId}`,
+          catalogRef: ref,
+        });
+      }
+      portIds.add(port.portId);
+      if (!Number.isFinite(port.position) || port.position < 0 || port.position > 1) {
+        diagnostics.push({
+          severity: "error",
+          code: "invalid-template-port-position",
+          message: `template port positionは0以上1以下である必要があります: ${templateRef}#${port.portId}`,
+          catalogRef: ref,
+        });
+      }
+    }
+    if (
+      (template.ports?.length ?? 0) > 0
+      && (template.structuralKind === "edge" || template.structuralKind === "annotation")
+    ) {
+      diagnostics.push({
+        severity: "error",
+        code: "invalid-template-port-kind",
+        message: `resource endpoint以外のtemplateへportsを宣言できません: ${templateRef}`,
+        catalogRef: ref,
+      });
+    }
   }
   for (const [styleRef, style] of Object.entries(catalog.styles ?? {})) {
     if (isSafeVisualStyleOverride(style)) continue;
@@ -385,6 +419,8 @@ function operatorSupportsMatch(rule: ProjectionRule): boolean {
       return matchKind === "type";
     case "direct-edge":
       return matchKind === "predicate" || matchKind === "any-iri-object";
+    case "literal-annotation":
+      return matchKind === "predicate";
     case "suppress":
       return matchKind === "type" || matchKind === "predicate";
   }
@@ -406,6 +442,8 @@ function expectedTemplateKind(
       return "container";
     case "direct-edge":
       return "edge";
+    case "literal-annotation":
+      return "annotation";
     case "suppress":
       return undefined;
   }

@@ -88,7 +88,7 @@ function iconGlyph(token?: string): string {
     add: "+", paste: "▣", details: "i", relation: "→", membership: "⊂",
     view: "◇", icon: "◆", reconnect: "↝", line: "⌁", reset: "↺",
     sequence: "1·2", alternatives: "◇", fit: "↔", forward: "↑",
-    backward: "↓", delete: "×",
+    backward: "↓", collapse: "⊟", expand: "⊞", delete: "×",
   };
   return glyphs[token] ?? "•";
 }
