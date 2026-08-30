@@ -9,6 +9,9 @@ on:
     paths:
       - ".github/package-release-version"
       - ".github/workflows/packages.yml"
+      - "scripts/package-release.mjs"
+      - "scripts/publish-packages.mjs"
+      - "scripts/write-package-publish-audit.sh"
   workflow_dispatch:
     inputs:
       publish:
