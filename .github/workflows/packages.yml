@@ -315,7 +315,7 @@ jobs:
           if [[ "${failed_stage}" != "none" && -f /tmp/iriograph-package-publish.log ]]; then
             failure_tail_base64="$(tail -c 1800 /tmp/iriograph-package-publish.log \
               | sed -E $'s/\\x1b\\[[0-?]*[ -\\/]*[@-~]//g' \
-              | sed -E '/token|password|secret|credential|authorization|_authToken|private[_-]?key/I c\[REDACTED-SENSITIVE-LINE]' \
+              | sed -E '/^npm verbose oidc exchange failed:/b; /token|password|secret|credential|authorization|_authToken|private[_-]?key/I c\[REDACTED-SENSITIVE-LINE]' \
               | base64 -w0)"
           fi
           echo "failureTailBase64=${failure_tail_base64}" >> "${GITHUB_OUTPUT}"
