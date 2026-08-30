@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/agent-bridge",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Revision-safe semantic transport, request routing, and external candidate review for Iriograph hosts.",
   "type": "module",
   "license": "MIT",
@@ -31,9 +31,9 @@
   "publishConfig": { "access": "public" },
   "engines": { "node": ">=20.19" },
   "dependencies": {
-    "@iriograph/core": "0.12.2",
-    "@iriograph/profile-resolver": "0.12.2",
-    "@iriograph/semantic-access": "0.12.2"
+    "@iriograph/core": "0.12.3",
+    "@iriograph/profile-resolver": "0.12.3",
+    "@iriograph/semantic-access": "0.12.3"
   },
   "devDependencies": { "typescript": "^5.8.3", "vitest": "^4.1.8" }
 }

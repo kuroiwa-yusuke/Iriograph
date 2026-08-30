@@ -9,12 +9,12 @@ const ASSET_NAMESPACE = `${ASSET_NAMESPACE_ROOT}${CATALOG_VERSION}:`;
 const TEMPLATE_NAMESPACE_ROOT = "urn:iriograph:template:vendor:aws:architecture-icons:";
 const LOCATOR_NAMESPACE_ROOT = "urn:iriograph:asset-source:vendor:aws:architecture-icons:";
 
-export const AWS_ICON_PACKAGE_VERSION = "0.12.2";
+export const AWS_ICON_PACKAGE_VERSION = "0.12.3";
 export const AWS_ICON_VENDOR_DISTRIBUTION = "2026-Q3";
 export const AWS_ICON_CATALOG_ID = CATALOG_ID;
 export const AWS_ICON_CATALOG_VERSION = CATALOG_VERSION;
 export const AWS_ICON_CATALOG_REF = `${CATALOG_ID}@${CATALOG_VERSION}`;
-export const AWS_ICON_CATALOG_INTEGRITY = "sha256-mbojorpdUCN0CeJXXjSkAlpANwcelWUi8X6xbpS5nD8=";
+export const AWS_ICON_CATALOG_INTEGRITY = "sha256-pnE5NJ2sZGSrRiNBCZ1w2VYrBYHs3R1TEN5TmgoFp/U=";
 export const AWS_ICON_ASSET_NAMESPACE = ASSET_NAMESPACE;
 export const AWS_RESERVED_NAMESPACES = Object.freeze([
   CATALOG_ID,

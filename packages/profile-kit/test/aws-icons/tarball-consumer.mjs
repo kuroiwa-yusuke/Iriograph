@@ -56,7 +56,7 @@ try {
     } from "@iriograph/profile-kit/aws-icons";
     import manifest from "@iriograph/profile-kit/aws-icons/catalog.manifest.json" with { type: "json" };
 
-    assert.equal(AWS_ICON_PACKAGE_VERSION, "0.12.2");
+    assert.equal(AWS_ICON_PACKAGE_VERSION, "0.12.3");
     assert.equal(manifest.catalogId + "@" + manifest.catalogVersion, AWS_ICON_CATALOG_REF);
     assert.equal(awsIconEntries.length, 13);
     const catalogRaw = await createAwsIconCatalogResolver().resolveCatalog(AWS_ICON_CATALOG_REF);
@@ -101,7 +101,7 @@ try {
   }
 
   const installedPackage = JSON.parse(await readFile(join(installedRoot, "package.json"), "utf8"));
-  assert.equal(installedPackage.version, "0.12.2");
+  assert.equal(installedPackage.version, "0.12.3");
   assert.equal(Object.hasOwn(installedPackage, "private"), false);
   assert.equal(installedPackage.publishConfig.access, "public");
   assert.equal(dirname(fileURLToPath(import.meta.url)), join(packageRoot, "test", "aws-icons"));

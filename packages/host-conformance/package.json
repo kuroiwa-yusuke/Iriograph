@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/host-conformance",
-  "version": "0.12.2",
+  "version": "0.12.3",
   "description": "Versioned Mock/product host conformance contract for Iriograph releases.",
   "type": "module",
   "license": "MIT",
