@@ -50,14 +50,13 @@ The editor does not own workspace storage, HTTP, authentication, or persistence.
 | Turtle and JSON-LD import/export | `@iriograph/rdf-io` |
 | Label-first search and safe semantic writes | `@iriograph/semantic-access` |
 | Immutable authoring-profile resolution | `@iriograph/profile-resolver` |
-| Domain-profile authoring and conformance | `@iriograph/profile-kit` |
+| Domain-profile authoring, conformance, and optional vendor catalogs | `@iriograph/profile-kit` |
 | Optional ELK layered layout | `@iriograph/layout-elk` |
 | Closed presentation-candidate tooling | `@iriograph/presentation-tools` |
 | Semantic/presentation agent bridge | `@iriograph/agent-bridge` |
-| AWS Architecture Icons metadata and resolver contracts | `@iriograph/icons-aws` |
 | Shared Mock/product-host conformance gate | `@iriograph/host-conformance` |
 
-All eleven packages use the same lockstep version. See [Package distribution and versioning](./docs/integration/distribution.md) for public contracts and release rules.
+All ten packages use the same lockstep version. See [Package distribution and versioning](./docs/integration/distribution.md) for public contracts and release rules.
 
 ## Local Mock
 
@@ -90,4 +89,4 @@ The Mock displays `.iriograph` documents and image assets from `apps/mock/public
 
 Iriograph is distributed under the [MIT License](./LICENSE). Dependencies, bundled icons, and vendor catalogs remain subject to their own licenses and terms. Package-specific third-party boundaries are documented in `THIRD_PARTY_NOTICES.md` or `NOTICE.md` files.
 
-The eleven public packages are published under the npm [`@iriograph`](https://www.npmjs.com/org/iriograph) organization.
+The ten public packages are published under the npm [`@iriograph`](https://www.npmjs.com/org/iriograph) organization.

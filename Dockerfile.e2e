@@ -12,7 +12,6 @@ COPY packages/layout-elk/package.json packages/layout-elk/package.json
 COPY packages/profile-kit/package.json packages/profile-kit/package.json
 COPY packages/presentation-tools/package.json packages/presentation-tools/package.json
 COPY packages/host-conformance/package.json packages/host-conformance/package.json
-COPY packages/icons-aws/package.json packages/icons-aws/package.json
 COPY packages/agent-bridge/package.json packages/agent-bridge/package.json
 COPY packages/vue-editor/package.json packages/vue-editor/package.json
 

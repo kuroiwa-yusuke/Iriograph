@@ -29,7 +29,6 @@ try {
   const profileKitTarball = await pack("packages/profile-kit", artifactsDirectory);
   const presentationToolsTarball = await pack("packages/presentation-tools", artifactsDirectory);
   const hostConformanceTarball = await pack("packages/host-conformance", artifactsDirectory);
-  const iconsAwsTarball = await pack("packages/icons-aws", artifactsDirectory);
   const agentBridgeTarball = await pack("packages/agent-bridge", artifactsDirectory);
   const editorTarball = await pack("packages/vue-editor", artifactsDirectory);
 
@@ -47,7 +46,6 @@ try {
     profileKitTarball,
     presentationToolsTarball,
     hostConformanceTarball,
-    iconsAwsTarball,
     agentBridgeTarball,
     editorTarball,
   ], consumerDirectory);
@@ -88,7 +86,6 @@ async function verifyInstalledContract(consumer) {
   const profileKitDirectory = join(consumer, "node_modules", "@iriograph", "profile-kit");
   const presentationToolsDirectory = join(consumer, "node_modules", "@iriograph", "presentation-tools");
   const hostConformanceDirectory = join(consumer, "node_modules", "@iriograph", "host-conformance");
-  const iconsAwsDirectory = join(consumer, "node_modules", "@iriograph", "icons-aws");
   const agentBridgeDirectory = join(consumer, "node_modules", "@iriograph", "agent-bridge");
   const editorDirectory = join(consumer, "node_modules", "@iriograph", "vue-editor");
   const [
@@ -100,7 +97,6 @@ async function verifyInstalledContract(consumer) {
     profileKitStat,
     presentationToolsStat,
     hostConformanceStat,
-    iconsAwsStat,
     agentBridgeStat,
     editorStat,
     corePackage,
@@ -111,7 +107,6 @@ async function verifyInstalledContract(consumer) {
     profileKitPackage,
     presentationToolsPackage,
     hostConformancePackage,
-    iconsAwsPackage,
     agentBridgePackage,
     editorPackage,
   ] = await Promise.all([
@@ -123,7 +118,6 @@ async function verifyInstalledContract(consumer) {
     lstat(profileKitDirectory),
     lstat(presentationToolsDirectory),
     lstat(hostConformanceDirectory),
-    lstat(iconsAwsDirectory),
     lstat(agentBridgeDirectory),
     lstat(editorDirectory),
     readJson(join(coreDirectory, "package.json")),
@@ -134,7 +128,6 @@ async function verifyInstalledContract(consumer) {
     readJson(join(profileKitDirectory, "package.json")),
     readJson(join(presentationToolsDirectory, "package.json")),
     readJson(join(hostConformanceDirectory, "package.json")),
-    readJson(join(iconsAwsDirectory, "package.json")),
     readJson(join(agentBridgeDirectory, "package.json")),
     readJson(join(editorDirectory, "package.json")),
   ]);
@@ -148,7 +141,6 @@ async function verifyInstalledContract(consumer) {
     || profileKitStat.isSymbolicLink()
     || presentationToolsStat.isSymbolicLink()
     || hostConformanceStat.isSymbolicLink()
-    || iconsAwsStat.isSymbolicLink()
     || agentBridgeStat.isSymbolicLink()
     || editorStat.isSymbolicLink()
   ) {
@@ -162,7 +154,6 @@ async function verifyInstalledContract(consumer) {
     || profileKitPackage.version !== corePackage.version
     || presentationToolsPackage.version !== corePackage.version
     || hostConformancePackage.version !== corePackage.version
-    || iconsAwsPackage.version !== corePackage.version
     || agentBridgePackage.version !== corePackage.version
     || editorPackage.version !== corePackage.version
   ) {
@@ -177,7 +168,6 @@ async function verifyInstalledContract(consumer) {
     [profileKitDirectory, profileKitPackage],
     [presentationToolsDirectory, presentationToolsPackage],
     [hostConformanceDirectory, hostConformancePackage],
-    [iconsAwsDirectory, iconsAwsPackage],
     [agentBridgeDirectory, agentBridgePackage],
     [editorDirectory, editorPackage],
   ]) {
@@ -226,6 +216,22 @@ async function verifyInstalledContract(consumer) {
   if (noticeExport !== "./THIRD_PARTY_NOTICES.md") {
     throw new Error("@iriograph/core third-party notice export is missing");
   }
+  const awsIconsExport = profileKitPackage.exports?.["./aws-icons"];
+  if (
+    awsIconsExport?.types !== "./aws-icons/index.d.ts"
+    || awsIconsExport?.import !== "./aws-icons/index.js"
+    || awsIconsExport?.default !== "./aws-icons/index.js"
+  ) {
+    throw new Error("@iriograph/profile-kit/aws-icons export is missing");
+  }
+  const awsIconsCatalogExport = profileKitPackage.exports?.["./aws-icons/catalog.manifest.json"];
+  if (awsIconsCatalogExport !== "./aws-icons/catalog.manifest.json") {
+    throw new Error("@iriograph/profile-kit AWS catalog manifest export is missing");
+  }
+  const awsIconsNoticeExport = profileKitPackage.exports?.["./aws-icons/NOTICE.md"];
+  if (awsIconsNoticeExport !== "./aws-icons/NOTICE.md") {
+    throw new Error("@iriograph/profile-kit AWS notice export is missing");
+  }
   await readFile(join(editorDirectory, cssExport), "utf8");
   const bundledCloudIcon = await readFile(join(coreDirectory, "assets", "icons", "cloud.svg"), "utf8");
   if (!bundledCloudIcon.includes("<svg")) {
@@ -241,9 +247,20 @@ async function verifyInstalledContract(consumer) {
   await readFile(join(semanticAccessDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(layoutElkDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(profileKitDirectory, "dist", "index.d.ts"), "utf8");
+  await readFile(join(profileKitDirectory, awsIconsExport.types), "utf8");
+  const awsIconsCatalog = await readJson(join(profileKitDirectory, awsIconsCatalogExport));
+  if (
+    awsIconsCatalog.extensions?.["urn:iriograph:extension:vendor-icon-catalog:1"]?.packageName
+      !== "@iriograph/profile-kit/aws-icons"
+  ) {
+    throw new Error("packed AWS catalog metadata does not identify the profile-kit subpath");
+  }
+  const awsIconsNotice = await readFile(join(profileKitDirectory, awsIconsNoticeExport), "utf8");
+  if (!awsIconsNotice.includes("@iriograph/profile-kit/aws-icons")) {
+    throw new Error("packed AWS notice does not identify the profile-kit subpath");
+  }
   await readFile(join(presentationToolsDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(hostConformanceDirectory, "dist", "index.d.ts"), "utf8");
-  await readFile(join(iconsAwsDirectory, iconsAwsPackage.types), "utf8");
   await readFile(join(agentBridgeDirectory, "dist", "index.d.ts"), "utf8");
   await readFile(join(editorDirectory, "dist", "types", "index.d.ts"), "utf8");
 }
@@ -258,7 +275,7 @@ function verifyNodeEsmImports(cwd) {
     'const profileKit = await import("@iriograph/profile-kit");',
     'const presentation = await import("@iriograph/presentation-tools");',
     'const conformance = await import("@iriograph/host-conformance");',
-    'const iconsAws = await import("@iriograph/icons-aws");',
+    'const iconsAws = await import("@iriograph/profile-kit/aws-icons");',
     'const agent = await import("@iriograph/agent-bridge");',
     'if (!core.standardRdfRdfsCatalog) throw new Error("core Node ESM export is missing");',
     'if (!rdfIo.importRdfDataset) throw new Error("rdf-io Node ESM export is missing");',
@@ -268,7 +285,7 @@ function verifyNodeEsmImports(cwd) {
     'if (!profileKit.referenceWorkflowProfile) throw new Error("profile-kit Node ESM export is missing");',
     'if (!presentation.PresentationToolSession) throw new Error("presentation-tools Node ESM export is missing");',
     'if (!conformance.IRIOGRAPH_HOST_CONFORMANCE_MANIFEST) throw new Error("host-conformance Node ESM export is missing");',
-    'if (!iconsAws.awsIconCatalogManifest) throw new Error("icons-aws Node ESM export is missing");',
+    'if (!iconsAws.awsIconCatalogManifest) throw new Error("profile-kit/aws-icons Node ESM export is missing");',
     'if (!agent.SemanticJsonTransport) throw new Error("agent-bridge Node ESM export is missing");',
   ].join("\n");
   const result = spawnSync(process.execPath, ["--input-type=module", "--eval", program], {

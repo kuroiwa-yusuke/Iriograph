@@ -7,13 +7,13 @@ import {
   parseProjectionCatalogV1,
   resolveProjectionCatalogImports,
   standardRdfRdfsInstanceFlowCatalog,
-} from "../../core/dist/index.js";
+} from "../../../core/dist/index.js";
 import {
   AWS_ICON_CATALOG_INTEGRITY,
   AWS_ICON_CATALOG_REF,
   awsIconCatalogManifest,
   createAwsIconCatalogResolver,
-} from "../index.js";
+} from "../../aws-icons/index.js";
 
 test("manifest satisfies Core ProjectionCatalogV1 and merges with the standard profile", async () => {
   const vendorCatalog = parseProjectionCatalogV1(awsIconCatalogManifest);

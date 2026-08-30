@@ -10,7 +10,7 @@ Iriographはpure graph処理、Vue component、実browser、配布tarball、利�
 npm run verify
 ```
 
-これは11 packageとMockのtest、typecheck、build、lockstep version検証、packed tarball consumer検証を行います。Editor UI、transaction、layout、asset、host interactionを変更した場合は実Chromiumも通します。
+これは10 packageとMockのtest、typecheck、build、lockstep version検証、packed tarball consumer検証を行います。Editor UI、transaction、layout、asset、host interactionを変更した場合は実Chromiumも通します。
 
 ```sh
 npm run verify:e2e

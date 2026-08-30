@@ -112,7 +112,6 @@ jobs:
             --workspace @iriograph/profile-kit \
             --workspace @iriograph/presentation-tools \
             --workspace @iriograph/host-conformance \
-            --workspace @iriograph/icons-aws \
             --workspace @iriograph/agent-bridge 2>&1 | tee /tmp/iriograph-workspace-verify.log
       - name: Test Vue editor workspace
         id: verify_test_vue_editor

@@ -1,7 +1,7 @@
 {
   "name": "@iriograph/profile-kit",
-  "version": "0.11.2",
-  "description": "Domain projection profile manifest and conformance kit for Iriograph.",
+  "version": "0.12.0",
+  "description": "Domain profile conformance kit and optional vendor catalogs for Iriograph.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -13,19 +13,28 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
-  "files": ["dist", "README.md", "README_ja.md", "LICENSE"],
+  "files": ["dist", "aws-icons", "README.md", "README_ja.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test:unit": "vitest run src",
+    "test:aws-icons:unit": "node --test test/aws-icons/catalog.test.mjs",
+    "test:aws-icons:core-compat": "node --test test/aws-icons/core-compat.test.mjs",
+    "test:aws-icons:types": "../../node_modules/.bin/tsc --noEmit --strict --skipLibCheck --target ES2022 --module NodeNext --moduleResolution NodeNext test/aws-icons/types.test.ts",
+    "test:aws-icons:tarball": "node test/aws-icons/tarball-consumer.mjs",
+    "test:aws-icons": "node --check aws-icons/index.js && npm run test:aws-icons:types && npm run test:aws-icons:core-compat && npm run test:aws-icons:unit && npm run test:aws-icons:tarball",
+    "test": "npm run test:unit && npm run test:aws-icons",
     "prepack": "npm run build"
   },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" },
+    "./aws-icons": { "types": "./aws-icons/index.d.ts", "import": "./aws-icons/index.js", "default": "./aws-icons/index.js" },
+    "./aws-icons/catalog.manifest.json": "./aws-icons/catalog.manifest.json",
+    "./aws-icons/NOTICE.md": "./aws-icons/NOTICE.md",
     "./package.json": "./package.json"
   },
   "publishConfig": { "access": "public" },
   "engines": { "node": ">=20.19" },
-  "dependencies": { "@iriograph/core": "0.11.2" },
+  "dependencies": { "@iriograph/core": "0.12.0" },
   "devDependencies": { "typescript": "^5.8.3", "vitest": "^4.1.8" }
 }

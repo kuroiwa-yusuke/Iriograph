@@ -4,7 +4,7 @@
 
 ## Package の配布内容
 
-`@iriograph/icons-aws` は AWS Architecture Icons の artwork bytes を配布しません。npm tarball に SVG、PNG、ZIP その他の AWS icon asset は含まれず、package の実行時処理も AWS asset を download しません。
+`@iriograph/profile-kit/aws-icons` は AWS Architecture Icons の artwork bytes を配布しません。npm tarball に SVG、PNG、ZIP その他の AWS icon asset は含まれず、package の実行時処理も AWS asset を download しません。
 
 この package が配布するのは、AWS Architecture Icons 2026-Q3（release identifier `07312026`）を識別・検証するための metadata、Iriograph catalog、resolver 契約、非ブランド fallback metadata だけです。公式 artwork の権利は Amazon Web Services, Inc. またはその関連会社に帰属します。Iriograph は AWS と提携、後援、承認関係にありません。
 

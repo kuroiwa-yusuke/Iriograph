@@ -12,7 +12,7 @@ Run the full repository gate in the fixed Node/Docker environment:
 npm run verify
 ```
 
-This covers tests, type checking, builds, lockstep-version validation, documentation checks, and packed-tarball consumer verification for all eleven packages and the Mock. Changes to editor UI, transactions, layout, assets, or host integration also require real Chromium:
+This covers tests, type checking, builds, lockstep-version validation, documentation checks, and packed-tarball consumer verification for all ten packages and the Mock. Changes to editor UI, transactions, layout, assets, or host integration also require real Chromium:
 
 ```sh
 npm run verify:e2e

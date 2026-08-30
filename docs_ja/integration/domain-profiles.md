@@ -8,8 +8,8 @@ Validatorはrole/rule/template/asset衝突、missing dependency、unknown fallba
 
 ## AWS icon catalog
 
-`@iriograph/icons-aws`はAWS Architecture Iconsの画像bytesを再配布せず、公式archiveの版、出典、hash、archive内path、日本語category、service alias、rename/deprecation情報だけを固定する任意packageです。Hostが利用条件に同意して取得した公式archiveをlocal providerへmapするか、allowlist済みHTTPS signed URL providerを注入します。
+`@iriograph/profile-kit/aws-icons`はAWS Architecture Iconsの画像bytesを再配布せず、公式archiveの版、出典、hash、archive内path、日本語category、service alias、rename/deprecation情報だけを固定する任意subpathです。Hostが利用条件に同意して取得した公式archiveをlocal providerへmapするか、allowlist済みHTTPS signed URL providerを注入します。
 
 Portable overlayはversioned asset IRIだけを保存します。Resolverはexact catalog version/integrityを照合し、未導入、版不一致、rename、deprecated、missing asset、予約namespace衝突を別diagnosticとして返します。認証URLとbyteはdocumentへ入りません。
 
-Core同梱Lucide iconとvendor iconは別namespaceです。Vendor brandをCore既定集合へ複製せず、package削除時もdocumentは未知assetの安全fallbackで開けます。
+Core同梱Lucide iconとvendor iconは別namespaceです。Vendor brandをCore既定集合へ複製せず、任意catalogを読み込まない場合もdocumentは未知assetの安全fallbackで開けます。

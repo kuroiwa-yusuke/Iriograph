@@ -5,18 +5,28 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const packageRoot = fileURLToPath(new URL("..", import.meta.url));
-const consumerRoot = await mkdtemp(join(tmpdir(), "iriograph-icons-aws-consumer-"));
+const packageRoot = fileURLToPath(new URL("../..", import.meta.url));
+const corePackageRoot = fileURLToPath(new URL("../../../core", import.meta.url));
+const consumerRoot = await mkdtemp(join(tmpdir(), "iriograph-profile-kit-aws-icons-consumer-"));
 
 try {
-  const pack = run("npm", ["pack", "--json", "--pack-destination", consumerRoot], packageRoot);
-  const packJson = parseTrailingJsonArray(pack.stdout);
+  const profileKitPack = run("npm", ["pack", "--json", "--pack-destination", consumerRoot], packageRoot);
+  const packJson = parseTrailingJsonArray(profileKitPack.stdout);
   assert.equal(packJson.length, 1);
   const packed = packJson[0];
   const tarballPath = join(consumerRoot, packed.filename);
+  const corePack = run("npm", ["pack", "--json", "--pack-destination", consumerRoot], corePackageRoot);
+  const coreTarballPath = join(consumerRoot, parseTrailingJsonArray(corePack.stdout)[0].filename);
   const paths = new Set(packed.files.map((file) => file.path));
 
-  for (const required of ["index.js", "index.d.ts", "catalog.manifest.json", "README.md", "NOTICE.md", "package.json"]) {
+  for (const required of [
+    "aws-icons/index.js",
+    "aws-icons/index.d.ts",
+    "aws-icons/catalog.manifest.json",
+    "aws-icons/NOTICE.md",
+    "README.md",
+    "package.json",
+  ]) {
     assert.equal(paths.has(required), true, required);
   }
   assert.equal([...paths].some((path) => path.startsWith("assets/")), false);
@@ -24,7 +34,14 @@ try {
   assert.equal([...paths].some((path) => path.startsWith("test/")), false);
   assert.equal([...paths].some((path) => path.endsWith("package-lock.json")), false);
 
-  run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarballPath], consumerRoot);
+  run("npm", [
+    "install",
+    "--ignore-scripts",
+    "--no-audit",
+    "--no-fund",
+    coreTarballPath,
+    tarballPath,
+  ], consumerRoot);
 
   const consumerSource = `
     import assert from "node:assert/strict";
@@ -36,10 +53,10 @@ try {
       createAwsIconAssetResolver,
       createAwsIconCatalogResolver,
       resolveAwsServiceAlias,
-    } from "@iriograph/icons-aws";
-    import manifest from "@iriograph/icons-aws/catalog.manifest.json" with { type: "json" };
+    } from "@iriograph/profile-kit/aws-icons";
+    import manifest from "@iriograph/profile-kit/aws-icons/catalog.manifest.json" with { type: "json" };
 
-    assert.equal(AWS_ICON_PACKAGE_VERSION, "0.11.2");
+    assert.equal(AWS_ICON_PACKAGE_VERSION, "0.12.0");
     assert.equal(manifest.catalogId + "@" + manifest.catalogVersion, AWS_ICON_CATALOG_REF);
     assert.equal(awsIconEntries.length, 13);
     const catalogRaw = await createAwsIconCatalogResolver().resolveCatalog(AWS_ICON_CATALOG_REF);
@@ -71,7 +88,7 @@ try {
   await writeFile(consumerFile, consumerSource, "utf8");
   run("node", [consumerFile], consumerRoot);
 
-  const installedRoot = join(consumerRoot, "node_modules", "@iriograph", "icons-aws");
+  const installedRoot = join(consumerRoot, "node_modules", "@iriograph", "profile-kit");
   for (const path of paths) {
     const bytes = await readFile(join(installedRoot, path));
     const text = bytes.toString("utf8");
@@ -84,10 +101,10 @@ try {
   }
 
   const installedPackage = JSON.parse(await readFile(join(installedRoot, "package.json"), "utf8"));
-  assert.equal(installedPackage.version, "0.11.2");
+  assert.equal(installedPackage.version, "0.12.0");
   assert.equal(Object.hasOwn(installedPackage, "private"), false);
   assert.equal(installedPackage.publishConfig.access, "public");
-  assert.equal(dirname(fileURLToPath(import.meta.url)), join(packageRoot, "test"));
+  assert.equal(dirname(fileURLToPath(import.meta.url)), join(packageRoot, "test", "aws-icons"));
 } finally {
   await rm(consumerRoot, { recursive: true, force: true });
 }

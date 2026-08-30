@@ -10,8 +10,8 @@ The validator checks role, rule, template, and asset conflicts; missing dependen
 
 ## AWS icon catalog
 
-`@iriograph/icons-aws` is an optional metadata-only package. It does not redistribute AWS Architecture Icons. It pins the official archive release, provenance, hashes, paths within the archive, localized categories, service aliases, and rename/deprecation metadata. A host may map an officially downloaded archive to a local provider or inject an allowlisted HTTPS signed-URL provider.
+`@iriograph/profile-kit/aws-icons` is an optional metadata-only subpath. It does not redistribute AWS Architecture Icons. It pins the official archive release, provenance, hashes, paths within the archive, localized categories, service aliases, and rename/deprecation metadata. A host may map an officially downloaded archive to a local provider or inject an allowlisted HTTPS signed-URL provider.
 
 Portable overlays store only versioned asset IRIs. The resolver distinguishes missing installation, version mismatch, rename, deprecation, missing asset, and reserved-namespace conflict. Authentication URLs and bytes never enter the portable document.
 
-Bundled Lucide icons and vendor icons use separate namespaces. Vendor branding is not copied into the Core default set, and documents remain readable through a safe unknown-asset fallback when a vendor package is absent.
+Bundled Lucide icons and vendor icons use separate namespaces. Vendor branding is not copied into the Core default set, and documents remain readable through a safe unknown-asset fallback when the optional catalog is not loaded.

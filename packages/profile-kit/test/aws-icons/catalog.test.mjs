@@ -26,13 +26,13 @@ import {
   getAwsIconMetadata,
   listAwsIcons,
   resolveAwsServiceAlias,
-} from "../index.js";
+} from "../../aws-icons/index.js";
 
-const PACKAGE_ROOT = new URL("../", import.meta.url);
+const PACKAGE_ROOT = new URL("../../", import.meta.url);
 const CATALOG_EXTENSION = "urn:iriograph:extension:vendor-icon-catalog:1";
 
 test("immutable catalog identity and metadata-only distribution are fixed", async () => {
-  assert.equal(AWS_ICON_PACKAGE_VERSION, "0.11.2");
+  assert.equal(AWS_ICON_PACKAGE_VERSION, "0.12.0");
   assert.equal(AWS_ICON_VENDOR_DISTRIBUTION, "2026-Q3");
   assert.equal(AWS_ICON_CATALOG_ID, "urn:iriograph:catalog:vendor:aws:architecture-icons");
   assert.equal(AWS_ICON_CATALOG_VERSION, "2026-q3");
@@ -42,7 +42,10 @@ test("immutable catalog identity and metadata-only distribution are fixed", asyn
     AWS_ICON_CATALOG_INTEGRITY,
   );
 
-  const distribution = awsIconCatalogManifest.extensions[CATALOG_EXTENSION].distribution;
+  const packageMetadata = awsIconCatalogManifest.extensions[CATALOG_EXTENSION];
+  assert.equal(packageMetadata.packageName, "@iriograph/profile-kit/aws-icons");
+  assert.equal(packageMetadata.packageVersion, AWS_ICON_PACKAGE_VERSION);
+  const distribution = packageMetadata.distribution;
   assert.equal(distribution.version, "2026-Q3");
   assert.equal(distribution.archiveSha256, "d2d166c453526471749d520e0db022c459abef759d2946cf2dd1d1c992dc6526");
   assert.equal(distribution.archiveByteLength, 13_988_918);
@@ -87,7 +90,7 @@ test("package source contains no AWS SVG or archive bytes and is publishable", a
   assert.equal(files.some((path) => /(?:^|\/)assets(?:\/|$)/u.test(path)), false);
   assert.equal(files.some((path) => /\.(?:svg|zip|tar|tgz|png|jpe?g|webp)$/iu.test(path)), false);
 
-  const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
+  const packageJson = JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8"));
   assert.equal(Object.hasOwn(packageJson, "private"), false);
   assert.equal(packageJson.publishConfig.access, "public");
   assert.equal(packageJson.files.includes("assets"), false);

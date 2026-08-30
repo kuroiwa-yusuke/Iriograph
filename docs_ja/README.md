@@ -5,7 +5,7 @@
 文書は、最初に読む設計、正確な仕様、Editor、host統合、開発記録を分けています。通常は次の順で十分です。
 
 1. [設計原則](./architecture/principles.md) — Iriographが解く問題と、意味・表示・layoutの境界
-2. [Package・実装構成](./architecture/packages.md) — 11 packageの責務と処理pipeline
+2. [Package・実装構成](./architecture/packages.md) — 10 packageの責務と処理pipeline
 3. [RDF/RDFS profile](./semantics/rdf-profile.md) — 意味graph、標準語彙、catalog binding
 4. [Editor操作](./editor/interactions.md) — 利用者向け編集flow
 5. [Host conformance](./integration/host-conformance.md) — Mockとproduct hostで同じ機能を保つgate

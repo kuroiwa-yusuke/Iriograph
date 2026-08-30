@@ -4,7 +4,7 @@
 
 ## Public packages
 
-Iriograph releases eleven ESM packages together:
+Iriograph releases ten ESM packages together:
 
 | Package | Public contract |
 |---|---|
@@ -13,10 +13,9 @@ Iriograph releases eleven ESM packages together:
 | `@iriograph/profile-resolver` | immutable authoring-profile/vocabulary resolution |
 | `@iriograph/semantic-access` | label-first index and revision-safe authoring facade |
 | `@iriograph/layout-elk` | optional ELK Layered layout adapter |
-| `@iriograph/profile-kit` | domain projection-profile manifest and conformance kit |
+| `@iriograph/profile-kit` | domain projection-profile manifest, conformance kit, and optional vendor-catalog subpaths |
 | `@iriograph/presentation-tools` | read-only Scene index and closed presentation candidates |
 | `@iriograph/host-conformance` | shared versioned capability/browser gate |
-| `@iriograph/icons-aws` | metadata-only AWS Architecture Icons catalog/resolver |
 | `@iriograph/agent-bridge` | semantic/presentation routing and candidate review |
 | `@iriograph/vue-editor` | Vue components and `@iriograph/vue-editor/styles.css` |
 
@@ -24,7 +23,7 @@ The packages use one lockstep version and exact inter-package dependencies. Vue 
 
 Iriograph code is [MIT licensed](../../LICENSE). Every package tarball contains the license. Dependencies, bundled Lucide icons, and vendor catalogs retain their own licenses and notices. `@iriograph/layout-elk` depends on ELK.js under `EPL-2.0 OR GPL-3.0-or-later`; hosts that bundle it must review the applicable terms.
 
-`@iriograph/icons-aws` distributes metadata only, not AWS artwork. Official icon bytes remain user/host supplied under AWS terms.
+The optional `@iriograph/profile-kit/aws-icons` subpath distributes metadata and resolver helpers only, not AWS artwork. Official icon bytes remain user/host supplied under AWS terms.
 
 ## Tarball verification
 
@@ -50,7 +49,7 @@ https://registry.npmjs.org/
 
 The npm organization and scope are `iriograph` / `@iriograph`. The publishing script rejects any different scheme, host, port, path, query, fragment, embedded credential, or fallback registry.
 
-Triggers are a `packages-v<version>` tag, an explicit workflow dispatch, or a main-branch change to the release marker `.github/package-release-version`. The marker must exactly equal all eleven package versions.
+Triggers are a `packages-v<version>` tag, an explicit workflow dispatch, or a main-branch change to the release marker `.github/package-release-version`. The marker must exactly equal all ten package versions.
 
 The publish job uses GitHub Actions Trusted Publishing:
 
@@ -64,7 +63,7 @@ The publish job uses GitHub Actions Trusted Publishing:
 
 Each npm package configures the exact trusted publisher `kuroiwa-yusuke/Iriograph` and workflow `packages.yml`.
 
-Publication order is Core, RDF I/O, profile resolver, semantic access, ELK adapter, profile kit, presentation tools, host conformance, AWS icons, agent bridge, then Vue editor.
+Publication order is Core, RDF I/O, profile resolver, semantic access, ELK adapter, profile kit, presentation tools, host conformance, agent bridge, then Vue editor.
 
 For each `name@version`, the script:
 

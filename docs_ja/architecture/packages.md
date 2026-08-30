@@ -9,14 +9,13 @@
 | `@iriograph/profile-resolver` | Immutable authoring profile/vocabulary importのidentity・integrity・循環・競合検証と解決済みcontext構築 | Network、tenant認証、registry cache |
 | `@iriograph/semantic-access` | Turtle由来のlabel/comment/構造索引、検索・describe・近傍/subgraph、revision alias、Core commandへcompileする注入WritePort | LLM provider、MCP transport、overlay、永続化、認証 |
 | `@iriograph/layout-elk` | ELK.js Layeredへのoptional adapter、compound hierarchy、直交route、host engine/Worker注入 | semantic解釈、document内のengine固有option、hard pinの近似 |
-| `@iriograph/profile-kit` | Domain profile manifest、validator、fixture/conformanceとreference workflow profile | Core分岐、規格互換の暗黙主張 |
+| `@iriograph/profile-kit` | Domain profile manifest、validator、fixture/conformance、reference workflow profile、`./aws-icons`等の任意vendor catalog subpath | Core分岐、vendor artwork、規格互換の暗黙主張 |
 | `@iriograph/presentation-tools` | Opaque Scene bridge、closed sparse patch、budget、diff/render/score/telemetry contract | Apply、Turtle、任意CSS/URL、画像bytes |
 | `@iriograph/host-conformance` | Versioned package/CSS/fixture/capability manifestとHost report検証 | Product固有deploy実行 |
-| `@iriograph/icons-aws` | AWS公式icon archiveのversioned metadataとHost注入resolver | AWS icon bytesの再配布、認証URL保存 |
 | `@iriograph/agent-bridge` | Semantic/presentation/mixed routing、label-first transport DTO、外部候補review model | 分類結果による権限付与、model SDK、永続化 |
 | `@iriograph/vue-editor` | Scene描画、annotation/port/folding/scope、overlay編集、Turtle draft、history、structured semantic authoring、外部候補review UI | 語彙判定、永続化、認証、catalog取得 |
 
-11 packageは公開境界です。`apps/mock`は配布packageではなく、sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocatorを実装するreference hostです。投影規則やEditor内部stateは持ちません。
+10 packageは公開境界です。`apps/mock`は配布packageではなく、sample workspace、localStorage working copy、取込・書出、asset resolver、static authoring context/allocatorを実装するreference hostです。投影規則やEditor内部stateは持ちません。
 
 ## 投影処理
 

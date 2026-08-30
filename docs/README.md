@@ -5,7 +5,7 @@
 The documentation separates introductory architecture, normative semantics, editor behavior, host integration, and development evidence. Most readers can start with:
 
 1. [Architecture principles](./architecture/principles.md) — problem statement and semantic/presentation/layout boundaries
-2. [Packages and processing pipeline](./architecture/packages.md) — responsibilities of the eleven packages
+2. [Packages and processing pipeline](./architecture/packages.md) — responsibilities of the ten packages
 3. [RDF/RDFS profile](./semantics/rdf-profile.md) — semantic graph, standard vocabulary, and catalog bindings
 4. [Editor interactions](./editor/interactions.md) — user-facing editing flows
 5. [Host conformance](./integration/host-conformance.md) — parity gates for the Mock and product hosts

@@ -45,14 +45,13 @@ Editorはworkspace、HTTP、認証、永続化を知りません。Product host�
 | Turtle / JSON-LD import・export | `@iriograph/rdf-io` |
 | Label-first検索・安全なsemantic write facade | `@iriograph/semantic-access` |
 | Authoring profile解決 | `@iriograph/profile-resolver` |
-| Domain profile作成 | `@iriograph/profile-kit` |
+| Domain profile作成・conformance・任意vendor catalog | `@iriograph/profile-kit` |
 | ELK layered layout | `@iriograph/layout-elk` |
 | Closed presentation candidate tool | `@iriograph/presentation-tools` |
 | Semantic/presentation agent bridge | `@iriograph/agent-bridge` |
-| AWS architecture icon metadata/resolver | `@iriograph/icons-aws` |
 | Mock/product host共通gate | `@iriograph/host-conformance` |
 
-11 packageは同じversionを使うlockstep releaseです。Public exports、配布順、SemVerは[Package配布・version](./docs/integration/distribution.md)を参照してください。
+10 packageは同じversionを使うlockstep releaseです。Public exports、配布順、SemVerは[Package配布・version](./docs/integration/distribution.md)を参照してください。
 
 ## Local Mock
 
@@ -78,4 +77,4 @@ Mockは`apps/mock/public/workspace`の`.iriograph`と画像assetをtree表示し
 - [公開契約](./docs_ja/architecture/public-contracts.md)
 - [バックログ](./docs_ja/backlog.md)
 
-全11 packageはnpmjsの`@iriograph` organizationからpublic packageとして配布します。Iriograph本体は[MIT License](./LICENSE)です。依存package、同梱icon、vendor catalogには各提供元のlicenseと利用条件が別途適用されます。
+全10 packageはnpmjsの`@iriograph` organizationからpublic packageとして配布します。Iriograph本体は[MIT License](./LICENSE)です。依存package、同梱icon、vendor catalogには各提供元のlicenseと利用条件が別途適用されます。

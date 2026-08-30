@@ -13,7 +13,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build:packages": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/rdf-io && npm run build --workspace @iriograph/profile-resolver && npm run build --workspace @iriograph/semantic-access && npm run build --workspace @iriograph/layout-elk && npm run build --workspace @iriograph/profile-kit && npm run build --workspace @iriograph/presentation-tools && npm run build --workspace @iriograph/host-conformance && npm run build --workspace @iriograph/icons-aws && npm run build --workspace @iriograph/agent-bridge && npm run build --workspace @iriograph/vue-editor",
+    "build:packages": "npm run build --workspace @iriograph/core && npm run build --workspace @iriograph/rdf-io && npm run build --workspace @iriograph/profile-resolver && npm run build --workspace @iriograph/semantic-access && npm run build --workspace @iriograph/layout-elk && npm run build --workspace @iriograph/profile-kit && npm run build --workspace @iriograph/presentation-tools && npm run build --workspace @iriograph/host-conformance && npm run build --workspace @iriograph/agent-bridge && npm run build --workspace @iriograph/vue-editor",
     "predev": "npm run build:packages",
     "dev": "npm run dev --workspace @iriograph/mock",
     "build": "npm run build:packages && npm run build --workspace @iriograph/mock",

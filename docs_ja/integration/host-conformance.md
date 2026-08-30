@@ -9,7 +9,7 @@ Versioned manifestはpackage version、CSS entry、baseline catalog、共通fixt
 Release順は次です。
 
 1. 全packageをpackし、workspace外consumerでimport/type/CSS/fixtureを検証する
-2. npmjsへ11 packageのexact lockstep versionを依存順にpublic公開する
+2. npmjsへ10 packageのexact lockstep versionを依存順にpublic公開する
 3. Registryで全exact versionを確認してrelease tagを作る
 4. Cloudをそのexact versionへ更新し、build/test/local Chromium gateを通す
 5. OIDC/SSM workflowでdeployし、実行commit、health、production Chromium、console/service log、volume使用率を確認する

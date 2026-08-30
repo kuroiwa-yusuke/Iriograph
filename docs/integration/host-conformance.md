@@ -11,7 +11,7 @@ The common gate covers initial rendering, grid, marquee selection, context menus
 Release order:
 
 1. Pack all packages and verify imports, types, CSS, fixtures, notices, and licenses in a consumer outside the workspace.
-2. Publish all eleven exact lockstep versions publicly to npmjs in dependency order.
+2. Publish all ten exact lockstep versions publicly to npmjs in dependency order.
 3. Verify every exact version and record the immutable release tag.
 4. Upgrade the Cloud host to that exact version and pass build, tests, and its local Chromium gate.
 5. Deploy through the host's OIDC/SSM workflow and verify the running commit, service health, production Chromium behavior, console and service logs, and disk usage.

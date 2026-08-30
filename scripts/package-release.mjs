@@ -9,7 +9,6 @@ export const releasePackagePaths = Object.freeze([
   "packages/profile-kit/package.json",
   "packages/presentation-tools/package.json",
   "packages/host-conformance/package.json",
-  "packages/icons-aws/package.json",
   "packages/agent-bridge/package.json",
   "packages/vue-editor/package.json",
 ]);
@@ -23,7 +22,6 @@ export const releasePackageNames = Object.freeze([
   "@iriograph/profile-kit",
   "@iriograph/presentation-tools",
   "@iriograph/host-conformance",
-  "@iriograph/icons-aws",
   "@iriograph/agent-bridge",
   "@iriograph/vue-editor",
 ]);

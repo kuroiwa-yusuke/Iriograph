@@ -11,7 +11,7 @@ import {
   type AwsAssetResolveRequest,
   type AwsAssetResolveResult,
   type CatalogRawSource,
-} from "../index.js";
+} from "../../aws-icons/index.js";
 
 type CoreCompatibleCatalogResolver = {
   resolveCatalog(catalogRef: string): Promise<CatalogRawSource>;

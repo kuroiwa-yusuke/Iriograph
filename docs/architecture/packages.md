@@ -11,10 +11,9 @@
 | `@iriograph/profile-resolver` | immutable authoring-profile and vocabulary resolution with identity, integrity, cycle, and conflict checks | network, tenant authentication, registry cache |
 | `@iriograph/semantic-access` | label/comment/structure index, search, describe, neighborhood/subgraph reads, revision aliases, write-port compilation to Core | LLM provider, MCP transport, overlay, persistence, authentication |
 | `@iriograph/layout-elk` | optional ELK Layered adapter, compound hierarchy, orthogonal routing, host engine/Worker injection | semantic interpretation, engine-specific document options |
-| `@iriograph/profile-kit` | domain-profile manifest, validation, fixtures, and conformance helpers | Core branches, implicit standards-compliance claims |
+| `@iriograph/profile-kit` | domain-profile manifest, validation, fixtures, conformance helpers, and optional vendor-catalog subpaths such as `./aws-icons` | Core branches, vendor artwork, implicit standards-compliance claims |
 | `@iriograph/presentation-tools` | opaque Scene bridge, closed sparse patches, budgets, diff/render/score/telemetry contracts | application, Turtle, arbitrary CSS/URLs, image bytes |
 | `@iriograph/host-conformance` | versioned package/CSS/fixture/capability manifest and report validation | product deployment execution |
-| `@iriograph/icons-aws` | versioned metadata and host-injected resolvers for official AWS icon archives | redistribution of AWS artwork, saved authenticated URLs |
 | `@iriograph/agent-bridge` | semantic/presentation request routing and external candidate review contracts | model SDK, authentication, tenant policy |
 | `@iriograph/vue-editor` | Vue components, canvas/inspector interactions, session navigation, semantic and presentation command orchestration | workspace persistence, HTTP, authentication, RDF policy resolution |
 
