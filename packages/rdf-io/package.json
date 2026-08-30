@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/rdf-io",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Framework-independent RDF dataset import, merge, rebase, and semantic export for Iriograph.",
   "type": "module",
   "license": "MIT",

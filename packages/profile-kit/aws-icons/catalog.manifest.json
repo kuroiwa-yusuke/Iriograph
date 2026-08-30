@@ -1267,7 +1267,7 @@
   "extensions": {
     "urn:iriograph:extension:vendor-icon-catalog:1": {
       "packageName": "@iriograph/profile-kit/aws-icons",
-      "packageVersion": "0.12.1",
+      "packageVersion": "0.12.2",
       "vendor": {
         "id": "aws",
         "name": "Amazon Web Services",
