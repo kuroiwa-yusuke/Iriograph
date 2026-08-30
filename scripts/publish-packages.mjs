@@ -110,7 +110,10 @@ async function waitForExactVersion({
   registry,
   runNpm,
   wait,
-  attempts = 8,
+  // npm's write endpoint can acknowledge a publish before every public read
+  // endpoint observes it. Keep the retry bounded, but allow roughly one
+  // minute before treating a successful publish as absent.
+  attempts = 16,
 }) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     if (await registryHasExactVersion({ name, version, registry, runNpm })) {
