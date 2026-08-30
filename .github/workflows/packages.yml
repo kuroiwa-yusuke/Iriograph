@@ -277,12 +277,18 @@ jobs:
             exit 1
           fi
           echo "NPM_CONFIG_USERCONFIG=${publish_userconfig}" >> "${GITHUB_ENV}"
+      - name: Build packages for publishing
+        id: publish_build
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build:packages 2>&1 | tee /tmp/iriograph-package-publish.log
       - name: Publish packages
         id: publish_packages
         shell: bash
         run: |
           set -o pipefail
-          npm run publish:packages 2>&1 | tee /tmp/iriograph-package-publish.log
+          npm run publish:packages 2>&1 | tee -a /tmp/iriograph-package-publish.log
       - name: Summarize failed stage
         id: failure_summary
         if: ${{ always() }}
@@ -294,6 +300,7 @@ jobs:
           VERSION_OUTCOME: ${{ steps.publish_version.outcome }}
           NPM_CLI_OUTCOME: ${{ steps.publish_npm_cli.outcome }}
           NPM_REGISTRY_OUTCOME: ${{ steps.publish_npm_registry.outcome }}
+          PACKAGE_BUILD_OUTCOME: ${{ steps.publish_build.outcome }}
           PUBLISH_OUTCOME: ${{ steps.publish_packages.outcome }}
         run: |
           set -euo pipefail
@@ -309,6 +316,7 @@ jobs:
           record_failure "version-check" "${VERSION_OUTCOME}"
           record_failure "npm-cli" "${NPM_CLI_OUTCOME}"
           record_failure "npm-registry" "${NPM_REGISTRY_OUTCOME}"
+          record_failure "package-build" "${PACKAGE_BUILD_OUTCOME}"
           record_failure "npm-publish" "${PUBLISH_OUTCOME}"
           echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
           failure_tail_base64=""

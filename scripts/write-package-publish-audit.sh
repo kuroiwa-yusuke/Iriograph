@@ -36,7 +36,7 @@ case "${VERIFY_FAILED_STAGE}" in
     ;;
 esac
 case "${PUBLISH_FAILED_STAGE}" in
-  none|install|version-check|npm-cli|npm-registry|npm-publish) ;;
+  none|install|version-check|npm-cli|npm-registry|package-build|npm-publish) ;;
   *)
     echo "Invalid publish failed stage" >&2
     exit 1

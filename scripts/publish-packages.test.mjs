@@ -291,8 +291,10 @@ test("the release workflow and audit vocabulary are npmjs-only", async () => {
   assert.doesNotMatch(workflow, /registry-url:/u);
   assert.match(workflow, /record_failure "npm-cli"/u);
   assert.match(workflow, /record_failure "npm-registry"/u);
+  assert.match(workflow, /id: publish_build[\s\S]*?npm run build:packages/u);
+  assert.match(workflow, /record_failure "package-build"/u);
   assert.match(workflow, /record_failure "npm-publish"/u);
-  assert.match(auditScript, /npm-cli\|npm-registry\|npm-publish/u);
+  assert.match(auditScript, /npm-cli\|npm-registry\|package-build\|npm-publish/u);
   assert.match(auditScript, /test-semantic-access\|test-extensions\|test-vue-editor/u);
 
   for (const forbidden of [
