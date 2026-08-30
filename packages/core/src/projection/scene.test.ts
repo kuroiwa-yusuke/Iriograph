@@ -228,6 +228,43 @@ describe("ProjectedScene conversion", () => {
     expect(scene.diagnostics).toEqual([]);
   });
 
+  it("transient semanticLocalesでportable view.localeを変更せずScene textだけを切り替える", async () => {
+    const document = documentFor({});
+    document.views[0]!.locale = "ja";
+    document.semantic.source = `
+      @prefix : <urn:test:scene:> .
+      @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+      :a rdfs:label "申請"@ja, "Application"@en ;
+         rdfs:comment "申請の説明"@ja, "Application details"@en ;
+         :p :b .
+      :b rdfs:label "完了"@ja, "Complete"@en .
+      :p rdfs:label "次"@ja, "Next"@en .
+    `;
+    const portableBytes = JSON.stringify(document);
+    const runtime = (semanticLocales: readonly string[]): ProjectionRuntimeContext => ({
+      catalogsByProfile: new Map([[
+        standardRdfRdfsCatalog.profileRef,
+        { catalog: standardRdfRdfsCatalog },
+      ]]),
+      layouts: createStandardLayoutRegistry(),
+      projectionOptions: { semanticLocales },
+    });
+
+    const english = await buildIriographView(document, "main", runtime(["en", "ja"]));
+    const japanese = await buildIriographView(document, "main", runtime(["ja", "en"]));
+    const englishApplication = english.nodes.find((node) => node.semanticRef.endsWith(":a"));
+    const japaneseApplication = japanese.nodes.find((node) => node.semanticRef.endsWith(":a"));
+
+    expect(englishApplication?.label).toBe("Application");
+    expect(englishApplication?.semanticText?.primaryComment?.value).toBe("Application details");
+    expect(japaneseApplication?.label).toBe("申請");
+    expect(japaneseApplication?.semanticText?.primaryComment?.value).toBe("申請の説明");
+    expect(english.edges[0]?.label).toBe("Next");
+    expect(japanese.edges[0]?.label).toBe("次");
+    expect(JSON.stringify(document)).toBe(portableBytes);
+    expect(document.views[0]!.locale).toBe("ja");
+  });
+
   it("同一runtimeのreconciliation cacheがあっても通常buildは新しいdocumentを再投影する", async () => {
     let layouts = 0;
     const standard = new StandardLightweightLayoutAdapter(STANDARD_LAYOUT_REFS.hierarchicalLr, "LR");

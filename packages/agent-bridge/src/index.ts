@@ -191,7 +191,7 @@ export class SemanticJsonTransport {
       const candidate = await this.#host.previewCompiledWrite(compiled, snapshot, signal);
       assertCandidateBinding(candidate, snapshot);
       this.#candidates.set(candidate.candidateId, candidate);
-      result = semanticReview(candidate, snapshot.index);
+      result = semanticReview(candidate, snapshot.index, snapshot.context.defaultLocale);
     } else {
       if (request.contextRevision !== snapshot.context.contextRevision) throw new Error("authoring context is stale");
       const candidate = this.#candidates.get(request.candidateId);
@@ -311,13 +311,17 @@ export class ExternalCandidateReviewSession {
   }
 }
 
-export function semanticReview(candidate: SemanticCandidatePayload, index: SemanticAccessIndex): SemanticReview {
+export function semanticReview(
+  candidate: SemanticCandidatePayload,
+  index: SemanticAccessIndex,
+  locale = "en",
+): SemanticReview {
   return {
     candidateId: candidate.candidateId,
     documentRevision: candidate.documentRevision,
     contextRevision: candidate.contextRevision,
-    added: candidate.patch.added.map((item) => labelFirstChange(item, index)),
-    removed: candidate.patch.removed.map((item) => labelFirstChange(item, index)),
+    added: candidate.patch.added.map((item) => labelFirstChange(item, index, locale)),
+    removed: candidate.patch.removed.map((item) => labelFirstChange(item, index, locale)),
     diagnostics: candidate.diagnostics,
   };
 }
@@ -398,27 +402,48 @@ function textDto(value: LocalizedText, index: number) {
 function labelFirstChange(
   item: AuthoringGraphPatch["added"][number],
   index: SemanticAccessIndex,
+  locale: string,
 ): LabelFirstTripleChange {
+  const fallback = reviewFallbacks(locale);
   const subjectAlias = item.subject.termType === "NamedNode" ? index.resourceAlias(item.subject.value) : undefined;
   const predicateAlias = index.predicateAlias(item.predicateIri);
   const objectAlias = item.object.termType === "NamedNode" ? index.resourceAlias(item.object.value) : undefined;
-  const subject = subjectAlias ? safeLabel(index, subjectAlias) : "新しい匿名要素";
-  const predicate = predicateAlias ? safePredicateLabel(index, predicateAlias) : "新しい関係";
+  const subject = subjectAlias ? safeLabel(index, subjectAlias, fallback.newElement) : fallback.newAnonymousElement;
+  const predicate = predicateAlias
+    ? safePredicateLabel(index, predicateAlias, fallback.relationship)
+    : fallback.newRelationship;
   const object = item.object.termType === "Literal"
     ? item.object.value
-    : objectAlias ? safeLabel(index, objectAlias) : "新しい要素";
+    : objectAlias ? safeLabel(index, objectAlias, fallback.newElement) : fallback.newElement;
   return { statementId: item.statementRef, subject, predicate, object };
 }
 
-function safeLabel(index: SemanticAccessIndex, reference: RevisionAlias): string {
-  try { return index.describe(reference).label; } catch { return "新しい要素"; }
+function safeLabel(index: SemanticAccessIndex, reference: RevisionAlias, fallback: string): string {
+  try { return index.describe(reference).label; } catch { return fallback; }
 }
 
-function safePredicateLabel(index: SemanticAccessIndex, reference: RevisionAlias): string {
+function safePredicateLabel(index: SemanticAccessIndex, reference: RevisionAlias, fallback: string): string {
   try {
     const resource = index.searchPredicates("").find((item) => item.predicateAlias === reference.alias);
-    return resource?.label ?? "関係";
-  } catch { return "関係"; }
+    return resource?.label ?? fallback;
+  } catch { return fallback; }
+}
+
+function reviewFallbacks(locale: string) {
+  const japanese = locale.trim().replaceAll("_", "-").toLowerCase().split("-", 1)[0] === "ja";
+  return japanese
+    ? {
+        newAnonymousElement: "新しい匿名要素",
+        newRelationship: "新しい関係",
+        newElement: "新しい要素",
+        relationship: "関係",
+      }
+    : {
+        newAnonymousElement: "New anonymous element",
+        newRelationship: "New relationship",
+        newElement: "New element",
+        relationship: "Relationship",
+      };
 }
 
 function jsonBytes(value: unknown): number {

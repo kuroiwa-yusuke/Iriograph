@@ -644,8 +644,17 @@ const selectedOverlay = computed<ViewElementOverlay | undefined>(() => {
 });
 const projectionRuntimeContext = computed<ProjectionRuntimeContext | undefined>(() => {
   const source = props.runtimeContext ?? props.authoringContext?.runtime;
-  if (source) return unwrapProjectionRuntimeContext(source);
-  return props.catalog ? projectionContextFromLegacyCatalog(props.catalog) : undefined;
+  const runtime = source
+    ? unwrapProjectionRuntimeContext(source)
+    : props.catalog ? projectionContextFromLegacyCatalog(props.catalog) : undefined;
+  if (!runtime) return undefined;
+  return {
+    ...runtime,
+    projectionOptions: {
+      ...runtime.projectionOptions,
+      semanticLocales: [...preferredSemanticLocales.value],
+    },
+  };
 });
 const activeCatalog = computed(() => {
   const view = activeView.value;
@@ -691,7 +700,10 @@ const annotationAnchorOptions = computed(() => [
   ...scene.value.edges,
 ].map((element) => ({ elementId: element.elementId, label: element.label || t("semantic.unnamedElement") }))
   .sort((left, right) => left.label.localeCompare(right.label, currentUiLocale.value)));
-const semanticMetadata = computed(() => semanticDisplayMetadata(draft.value));
+const semanticMetadata = computed(() => semanticDisplayMetadata(
+  draft.value,
+  preferredSemanticLocales.value,
+));
 const edgeRouteModes = computed<Record<string, EdgeRouteMode>>(() => Object.fromEntries(
   scene.value.edges.map((edge) => [edge.elementId, routeModeFor(edge)]),
 ));
@@ -1989,6 +2001,14 @@ watch(
     void refreshScene();
   },
   { deep: true },
+);
+
+watch(
+  () => preferredSemanticLocales.value.join("\u0000"),
+  () => {
+    applyDiagnostics.value = [];
+    void refreshScene();
+  },
 );
 
 watch(

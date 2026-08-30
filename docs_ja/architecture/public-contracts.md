@@ -399,7 +399,7 @@ Literal propertyはv1で独立Scene elementを生成しない場合もありま�
 
 公開Editor UIの既定言語は英語です。`uiLocale`はHostまたは利用者sessionが管理する設定で、package同梱の値は`en`と`ja`に限定します。Editorは言語selectorを表示し、変更をeventで通知します。Hostは利用者設定として保持できますが、Turtle、named view、sparse overlay、document history、dirty stateへ書き込みません。
 
-UI言語と意味literalの選択言語は別契約です。`semanticLocales`は既存の`rdfs:label`、`rdfs:comment`、catalog語彙の表示優先順を指定します。省略時だけ初期値が`uiLocale`へ従い、Hostは異なる順序を指定できます。どちらを変更してもRDF literalの翻訳、追加、language tag付与、書換えを行いません。意味表示は指定言語、languageなし、残る利用可能値の順に決定的にfallbackします。
+UI言語と意味literalの選択言語は別契約です。`semanticLocales`は既存の`rdfs:label`、`rdfs:comment`、catalog語彙の表示優先順を指定します。省略時は`uiLocale`へ従い、Hostは異なる順序を指定できます。Coreも同じ順序をtransientな`ProjectionOptions.semanticLocales`として受け取り、空でない場合だけその投影でportableな`view.locale`より優先します。未指定または空配列では保存済みviewの挙動を維持します。どちらを変更してもRDF literalの翻訳、追加、language tag付与、書換え、named view・overlay・history・dirty stateの変更を行いません。意味表示は指定言語、languageなし、残る利用可能値の順に決定的にfallbackします。
 
 標準control、案内、validation表示、accessibility text、標準関係metadataは、安定したIDに対する英語・日本語lexical formとして提供します。言語変更で変わるのは表示だけであり、predicate IRI、command ID、validation code、transactionの動作は変わりません。UI keyが不足する場合はpackageの英語を正規fallbackとします。Mockと製品HostはEditor文言を複製せず同じpackage契約を利用し、Host固有のworkspace chromeだけをその外側で翻訳します。
 

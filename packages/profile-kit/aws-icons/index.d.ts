@@ -138,12 +138,12 @@ export type AwsLocalAssetSource = AwsLocalAssetBytes | AwsLocalAssetPath;
 export type AwsLocalPathRequest = AwsExpectedAsset & Readonly<{ path: string }>;
 export type AwsBytesUrlRequest = AwsExpectedAsset & Readonly<{ bytes: Uint8Array }>;
 
-export const AWS_ICON_PACKAGE_VERSION: "0.12.0";
+export const AWS_ICON_PACKAGE_VERSION: "0.12.1";
 export const AWS_ICON_VENDOR_DISTRIBUTION: "2026-Q3";
 export const AWS_ICON_CATALOG_ID: "urn:iriograph:catalog:vendor:aws:architecture-icons";
 export const AWS_ICON_CATALOG_VERSION: "2026-q3";
 export const AWS_ICON_CATALOG_REF: "urn:iriograph:catalog:vendor:aws:architecture-icons@2026-q3";
-export const AWS_ICON_CATALOG_INTEGRITY: "sha256-EwO9T9KStVG09FcxO5ztuwYFGYXJxz52s0CH3XOsoro=";
+export const AWS_ICON_CATALOG_INTEGRITY: "sha256-vMHzPj10lE4jKRerb0TS6nvP/DIqkRrfdtFwiP3WcgM=";
 export const AWS_ICON_ASSET_NAMESPACE: "urn:iriograph:asset:vendor:aws:architecture-icons:2026-q3:";
 export const AWS_RESERVED_NAMESPACES: readonly string[];
 export const awsIconCatalogSource: string;

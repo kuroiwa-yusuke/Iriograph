@@ -1,7 +1,7 @@
 export const IRIOGRAPH_HOST_CONFORMANCE_MANIFEST = Object.freeze({
   schemaVersion: "1",
   kind: "iriograph.host-conformance",
-  packageVersion: "0.12.0",
+  packageVersion: "0.12.1",
   cssEntry: "@iriograph/vue-editor/styles.css",
   fixtureRef: "@iriograph/host-conformance/fixtures/baseline.iriograph.json",
   fixtureIntegrity: "sha256-+vzGLBfjWs3Flr6Rprffdt8atwm0FGBLKMXAFMCXPcU=",

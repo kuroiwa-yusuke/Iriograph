@@ -43,7 +43,7 @@ const uiLocale = ref<"en" | "ja">("en");
 
 The editor does not own workspace storage, HTTP, authentication, or persistence. A product host injects the document, authenticated asset resolvers, IRI allocators, resolved authoring profiles, save operations, and revision-conflict handling.
 
-The package UI defaults to English and includes Japanese. UI language is host/session state and never modifies Turtle or display overlays. Hosts can independently provide semantic-language preferences for selecting existing RDF labels and comments.
+The package UI defaults to English and includes Japanese. UI language is host/session state and never modifies Turtle, named views, or display overlays. Hosts can independently provide semantic-language preferences that transiently select existing RDF labels and comments in both the Canvas and editor metadata.
 
 ## Packages
 

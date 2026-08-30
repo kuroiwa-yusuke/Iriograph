@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-const STORAGE_KEY = "iriograph.mock.workspace:models/pizza-order-delivery.iriograph";
+const STORAGE_KEY = "iriograph.mock.workspace:models/pizza-order-delivery-bilingual.iriograph";
 
 const labels = {
   horizontalShort: "承認",

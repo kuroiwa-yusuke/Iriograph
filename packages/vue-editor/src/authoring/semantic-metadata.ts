@@ -23,6 +23,7 @@ export type SemanticDisplayMetadata = {
  */
 export function semanticDisplayMetadata(
   document: IriographDocument,
+  preferredLocales: readonly string[] = [],
 ): Record<string, SemanticDisplayMetadata> {
   const graph = parseSemanticGraph(document);
   const result = new Map<string, SemanticDisplayMetadata>();
@@ -44,8 +45,8 @@ export function semanticDisplayMetadata(
     result.set(quad.subject.value, current);
   }
   return Object.fromEntries([...result.entries()].map(([iri, metadata]) => [iri, {
-    labels: metadata.labels.sort(compareText),
-    comments: metadata.comments.sort(compareText),
+    labels: metadata.labels.sort((left, right) => compareText(left, right, preferredLocales)),
+    comments: metadata.comments.sort((left, right) => compareText(left, right, preferredLocales)),
   }]));
 }
 
@@ -53,7 +54,23 @@ export function semanticTextLabel(text: SemanticDisplayText): string {
   return text.language ? `${text.value} (${text.language})` : text.value;
 }
 
-function compareText(left: SemanticDisplayText, right: SemanticDisplayText): number {
-  return compareCodePoints(left.language, right.language)
+function compareText(
+  left: SemanticDisplayText,
+  right: SemanticDisplayText,
+  preferredLocales: readonly string[],
+): number {
+  return localeRank(left.language, preferredLocales) - localeRank(right.language, preferredLocales)
+    || compareCodePoints(left.language, right.language)
     || compareCodePoints(left.value, right.value);
+}
+
+function localeRank(language: string, preferredLocales: readonly string[]): number {
+  if (!language) return preferredLocales.length * 2;
+  const normalized = language.toLowerCase();
+  for (let index = 0; index < preferredLocales.length; index += 1) {
+    const locale = preferredLocales[index]!.trim().toLowerCase();
+    if (normalized === locale) return index * 2;
+    if (normalized.split("-")[0] === locale.split("-")[0]) return index * 2 + 1;
+  }
+  return preferredLocales.length * 2 + 1;
 }

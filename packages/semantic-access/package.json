@@ -1,6 +1,6 @@
 {
   "name": "@iriograph/semantic-access",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Label-first semantic index and revision-safe authoring facade for Iriograph.",
   "type": "module",
   "license": "MIT",
@@ -51,7 +51,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "@iriograph/core": "0.12.0",
+    "@iriograph/core": "0.12.1",
     "@types/n3": "^1.26.0",
     "n3": "^1.26.0"
   }

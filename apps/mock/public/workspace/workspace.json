@@ -1,7 +1,7 @@
 {
   "workspaceId": "iriograph-local-mock",
   "name": "Iriograph local workspace",
-  "defaultDocumentPath": "models/pizza-order-delivery.iriograph",
+  "defaultDocumentPath": "models/pizza-order-delivery-bilingual.iriograph",
   "entries": [
     {
       "kind": "iriograph-document",
@@ -16,6 +16,13 @@
       "documentId": "pizza-order-delivery",
       "mediaType": "application/vnd.iriograph+json",
       "url": "/workspace/models/pizza-order-delivery.iriograph"
+    },
+    {
+      "kind": "iriograph-document",
+      "path": "models/pizza-order-delivery-bilingual.iriograph",
+      "documentId": "pizza-order-delivery-bilingual",
+      "mediaType": "application/vnd.iriograph+json",
+      "url": "/workspace/models/pizza-order-delivery-bilingual.iriograph"
     },
     {
       "kind": "iriograph-document",

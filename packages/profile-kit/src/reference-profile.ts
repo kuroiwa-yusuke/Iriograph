@@ -5,16 +5,99 @@ import {
 
 import type { DomainProjectionProfileManifestV1 } from "./index.js";
 
-export const REFERENCE_WORKFLOW_PROFILE_REF = "urn:iriograph:profile:reference-workflow@1";
-export const REFERENCE_WORKFLOW_CATALOG_REF = "urn:iriograph:catalog:reference-workflow@1";
+export const REFERENCE_WORKFLOW_PROFILE_REF = "urn:iriograph:profile:reference-workflow@2";
+export const REFERENCE_WORKFLOW_CATALOG_REF = "urn:iriograph:catalog:reference-workflow@2";
+export const REFERENCE_WORKFLOW_PROFILE_REF_V1 = "urn:iriograph:profile:reference-workflow@1";
+export const REFERENCE_WORKFLOW_CATALOG_REF_V1 = "urn:iriograph:catalog:reference-workflow@1";
 
 /** Small distributable example proving that a domain profile needs no Core branch. */
 export const referenceWorkflowProfile: DomainProjectionProfileManifestV1 = Object.freeze({
   schemaVersion: "1",
   kind: "iriograph.domain-profile",
   profileId: "urn:iriograph:profile:reference-workflow",
-  profileVersion: "1",
+  profileVersion: "2",
   profileRef: REFERENCE_WORKFLOW_PROFILE_REF,
+  defaultLocale: "en",
+  ontology: {
+    mediaType: "text/turtle",
+    source: [
+      "@prefix ex: <urn:iriograph:reference-workflow:> .",
+      "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .",
+      "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+      "ex:Task a rdfs:Class ;",
+      "  rdfs:label \"Task\"@en, \"作業\"@ja ;",
+      "  rdfs:comment \"A unit of work in a workflow.\"@en, \"ワークフロー内の作業単位です。\"@ja .",
+      "ex:next a rdf:Property ;",
+      "  rdfs:label \"Next step\"@en, \"次の工程\"@ja ;",
+      "  rdfs:comment \"Connects a task to its next step.\"@en, \"作業を次の工程へ接続します。\"@ja .",
+    ].join("\n"),
+  },
+  authoring: {
+    roles: [{ roleId: "task", classIri: "urn:iriograph:reference-workflow:Task", label: "Task" }],
+    terms: [{
+      termId: "next",
+      iri: "urn:iriograph:reference-workflow:next",
+      kind: "property",
+      roles: ["predicate"],
+      label: "Next step",
+      objectKinds: ["iri"],
+    }],
+  },
+  catalogRefs: ["urn:iriograph:catalog:workflow-instance-flow@1"],
+  catalog: {
+    ...standardWorkflowInstanceFlowCatalog,
+    catalogId: "urn:iriograph:catalog:reference-workflow",
+    catalogVersion: "2",
+    profileRef: REFERENCE_WORKFLOW_PROFILE_REF,
+    templates: {
+      ...standardWorkflowInstanceFlowCatalog.templates,
+      "urn:iriograph:template:node:generic:1": {
+        ...standardWorkflowInstanceFlowCatalog.templates["urn:iriograph:template:node:generic:1"]!,
+        ports: [
+          { portId: "input", label: "Input", role: "target", side: "left", position: .5, predicateIris: ["urn:iriograph:reference-workflow:next"] },
+          { portId: "output", label: "Output", role: "source", side: "right", position: .5, predicateIris: ["urn:iriograph:reference-workflow:next"] },
+          { portId: "aux-top", label: "Auxiliary", role: "both", side: "top", position: .5 },
+        ],
+      },
+    },
+  },
+  licenses: [{ licenseId: "CC0-1.0", notice: "Iriograph reference ontology fixture." }],
+} satisfies DomainProjectionProfileManifestV1);
+
+export const referenceWorkflowFixture: IriographDocumentV1 = Object.freeze({
+  schemaVersion: "1",
+  kind: "iriograph.document",
+  documentId: "iriograph-reference-workflow",
+  semantic: {
+    format: "text/turtle",
+    baseIri: "urn:iriograph:reference-workflow:fixture:",
+    authoringProfileRef: "urn:iriograph:authoring-profile:reference-workflow@2",
+    source: [
+      "@prefix : <urn:iriograph:reference-workflow:fixture:> .",
+      "@prefix ex: <urn:iriograph:reference-workflow:> .",
+      "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+      ":start a ex:Task ; rdfs:label \"Start\"@en, \"開始\"@ja ; ex:next :finish .",
+      ":finish a ex:Task ; rdfs:label \"Finish\"@en, \"完了\"@ja .",
+    ].join("\n"),
+  },
+  imports: [{ catalogRef: REFERENCE_WORKFLOW_CATALOG_REF }],
+  views: [{
+    viewId: "main",
+    kind: "region",
+    profileRef: REFERENCE_WORKFLOW_PROFILE_REF,
+    layoutRef: standardWorkflowInstanceFlowCatalog.defaults!.layoutRef,
+    locale: "en",
+    overlay: {},
+  }],
+} satisfies IriographDocumentV1);
+
+/** Immutable Japanese-first v1 artifact retained for documents that already reference it. */
+export const referenceWorkflowProfileV1: DomainProjectionProfileManifestV1 = Object.freeze({
+  schemaVersion: "1",
+  kind: "iriograph.domain-profile",
+  profileId: "urn:iriograph:profile:reference-workflow",
+  profileVersion: "1",
+  profileRef: REFERENCE_WORKFLOW_PROFILE_REF_V1,
   defaultLocale: "ja",
   ontology: {
     mediaType: "text/turtle",
@@ -42,7 +125,7 @@ export const referenceWorkflowProfile: DomainProjectionProfileManifestV1 = Objec
     ...standardWorkflowInstanceFlowCatalog,
     catalogId: "urn:iriograph:catalog:reference-workflow",
     catalogVersion: "1",
-    profileRef: REFERENCE_WORKFLOW_PROFILE_REF,
+    profileRef: REFERENCE_WORKFLOW_PROFILE_REF_V1,
     templates: {
       ...standardWorkflowInstanceFlowCatalog.templates,
       "urn:iriograph:template:node:generic:1": {
@@ -58,7 +141,7 @@ export const referenceWorkflowProfile: DomainProjectionProfileManifestV1 = Objec
   licenses: [{ licenseId: "CC0-1.0", notice: "Iriograph reference ontology fixture." }],
 } satisfies DomainProjectionProfileManifestV1);
 
-export const referenceWorkflowFixture: IriographDocumentV1 = Object.freeze({
+export const referenceWorkflowFixtureV1: IriographDocumentV1 = Object.freeze({
   schemaVersion: "1",
   kind: "iriograph.document",
   documentId: "iriograph-reference-workflow",
@@ -74,11 +157,11 @@ export const referenceWorkflowFixture: IriographDocumentV1 = Object.freeze({
       ":finish a ex:Task ; rdfs:label \"完了\"@ja .",
     ].join("\n"),
   },
-  imports: [{ catalogRef: REFERENCE_WORKFLOW_CATALOG_REF }],
+  imports: [{ catalogRef: REFERENCE_WORKFLOW_CATALOG_REF_V1 }],
   views: [{
     viewId: "main",
     kind: "region",
-    profileRef: REFERENCE_WORKFLOW_PROFILE_REF,
+    profileRef: REFERENCE_WORKFLOW_PROFILE_REF_V1,
     layoutRef: standardWorkflowInstanceFlowCatalog.defaults!.layoutRef,
     locale: "ja",
     overlay: {},

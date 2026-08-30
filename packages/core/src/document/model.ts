@@ -220,9 +220,10 @@ export type SemanticTextValue = {
   datatypeIri?: string;
 };
 
-/** All labels/comments plus the locale-selected primary label. */
+/** All labels/comments plus the locale-selected primary values. */
 export type SceneSemanticText = {
   primaryLabel?: SemanticTextValue;
+  primaryComment?: SemanticTextValue;
   labels: SemanticTextValue[];
   comments: SemanticTextValue[];
 };
@@ -441,6 +442,12 @@ export type ProjectionOptions = {
     assetRef: string,
     definition: AssetDefinition | undefined,
   ) => string | undefined;
+  /**
+   * Transient RDF label/comment language preference in priority order.
+   * A non-empty value overrides the persisted `view.locale` for this
+   * projection only and is never written to the portable document.
+   */
+  semanticLocales?: readonly string[];
 };
 
 /**

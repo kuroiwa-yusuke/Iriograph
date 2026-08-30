@@ -37,7 +37,7 @@ import "@iriograph/vue-editor/styles.css";
 
 ## 言語
 
-Editorは英語を既定とし、日本語を同梱します。`uiLocale`はpackage UIを切り替え、`update:uiLocale`を受けたHostは利用者設定としてportable document外へ保存できます。`semanticLocales`は既存RDF label/commentの表示優先順で、省略時は`uiLocale`へ従います。どちらを変えてもTurtleの翻訳・書換え、view overlay更新、history追加、dirty化を行いません。
+Editorは英語を既定とし、日本語を同梱します。`uiLocale`はpackage UIを切り替え、`update:uiLocale`を受けたHostは利用者設定としてportable document外へ保存できます。`semanticLocales`は既存RDF label/commentの表示優先順で、省略時は`uiLocale`へ従います。この順序は保存済みview localeより先にCanvasのnode、edge、group、comment表示へtransientに適用されます。どちらを変えてもTurtleの翻訳・書換え、named view・overlay更新、history追加、dirty化を行いません。
 
 標準関係とpackage iconはexact IRIを保ったまま英語または日本語metadataを選択します。利用者が作成した意味textに選択言語がなければ、既存literalから決定的にfallbackします。
 

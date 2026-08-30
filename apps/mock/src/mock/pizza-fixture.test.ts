@@ -21,8 +21,22 @@ const PIZZA_FILES = [
   "pizza-order-delivery-llm-overlay.iriograph",
   "pizza-order-delivery-llm-overlay-r2.iriograph",
 ] as const;
+const BILINGUAL_PIZZA_FILE = "pizza-order-delivery-bilingual.iriograph";
+const HISTORICAL_PIZZA_FILE_HASHES = {
+  "pizza-order-delivery.iriograph": "e726751197c733d70624d9a471d8e406e32d732a229f4ebcada41620c6c6720c",
+  "pizza-order-delivery-llm-overlay.iriograph": "1ddce5293884875c6c8666a04e81412ff56a2ef4402043d455130dfbf62058a9",
+  "pizza-order-delivery-llm-overlay-r2.iriograph": "27257f536a51afb85ae34bd0f2b0ff3f8eade3fbd7cdf6dfccca59de64f41434",
+} as const;
 
 describe("Pizza canonical fixture", () => {
+  it("keeps every historical comparison fixture byte-identical", () => {
+    for (const name of PIZZA_FILES) {
+      const bytes = readFileSync(pizzaDocumentUrl(name));
+      expect(createHash("sha256").update(bytes).digest("hex"), name)
+        .toBe(HISTORICAL_PIZZA_FILE_HASHES[name]);
+    }
+  });
+
   it("過去のLLM実験と同じcanonical Turtleを3 fixtureでbyte-identicalに保つ", () => {
     const documents = PIZZA_FILES.map(readPizzaDocument);
     const canonical = documents[0]!;
@@ -121,11 +135,86 @@ describe("Pizza canonical fixture", () => {
     expect(applied.document).toEqual(readPizzaDocument(PIZZA_FILES[2]));
     expect(applied.scenes).toHaveProperty("main");
   });
+
+  it("publishes an English-default bilingual sample without changing the canonical graph or overlay", () => {
+    const canonical = readPizzaDocument(PIZZA_FILES[0]);
+    const bilingual = readPizzaDocument(BILINGUAL_PIZZA_FILE);
+
+    expect(bilingual.documentId).toBe("pizza-order-delivery-bilingual");
+    expect(bilingual.semantic.baseIri).toBe(canonical.semantic.baseIri);
+    expect(bilingual.imports).toEqual(canonical.imports);
+    expect(bilingual.views[0]).toEqual({
+      ...canonical.views[0],
+      locale: "en",
+      overlay: canonical.views[0]?.overlay,
+    });
+
+    const sourceWithoutAddedEnglish = bilingual.semantic.source
+      .replace(/, "[^"\n]+"@en/gu, "")
+      .replace(
+        'pizza:lane4-d03 rdfs:label "注文完了"@ja .',
+        'pizza:lane4-d03 rdfs:label "注文完了"@ja, "Order completed"@en .',
+      );
+    expect(sourceWithoutAddedEnglish).toBe(canonical.semantic.source);
+
+    const labeledBlocks = bilingual.semantic.source.split("\n\n")
+      .filter((block) => block.includes("rdfs:label"));
+    const commentedBlocks = bilingual.semantic.source.split("\n\n")
+      .filter((block) => block.includes("rdfs:comment"));
+    expect(labeledBlocks.length).toBeGreaterThan(0);
+    expect(labeledBlocks.every((block) => /rdfs:label [^\n]*@ja, "[^"\n]+"@en/u.test(block)))
+      .toBe(true);
+    expect(commentedBlocks.every((block) => /rdfs:comment [^\n]*@ja, "[^"\n]+"@en/u.test(block)))
+      .toBe(true);
+
+    const projected = projectSemanticView(
+      bilingual,
+      mockInstanceFlowProjectionCatalog,
+      "main",
+    );
+    expect(projected.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
+    expect(projected.nodes).toHaveLength(25);
+    expect(projected.edges).toHaveLength(32);
+    expect(projected.regions).toHaveLength(5);
+    const visibleLabels = [
+      ...projected.nodes.map((item) => item.label),
+      ...projected.edges.map((item) => item.label),
+      ...(projected.regions ?? []).map((item) => item.label),
+    ].filter(Boolean);
+    expect(visibleLabels).toEqual(expect.arrayContaining([
+      "Choose a pizza",
+      "Next step",
+      "Customer",
+    ]));
+    expect(visibleLabels.some((label) => /[ぁ-んァ-ヶ一-龠]/u.test(label))).toBe(false);
+  });
+
+  it("makes the bilingual sample the public workspace default", () => {
+    const manifest = JSON.parse(readFileSync(
+      new URL("../../public/workspace/workspace.json", import.meta.url),
+      "utf8",
+    )) as {
+      defaultDocumentPath: string;
+      entries: Array<{ kind: string; path: string; documentId?: string; url: string }>;
+    };
+    expect(manifest.defaultDocumentPath).toBe(`models/${BILINGUAL_PIZZA_FILE}`);
+    expect(manifest.entries).toContainEqual({
+      kind: "iriograph-document",
+      path: `models/${BILINGUAL_PIZZA_FILE}`,
+      documentId: "pizza-order-delivery-bilingual",
+      mediaType: "application/vnd.iriograph+json",
+      url: `/workspace/models/${BILINGUAL_PIZZA_FILE}`,
+    });
+  });
 });
 
-function readPizzaDocument(name: typeof PIZZA_FILES[number]): IriographDocumentV1 {
+function pizzaDocumentUrl(name: string): URL {
+  return new URL(`../../public/workspace/models/${name}`, import.meta.url);
+}
+
+function readPizzaDocument(name: string): IriographDocumentV1 {
   return parseIriographDocumentV1(JSON.parse(readFileSync(
-    new URL(`../../public/workspace/models/${name}`, import.meta.url),
+    pizzaDocumentUrl(name),
     "utf8",
   )) as unknown);
 }

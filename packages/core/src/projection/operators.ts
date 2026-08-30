@@ -27,6 +27,7 @@ import type {
   ProjectionProvenance,
   ProjectionRuleResolutionTrace,
   ProjectionRule,
+  SemanticTextValue,
   SceneSemanticText,
   ViewElementOverlay,
   ViewAnnotation,
@@ -220,6 +221,7 @@ export function executeProjectionOperators(
       diagnostics,
       closure,
       projectedResources,
+      input.options,
     );
     if (edge) edges.push(edge);
   }
@@ -513,7 +515,7 @@ function projectResource(
     plan.semanticRef,
     vocabulary.labelPredicate,
     vocabulary.commentPredicate,
-    view.locale,
+    semanticLocalePreferences(options, view.locale),
   );
   const groupRole = groupFrameKind(operator?.operator);
   const appearance = overlayEntry?.overlay.appearance;
@@ -628,6 +630,7 @@ function projectDirectEdge(
   diagnostics: ProjectionDiagnostic[],
   closure: RdfsClosure,
   projectedResources: ReadonlyMap<string, ProjectedNode | ProjectedContainer | ProjectedRegion>,
+  options: ProjectionOptions | undefined,
 ): ProjectedEdge | undefined {
   if (!isNamedNode(plan.quad.subject) || !isNamedNode(plan.quad.object)) return undefined;
   const sourceElementId = semanticToElement.get(plan.quad.subject.value);
@@ -661,7 +664,7 @@ function projectDirectEdge(
     plan.quad.predicate.value,
     vocabulary.labelPredicate,
     vocabulary.commentPredicate,
-    view.locale,
+    semanticLocalePreferences(options, view.locale),
   );
   const routeMode = overlay?.overlay.routing?.routeMode
     ?? (manualWaypoints ? "manual" : template.routeMode ?? "auto");
@@ -1308,7 +1311,7 @@ function collectSemanticText(
   semanticRef: string,
   labelPredicate: string,
   commentPredicate: string,
-  locale: string | undefined,
+  locales: readonly string[],
 ): SceneSemanticText {
   const values = (predicateIri: string) => graph.store
     .getQuads(semanticRef, predicateIri, null, null)
@@ -1327,23 +1330,40 @@ function collectSemanticText(
     ));
   const labels = values(labelPredicate);
   const comments = values(commentPredicate);
-  const normalizedLocale = locale?.toLowerCase();
-  const primaryLocale = normalizedLocale?.split("-")[0];
-  const selected = (
-    normalizedLocale
-      ? labels.find((label) => label.language === normalizedLocale)
-      : undefined
-  ) ?? (
-    primaryLocale
-      ? labels.find((label) => label.language?.split("-")[0] === primaryLocale)
-      : undefined
-  ) ?? labels.find((label) => !label.language)
-    ?? labels[0];
+  const selectedLabel = preferredSemanticText(labels, locales);
+  const selectedComment = preferredSemanticText(comments, locales);
   return {
-    ...(selected ? { primaryLabel: selected } : {}),
+    ...(selectedLabel ? { primaryLabel: selectedLabel } : {}),
+    ...(selectedComment ? { primaryComment: selectedComment } : {}),
     labels,
     comments,
   };
+}
+
+function semanticLocalePreferences(
+  options: ProjectionOptions | undefined,
+  viewLocale: string | undefined,
+): readonly string[] {
+  const override = options?.semanticLocales
+    ?.map((locale) => locale.trim().toLowerCase())
+    .filter(Boolean);
+  if (override?.length) return override;
+  const persisted = viewLocale?.trim().toLowerCase();
+  return persisted ? [persisted] : [];
+}
+
+function preferredSemanticText(
+  values: readonly SemanticTextValue[],
+  locales: readonly string[],
+): SemanticTextValue | undefined {
+  for (const locale of locales) {
+    const exact = values.find((value) => value.language === locale);
+    if (exact) return exact;
+    const primary = locale.split("-")[0];
+    const languageMatch = values.find((value) => value.language?.split("-")[0] === primary);
+    if (languageMatch) return languageMatch;
+  }
+  return values.find((value) => !value.language) ?? values[0];
 }
 
 function groupFrameKind(

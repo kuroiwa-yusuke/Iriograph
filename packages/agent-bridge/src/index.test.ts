@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyAgentRequest, ExternalCandidateReviewSession } from "./index.js";
+import type { IriographDocumentV1 } from "@iriograph/core";
+import { SemanticAccessIndex } from "@iriograph/semantic-access";
+import {
+  classifyAgentRequest,
+  ExternalCandidateReviewSession,
+  semanticReview,
+  type SemanticCandidatePayload,
+} from "./index.js";
 
 describe("agent request routing", () => {
   it("separates semantic, presentation and mixed concerns without granting authority", () => {
@@ -33,5 +40,47 @@ describe("external candidate review", () => {
     expect(() => session.take("review-1", "presentation", {
       documentRevision: "stale", contextRevision: "c1",
     })).toThrow("stale");
+  });
+
+  it("uses English preview fallbacks by default and the existing locale for Japanese", () => {
+    const document: IriographDocumentV1 = {
+      schemaVersion: "1",
+      kind: "iriograph.document",
+      documentId: "agent-review-fallbacks",
+      semantic: {
+        format: "text/turtle",
+        baseIri: "urn:test:agent-review:",
+        authoringProfileRef: "urn:test:authoring-profile@1",
+        source: "@prefix : <urn:test:agent-review:> .",
+      },
+      views: [],
+    };
+    const index = new SemanticAccessIndex(document, "d1", { locales: ["en"] });
+    const candidate: SemanticCandidatePayload = {
+      candidateId: "fallback-candidate",
+      documentRevision: "d1",
+      contextRevision: "c1",
+      patch: {
+        added: [{
+          statementRef: "urn:test:statement:new",
+          subject: { termType: "BlankNode", value: "new-subject" },
+          predicateIri: "urn:test:agent-review:new-predicate",
+          object: { termType: "NamedNode", value: "urn:test:agent-review:new-object" },
+        }],
+        removed: [],
+      },
+      diagnostics: [],
+    };
+
+    expect(semanticReview(candidate, index).added[0]).toMatchObject({
+      subject: "New anonymous element",
+      predicate: "New relationship",
+      object: "New element",
+    });
+    expect(semanticReview(candidate, index, "ja-JP").added[0]).toMatchObject({
+      subject: "新しい匿名要素",
+      predicate: "新しい関係",
+      object: "新しい要素",
+    });
   });
 });

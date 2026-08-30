@@ -43,7 +43,7 @@ import "@iriograph/vue-editor/styles.css";
 
 ## Languages
 
-The editor defaults to English and includes Japanese. `uiLocale` controls package chrome and `update:uiLocale` lets a host persist the user preference outside the portable document. `semanticLocales` is an ordered preference for existing RDF labels and comments; when omitted it follows `uiLocale`. Neither option translates or rewrites Turtle, changes a view overlay, creates history, or marks the document dirty.
+The editor defaults to English and includes Japanese. `uiLocale` controls package chrome and `update:uiLocale` lets a host persist the user preference outside the portable document. `semanticLocales` is an ordered preference for existing RDF labels and comments; when omitted it follows `uiLocale`. The preference also selects Canvas node, edge, group, and comment text transiently, ahead of the saved view locale. Neither option translates or rewrites Turtle, changes a named view or overlay, creates history, or marks the document dirty.
 
 Built-in relation and icon catalogs keep exact IRIs while selecting English or Japanese presentation metadata. User-authored semantic text falls back deterministically when the requested language is unavailable.
 

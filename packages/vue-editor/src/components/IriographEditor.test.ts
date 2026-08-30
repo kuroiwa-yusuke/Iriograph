@@ -115,14 +115,70 @@ describe("IriographEditor transaction regression", () => {
       semanticLocales: ["en"],
     }, -1);
 
+    await waitUntil(() => wrapper!.getComponent(DiagramCanvas).props("scene").nodes.some((node) => (
+      node.label === "Application"
+    )));
+
     await buttonWithText(wrapper, "型一覧").trigger("click");
     await nextTick();
     const typePanel = wrapper.getComponent(TypeListPanel);
     expect(typePanel.props("presentation").types[0]?.label).toBe("Work");
+    expect(wrapper.getComponent(DiagramCanvas).props("scene").nodes.some((node) => (
+      node.label === "申請"
+    ))).toBe(false);
     expect(wrapper.get('.iriograph-view-tabs[role="group"]').text()).toContain("型一覧");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
     expect(((wrapper.props() as Record<string, unknown>).modelValue as IriographDocumentV1).semantic.source)
       .toBe(fixture.semantic.source);
+  });
+
+  it("switches transient Canvas semantic text with the UI locale without mutating the document", async () => {
+    const fixture = documentFixture();
+    fixture.views[0]!.locale = "ja";
+    fixture.views[0]!.overlay = {
+      a: {
+        semanticRef: `${NS}a`,
+        geometry: { x: 20, y: 40, width: 160, height: 72 },
+      },
+    };
+    fixture.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:a rdfs:label "申請"@ja, "Application"@en ;
+  rdfs:comment "申請の説明"@ja, "Application details"@en ;
+  :rel :b .
+:b rdfs:label "完了"@ja, "Complete"@en .
+:rel rdfs:label "次"@ja, "Next"@en .
+`;
+    const portableBytes = JSON.stringify(fixture);
+    wrapper = await mountEditor({ modelValue: fixture, uiLocale: "en", dirty: false }, -1);
+    const canvas = wrapper.getComponent(DiagramCanvas);
+    await waitUntil(() => canvas.props("scene").nodes.some((node) => node.label === "Application"));
+    const historyDisabledBefore = wrapper.findAll<HTMLButtonElement>(".iriograph-history-actions button")
+      .map((button) => button.attributes("disabled") !== undefined);
+    expect(canvas.props("scene").nodes.find((node) => node.label === "Application")
+      ?.semanticText?.primaryComment?.value).toBe("Application details");
+
+    const language = wrapper.get<HTMLSelectElement>('select[aria-label="Editor language"]');
+    await language.setValue("ja");
+    await waitUntil(() => canvas.props("scene").nodes.some((node) => node.label === "申請"));
+
+    expect(canvas.props("scene").edges[0]?.label).toBe("次");
+    expect(canvas.props("scene").nodes.find((node) => node.label === "申請")
+      ?.semanticText?.primaryComment?.value).toBe("申請の説明");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(JSON.stringify(fixture)).toBe(portableBytes);
+    expect(JSON.stringify((wrapper.props() as Record<string, unknown>).modelValue)).toBe(portableBytes);
+    expect(fixture.views[0]!.locale).toBe("ja");
+    expect(fixture.views[0]!.overlay).toEqual({
+      a: {
+        semanticRef: `${NS}a`,
+        geometry: { x: 20, y: 40, width: 160, height: 72 },
+      },
+    });
+    expect(wrapper.findAll<HTMLButtonElement>(".iriograph-history-actions button")
+      .map((button) => button.attributes("disabled") !== undefined)).toEqual(historyDisabledBefore);
+    expect((wrapper.props() as Record<string, unknown>).dirty).toBe(false);
   });
 
   it("図/型一覧/Turtle/Documentを押下状態が分かるbutton groupとして公開する", async () => {
