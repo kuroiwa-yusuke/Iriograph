@@ -9,6 +9,7 @@ import {
   assertNpmjsRegistry,
   NPMJS_REGISTRY,
   publishReleasePackages,
+  summarizeNpmFailure,
 } from "./publish-packages.mjs";
 
 const registry = NPMJS_REGISTRY;
@@ -217,6 +218,22 @@ test("authentication and network failures fail closed without publishing or leak
     },
   );
   assert.equal(calls.some(([command]) => command === "publish"), false);
+});
+
+test("publish diagnostics retain error codes while redacting credentials", () => {
+  const summary = summarizeNpmFailure({
+    code: 1,
+    stdout: "",
+    stderr: [
+      "npm error code E403",
+      "npm error authorization token super-secret-value",
+      "npm error Trusted Publisher configuration did not match",
+    ].join("\n"),
+  });
+  assert.match(summary, /E403/u);
+  assert.match(summary, /Trusted Publisher configuration did not match/u);
+  assert.match(summary, /REDACTED-SENSITIVE-LINE/u);
+  assert.equal(summary.includes("super-secret-value"), false);
 });
 
 test("publishing permits only the canonical npmjs registry", () => {

@@ -93,9 +93,10 @@ git fetch --no-tags origin "refs/tags/packages-publish-diagnostic-<commit>:refs/
 git cat-file tag "refs/tags/packages-publish-diagnostic-<commit>"
 ```
 
-verify内の各段階が失敗したときだけ、同じJSONの`verifyLogTailBase64`へANSI escapeを除去し、credential関連語を
-含む行をredactした失敗出力末尾を最大1,200 bytesで記録します。`base64 -d`で復号してtest名やbudget値を
-切り分けられます。他stage、成功時、logがない場合は空文字です。完全logや無加工出力はtagへ保存しません。
+verify内の各段階が失敗したときは`verifyLogTailBase64`、publishが失敗したときは
+`publishLogTailBase64`へ、ANSI escapeを除去しcredential関連語を含む行をredactした小さな出力末尾を記録します。
+`base64 -d`で復号し、test名、registry authorization、Trusted Publisher設定不一致を切り分けられます。
+成功時またはlogがない場合は空文字です。完全logや無加工出力はtagへ保存しません。
 
 Repository全体とpublish jobの`contents`権限はread-onlyのまま保ち、publish jobだけへ`id-token: write`、
 tagを作る独立audit jobだけへ`contents: write`を付与します。GitHub tokenやOIDC assertionを

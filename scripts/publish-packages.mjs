@@ -31,6 +31,19 @@ function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 }
 
+export function summarizeNpmFailure(result) {
+  const lines = `${result.stderr ?? ""}\n${result.stdout ?? ""}`
+    .split(/\r?\n/u)
+    .filter((line) => /(?:^npm\s+(?:error|ERR!)|\bE(?:401|403|404|409|NEEDAUTH)\b)/iu.test(line))
+    .map((line) => (
+      /token|password|secret|credential|authorization|_authToken|private[_-]?key/iu.test(line)
+        ? "[REDACTED-SENSITIVE-LINE]"
+        : line.replace(/https?:\/\/[^/\s:@]+:[^@\s]+@/giu, "https://[REDACTED-CREDENTIAL]@")
+    ));
+  const summary = lines.slice(-12).join("\n").slice(-1600);
+  return summary || `npm exited with code ${Number.isInteger(result.code) ? result.code : 1}`;
+}
+
 export function assertNpmjsRegistry(registry) {
   let parsed;
   try {
@@ -141,7 +154,11 @@ export async function publishReleasePackages(options = {}) {
         results.push({ name, version, status: "skipped-after-race" });
         continue;
       }
-      throw new Error(`publish failed for ${name}@${version}; exact version is still absent`);
+      throw new Error([
+        `publish failed for ${name}@${version}; exact version is still absent`,
+        "sanitized npm diagnostic:",
+        summarizeNpmFailure(publishResult),
+      ].join("\n"));
     }
 
     const published = await waitForExactVersion({

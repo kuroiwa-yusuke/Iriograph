@@ -197,6 +197,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       failedStage: ${{ steps.failure_summary.outputs.failedStage }}
+      failureTailBase64: ${{ steps.failure_summary.outputs.failureTailBase64 }}
     permissions:
       contents: read
       id-token: write
@@ -275,7 +276,10 @@ jobs:
           echo "NPM_CONFIG_USERCONFIG=${publish_userconfig}" >> "${GITHUB_ENV}"
       - name: Publish packages
         id: publish_packages
-        run: npm run publish:packages
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run publish:packages 2>&1 | tee /tmp/iriograph-package-publish.log
       - name: Summarize failed stage
         id: failure_summary
         if: ${{ always() }}
@@ -304,6 +308,14 @@ jobs:
           record_failure "npm-registry" "${NPM_REGISTRY_OUTCOME}"
           record_failure "npm-publish" "${PUBLISH_OUTCOME}"
           echo "failedStage=${failed_stage}" >> "${GITHUB_OUTPUT}"
+          failure_tail_base64=""
+          if [[ "${failed_stage}" != "none" && -f /tmp/iriograph-package-publish.log ]]; then
+            failure_tail_base64="$(tail -c 1800 /tmp/iriograph-package-publish.log \
+              | sed -E $'s/\\x1b\\[[0-?]*[ -\\/]*[@-~]//g' \
+              | sed -E '/token|password|secret|credential|authorization|_authToken|private[_-]?key/I c\[REDACTED-SENSITIVE-LINE]' \
+              | base64 -w0)"
+          fi
+          echo "failureTailBase64=${failure_tail_base64}" >> "${GITHUB_OUTPUT}"
 
   audit:
     needs: [verify, publish]
@@ -325,6 +337,7 @@ jobs:
           VERIFY_FAILED_STAGE: ${{ needs.verify.outputs.failedStage || 'none' }}
           PUBLISH_FAILED_STAGE: ${{ needs.publish.outputs.failedStage || 'none' }}
           VERIFY_LOG_TAIL_BASE64: ${{ needs.verify.outputs.failureTailBase64 || '' }}
+          PUBLISH_LOG_TAIL_BASE64: ${{ needs.publish.outputs.failureTailBase64 || '' }}
         run: |
           set -euo pipefail
           package_version="$(node --input-type=module -e "import { readFileSync } from 'node:fs'; console.log(JSON.parse(readFileSync('packages/core/package.json', 'utf8')).version)")"
@@ -335,4 +348,5 @@ jobs:
           VERIFY_FAILED_STAGE="${VERIFY_FAILED_STAGE}" \
           PUBLISH_FAILED_STAGE="${PUBLISH_FAILED_STAGE}" \
           VERIFY_LOG_TAIL_BASE64="${VERIFY_LOG_TAIL_BASE64}" \
+          PUBLISH_LOG_TAIL_BASE64="${PUBLISH_LOG_TAIL_BASE64}" \
           bash scripts/write-package-publish-audit.sh

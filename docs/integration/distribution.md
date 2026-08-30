@@ -86,7 +86,7 @@ After all exact versions are visible, an audit job records:
 
 The immutable version tag must point to the release commit and is never force-moved. Diagnostic stages use a closed vocabulary. Publish stages are `install`, `version-check`, `npm-cli`, `npm-registry`, and `npm-publish`. Verify stages distinguish install, version checks, package test groups, type checking, build, and tarball consumer verification.
 
-Only the independent audit job receives `contents: write`; the publish job remains read-only except for its short-lived OIDC identity. Tokens and OIDC assertions never enter script arguments, tags, or stored diagnostics. Failed verify output may include only a small redacted base64 tail under the existing audit contract.
+Only the independent audit job receives `contents: write`; the publish job remains read-only except for its short-lived OIDC identity. Tokens and OIDC assertions never enter script arguments, tags, or stored diagnostics. Failed verify or publish output may include only a small redacted base64 tail. The publish tail distinguishes registry authorization and Trusted Publisher mismatches without retaining credentials.
 
 ## Consumer hosts
 

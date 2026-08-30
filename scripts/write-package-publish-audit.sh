@@ -8,6 +8,7 @@ set -euo pipefail
 : "${VERIFY_FAILED_STAGE:?VERIFY_FAILED_STAGE is required}"
 : "${PUBLISH_FAILED_STAGE:?PUBLISH_FAILED_STAGE is required}"
 VERIFY_LOG_TAIL_BASE64="${VERIFY_LOG_TAIL_BASE64:-}"
+PUBLISH_LOG_TAIL_BASE64="${PUBLISH_LOG_TAIL_BASE64:-}"
 
 if [[ ! "${TARGET_COMMIT}" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Invalid target commit" >&2
@@ -53,6 +54,10 @@ if [[ ${#VERIFY_LOG_TAIL_BASE64} -gt 1800 || ! "${VERIFY_LOG_TAIL_BASE64}" =~ ^[
   echo "Invalid verify log tail" >&2
   exit 1
 fi
+if [[ ${#PUBLISH_LOG_TAIL_BASE64} -gt 2600 || ! "${PUBLISH_LOG_TAIL_BASE64}" =~ ^[A-Za-z0-9+/=]*$ ]]; then
+  echo "Invalid publish log tail" >&2
+  exit 1
+fi
 
 if [[ "${VERIFY_RESULT}" == "success" && "${PUBLISH_RESULT}" == "success" ]]; then
   OUTCOME="success"
@@ -83,8 +88,8 @@ OPPOSITE_TAG="packages-publish-${OPPOSITE}-${TARGET_COMMIT}"
 DIAGNOSTIC_TAG="packages-publish-diagnostic-${TARGET_COMMIT}"
 PUBLISHED_TAG="packages-published-v${PACKAGE_VERSION}"
 DIAGNOSTIC_MESSAGE="$(printf \
-  '{"schema":"iriograph-package-publish-diagnostic/v1","commit":"%s","version":"%s","outcome":"%s","failedStage":"%s","jobs":{"verify":"%s","publish":"%s"},"verifyLogTailBase64":"%s"}' \
-  "${TARGET_COMMIT}" "${PACKAGE_VERSION}" "${OUTCOME}" "${FAILED_STAGE}" "${VERIFY_RESULT}" "${PUBLISH_RESULT}" "${VERIFY_LOG_TAIL_BASE64}")"
+  '{"schema":"iriograph-package-publish-diagnostic/v1","commit":"%s","version":"%s","outcome":"%s","failedStage":"%s","jobs":{"verify":"%s","publish":"%s"},"verifyLogTailBase64":"%s","publishLogTailBase64":"%s"}' \
+  "${TARGET_COMMIT}" "${PACKAGE_VERSION}" "${OUTCOME}" "${FAILED_STAGE}" "${VERIFY_RESULT}" "${PUBLISH_RESULT}" "${VERIFY_LOG_TAIL_BASE64}" "${PUBLISH_LOG_TAIL_BASE64}")"
 
 remote_tag_commit() {
   local tag_name="$1"
