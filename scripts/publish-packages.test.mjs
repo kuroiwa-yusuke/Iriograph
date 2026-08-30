@@ -234,6 +234,7 @@ test("publish diagnostics retain error codes while redacting credentials", () =>
   assert.match(summary, /E403/u);
   assert.match(summary, /Trusted Publisher configuration did not match/u);
   assert.match(summary, /workflow filename did not match/u);
+  assert.equal(summary.includes("token exchange"), false);
   assert.match(summary, /REDACTED-SENSITIVE-LINE/u);
   assert.equal(summary.includes("super-secret-value"), false);
 });

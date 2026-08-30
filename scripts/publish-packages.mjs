@@ -38,6 +38,10 @@ export function summarizeNpmFailure(result) {
     .map((line) => {
       if (/^npm\s+verbose\s+oidc\s+/iu.test(line)) {
         return line
+          .replace(
+            /^npm\s+verbose\s+oidc\s+Failed token exchange request with body message:\s*/iu,
+            "npm verbose oidc exchange failed: ",
+          )
           .replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/gu, "[REDACTED-JWT]")
           .replace(/https?:\/\/[^/\s:@]+:[^@\s]+@/giu, "https://[REDACTED-CREDENTIAL]@")
           .slice(0, 600);
