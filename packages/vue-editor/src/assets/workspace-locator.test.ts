@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { createStaticWorkspaceLocator } from "./workspace-locator";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 const locator = createStaticWorkspaceLocator([
   { path: "assets/icons/task.svg", assetRef: "urn:asset:task", label: "Task" },
@@ -41,6 +42,16 @@ describe("workspace locator", () => {
     expect(ambiguous.resolve({ documentPath: "models/flow.iriograph", input: "assets/a.svg" })).toMatchObject({
       status: "rejected", reason: "ambiguous",
     });
+  });
+
+  it("rejection guidance is English by default and can be localized to Japanese", () => {
+    expect(locator.resolve({ documentPath: "models/flow.iriograph", input: "" }))
+      .toMatchObject({ message: "Enter an image path." });
+    const japanese = createStaticWorkspaceLocator([
+      { path: "assets/task.svg", assetRef: "urn:asset:task" },
+    ], (key, parameters) => translateEditorMessage("ja", key, parameters));
+    expect(japanese.resolve({ documentPath: "models/flow.iriograph", input: "" }))
+      .toMatchObject({ message: "画像pathを入力してください。" });
   });
 
   it("host metadata自身がWorkspace rootをescapeする場合はindex生成を拒否する", () => {

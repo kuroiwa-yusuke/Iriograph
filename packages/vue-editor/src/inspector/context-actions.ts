@@ -1,5 +1,14 @@
 import type { Point } from "@iriograph/core";
 
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
+
 export type DiagramContextTargetKind = "node" | "edge" | "container" | "region" | "blank";
 
 export type DiagramContextMenuRequest = {
@@ -49,19 +58,20 @@ export type EditorContextAction = {
 export function contextActionsFor(
   target: DiagramContextTargetKind,
   readOnly: boolean,
+  translator: EditorTranslator = defaultTranslator,
 ): EditorContextAction[] {
   const editable = (action: Omit<EditorContextAction, "disabled">): EditorContextAction => ({
     ...action,
     disabled: readOnly,
   });
   if (target === "node") {
-    return [editable({ id: "edit-appearance", label: "ビューを編集" })];
+    return [editable({ id: "edit-appearance", label: translator("contextAction.editView") })];
   }
   if (target === "edge") {
-    return [editable({ id: "edit-appearance", label: "線のビューを編集" })];
+    return [editable({ id: "edit-appearance", label: translator("contextAction.editEdgeView") })];
   }
   if (target === "container" || target === "region") {
-    return [editable({ id: "edit-appearance", label: "領域のビューを編集" })];
+    return [editable({ id: "edit-appearance", label: translator("contextAction.editRegionView") })];
   }
   return [];
 }

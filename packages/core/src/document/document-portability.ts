@@ -328,7 +328,7 @@ function transformDocumentNamespace(
       severity: "error",
       category: "structure",
       code: "document-rebase-base-unchanged",
-      message: "新しい図として複製するには、現在と異なるbase IRIを発行してください。",
+      message: "Issue a base IRI different from the current one when duplicating as a new diagram.",
       jsonPointer: "/semantic/baseIri",
       suggestedActions: [{
         actionId: "allocate-new-document-base",

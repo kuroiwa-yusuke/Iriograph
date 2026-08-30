@@ -16,6 +16,7 @@ import type {
   MockWorkspaceEntry,
   MockWorkspaceManifest,
 } from "./workspace";
+import { translateMockMessage, type MockLocale } from "./localization";
 
 type FetchAsset = (
   input: string,
@@ -48,6 +49,7 @@ export type MockAssetHost = {
 
 export type MockAssetResolverOptions = {
   baseUrl: string;
+  locale?: MockLocale;
   fetchAsset?: FetchAsset;
   objectUrls?: ObjectUrlApi;
   decodeIntrinsicSize?: (
@@ -124,7 +126,9 @@ export class MockWorkspaceAssetResolver implements AssetResolver {
     );
     const duplicates = duplicateAssetRefs(entries.map((entry) => entry.assetRef));
     if (duplicates.length > 0) {
-      throw new Error(`Workspace assetRefが重複しています: ${duplicates.join(", ")}`);
+      throw new Error(translateMockMessage(options.locale ?? "en", "assetRefDuplicates", {
+        refs: duplicates.join(", "),
+      }));
     }
     this.entries = new Map(entries.map((entry) => [entry.assetRef, entry]));
     this.fetchAsset = options.fetchAsset ?? ((input, init) => fetch(input, init));

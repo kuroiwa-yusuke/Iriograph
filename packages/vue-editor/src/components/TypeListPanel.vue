@@ -9,6 +9,7 @@ import {
   type TypeSystemPresentation,
   type TypeSystemShowInDiagramRequest,
 } from "../authoring/type-system";
+import { useEditorLocalization } from "../localization/editor-localization";
 
 const props = withDefaults(defineProps<{
   presentation: TypeSystemPresentation;
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   action: [action: TypeSystemAction];
   "show-in-diagram": [request: TypeSystemShowInDiagramRequest];
 }>();
+const { locale, t } = useEditorLocalization();
 
 const search = ref("");
 const resourceSearch = ref("");
@@ -80,15 +82,15 @@ const removableSelectedResourceIds = computed(() => selectedResourceIds.value.fi
   resourceById.value.get(resourceId)?.directTypeIds.includes(selectedTypeId.value)
 )));
 const formValidation = computed(() => {
-  if (!formLabel.value.trim()) return "型の名前を入力してください。";
+  if (!formLabel.value.trim()) return t("typeList.nameRequired");
   if (formMode.value !== "edit" || !selectedType.value) return "";
   const validation = validateProposedTypeParents(
     props.presentation,
     selectedType.value.typeId,
     formParentTypeIds.value,
   );
-  if (!validation.valid && validation.reason === "cycle") return "上位の型が循環するため保存できません。";
-  if (!validation.valid) return "型の選択が古くなっています。";
+  if (!validation.valid && validation.reason === "cycle") return t("typeList.cycleInvalid");
+  if (!validation.valid) return t("typeList.selectionStale");
   return "";
 });
 
@@ -120,7 +122,8 @@ function toggleResource(resourceId: string): void {
 }
 
 function typeLabels(typeIds: readonly string[]): string {
-  return typeIds.map((typeId) => typeById.value.get(typeId)?.label).filter(Boolean).join("、");
+  return typeIds.map((typeId) => typeById.value.get(typeId)?.label).filter(Boolean)
+    .join(locale.value === "ja" ? "、" : ", ");
 }
 
 function openCreate(): void {
@@ -190,21 +193,21 @@ function showInDiagram(): void {
   <section class="type-list-panel" aria-labelledby="type-list-heading">
     <header>
       <div>
-        <h2 id="type-list-heading">型一覧</h2>
-        <p>型の関係と該当する要素を確認・編集します。</p>
+        <h2 id="type-list-heading">{{ t("typeList.title") }}</h2>
+        <p>{{ t("typeList.description") }}</p>
       </div>
-      <button type="button" :disabled="readonly" @click="openCreate">新しい型</button>
+      <button type="button" :disabled="readonly" @click="openCreate">{{ t("typeList.newType") }}</button>
     </header>
 
     <label class="search-field">
-      <span>型を検索</span>
-      <input v-model="search" type="search" placeholder="名前または説明" />
+      <span>{{ t("typeList.search") }}</span>
+      <input v-model="search" type="search" :placeholder="t('typeList.searchPlaceholder')" />
     </label>
 
     <div class="panel-columns">
-      <nav aria-label="型の階層">
-        <p v-if="presentation.cycles.length" role="alert">循環している上位関係があります。</p>
-        <ul role="tree" aria-label="型">
+      <nav :aria-label="t('typeList.hierarchy')">
+        <p v-if="presentation.cycles.length" role="alert">{{ t("typeList.cycleWarning") }}</p>
+        <ul role="tree" :aria-label="t('typeList.typesAria')">
           <li
             v-for="row in visibleTreeRows"
             :key="row.rowId"
@@ -215,54 +218,54 @@ function showInDiagram(): void {
             :style="{ paddingInlineStart: `${row.depth * 18}px` }"
           >
             <button type="button" :class="{ selected: row.typeId === selectedTypeId }" @click="selectType(row.typeId)">
-              <strong>{{ row.item.label }}<small v-if="row.reference" class="dag-reference">同じ型への参照</small></strong>
-              <span>直接 {{ row.item.directCount }}件 / 継承 {{ row.item.inheritedCount }}件</span>
+              <strong>{{ row.item.label }}<small v-if="row.reference" class="dag-reference">{{ t("typeList.sameTypeReference") }}</small></strong>
+              <span>{{ t("typeList.directInheritedCounts", { direct: row.item.directCount, inherited: row.item.inheritedCount }) }}</span>
             </button>
             <p v-if="row.item.parentTypeIds.length" class="parent-summary">
-              <span>上位の型</span>
-              {{ row.item.parentTypeIds.map((id) => typeById.get(id)?.label).filter(Boolean).join("、") }}
+              <span>{{ t("typeList.parentTypes") }}</span>
+              {{ row.item.parentTypeIds.map((id) => typeById.get(id)?.label).filter(Boolean).join(t("common.listSeparator")) }}
             </p>
           </li>
         </ul>
-        <p v-if="visibleTreeRows.length === 0" class="empty">一致する型はありません。</p>
+        <p v-if="visibleTreeRows.length === 0" class="empty">{{ t("typeList.noMatches") }}</p>
       </nav>
 
-      <article v-if="selectedType" aria-label="選択した型">
+      <article v-if="selectedType" :aria-label="t('typeList.selectedType')">
         <div class="detail-heading">
           <div>
-            <span class="eyebrow">型</span>
+            <span class="eyebrow">{{ t("common.type") }}</span>
             <h3>{{ selectedType.label }}</h3>
           </div>
           <div class="detail-actions">
-            <button type="button" :disabled="readonly" @click="openEdit">編集</button>
-            <button type="button" :disabled="readonly" @click="requestDelete">削除</button>
+            <button type="button" :disabled="readonly" @click="openEdit">{{ t("common.edit") }}</button>
+            <button type="button" :disabled="readonly" @click="requestDelete">{{ t("common.delete") }}</button>
           </div>
         </div>
         <p v-if="selectedType.description">{{ selectedType.description }}</p>
 
         <dl>
           <div>
-            <dt>上位の型</dt>
-            <dd>{{ selectedType.parentTypeIds.length ? selectedType.parentTypeIds.map((id) => typeById.get(id)?.label).filter(Boolean).join("、") : "なし" }}</dd>
+            <dt>{{ t("typeList.parentTypes") }}</dt>
+            <dd>{{ selectedType.parentTypeIds.length ? selectedType.parentTypeIds.map((id) => typeById.get(id)?.label).filter(Boolean).join(", ") : t("common.none") }}</dd>
           </div>
           <div>
-            <dt>下位の型</dt>
-            <dd>{{ selectedType.childTypeIds.length ? selectedType.childTypeIds.map((id) => typeById.get(id)?.label).filter(Boolean).join("、") : "なし" }}</dd>
+            <dt>{{ t("typeList.childTypes") }}</dt>
+            <dd>{{ selectedType.childTypeIds.length ? selectedType.childTypeIds.map((id) => typeById.get(id)?.label).filter(Boolean).join(", ") : t("common.none") }}</dd>
           </div>
         </dl>
 
         <form v-if="formMode" class="type-form" @submit.prevent="saveForm">
-          <h4>{{ formMode === "create" ? "新しい型" : "型を編集" }}</h4>
+          <h4>{{ formMode === "create" ? t("typeList.newType") : t("typeList.editType") }}</h4>
           <label>
-            <span>名前</span>
+            <span>{{ t("common.name") }}</span>
             <input v-model="formLabel" />
           </label>
           <label>
-            <span>説明</span>
+            <span>{{ t("common.description") }}</span>
             <textarea v-model="formDescription" rows="3" />
           </label>
           <fieldset>
-            <legend>上位の型</legend>
+            <legend>{{ t("typeList.parentTypes") }}</legend>
             <label v-for="candidate in presentation.types.filter((item) => formMode === 'create' || item.typeId !== selectedTypeId)" :key="candidate.typeId">
               <input v-model="formParentTypeIds" type="checkbox" :value="candidate.typeId" />
               <span>{{ candidate.label }}</span>
@@ -270,43 +273,43 @@ function showInDiagram(): void {
           </fieldset>
           <p v-if="formValidation" class="form-error" role="alert">{{ formValidation }}</p>
           <div class="form-actions">
-            <button type="submit" :disabled="Boolean(formValidation)">保存</button>
-            <button type="button" @click="formMode = undefined">キャンセル</button>
+            <button type="submit" :disabled="Boolean(formValidation)">{{ t("typeList.save") }}</button>
+            <button type="button" @click="formMode = undefined">{{ t("common.cancel") }}</button>
           </div>
         </form>
 
         <section class="resource-section" aria-labelledby="type-resources-heading">
           <div class="resource-heading">
-            <h4 id="type-resources-heading">該当する要素</h4>
-            <div role="group" aria-label="要素の範囲">
-              <button type="button" :aria-pressed="scope === 'direct'" @click="scope = 'direct'">直接</button>
-              <button type="button" :aria-pressed="scope === 'direct-and-inherited'" @click="scope = 'direct-and-inherited'">継承を含む</button>
+            <h4 id="type-resources-heading">{{ t("typeList.matchingElements") }}</h4>
+            <div role="group" :aria-label="t('typeList.elementScope')">
+              <button type="button" :aria-pressed="scope === 'direct'" @click="scope = 'direct'">{{ t("typeList.direct") }}</button>
+              <button type="button" :aria-pressed="scope === 'direct-and-inherited'" @click="scope = 'direct-and-inherited'">{{ t("typeList.includeInherited") }}</button>
             </div>
           </div>
           <div v-for="resource in visibleResources" :key="resource.resourceId" class="resource-row resource-row-readonly">
             <span class="resource-copy">
               <span>{{ resource.label }}</span>
-              <small>直接の型: {{ typeLabels(resource.directTypeIds) || "なし" }}</small>
-              <small v-if="resource.inheritedTypeIds.length">継承の型: {{ typeLabels(resource.inheritedTypeIds) }}</small>
+              <small>{{ t("typeList.directTypes", { types: typeLabels(resource.directTypeIds) || t("common.none") }) }}</small>
+              <small v-if="resource.inheritedTypeIds.length">{{ t("typeList.inheritedTypes", { types: typeLabels(resource.inheritedTypeIds) }) }}</small>
             </span>
-            <small>{{ resource.directTypeIds.includes(selectedType.typeId) ? "直接" : "継承" }}</small>
+            <small>{{ resource.directTypeIds.includes(selectedType.typeId) ? t("typeList.direct") : t("typeList.includeInherited") }}</small>
           </div>
-          <p v-if="visibleResources.length === 0" class="empty">該当する要素はありません。</p>
+          <p v-if="visibleResources.length === 0" class="empty">{{ t("typeList.noElements") }}</p>
           <div class="resource-actions">
-            <button type="button" @click="showInDiagram">図で表示</button>
+            <button type="button" @click="showInDiagram">{{ t("typeList.showInDiagram") }}</button>
           </div>
         </section>
 
         <section class="resource-section assignment-section" aria-labelledby="type-assignment-heading">
           <div class="resource-heading">
             <div>
-              <h4 id="type-assignment-heading">型を一括変更</h4>
-              <p>図の要素から複数選択できます。解除はこの型が直接付いている要素だけに適用されます。</p>
+              <h4 id="type-assignment-heading">{{ t("typeList.bulkChange") }}</h4>
+              <p>{{ t("typeList.bulkDescription") }}</p>
             </div>
           </div>
           <label class="search-field">
-            <span>要素を検索</span>
-            <input v-model="resourceSearch" type="search" placeholder="要素名または現在の型" />
+            <span>{{ t("typeList.searchElements") }}</span>
+            <input v-model="resourceSearch" type="search" :placeholder="t('typeList.searchElementsPlaceholder')" />
           </label>
           <label v-for="resource in assignmentResources" :key="resource.resourceId" class="resource-row assignment-resource-row">
             <input
@@ -316,15 +319,15 @@ function showInDiagram(): void {
             />
             <span class="resource-copy">
               <span>{{ resource.label }}</span>
-              <small>直接の型: {{ typeLabels(resource.directTypeIds) || "なし" }}</small>
-              <small v-if="resource.inheritedTypeIds.length">継承の型: {{ typeLabels(resource.inheritedTypeIds) }}</small>
+              <small>{{ t("typeList.directTypes", { types: typeLabels(resource.directTypeIds) || t("common.none") }) }}</small>
+              <small v-if="resource.inheritedTypeIds.length">{{ t("typeList.inheritedTypes", { types: typeLabels(resource.inheritedTypeIds) }) }}</small>
             </span>
-            <small>{{ resource.directTypeIds.includes(selectedType.typeId) ? "解除可" : "付与可" }}</small>
+            <small>{{ resource.directTypeIds.includes(selectedType.typeId) ? t("typeList.canRemove") : t("typeList.canAssign") }}</small>
           </label>
-          <p v-if="assignmentResources.length === 0" class="empty">一致する要素はありません。</p>
+          <p v-if="assignmentResources.length === 0" class="empty">{{ t("typeList.noElementMatches") }}</p>
           <div class="resource-actions">
-            <button type="button" :disabled="readonly || addableSelectedResourceIds.length === 0" @click="bulk('bulk-add-type')">選択要素へ型を付与</button>
-            <button type="button" :disabled="readonly || removableSelectedResourceIds.length === 0" @click="bulk('bulk-remove-type')">選択要素から型を解除</button>
+            <button type="button" :disabled="readonly || addableSelectedResourceIds.length === 0" @click="bulk('bulk-add-type')">{{ t("typeList.assignSelected") }}</button>
+            <button type="button" :disabled="readonly || removableSelectedResourceIds.length === 0" @click="bulk('bulk-remove-type')">{{ t("typeList.removeSelected") }}</button>
           </div>
         </section>
       </article>

@@ -19,6 +19,10 @@ import {
   type StructuredAuthoringFlowState,
 } from "../authoring/structured-authoring-flow";
 import StructuredAuthoringWizard from "./StructuredAuthoringWizard.vue";
+import {
+  createStaticEditorLocalization,
+  editorLocalizationKey,
+} from "../localization/editor-localization";
 
 const presentation: StructuredAuthoringPresentation = {
   profile: {
@@ -325,7 +329,14 @@ function mountControlled(
       });
     },
   });
-  return mount(Host, options.attach ? { attachTo: document.body } : undefined);
+  return mount(Host, {
+    ...(options.attach ? { attachTo: document.body } : {}),
+    global: {
+      provide: {
+        [editorLocalizationKey as symbol]: createStaticEditorLocalization("ja"),
+      },
+    },
+  });
 }
 
 function child(host: VueWrapper): VueWrapper<any> {

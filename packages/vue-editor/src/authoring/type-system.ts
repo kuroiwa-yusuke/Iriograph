@@ -6,6 +6,15 @@ import {
   type IriographDocument,
 } from "@iriograph/core";
 
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
+
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_PROPERTY = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property";
 const RDF_STATEMENT = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Statement";
@@ -187,8 +196,12 @@ export class TypeSystemIndex {
     return this.#exact.resourceIriById.get(resourceId);
   }
 
-  compileAction(action: TypeSystemAction, options: TypeSystemCompileOptions): TypeSystemCompileResult {
-    return compileTypeSystemAction(this.presentation, this.#exact, action, options);
+  compileAction(
+    action: TypeSystemAction,
+    options: TypeSystemCompileOptions,
+    translator: EditorTranslator = defaultTranslator,
+  ): TypeSystemCompileResult {
+    return compileTypeSystemAction(this.presentation, this.#exact, action, options, translator);
   }
 }
 
@@ -200,6 +213,7 @@ export function deriveTypeSystem(
     /** Exact scene-node identities supplied only at the derivation boundary. */
     resourceIris?: readonly string[];
   } = {},
+  translator: EditorTranslator = defaultTranslator,
 ): TypeSystemIndex {
   const graph = parseSemanticGraph(document);
   const classIris = new Set<string>();
@@ -235,7 +249,9 @@ export function deriveTypeSystem(
     const role = roleByClass.get(classIri)?.[0];
     const label = preferredLiteral(graph.store.getObjects(classIri, RDFS_LABEL, null), locale)
       ?? role?.label
-      ?? fallbackLabel("名前未設定の型", stableOpaqueId("type", classIri));
+      ?? translator("typeSystem.unnamedType", {
+        id: stableOpaqueId("type", classIri).slice(-6),
+      });
     return [classIri, label] as const;
   }));
   const typeDescriptionByIri = new Map([...classIris].map((classIri) => {
@@ -258,7 +274,9 @@ export function deriveTypeSystem(
   const resourceLabelByIri = new Map(resourceIris.map((resourceIri) => [
     resourceIri,
     preferredLiteral(graph.store.getObjects(resourceIri, RDFS_LABEL, null), locale)
-      ?? fallbackLabel("名前未設定の要素", stableOpaqueId("resource", resourceIri)),
+      ?? translator("typeSystem.unnamedResource", {
+        id: stableOpaqueId("resource", resourceIri).slice(-6),
+      }),
   ]));
   resourceIris.sort((left, right) => compareLabelFirst(
     resourceLabelByIri.get(left)!,
@@ -431,17 +449,20 @@ function compileTypeSystemAction(
   exact: ExactTypeSystemIndex,
   action: TypeSystemAction,
   options: TypeSystemCompileOptions,
+  translator: EditorTranslator,
 ): TypeSystemCompileResult {
   const label = "label" in action ? action.label.trim() : undefined;
   if (label !== undefined && label.length === 0) {
-    return { ok: false, code: "invalid-label", message: "型の名前を入力してください。" };
+    return { ok: false, code: "invalid-label", message: translator("typeSystem.typeNameRequired") };
   }
   const parentIds = "parentTypeIds" in action ? action.parentTypeIds : [];
   if (new Set(parentIds).size !== parentIds.length) {
-    return { ok: false, code: "duplicate-id", message: "同じ上位の型が重複しています。" };
+    return { ok: false, code: "duplicate-id", message: translator("typeSystem.duplicateParent") };
   }
   const parentIris = resolveAll(parentIds, exact.typeIriById);
-  if (!parentIris) return { ok: false, code: "unknown-type", message: "型の選択が古くなっています。" };
+  if (!parentIris) {
+    return { ok: false, code: "unknown-type", message: translator("typeSystem.staleTypeSelection") };
+  }
 
   if (action.type === "create-class") {
     const subject = options.createdTypeIri
@@ -467,7 +488,9 @@ function compileTypeSystemAction(
   }
 
   const typeIri = exact.typeIriById.get(action.typeId);
-  if (!typeIri) return { ok: false, code: "unknown-type", message: "型の選択が古くなっています。" };
+  if (!typeIri) {
+    return { ok: false, code: "unknown-type", message: translator("typeSystem.staleTypeSelection") };
+  }
   if (action.type === "edit-class") {
     const validation = validateProposedTypeParents(presentation, action.typeId, action.parentTypeIds);
     if (!validation.valid) {
@@ -475,10 +498,14 @@ function compileTypeSystemAction(
         ? {
             ok: false,
             code: "cycle",
-            message: "上位の型が循環するため保存できません。",
+            message: translator("typeSystem.parentCycle"),
             cycleTypeIds: validation.cycleTypeIds,
           }
-        : { ok: false, code: validation.reason, message: "型の選択が古くなっています。" };
+        : {
+            ok: false,
+            code: validation.reason,
+            message: translator("typeSystem.staleTypeSelection"),
+          };
     }
     return success(action.type, [
       setProperty(
@@ -519,9 +546,15 @@ function compileTypeSystemAction(
   }
 
   const resourceIris = resolveAll(action.resourceIds, exact.resourceIriById);
-  if (!resourceIris) return { ok: false, code: "unknown-resource", message: "要素の選択が古くなっています。" };
+  if (!resourceIris) {
+    return {
+      ok: false,
+      code: "unknown-resource",
+      message: translator("typeSystem.staleResourceSelection"),
+    };
+  }
   if (new Set(action.resourceIds).size !== action.resourceIds.length) {
-    return { ok: false, code: "duplicate-id", message: "同じ要素が重複しています。" };
+    return { ok: false, code: "duplicate-id", message: translator("typeSystem.duplicateResource") };
   }
   const commands = action.resourceIds.map((resourceId, index): AuthoringCommand => {
     const current = exact.directTypeIrisByResourceId.get(resourceId) ?? [];
@@ -751,10 +784,6 @@ function addToSetMap(map: Map<string, Set<string>>, key: string, value: string):
   const values = map.get(key) ?? new Set<string>();
   values.add(value);
   map.set(key, values);
-}
-
-function fallbackLabel(prefix: string, opaqueId: string): string {
-  return `${prefix} ${opaqueId.slice(-6)}`;
 }
 
 function stableOpaqueId(kind: "type" | "resource", exactIdentity: string): string {

@@ -322,6 +322,10 @@ describe("MockWorkspaceAssetResolver", () => {
     });
     expect(() => createMockAssetHost(duplicate, {
       baseUrl: "https://mock.example/editor",
+    })).toThrow(`Duplicate workspace asset references: ${ASSET_REF}`);
+    expect(() => createMockAssetHost(duplicate, {
+      baseUrl: "https://mock.example/editor",
+      locale: "ja",
     })).toThrow(`Workspace assetRefが重複しています: ${ASSET_REF}`);
   });
 

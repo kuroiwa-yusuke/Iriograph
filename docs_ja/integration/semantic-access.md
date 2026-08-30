@@ -34,6 +34,8 @@ Blank nodeとliteralはalias対象にしません。Literalはlabel/commentま�
 
 ## 3. Label、説明、検索
 
+標準predicate vocabularyは、RDF/RDFS、Dublin Core Terms、PROV-O、SKOSと関係を表す一部OWL termへ英語・日本語のpicker metadataを付けます。`standardPredicateVocabulary`と`standardPredicateTerms()`の既定は英語で、locale対応helperはBCP 47のprimary languageが日本語の場合だけ日本語を選び、それ以外は英語へfallbackします。Locale別に独自predicateを作らず、同じexact IRIを使います。
+
 既定の語彙は次です。
 
 | 用途 | Predicate |

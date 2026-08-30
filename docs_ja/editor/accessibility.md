@@ -47,7 +47,7 @@ Toolbarの`Canvasドラッグモード`は`範囲選択`と`移動`を排他的�
 
 Pointerの右clickとContext Menu / Shift+F10は、対象、利用可能action、無効理由が同じmenu modelを使う。Keyboardで開く場合はactive itemの画面上の境界、空SceneではCanvasの既定anchorへ配置し、menu containerへfocusを移す。最初の有効項目、次/前、先頭/末尾への移動はArrow、Home、Endで行い、disabled項目はfocus移動で飛ばす。EnterまたはSpaceは選択項目に対応するInspector/actionへfocusを移すだけで、menu選択そのものからsemantic/presentation mutationを実行しない。
 
-Escape、外側click、action選択で閉じた後は、存在する元のCanvas active itemまたはCanvas本体へfocusを戻す。Derived順序ガイド・候補線は所有する構造をaccessible nameとdestinationに含め、線単体の編集項目を作らない。Iconを表示する場合も日本語labelをaccessible nameとして必ず残し、読み取り専用、権限不足、操作対象なし等は`aria-disabled`と説明文で通知する。
+Escape、外側click、action選択で閉じた後は、存在する元のCanvas active itemまたはCanvas本体へfocusを戻す。Derived順序ガイド・候補線は所有する構造をaccessible nameとdestinationに含め、線単体の編集項目を作らない。Iconを表示する場合も選択中localeのlabelをaccessible nameとして必ず残し、読み取り専用、権限不足、操作対象なし等は`aria-disabled`と説明文で通知する。
 
 ## Status, dialogs, and visual targets
 

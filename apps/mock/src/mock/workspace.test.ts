@@ -234,7 +234,7 @@ describe("mock dynamic workspace persistence", () => {
       documentFixture("working"),
       documentFixture("memory"),
       readRepository,
-    )).rejects.toThrow("repository上の正本がありません");
+    )).rejects.toThrow("has no repository source");
     expect(readRepository).not.toHaveBeenCalled();
   });
 });

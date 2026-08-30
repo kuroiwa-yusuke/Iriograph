@@ -775,7 +775,7 @@ function placeNewlyConstrainedGroupMembers(
     pushDiagnosticOnce(diagnostics, {
       severity: "warning",
       code: "layout-new-membership-placement-unavailable",
-      message: `${memberId}を新しい所属先の空き領域へ配置できません。固定Group Frameを広げるか、既存要素を移動してください。`,
+      message: `${memberId} cannot be placed in free space within its new parent. Enlarge the fixed Group Frame or move existing elements.`,
       layoutRef: request.layoutRef,
       elementId: memberId,
     });
@@ -1022,7 +1022,7 @@ function separateUnrelatedGeneratedRegions(
           pushDiagnosticOnce(diagnostics, {
             severity: "warning",
             code: "layout-region-separation-fixed",
-            message: `${group.key}と${previous.group.key}は共通要素を持たない領域ですが、固定配置または親コンテナの制約により重なりを解消できません。固定位置を解除するか、領域または要素を手動で離してください。`,
+            message: `${group.key} and ${previous.group.key} are regions with no shared members, but fixed placement or parent-container constraints prevent their overlap from being resolved. Release fixed placement or manually separate the regions or elements.`,
             layoutRef: request.layoutRef,
             elementId: group.key,
           });
@@ -1172,7 +1172,7 @@ function separateUnrelatedRegionPairs(
           pushDiagnosticOnce(diagnostics, {
             severity: "warning",
             code: "layout-region-separation-fixed",
-            message: `${left.elementId}と${right.elementId}は共通要素を持たない領域ですが、固定配置または親コンテナの制約により重なりを解消できません。固定位置を解除するか、領域または要素を手動で離してください。`,
+            message: `${left.elementId} and ${right.elementId} are regions with no shared members, but fixed placement or parent-container constraints prevent their overlap from being resolved. Release fixed placement or manually separate the regions or elements.`,
             layoutRef: request.layoutRef,
             elementId: right.elementId,
           });
@@ -1285,7 +1285,7 @@ function diagnoseUnrelatedRegionOverlaps(
       pushDiagnosticOnce(diagnostics, {
         severity: "warning",
         code: "layout-region-separation-unresolved",
-        message: `${left.elementId}と${right.elementId}は共通要素を持たない領域ですが、包含制約を保ったまま重なりを解消できません。領域または所属要素の位置を調整してください。`,
+        message: `${left.elementId} and ${right.elementId} are regions with no shared members, but their overlap cannot be resolved while preserving containment constraints. Adjust the regions or their member positions.`,
         layoutRef: request.layoutRef,
         elementId: right.elementId,
       });
@@ -1350,7 +1350,7 @@ function relocateUnassignedGeneratedNodes(
       pushDiagnosticOnce(diagnostics, {
         severity: "warning",
         code: "layout-unassigned-node-inside-region-fixed",
-        message: `${node.elementId}はGroup Frameに所属していませんが、固定配置または親コンテナの制約によりcontent bounds外へ移動できません。固定位置を解除するか、所属先を設定してください。`,
+        message: `${node.elementId} is not a member of a Group Frame, but fixed placement or parent-container constraints prevent it from moving outside the content bounds. Release fixed placement or assign a parent.`,
         layoutRef: request.layoutRef,
         elementId: node.elementId,
       });
@@ -1685,7 +1685,7 @@ function validateGroupMembershipGeometry(
       pushDiagnosticOnce(diagnostics, {
         severity: "warning",
         code: "layout-group-membership-unresolved",
-        message: `${membership.semanticRef}の所属先Group Frameまたはgeometryを解決できません。所属先が表示対象か確認してください。`,
+        message: `The parent Group Frame or geometry for ${membership.semanticRef} could not be resolved. Verify that the parent is displayed.`,
         layoutRef: request.layoutRef,
         elementId: membership.memberElementId,
       });
@@ -1703,7 +1703,7 @@ function validateGroupMembershipGeometry(
       pushDiagnosticOnce(diagnostics, {
         severity: "warning",
         code: "layout-group-member-unresolved",
-        message: `${memberId}のgeometryを解決できないため、所属先Group Frameとの包含を確認できません。`,
+        message: `Containment within the parent Group Frame cannot be checked because the geometry for ${memberId} could not be resolved.`,
         layoutRef: request.layoutRef,
         elementId: memberId,
       });
@@ -1723,7 +1723,7 @@ function validateGroupMembershipGeometry(
       pushDiagnosticOnce(diagnostics, {
         severity: "warning",
         code: onlyRegions ? "region-membership-intersection-empty" : "group-membership-intersection-empty",
-        message: `${memberId}が属するGroup Frameに共通の交差領域がありません。固定枠を広げるか、所属を見直してください。`,
+        message: `The Group Frames containing ${memberId} have no shared intersection. Enlarge the fixed frames or revise the memberships.`,
         layoutRef: request.layoutRef,
         elementId: memberId,
       });
@@ -1740,7 +1740,7 @@ function validateGroupMembershipGeometry(
           : (frameGeometries.length > 1
               ? "group-member-outside-intersection"
               : "group-member-outside"),
-        message: `${memberId}の全体とpadding ${padding}が所属Group Frame${frameGeometries.length > 1 ? "の共通交差" : ""}内にありません。固定位置を解除するか、枠または要素を調整してください。`,
+        message: `${memberId} and padding ${padding} do not fit within ${frameGeometries.length > 1 ? "the shared intersection of its Group Frames" : "its Group Frame"}. Release fixed placement or adjust the frame or element.`,
         layoutRef: request.layoutRef,
         elementId: memberId,
       });
@@ -1841,7 +1841,7 @@ function normalizeGeneratedAdapterRoutes(
     pushDiagnosticOnce(diagnostics, {
       severity: "warning",
       code: "layout-generated-route-compacted",
-      message: `${edgeId}の生成経路を公開上限の中間点1個へ縮約しました。adapter内の探索経路はrendererへ直接公開しないでください。`,
+      message: `Reduced the generated route for ${edgeId} to the public limit of one intermediate point. Do not expose adapter search paths directly to the renderer.`,
       layoutRef: request.layoutRef,
       edgeId,
     });

@@ -18,7 +18,9 @@ import {
   ELK_LAYOUT_REFS,
   ElkLayeredLayoutAdapter,
 } from "@iriograph/layout-elk";
-import { standardPredicateTermsJa } from "@iriograph/semantic-access";
+import { standardPredicateTerms } from "@iriograph/semantic-access";
+
+import type { MockLocale } from "./localization";
 
 import {
   mockClassificationRegionProjectionCatalog,
@@ -42,7 +44,7 @@ export const MOCK_WORKFLOW_ROLE_CLASSES = {
   information: "urn:iriograph:authoring-role:workflow:Information",
 } as const;
 
-const mockWorkflowRoleTerms: readonly ResolvedAuthoringTerm[] = [
+const mockWorkflowRoleTermsJa = [
   {
     iri: MOCK_WORKFLOW_ROLE_CLASSES.process,
     termId: "workflow-role-process",
@@ -79,7 +81,46 @@ const mockWorkflowRoleTerms: readonly ResolvedAuthoringTerm[] = [
     description: "注文、料金、帳票など、業務で受け渡す情報です。",
     category: "要素の種類",
   },
-];
+] satisfies readonly (ResolvedAuthoringTerm & { label: string; description: string })[];
+
+const mockWorkflowRoleTermsEn = [
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.process,
+    termId: "workflow-role-process",
+    kind: "class",
+    roles: ["type-object"],
+    label: "Process",
+    description: "Work or a decision performed in the business flow.",
+    category: "Element type",
+  },
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.event,
+    termId: "workflow-role-event",
+    kind: "class",
+    roles: ["type-object"],
+    label: "Event",
+    description: "A point where state changes, such as start, wait, receive, or completion.",
+    category: "Element type",
+  },
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.gateway,
+    termId: "workflow-role-gateway",
+    kind: "class",
+    roles: ["type-object"],
+    label: "Branch or merge",
+    description: "A point that splits a flow into alternatives or merges multiple flows.",
+    category: "Element type",
+  },
+  {
+    iri: MOCK_WORKFLOW_ROLE_CLASSES.information,
+    termId: "workflow-role-information",
+    kind: "class",
+    roles: ["type-object"],
+    label: "Information",
+    description: "Information exchanged in a workflow, such as an order, payment, or document.",
+    category: "Element type",
+  },
+] satisfies readonly (ResolvedAuthoringTerm & { label: string; description: string })[];
 
 const mockLayoutRegistry = createStandardLayoutRegistry();
 mockLayoutRegistry.register(new ElkLayeredLayoutAdapter(ELK_LAYOUT_REFS.layeredLr, "LR"));
@@ -141,54 +182,57 @@ export const mockResourceIriAllocator = createMockResourceIriAllocator(DEMO_NAME
 
 export function createMockAuthoringContext(
   document: IriographDocumentV1,
+  locale: MockLocale = "en",
 ): ResolvedAuthoringContext {
   const localNamespace = document.semantic.baseIri;
   const allocator = createMockResourceIriAllocator(localNamespace);
+  const isJa = locale === "ja";
+  const workflowRoleTerms = isJa ? mockWorkflowRoleTermsJa : mockWorkflowRoleTermsEn;
   const standardTerms: ResolvedAuthoringTerm[] = [
-    { iri: RDFS_CLASS, kind: "class", roles: ["type-object"], label: "概念クラス" },
-    { iri: RDF_PROPERTY, kind: "class", roles: ["type-object"], label: "関係の定義" },
-    { iri: `${RDF}Bag`, kind: "structure", roles: ["type-object"], label: "領域（順序なし）" },
-    { iri: `${RDF}Seq`, kind: "structure", roles: ["type-object"], label: "並び順" },
-    { iri: `${RDF}Alt`, kind: "structure", roles: ["type-object"], label: "分岐" },
-    { iri: RDFS_LABEL, kind: "property", label: "名前", objectKinds: ["literal"] },
-    { iri: `${RDFS}comment`, kind: "property", label: "説明", objectKinds: ["literal"] },
-    { iri: `${RDFS}seeAlso`, kind: "property", label: "参照先", objectKinds: ["iri"] },
-    { iri: `${RDFS}subClassOf`, kind: "property", label: "上位概念", objectKinds: ["iri"] },
-    { iri: `${RDFS}member`, kind: "property", label: "標準の包含", objectKinds: ["iri"], structural: true },
+    { iri: RDFS_CLASS, kind: "class", roles: ["type-object"], label: isJa ? "概念クラス" : "Concept class" },
+    { iri: RDF_PROPERTY, kind: "class", roles: ["type-object"], label: isJa ? "関係の定義" : "Relationship definition" },
+    { iri: `${RDF}Bag`, kind: "structure", roles: ["type-object"], label: isJa ? "領域（順序なし）" : "Unordered group" },
+    { iri: `${RDF}Seq`, kind: "structure", roles: ["type-object"], label: isJa ? "並び順" : "Ordered group" },
+    { iri: `${RDF}Alt`, kind: "structure", roles: ["type-object"], label: isJa ? "分岐" : "Alternative group" },
+    { iri: RDFS_LABEL, kind: "property", label: isJa ? "名前" : "Name", objectKinds: ["literal"] },
+    { iri: `${RDFS}comment`, kind: "property", label: isJa ? "説明" : "Description", objectKinds: ["literal"] },
+    { iri: `${RDFS}seeAlso`, kind: "property", label: isJa ? "参照先" : "Related information", objectKinds: ["iri"] },
+    { iri: `${RDFS}subClassOf`, kind: "property", label: isJa ? "上位概念" : "Broader class", objectKinds: ["iri"] },
+    { iri: `${RDFS}member`, kind: "property", label: isJa ? "標準の包含" : "Contains member", objectKinds: ["iri"], structural: true },
     {
       iri: `${localNamespace}p-03`,
       kind: "property",
-      label: "監査対象として含む",
-      description: "監査領域へ対象工程を所属させます。",
-      category: "包含",
-      examples: ["監査領域に審査工程を含める"],
+      label: isJa ? "監査対象として含む" : "Contains as an audit target",
+      description: isJa ? "監査領域へ対象工程を所属させます。" : "Adds a process to an audit scope.",
+      category: isJa ? "包含" : "Containment",
+      examples: [isJa ? "監査領域に審査工程を含める" : "Include a review process in the audit scope"],
       objectKinds: ["iri"],
       structural: true,
     },
     {
       iri: `${localNamespace}p-01`,
       kind: "property",
-      label: "関連する",
-      description: "業務要素間の一般的な関係を示します。",
-      category: "一般関係",
-      examples: ["受付と審査を関連付ける"],
+      label: isJa ? "関連する" : "Related to",
+      description: isJa ? "業務要素間の一般的な関係を示します。" : "Expresses a general relationship between workflow elements.",
+      category: isJa ? "一般関係" : "General relationship",
+      examples: [isJa ? "受付と審査を関連付ける" : "Relate intake and review"],
       objectKinds: ["iri"],
     },
     {
       iri: `${localNamespace}p-02`,
       kind: "property",
-      label: "再試行",
-      description: "処理が以前の工程へ戻る関係を示します。",
-      category: "業務フロー",
-      examples: ["差し戻し後に審査を再試行する"],
+      label: isJa ? "再試行" : "Retry",
+      description: isJa ? "処理が以前の工程へ戻る関係を示します。" : "Returns processing to an earlier step.",
+      category: isJa ? "業務フロー" : "Workflow",
+      examples: [isJa ? "差し戻し後に審査を再試行する" : "Retry review after a return"],
       objectKinds: ["iri"],
     },
   ];
   return {
     contextId: "urn:iriograph:mock:authoring-context",
-    contextRevision: "1",
+    contextRevision: `1:${locale}`,
     documentRevision: shortHash(JSON.stringify(document)),
-    defaultLocale: "ja",
+    defaultLocale: locale,
     authoringProfileRef: document.semantic.authoringProfileRef,
     runtime: createMockProjectionRuntimeContext(document),
     resourcePolicy: { allowedMintNamespaces: [localNamespace] },
@@ -202,8 +246,8 @@ export function createMockAuthoringContext(
       llmMinting: "deny",
     },
     terms: mergeTerms(
-      [...standardPredicateTermsJa(), ...mockWorkflowRoleTerms, ...standardTerms],
-      discoverDocumentTerms(document),
+      [...standardPredicateTerms({ locale }), ...workflowRoleTerms, ...standardTerms],
+      discoverDocumentTerms(document, locale),
     ),
     capabilities: [],
     structuredAuthoring: {
@@ -213,29 +257,29 @@ export function createMockAuthoringContext(
         {
           roleId: "role-01",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.process,
-          label: "処理",
-          description: "作業や判断など、業務の中で実行する内容です。",
+          label: workflowRoleTerms[0]!.label,
+          description: workflowRoleTerms[0]!.description,
           displayPriority: 10,
         },
         {
           roleId: "role-02",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.event,
-          label: "出来事",
-          description: "開始、待機、受信、完了など、状態が変わる時点です。",
+          label: workflowRoleTerms[1]!.label,
+          description: workflowRoleTerms[1]!.description,
           displayPriority: 10,
         },
         {
           roleId: "role-03",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.gateway,
-          label: "分岐・合流",
-          description: "流れを複数に分ける、または複数の流れをまとめる地点です。",
+          label: workflowRoleTerms[2]!.label,
+          description: workflowRoleTerms[2]!.description,
           displayPriority: 10,
         },
         {
           roleId: "role-04",
           classIri: MOCK_WORKFLOW_ROLE_CLASSES.information,
-          label: "情報",
-          description: "注文、料金、帳票など、業務で受け渡す情報です。",
+          label: workflowRoleTerms[3]!.label,
+          description: workflowRoleTerms[3]!.description,
           displayPriority: 10,
         },
       ],
@@ -244,7 +288,10 @@ export function createMockAuthoringContext(
   };
 }
 
-function discoverDocumentTerms(document: IriographDocumentV1): ResolvedAuthoringTerm[] {
+function discoverDocumentTerms(
+  document: IriographDocumentV1,
+  locale: MockLocale,
+): ResolvedAuthoringTerm[] {
   const graph = parseSemanticGraph(document);
   const closure = buildLimitedRdfsClosure(graph, rdfRdfsVocabulary);
   const labels = new Map<string, LocalizedLiteralSelection>();
@@ -254,10 +301,10 @@ function discoverDocumentTerms(document: IriographDocumentV1): ResolvedAuthoring
   for (const quad of graph.quads) {
     if (quad.subject.termType !== "NamedNode") continue;
     if (quad.predicate.value === RDFS_LABEL && quad.object.termType === "Literal") {
-      selectJapaneseLiteral(labels, quad.subject.value, quad.object.value, quad.object.language);
+      selectLocalizedLiteral(labels, quad.subject.value, quad.object.value, quad.object.language, locale);
     }
     if (quad.predicate.value === `${RDFS}comment` && quad.object.termType === "Literal") {
-      selectJapaneseLiteral(comments, quad.subject.value, quad.object.value, quad.object.language);
+      selectLocalizedLiteral(comments, quad.subject.value, quad.object.value, quad.object.language, locale);
     }
     if (quad.predicate.value === RDF_TYPE && quad.object.termType === "NamedNode") {
       if (quad.object.value === RDFS_CLASS) classes.add(quad.subject.value);
@@ -272,7 +319,7 @@ function discoverDocumentTerms(document: IriographDocumentV1): ResolvedAuthoring
       roles: ["type-object"],
       label: labels.get(iri)?.value,
       description: comments.get(iri)?.value,
-      category: "ドキュメントの概念",
+      category: locale === "ja" ? "ドキュメントの概念" : "Document concepts",
     })),
     ...[...properties].sort().map((iri): ResolvedAuthoringTerm => ({
       ...propertyConstraints(closure.subpropertyDistance(iri, `${RDFS}member`) !== undefined),
@@ -281,7 +328,7 @@ function discoverDocumentTerms(document: IriographDocumentV1): ResolvedAuthoring
       roles: ["predicate"],
       label: labels.get(iri)?.value,
       description: comments.get(iri)?.value,
-      category: "ドキュメントの関係",
+      category: locale === "ja" ? "ドキュメントの関係" : "Document relationships",
     })),
   ];
 }
@@ -296,17 +343,18 @@ function propertyConstraints(
 
 type LocalizedLiteralSelection = { value: string; rank: number; language: string };
 
-function selectJapaneseLiteral(
+function selectLocalizedLiteral(
   selected: Map<string, LocalizedLiteralSelection>,
   iri: string,
   value: string,
   language: string,
+  locale: MockLocale,
 ): void {
   const normalizedLanguage = language.toLowerCase();
   const candidate: LocalizedLiteralSelection = {
     value: value.normalize("NFC"),
-    rank: normalizedLanguage === "ja" ? 0
-      : normalizedLanguage.startsWith("ja-") ? 1
+    rank: normalizedLanguage === locale ? 0
+      : normalizedLanguage.startsWith(`${locale}-`) ? 1
         : normalizedLanguage === "" ? 2 : 3,
     language: normalizedLanguage,
   };

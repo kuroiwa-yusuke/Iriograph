@@ -80,6 +80,8 @@ Portable documents and catalogs refer to assets by stable IRI. A host injects:
 
 The editor never saves a resolved URL or byte payload. A canceled, stale, invalid, or rejected result leaves the document unchanged.
 
+Bundled icon definitions expose a canonical English label and optional locale-specific labels. Choosing another label never changes the asset IRI. Hosts may supply the same metadata for workspace or vendor catalogs; missing localized text falls back to the canonical English label and then the stable asset reference.
+
 ## Annotation and ports
 
 Projection may produce annotations from semantic literals or validated view metadata. An annotation has provenance and a closed role such as a comment/note; it is not arbitrary HTML.
@@ -137,6 +139,14 @@ A product host embeds `IriographEditor` and supplies the portable document plus 
 - `resourceIriAllocator` and `documentIdentityAllocator`;
 - `assetAccess`, `assetOptions`, `workspaceLocator`, and `pickAsset`;
 - `save`, `validationChanged`, `duplicatedAsNew`, and selection/pending-draft events.
+
+### User-interface localization
+
+The public editor UI defaults to English. `uiLocale` is a controlled or initially seeded host/session preference with the closed built-in values `en` and `ja`; the editor also exposes a language selector and emits locale changes. A host may persist that preference for a user, but it must not write it into Turtle, a named view, sparse overlay, document history, or dirty state.
+
+UI localization and semantic literal selection are separate contracts. `semanticLocales` controls which existing `rdfs:label`, `rdfs:comment`, and catalog lexical forms are preferred. When it is omitted, it initially follows `uiLocale`; a host may provide a different ordered list. Changing either preference never translates, adds a language tag to, or rewrites an RDF literal. Semantic selection remains deterministic and falls back through the requested languages, untagged values, and the remaining available values.
+
+Built-in controls, guidance, validation presentation, accessibility text, and standard relation metadata have English and Japanese lexical forms keyed by stable identifiers. The selected locale changes presentation only: relation IRI identity, command IDs, validation codes, and transaction behavior remain exact. Package English text is the canonical fallback when a UI key is unavailable. Mock and product hosts consume the same package locale contract instead of maintaining an editor-text fork; host-owned workspace chrome may add its own dictionary around that boundary.
 
 Before emitting `save`, the editor flushes valid pending Turtle, overlay, and full-document drafts. It does not auto-apply incomplete structured forms. The host saves the current model and must not re-enter `flushPendingEdits()` from the save handler.
 

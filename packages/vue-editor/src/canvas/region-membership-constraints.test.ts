@@ -7,6 +7,7 @@ import {
   constrainMembershipRegionMovement,
   membershipRegionClassIrisAtPoint,
 } from "./region-membership-constraints";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 describe("membership-region presentation constraints", () => {
   it("一方のregion内だけに残る移動も全所属regionのintersectionへclampする", () => {
@@ -46,10 +47,23 @@ describe("membership-region presentation constraints", () => {
   it("空intersectionを拒否し、pointer上のderived class regionを全件返す", () => {
     const scene = matrixScene();
     scene.regions![1]!.geometry.x = 400;
+    const english = constrainMembershipRegionMovement(scene, [{
+      elementId: "node",
+      geometry: { x: 80, y: 80, width: 40, height: 30 },
+    }]);
+    expect(english).toMatchObject({
+      changes: [],
+      issue: {
+        code: "membership-region-intersection-empty",
+        message: expect.stringContaining("same movement"),
+      },
+    });
     expect(constrainMembershipRegionMovement(scene, [{
       elementId: "node",
       geometry: { x: 80, y: 80, width: 40, height: 30 },
-    }])).toMatchObject({ changes: [], issue: { code: "membership-region-intersection-empty" } });
+    }], (key, parameters) => translateEditorMessage("ja", key, parameters))).toMatchObject({
+      issue: { message: expect.stringContaining("全所属領域") },
+    });
 
     scene.regions![1]!.geometry.x = 120;
     expect(membershipRegionClassIrisAtPoint(scene, { x: 150, y: 100 }))

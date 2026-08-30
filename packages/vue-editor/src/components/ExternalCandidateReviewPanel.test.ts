@@ -21,11 +21,16 @@ describe("ExternalCandidateReviewPanel", () => {
         },
       },
     });
+    expect(wrapper.get("h3").text()).toBe("Review semantics and view separately");
     expect(wrapper.text()).toContain("注文");
     expect(wrapper.text()).not.toContain("urn:");
     await wrapper.get('[data-review-kind="semantic"] .is-primary').trigger("click");
     expect(wrapper.emitted("apply")?.[0]).toEqual([{ reviewId: "review-1", kind: "semantic" }]);
     await wrapper.get('[data-review-kind="presentation"] button').trigger("click");
     expect(wrapper.emitted("reject")?.[0]).toEqual([{ reviewId: "review-1", kind: "presentation" }]);
+
+    await wrapper.setProps({ uiLocale: "ja" });
+    expect(wrapper.get("h3").text()).toBe("意味とビューを別々に確認");
+    expect(wrapper.text()).toContain("注文");
   });
 });

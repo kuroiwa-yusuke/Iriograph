@@ -8,6 +8,7 @@ import {
   validateProposedTypeParents,
   type TypeSystemProfile,
 } from "./type-system";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 const NS = "urn:test:type-system:";
 
@@ -287,6 +288,34 @@ describe("type system index", () => {
       ok: true,
       batch: { commands: [expect.objectContaining({ values: [{ kind: "iri", iri: `${NS}Task` }] })] },
     });
+  });
+
+  it("fallback labels and compile guidance are English by default and localizable", () => {
+    const source = document(`
+@prefix : <${NS}> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:Unnamed a rdfs:Class .
+:item a :Unnamed .
+`);
+    const english = deriveTypeSystem(source);
+    expect(english.presentation.types[0]?.label).toMatch(/^Unnamed type /u);
+    expect(english.presentation.resources[0]?.label).toMatch(/^Unnamed element /u);
+    expect(english.compileAction({
+      type: "create-class",
+      label: "",
+      parentTypeIds: [],
+    }, { commandId: "invalid" })).toMatchObject({ message: "Enter a type name." });
+
+    const ja = (key: Parameters<typeof translateEditorMessage>[1], parameters?: Parameters<typeof translateEditorMessage>[2]) => (
+      translateEditorMessage("ja", key, parameters)
+    );
+    const japanese = deriveTypeSystem(source, {}, ja);
+    expect(japanese.presentation.types[0]?.label).toMatch(/^名前未設定の型 /u);
+    expect(japanese.compileAction({
+      type: "create-class",
+      label: "",
+      parentTypeIds: [],
+    }, { commandId: "invalid" }, ja)).toMatchObject({ message: "型の名前を入力してください。" });
   });
 });
 

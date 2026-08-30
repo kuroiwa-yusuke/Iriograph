@@ -1,5 +1,14 @@
 import type { Point } from "@iriograph/core";
 
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
+
 export type TargetContextSubject =
   | { kind: "blank" }
   | { kind: "node"; elementId: string }
@@ -113,11 +122,13 @@ export type TargetContextMenuSelection = {
 export function targetContextMenuEntries(
   target: TargetContextSubject,
   options: TargetContextMenuOptions = {},
+  translator: EditorTranslator = defaultTranslator,
 ): TargetContextMenuEntry[] {
   const entries = entriesForTarget(target);
   return entries.map((entry) => {
-    const reason = disabledReason(entry, options);
-    return reason ? { ...entry, disabledReason: reason } : entry;
+    const localized = { ...entry, label: targetMenuLabel(entry.actionId, translator) };
+    const reason = disabledReason(localized, options, translator);
+    return reason ? { ...localized, disabledReason: reason } : localized;
   });
 }
 
@@ -197,57 +208,57 @@ function entriesForTarget(target: TargetContextSubject): TargetContextMenuEntry[
   switch (target.kind) {
     case "blank":
       return [
-        entry("add-element", "要素を追加", "create", {
+        entry("add-element", "Add element", "create", {
           surface: "semantic-flow", intent: "add-element",
         }, "add"),
-        entry("paste", "貼り付け", "create", {
+        entry("paste", "Paste", "create", {
           surface: "canvas-command", command: "paste",
         }, "paste"),
       ];
     case "node":
       return [
-        entry("element-details", "要素の詳細", "meaning", {
+        entry("element-details", "Element details", "meaning", {
           surface: "semantic-flow", intent: "edit-element", elementId: target.elementId, section: "details",
         }, "details"),
-        entry("create-relation", "関係を追加", "meaning", {
+        entry("create-relation", "Add relation", "meaning", {
           surface: "semantic-flow", intent: "add-relation", elementId: target.elementId,
         }, "relation"),
-        entry("edit-membership", "所属を編集", "meaning", {
+        entry("edit-membership", "Edit membership", "meaning", {
           surface: "semantic-flow", intent: "edit-relation", elementId: target.elementId, section: "membership",
         }, "membership"),
-        entry("element-view", "要素のビュー", "view", {
+        entry("element-view", "Element view", "view", {
           surface: "view-inspector", elementId: target.elementId, section: "element",
         }, "view"),
-        entry("element-icon", "アイコン", "view", {
+        entry("element-icon", "Icon", "view", {
           surface: "view-inspector", elementId: target.elementId, section: "icon",
         }, "icon"),
-        destructive("delete-element", "要素を削除", target.elementId, "element"),
+        destructive("delete-element", "Delete element", target.elementId, "element"),
       ];
     case "direct-edge":
       return [
-        entry("relation-details", "関係の詳細", "meaning", {
+        entry("relation-details", "Relation details", "meaning", {
           surface: "semantic-flow", intent: "edit-relation", elementId: target.elementId, section: "meaning",
         }, "details"),
-        entry("reconnect-relation", "接続先を変更", "meaning", {
+        entry("reconnect-relation", "Change endpoint", "meaning", {
           surface: "semantic-flow", intent: "edit-relation", elementId: target.elementId, section: "reconnect",
         }, "reconnect"),
-        entry("relation-view", "線のビュー", "view", {
+        entry("relation-view", "Line view", "view", {
           surface: "view-inspector", elementId: target.elementId, section: "line",
         }, "line"),
-        entry("reset-route", "線の経路をリセット", "view", {
+        entry("reset-route", "Reset line route", "view", {
           surface: "canvas-command", command: "reset-route", elementId: target.elementId,
         }, "reset"),
-        destructive("delete-relation", "関係を削除", target.elementId, "relation"),
+        destructive("delete-relation", "Delete relation", target.elementId, "relation"),
       ];
     case "derived-sequence-guide":
-      return [entry("edit-sequence", "順序を編集", "meaning", {
+      return [entry("edit-sequence", "Edit order", "meaning", {
         surface: "semantic-flow",
         intent: "edit-relation",
         elementId: target.groupElementId,
         section: "sequence",
       }, "sequence")];
     case "derived-alternative-guide":
-      return [entry("edit-alternatives", "候補グループを編集", "meaning", {
+      return [entry("edit-alternatives", "Edit alternative group", "meaning", {
         surface: "semantic-flow",
         intent: "edit-relation",
         elementId: target.groupElementId,
@@ -270,40 +281,40 @@ function groupEntries(
   kind: "membership" | "sequence" | "alternatives",
 ): TargetContextMenuEntry[] {
   const semanticEntry = kind === "membership"
-    ? entry("edit-membership", "所属を編集", "meaning", {
+    ? entry("edit-membership", "Edit membership", "meaning", {
         surface: "semantic-flow", intent: "edit-relation", elementId, section: "membership",
       }, "membership")
     : kind === "sequence"
-      ? entry("edit-sequence", "順序を編集", "meaning", {
+      ? entry("edit-sequence", "Edit order", "meaning", {
           surface: "semantic-flow", intent: "edit-relation", elementId, section: "sequence",
         }, "sequence")
-      : entry("edit-alternatives", "候補グループを編集", "meaning", {
+      : entry("edit-alternatives", "Edit alternative group", "meaning", {
           surface: "semantic-flow", intent: "edit-relation", elementId, section: "alternatives",
         }, "alternatives");
   return [
-    entry("group-details", "グループの詳細", "meaning", {
+    entry("group-details", "Group details", "meaning", {
       surface: "semantic-flow", intent: "edit-element", elementId, section: "details",
     }, "details"),
     semanticEntry,
-    entry("group-view", "グループのビュー", "view", {
+    entry("group-view", "Group view", "view", {
       surface: "view-inspector", elementId, section: "group",
     }, "view"),
-    entry("fit-group", "要素に合わせる", "arrange", {
+    entry("fit-group", "Fit to elements", "arrange", {
       surface: "canvas-command", command: "fit-group", elementId,
     }, "fit"),
-    entry("collapse-group", "内容を折り畳む", "arrange", {
+    entry("collapse-group", "Collapse contents", "arrange", {
       surface: "canvas-command", command: "collapse-group", elementId,
     }, "collapse"),
-    entry("expand-group", "内容を展開", "arrange", {
+    entry("expand-group", "Expand contents", "arrange", {
       surface: "canvas-command", command: "expand-group", elementId,
     }, "expand"),
-    entry("bring-group-forward", "一つ前へ", "arrange", {
+    entry("bring-group-forward", "Bring forward one level", "arrange", {
       surface: "canvas-command", command: "bring-forward", elementId,
     }, "forward"),
-    entry("send-group-backward", "一つ後ろへ", "arrange", {
+    entry("send-group-backward", "Send backward one level", "arrange", {
       surface: "canvas-command", command: "send-backward", elementId,
     }, "backward"),
-    destructive("delete-group", "グループを削除", elementId, "group"),
+    destructive("delete-group", "Delete group", elementId, "group"),
   ];
 }
 
@@ -329,36 +340,69 @@ function destructive(
   };
 }
 
+function targetMenuLabel(
+  actionId: TargetContextActionId,
+  translator: EditorTranslator,
+): string {
+  switch (actionId) {
+    case "add-element": return translator("targetMenu.addElement");
+    case "paste": return translator("targetMenu.paste");
+    case "element-details": return translator("targetMenu.elementDetails");
+    case "create-relation": return translator("targetMenu.createRelation");
+    case "edit-membership": return translator("targetMenu.editMembership");
+    case "element-view": return translator("targetMenu.elementView");
+    case "element-icon": return translator("targetMenu.elementIcon");
+    case "delete-element": return translator("targetMenu.deleteElement");
+    case "relation-details": return translator("targetMenu.relationDetails");
+    case "reconnect-relation": return translator("targetMenu.reconnectRelation");
+    case "relation-view": return translator("targetMenu.relationView");
+    case "reset-route": return translator("targetMenu.resetRoute");
+    case "delete-relation": return translator("targetMenu.deleteRelation");
+    case "edit-sequence": return translator("targetMenu.editSequence");
+    case "edit-alternatives": return translator("targetMenu.editAlternatives");
+    case "group-details": return translator("targetMenu.groupDetails");
+    case "group-view": return translator("targetMenu.groupView");
+    case "fit-group": return translator("targetMenu.fitGroup");
+    case "collapse-group": return translator("targetMenu.collapseGroup");
+    case "expand-group": return translator("targetMenu.expandGroup");
+    case "bring-group-forward": return translator("targetMenu.bringForward");
+    case "send-group-backward": return translator("targetMenu.sendBackward");
+    case "delete-group": return translator("targetMenu.deleteGroup");
+    default: return assertNever(actionId);
+  }
+}
+
 function disabledReason(
   entry: TargetContextMenuEntry,
   options: TargetContextMenuOptions,
+  translator: EditorTranslator,
 ): string | undefined {
   const explicit = options.actionDisabledReasons?.[entry.actionId];
   if (explicit) return explicit;
   if (entry.destructive && options.deleteDisabledReason) return options.deleteDisabledReason;
   if (entry.actionId === "paste" && !options.clipboardHasSupportedContent) {
-    return "貼り付けできる要素がクリップボードにありません。";
+    return translator("targetMenu.disabled.noPaste");
   }
   if (entry.actionId === "reset-route" && !options.hasManualRoute) {
-    return "手動調整された線の経路がありません。";
+    return translator("targetMenu.disabled.noManualRoute");
   }
   if (entry.actionId === "fit-group" && !options.hasGroupMembers) {
-    return "グループに所属する要素がありません。";
+    return translator("targetMenu.disabled.noGroupMembers");
   }
   if (entry.actionId === "collapse-group" && options.isGroupCollapsed) {
-    return "このグループは折り畳まれています。";
+    return translator("targetMenu.disabled.alreadyCollapsed");
   }
   if (entry.actionId === "expand-group" && !options.isGroupCollapsed) {
-    return "このグループは展開されています。";
+    return translator("targetMenu.disabled.alreadyExpanded");
   }
   if (
     (entry.actionId === "bring-group-forward" || entry.actionId === "send-group-backward")
     && options.canChangeGroupOrder === false
   ) {
-    return "このグループは現在の層内でこれ以上移動できません。";
+    return translator("targetMenu.disabled.groupOrderLimit");
   }
   if (options.readOnly && requiresWrite(entry.actionId)) {
-    return "読み取り専用のため変更できません。";
+    return translator("targetMenu.disabled.readOnly");
   }
   return undefined;
 }

@@ -5,6 +5,11 @@ import type {
   ProjectionDiagnostic,
 } from "@iriograph/core";
 
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
 const RDFS_CLASS = "http://www.w3.org/2000/01/rdf-schema#Class";
 
 export type EditorAuthoringKind =
@@ -224,6 +229,7 @@ export function capabilityBindingsFor(
 export function compileAuthoringDraft(
   draft: EditorAuthoringDraft,
   activeViewId: string,
+  translator: EditorTranslator = defaultTranslator,
 ): AuthoringCommand[] {
   const commandId = "editor-semantic-command";
   switch (draft.kind) {
@@ -261,11 +267,11 @@ export function compileAuthoringDraft(
       if (draft.createEdgeEnabled) {
         const predicateIri = requiredIri(
           draft.createEdgePredicateIri,
-          "作成時のedgeにはpredicateが必要です。",
+          translator("authoringDraft.edgePredicateRequired"),
         );
         const existingIri = requiredIri(
           draft.createEdgeResourceIri,
-          "作成時のedgeには既存resourceが必要です。",
+          translator("authoringDraft.edgeResourceRequired"),
         );
         initialStatements.push(draft.createEdgeDirection === "outgoing"
           ? {
@@ -284,12 +290,14 @@ export function compileAuthoringDraft(
           draft.createMembershipContainerIri.trim(),
           ...draft.createMembershipContainerIris.map((iri) => iri.trim()),
         ].filter(Boolean))];
-        if (containerIris.length === 0) throw new Error("作成時の包含には既存containerが必要です。");
+        if (containerIris.length === 0) {
+          throw new Error(translator("authoringDraft.containmentContainerRequired"));
+        }
         if (
           !draft.createMembershipStructureConfigKey
           || !draft.createMembershipContainerTypeIri.trim()
           || !draft.createMembershipPredicateIri.trim()
-        ) throw new Error("作成時の包含にはcatalog membership structureの選択が必要です。");
+        ) throw new Error(translator("authoringDraft.containmentStructureRequired"));
         for (const containerIri of containerIris) initialStatements.push({
           subject: { kind: "iri", iri: containerIri },
           predicateIri: draft.createMembershipPredicateIri.trim(),
@@ -297,12 +305,12 @@ export function compileAuthoringDraft(
         });
       }
       if (initialStatements.length === 0) {
-        throw new Error("Resourceにはclass、label、edge、包含のいずれか1 triple以上が必要です。");
+        throw new Error(translator("authoringDraft.initialStatementRequired"));
       }
       const x = draft.initialX.trim() ? Number(draft.initialX) : undefined;
       const y = draft.initialY.trim() ? Number(draft.initialY) : undefined;
       if ((x === undefined) !== (y === undefined) || (x !== undefined && !Number.isFinite(x)) || (y !== undefined && !Number.isFinite(y))) {
-        throw new Error("初期位置はxとyを両方、有限の数値で指定してください。");
+        throw new Error(translator("authoringDraft.initialPositionInvalid"));
       }
       return [{
         type: "create-resource",
@@ -405,6 +413,10 @@ export function compileAuthoringDraft(
       }];
   }
 }
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
 
 export function draftFromAuthoringCommand(
   command: AuthoringCommand,

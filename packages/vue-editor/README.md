@@ -23,6 +23,8 @@ import "@iriograph/vue-editor/styles.css";
   v-model="document"
   v-model:active-view-id="activeViewId"
   :runtime-context="projectionRuntimeContext"
+  :ui-locale="uiLocale"
+  :semantic-locales="semanticLocales"
   :authoring-context="resolvedAuthoringContext"
   :semantic-validation-context="resolvedSemanticValidationContext"
   :resource-iri-allocator="resourceIriAllocator"
@@ -33,10 +35,17 @@ import "@iriograph/vue-editor/styles.css";
   :pick-asset="pickWorkspaceAsset"
   @save="saveToWorkspace"
   @duplicated-as-new="openDuplicatedDocument"
+  @update:ui-locale="persistUiLocale"
 />
 ```
 
 `runtimeContext` contains resolved catalogs and a layout registry. `authoringContext` enables structured semantic editing with opaque roles, predicates, capabilities, and policy. Workspace storage, network, authentication, permissions, and persistence remain host responsibilities.
+
+## Languages
+
+The editor defaults to English and includes Japanese. `uiLocale` controls package chrome and `update:uiLocale` lets a host persist the user preference outside the portable document. `semanticLocales` is an ordered preference for existing RDF labels and comments; when omitted it follows `uiLocale`. Neither option translates or rewrites Turtle, changes a view overlay, creates history, or marks the document dirty.
+
+Built-in relation and icon catalogs keep exact IRIs while selecting English or Japanese presentation metadata. User-authored semantic text falls back deterministically when the requested language is unavailable.
 
 ## Editing model
 

@@ -24,7 +24,7 @@ import {
   createMockProjectionRuntimeContext,
   createMockResourceIriAllocator,
 } from "./mock/authoring";
-import { mockSemanticValidationContext } from "./mock/semantic-validation";
+import { createMockSemanticValidationContext } from "./mock/semantic-validation";
 import { createMockPerformanceDocument } from "./mock/performance-fixture";
 import {
   createMockAssetHost,
@@ -49,8 +49,15 @@ import {
   type MockWorkspaceManifest,
   type MockWorkspaceTreeRow,
 } from "./mock/workspace";
+import {
+  mockLocales,
+  translateMockMessage,
+  type MockLocale,
+  type MockMessageKey,
+} from "./mock/localization";
 
 const STORAGE_PREFIX = "iriograph.mock.workspace:";
+const UI_LOCALE_KEY = `${STORAGE_PREFIX}ui-locale`;
 
 const catalog: ProjectionCatalogV1 = mockInstanceFlowProjectionCatalog;
 const editor = ref<InstanceType<typeof IriographEditor> | null>(null);
@@ -66,6 +73,7 @@ const document = ref<IriographDocumentV1>(emptyDocument());
 const savedJson = ref("");
 const saving = ref(false);
 const saveMessage = ref("");
+const uiLocale = ref<MockLocale>(readUiLocale());
 const diagnostics = ref<ProjectionDiagnostic[]>([]);
 const inMemoryDocuments = new Map<string, IriographDocumentV1>();
 let saveMessageTimer: number | undefined;
@@ -111,12 +119,13 @@ const canResetActiveDocument = computed(() => hasMockRepositorySource(
 ));
 const resetUnavailableReason = computed(() => (
   activeDocumentEntry.value && !canResetActiveDocument.value
-    ? "保存した複製にはrepository上の正本がないため戻せません"
+    ? t("restoreUnavailable")
     : ""
 ));
 const documentTitle = computed(() => activeFilePath.value.split("/").at(-1)
   ?.replace(/\.iriograph$/, "") ?? document.value.documentId);
-const authoringContext = computed(() => createMockAuthoringContext(document.value));
+const authoringContext = computed(() => createMockAuthoringContext(document.value, uiLocale.value));
+const semanticValidationContext = computed(() => createMockSemanticValidationContext(uiLocale.value));
 const projectionRuntimeContext = computed(() => createMockProjectionRuntimeContext(document.value));
 const resourceIriAllocator = computed(() => (
   createMockResourceIriAllocator(document.value.semantic.baseIri)
@@ -174,7 +183,7 @@ async function initializeWorkspace(): Promise<void> {
   }
   let nextAssetHost: MockAssetHost | undefined;
   try {
-    const repositoryWorkspace = await loadMockWorkspace();
+    const repositoryWorkspace = await loadMockWorkspace(uiLocale.value);
     const persistedIndex = parseMockPersistedWorkspaceIndex(
       window.localStorage.getItem(workspaceIndexKey(repositoryWorkspace.workspaceId)),
       repositoryWorkspace.workspaceId,
@@ -188,10 +197,11 @@ async function initializeWorkspace(): Promise<void> {
       (candidate) => candidate.kind === "iriograph-document"
         && candidate.path === nextWorkspace.defaultDocumentPath,
     );
-    if (!entry) throw new Error("default Iriograph documentがworkspaceにありません。");
+    if (!entry) throw new Error(t("defaultDocumentMissing"));
 
     nextAssetHost = createMockAssetHost(nextWorkspace, {
       baseUrl: window.location.href,
+      locale: uiLocale.value,
     });
     workspace.value = nextWorkspace;
     await openWorkspaceDocument(entry, true);
@@ -205,7 +215,7 @@ async function initializeWorkspace(): Promise<void> {
   } catch (cause) {
     workspaceError.value = cause instanceof Error
       ? cause.message
-      : "Workspaceの読み込みに失敗しました。";
+      : t("workspaceLoadFailed");
   } finally {
     nextAssetHost?.dispose();
     workspaceReady.value = !workspaceError.value;
@@ -242,7 +252,7 @@ function persistDocument(): void {
   persistWorkspaceIndex();
   savedJson.value = serialized;
   saving.value = false;
-  showSaveMessage("browser working copyを保存しました");
+  showSaveMessage(t("workingCopySaved"));
 }
 
 function selectImportFile(): void {
@@ -261,9 +271,9 @@ async function importDocument(event: Event): Promise<void> {
     activeFilePath.value = `imports/${file.name}`;
     savedJson.value = JSON.stringify(imported);
     workspaceReady.value = true;
-    showSaveMessage(`${file.name}を取り込みました`);
+    showSaveMessage(t("imported", { name: file.name }));
   } catch (cause) {
-    showSaveMessage(cause instanceof Error ? cause.message : "取込に失敗しました");
+    showSaveMessage(cause instanceof Error ? cause.message : t("importFailed"));
   }
 }
 
@@ -279,7 +289,7 @@ async function exportDocument(): Promise<void> {
   anchor.download = `${document.value.documentId}.iriograph`;
   anchor.click();
   URL.revokeObjectURL(url);
-  showSaveMessage("書き出しました");
+  showSaveMessage(t("exported"));
 }
 
 async function resetMock(): Promise<void> {
@@ -288,7 +298,7 @@ async function resetMock(): Promise<void> {
   window.localStorage.removeItem(storageKey(entry.path));
   inMemoryDocuments.delete(entry.path);
   await openWorkspaceDocument(entry, false);
-  showSaveMessage("repositoryのサンプルへ戻しました");
+  showSaveMessage(t("restored"));
 }
 
 async function selectWorkspaceRow(row: MockWorkspaceTreeRow): Promise<void> {
@@ -301,13 +311,13 @@ async function selectWorkspaceRow(row: MockWorkspaceTreeRow): Promise<void> {
         pendingAssetPick.allowedMediaTypes,
       );
       if (result) settleAssetPick(result);
-      else showSaveMessage("このassetのmedia typeは選択できません");
+      else showSaveMessage(t("unsupportedAsset"));
     }
     return;
   }
   if (row.path === activeFilePath.value) return;
   if (dirty.value) {
-    showSaveMessage("未保存の変更があるためfile切替を中止しました");
+    showSaveMessage(t("unsavedSwitchBlocked"));
     return;
   }
   await openWorkspaceDocument(row.entry, true);
@@ -356,7 +366,8 @@ async function openWorkspaceDocument(
       preferWorkingCopy,
       workingCopy,
       inMemoryDocuments.get(entry.path),
-      readIriographDocument,
+      (candidate) => readIriographDocument(candidate, uiLocale.value),
+      uiLocale.value,
     );
     document.value = structuredClone(next);
     activeFilePath.value = entry.path;
@@ -367,7 +378,7 @@ async function openWorkspaceDocument(
   } catch (cause) {
     workspaceError.value = cause instanceof Error
       ? cause.message
-      : `${entry.path}の読み込みに失敗しました。`;
+      : t("documentLoadFailed", { path: entry.path });
   }
 }
 
@@ -376,7 +387,7 @@ function openDuplicatedDocument(handoff: DocumentDuplicateHandoff): void {
     handoff.sourceDocumentId !== document.value.documentId
     || handoff.sourceDocumentRevision !== authoringContext.value.documentRevision
   ) {
-    showSaveMessage("元の文書が変更されたため複製結果を開きませんでした");
+    showSaveMessage(t("duplicateStale"));
     return;
   }
   const next = structuredClone(handoff.document as IriographDocumentV1);
@@ -387,7 +398,7 @@ function openDuplicatedDocument(handoff: DocumentDuplicateHandoff): void {
     || inMemoryDocuments.has(path)
     || window.localStorage.getItem(storageKey(path)) !== null
   ) {
-    showSaveMessage("同じ文書IDまたは保存先が既にあるため複製結果を開きませんでした");
+    showSaveMessage(t("duplicateConflict"));
     return;
   }
   const serialized = JSON.stringify(next);
@@ -410,16 +421,16 @@ function openDuplicatedDocument(handoff: DocumentDuplicateHandoff): void {
   // Opening it therefore starts clean, just like a successful Cloud create.
   savedJson.value = serialized;
   diagnostics.value = [];
-  showSaveMessage("新しい図を別の作業コピーとして開きました");
+  showSaveMessage(t("duplicateOpened"));
 }
 
 async function copyAssetRef(): Promise<void> {
   if (!activeAsset.value?.assetRef) return;
   try {
     await navigator.clipboard.writeText(activeAsset.value.assetRef);
-    showSaveMessage("asset IRIをコピーしました");
+    showSaveMessage(t("iriCopied"));
   } catch {
-    showSaveMessage("clipboardへコピーできませんでした");
+    showSaveMessage(t("clipboardFailed"));
   }
 }
 
@@ -451,6 +462,23 @@ function showSaveMessage(message: string): void {
   }, 2600);
 }
 
+function t(
+  key: MockMessageKey,
+  parameters: Readonly<Record<string, string | number>> = {},
+): string {
+  return translateMockMessage(uiLocale.value, key, parameters);
+}
+
+function readUiLocale(): MockLocale {
+  const stored = window.localStorage.getItem(UI_LOCALE_KEY);
+  return mockLocales.includes(stored as MockLocale) ? stored as MockLocale : "en";
+}
+
+function updateUiLocale(locale: MockLocale): void {
+  uiLocale.value = locale;
+  window.localStorage.setItem(UI_LOCALE_KEY, locale);
+}
+
 function emptyDocument(): IriographDocumentV1 {
   return {
     schemaVersion: "1",
@@ -474,23 +502,23 @@ function emptyDocument(): IriographDocumentV1 {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :lang="uiLocale">
     <header class="topbar">
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-        <div><strong>Iriograph</strong><span>local package host</span></div>
+        <div><strong>Iriograph</strong><span>{{ t("localPackageHost") }}</span></div>
       </div>
       <div class="document-heading">
-        <span class="eyebrow">Workspace editor</span>
+        <span class="eyebrow">{{ t("workspaceEditor") }}</span>
         <strong>{{ documentTitle || "Loading…" }}</strong>
-        <span class="revision">embedded @iriograph/vue-editor</span>
+        <span class="revision">{{ t("embeddedEditor") }}</span>
       </div>
       <div class="status-cluster">
         <span class="status-pill" :class="errorCount ? 'warning' : 'success'">
-          <i /> {{ errorCount ? `${errorCount} errors` : "valid" }}
+          <i /> {{ errorCount ? t("errors", { count: errorCount }) : t("valid") }}
         </span>
         <span class="status-pill" :class="dirty ? 'warning' : 'neutral'">
-          {{ dirty ? "未保存" : "保存済み" }}
+          {{ dirty ? t("unsaved") : t("saved") }}
         </span>
         <span v-if="saveMessage" class="save-message" role="status">{{ saveMessage }}</span>
         <input
@@ -500,16 +528,16 @@ function emptyDocument(): IriographDocumentV1 {
           accept=".iriograph,.json,application/json"
           @change="importDocument"
         />
-        <button type="button" class="ghost-button" :disabled="!dirty" @click="saveDocument">保存</button>
-        <button type="button" class="ghost-button" @click="selectImportFile">取込</button>
-        <button type="button" class="ghost-button" :disabled="!workspaceReady" @click="exportDocument">書出</button>
+        <button type="button" class="ghost-button" :disabled="!dirty" @click="saveDocument">{{ t("save") }}</button>
+        <button type="button" class="ghost-button" @click="selectImportFile">{{ t("import") }}</button>
+        <button type="button" class="ghost-button" :disabled="!workspaceReady" @click="exportDocument">{{ t("export") }}</button>
         <button
           type="button"
           class="ghost-button"
           :disabled="!canResetActiveDocument"
-          :title="resetUnavailableReason || '現在の文書をrepository上の正本へ戻す'"
+          :title="resetUnavailableReason || t('restoreTitle')"
           @click="resetMock"
-        >Repositoryへ戻す</button>
+        >{{ t("restore") }}</button>
         <span v-if="resetUnavailableReason" class="reset-unavailable-reason" role="status">
           {{ resetUnavailableReason }}
         </span>
@@ -517,23 +545,23 @@ function emptyDocument(): IriographDocumentV1 {
     </header>
 
     <main v-if="workspaceError" class="workspace-load-state error">
-      <strong>Workspaceを開けませんでした</strong>
+      <strong>{{ t("workspaceOpenFailed") }}</strong>
       <p>{{ workspaceError }}</p>
-      <button type="button" @click="initializeWorkspace">再試行</button>
+      <button type="button" @click="initializeWorkspace">{{ t("retry") }}</button>
     </main>
 
     <main v-else-if="!workspaceReady" class="workspace-load-state">
-      <strong>Workspaceを読み込み中…</strong>
-      <p>repository内の `.iriograph` とasset manifestを参照しています。</p>
+      <strong>{{ t("workspaceLoading") }}</strong>
+      <p>{{ t("workspaceLoadingDetail") }}</p>
     </main>
 
     <main v-else class="host-workbench">
-      <aside class="workspace-panel" aria-label="Mock workspace files">
+      <aside class="workspace-panel" :aria-label="t('workspaceFilesAria')">
         <header>
-          <span>WORKSPACE</span>
+          <span>{{ t("workspace") }}</span>
           <strong>{{ workspace?.name }}</strong>
         </header>
-        <nav class="workspace-tree" aria-label="Workspace tree">
+        <nav class="workspace-tree" :aria-label="t('workspaceTreeAria')">
           <button
             v-for="row in workspaceRows"
             :key="`${row.kind}:${row.path}`"
@@ -555,20 +583,20 @@ function emptyDocument(): IriographDocumentV1 {
           </button>
         </nav>
         <section v-if="assetPickPending" class="workspace-picker-prompt" role="status">
-          <strong>アイコンを選択</strong>
-          <p>tree内の画像assetをクリックしてください。</p>
-          <button type="button" @click="settleAssetPick({ status: 'cancelled' })">キャンセル</button>
+          <strong>{{ t("chooseIcon") }}</strong>
+          <p>{{ t("chooseIconDetail") }}</p>
+          <button type="button" @click="settleAssetPick({ status: 'cancelled' })">{{ t("cancel") }}</button>
         </section>
         <section v-if="activeAsset" class="workspace-asset-preview">
-          <small>ASSET REFERENCE</small>
+          <small>{{ t("assetReference") }}</small>
           <strong>{{ activeAsset.path.split("/").at(-1) }}</strong>
           <code>{{ activeAsset.assetRef }}</code>
-          <button type="button" @click="copyAssetRef">IRIをコピー</button>
-          <p>画像bytesではなく、このIRIだけをoverlayが保持します。</p>
+          <button type="button" @click="copyAssetRef">{{ t("copyIri") }}</button>
+          <p>{{ t("assetIdentityDetail") }}</p>
         </section>
         <footer>
-          <span>Host-owned tree</span>
-          <small>{{ workspace?.entries.length }} files</small>
+          <span>{{ t("hostOwnedTree") }}</span>
+          <small>{{ t("files", { count: workspace?.entries.length ?? 0 }) }}</small>
         </footer>
       </aside>
 
@@ -578,6 +606,8 @@ function emptyDocument(): IriographDocumentV1 {
           v-model="document"
           hide-header
           :runtime-context="projectionRuntimeContext"
+          :ui-locale="uiLocale"
+          :semantic-locales="[uiLocale]"
           :title="documentTitle"
           :file-path="activeFilePath"
           :dirty="dirty"
@@ -589,13 +619,14 @@ function emptyDocument(): IriographDocumentV1 {
           :workspace-locator="workspaceLocator"
           :pick-asset="pickWorkspaceAsset"
           :authoring-context="authoringContext"
-          :semantic-validation-context="mockSemanticValidationContext"
+          :semantic-validation-context="semanticValidationContext"
           :resource-iri-allocator="resourceIriAllocator"
           :document-identity-allocator="documentIdentityAllocator"
           :predicate-inference-policy="{ query: 'rdfs-subproperty', validation: 'rdfs-subproperty' }"
           @save="saveFromEditor"
           @duplicated-as-new="openDuplicatedDocument"
           @validation-changed="diagnostics = $event"
+          @update:ui-locale="updateUiLocale"
         />
       </section>
     </main>

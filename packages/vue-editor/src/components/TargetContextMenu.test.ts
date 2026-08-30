@@ -8,6 +8,12 @@ import {
   type TargetContextSubject,
 } from "../inspector/target-context-menu";
 import TargetContextMenu from "./TargetContextMenu.vue";
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
+const ja: EditorTranslator = (key, parameters) => translateEditorMessage("ja", key, parameters);
 
 describe("TargetContextMenu", () => {
   it.each<[TargetContextSubject, string]>([
@@ -28,7 +34,7 @@ describe("TargetContextMenu", () => {
           clipboardHasSupportedContent: true,
           hasManualRoute: true,
           hasGroupMembers: true,
-        }),
+        }, ja),
       },
     });
     expect(wrapper.get("[role='menu']").text()).toContain(label);
@@ -44,7 +50,7 @@ describe("TargetContextMenu", () => {
       attachTo: document.body,
       props: {
         session: session(target, "menu-opener", "keyboard"),
-        entries: targetContextMenuEntries(target),
+        entries: targetContextMenuEntries(target, undefined, ja),
       },
     });
     await nextTick();
@@ -73,7 +79,7 @@ describe("TargetContextMenu", () => {
       attachTo: document.body,
       props: {
         session: session(target, "disabled-menu-opener"),
-        entries: targetContextMenuEntries(target, { readOnly: true, hasManualRoute: false }),
+        entries: targetContextMenuEntries(target, { readOnly: true, hasManualRoute: false }, ja),
       },
     });
     expect(wrapper.text()).toContain("読み取り専用のため変更できません。");
@@ -86,6 +92,18 @@ describe("TargetContextMenu", () => {
     expect(document.activeElement).toBe(opener);
     wrapper.unmount();
     opener.remove();
+  });
+
+  it("defaults standalone menu entries to English", () => {
+    const target: TargetContextSubject = { kind: "blank" };
+    const wrapper = mount(TargetContextMenu, {
+      props: {
+        session: session(target),
+        entries: targetContextMenuEntries(target),
+      },
+    });
+
+    expect(wrapper.get("[role='menu']").text()).toContain("Add element");
   });
 });
 

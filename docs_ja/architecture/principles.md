@@ -86,6 +86,12 @@ RDF/RDFSだけでBPMNの全概念を表すのではなく、RDF/RDFSの共通構
 
 具体的な語彙、制約、投影は[RDF/RDFS profile](../semantics/rdf-profile.md)を正本とします。
 
+## 言語の境界
+
+UI言語、意味literalの優先言語、portable viewのlocaleは関連しますが別の責務です。Editorは英語を既定とし、日本語をHostまたは利用者sessionの設定として提供します。意味言語は既存の多言語label/commentから表示値を選ぶだけです。再現可能なlabel選択がviewの一部である場合だけnamed viewが固有localeを保存できます。いずれもsemantic sourceを翻訳・書換えず、UI言語だけの変更はdocument revisionを作りません。
+
+動作は安定したIDへ、説明はlocale別の文言へ結び付けます。同じpredicate IRI、command、diagnostic code、projection ruleはUI言語に依存しません。Package文言は英語を正規fallbackとし、利用者が作成したRDF lexical formはUI文言ではなく意味データとして完全に保持します。
+
 ## Assetのidentityと取得
 
 iconはIRIで参照します。IRIと取得URLは同一視せず、catalogまたはhostが注入するresolverで実URLへ解決します。これによりcore catalogを小さく保ち、組織固有asset、署名URL、CDN、offline bundleをhost側で選べます。

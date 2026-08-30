@@ -5,6 +5,11 @@ import {
   type VisualStyle,
 } from "@iriograph/core";
 
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
 export type CreationPaletteCard = {
   templateRef: string;
   classIri?: string;
@@ -23,6 +28,7 @@ export function catalogCreationPalette(
   catalog: ProjectionCatalogV1 | undefined,
   terms: readonly ResolvedAuthoringTerm[],
   viewKind: "node-link" | "region" = "node-link",
+  translator: EditorTranslator = defaultTranslator,
 ): CreationPaletteCard[] {
   if (!catalog) return [];
   const termLabels = new Map(terms.map((term) => [term.iri, term.label]));
@@ -42,7 +48,7 @@ export function catalogCreationPalette(
         kind: "region",
         structuralKind,
         label: termLabels.get(rule.match.iri) ?? compactIri(rule.match.iri),
-        description: "意味上の包含を持つ領域",
+        description: translator("creationPalette.semanticRegionTitle"),
         shape: template.shape ?? "region",
         iconRef: template.iconRef,
         style: template.style,
@@ -60,7 +66,7 @@ export function catalogCreationPalette(
         kind: "node",
         structuralKind: "node",
         label: termLabels.get(rule.match.iri) ?? compactIri(rule.match.iri),
-        description: "分類領域としても利用できる概念クラス",
+        description: translator("creationPalette.conceptClassDescription"),
         shape: template.shape ?? "rectangle",
         iconRef: template.iconRef,
         style: template.style,
@@ -78,7 +84,9 @@ export function catalogCreationPalette(
       kind: structuralKind === "node" ? "node" : "region",
       structuralKind,
       label: termLabels.get(rule.match.iri) ?? compactIri(rule.match.iri),
-      description: structuralKind === "container" ? "要素を含める領域" : "意味グラフの要素",
+      description: structuralKind === "container"
+        ? translator("creationPalette.containerTitle")
+        : translator("creationPalette.resourceTitle"),
       shape: template.shape ?? (structuralKind === "node" ? "rectangle" : "region"),
       iconRef: template.iconRef,
       style: template.style,
@@ -93,8 +101,8 @@ export function catalogCreationPalette(
       classIri: undefined,
       kind: "node",
       structuralKind: "node",
-      label: "基本の要素",
-      description: "意味型を決めず、名前や関係から作成",
+      label: translator("creationPalette.basicElementLabel"),
+      description: translator("creationPalette.basicElementDescription"),
       shape: genericTemplate.shape ?? "rectangle",
       iconRef: genericTemplate.iconRef,
       style: genericTemplate.style,
@@ -112,6 +120,10 @@ export function catalogCreationPalette(
     || compareCodePoints(left.classIri ?? "", right.classIri ?? "")
   ));
 }
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
 
 function compactIri(value: string): string {
   const hash = value.lastIndexOf("#");

@@ -4,6 +4,8 @@
 
 The standard editor is designed for users who do not know RDF, RDFS, Turtle, or IRIs. Labels, descriptions, icons, and direct canvas selection are primary. Turtle and complete document source remain available as explicit source-editing modes.
 
+The interface opens in English and can be switched to Japanese from the language selector. This is a session preference, so switching languages does not edit the diagram. Semantic names and descriptions are displayed from the document's available language-tagged literals; they are selected rather than machine-translated, and user-authored text remains unchanged.
+
 ## Basic model
 
 The editor separates:

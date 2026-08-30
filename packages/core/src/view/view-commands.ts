@@ -90,9 +90,9 @@ export async function applyViewCommand(
 
   if (command.command === "delete") {
     const index = candidate.views.findIndex((view) => view.viewId === command.viewId);
-    if (index < 0) return rejected(document, "view-unresolved", `viewが存在しません: ${command.viewId}`);
+    if (index < 0) return rejected(document, "view-unresolved", `View does not exist: ${command.viewId}`);
     if (candidate.views.length === 1) {
-      return rejected(document, "last-view-delete-rejected", "最後のviewは削除できません。", command.viewId);
+      return rejected(document, "last-view-delete-rejected", "The last view cannot be deleted.", command.viewId);
     }
     // Deletion deliberately does not project the target or sibling views. This
     // keeps a broken named view removable without weakening semantic atomicity.
@@ -122,7 +122,7 @@ export async function applyViewCommand(
   if (command.command === "duplicate") {
     const source = candidate.views.find((view) => view.viewId === command.sourceViewId);
     if (!source) {
-      return rejected(document, "view-unresolved", `複製元viewが存在しません: ${command.sourceViewId}`);
+      return rejected(document, "view-unresolved", `Source view does not exist: ${command.sourceViewId}`);
     }
     const identityError = validateNewViewId(candidate, command.viewId);
     if (identityError) return rejected(document, identityError.code, identityError.message, command.viewId);
@@ -134,7 +134,7 @@ export async function applyViewCommand(
   }
 
   const current = candidate.views.find((view) => view.viewId === command.viewId);
-  if (!current) return rejected(document, "view-unresolved", `viewが存在しません: ${command.viewId}`);
+  if (!current) return rejected(document, "view-unresolved", `View does not exist: ${command.viewId}`);
 
   if (command.command === "reset-overlay") {
     current.overlay = {};
@@ -260,9 +260,9 @@ function validateNewViewId(
   document: IriographDocument,
   viewId: string,
 ): { code: string; message: string } | undefined {
-  if (!viewId.trim()) return { code: "view-id-empty", message: "viewIdは空にできません。" };
+  if (!viewId.trim()) return { code: "view-id-empty", message: "viewId must not be empty." };
   if (document.views.some((view) => view.viewId === viewId)) {
-    return { code: "view-id-conflict", message: `viewIdが重複しています: ${viewId}` };
+    return { code: "view-id-conflict", message: `Duplicate viewId: ${viewId}` };
   }
   return undefined;
 }
@@ -270,10 +270,10 @@ function validateNewViewId(
 function validateViewConfiguration(
   view: DiagramView,
 ): { code: string; message: string } | undefined {
-  if (!view.profileRef.trim()) return { code: "view-profile-empty", message: "profileRefは必須です。" };
-  if (!view.layoutRef.trim()) return { code: "view-layout-empty", message: "layoutRefは必須です。" };
+  if (!view.profileRef.trim()) return { code: "view-profile-empty", message: "profileRef is required." };
+  if (!view.layoutRef.trim()) return { code: "view-layout-empty", message: "layoutRef is required." };
   if (view.locale !== undefined && !isBcp47LanguageTag(view.locale)) {
-    return { code: "view-locale-invalid", message: `localeがBCP 47ではありません: ${view.locale}` };
+    return { code: "view-locale-invalid", message: `Locale is not a valid BCP 47 tag: ${view.locale}` };
   }
   return undefined;
 }
@@ -315,7 +315,7 @@ function aborted(document: IriographDocument): ViewCommandResult {
     severity: "info",
     category: "projection",
     code: "view-command-aborted",
-    message: "view commandは中断されました。",
+    message: "The view command was aborted.",
   }]);
 }
 

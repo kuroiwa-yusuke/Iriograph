@@ -1,3 +1,8 @@
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
 export type WorkspaceLocatorEntry = {
   path: string;
   assetRef: string;
@@ -45,6 +50,7 @@ export interface WorkspaceLocator {
 
 export function createStaticWorkspaceLocator(
   entries: readonly WorkspaceLocatorEntry[],
+  translator: EditorTranslator = defaultTranslator,
 ): WorkspaceLocator {
   const indexed = entries.map((entry) => ({ ...entry, path: normalizeEntryPath(entry.path) }));
   const byPath = new Map<string, WorkspaceLocatorEntry[]>();
@@ -106,39 +112,43 @@ export function createStaticWorkspaceLocator(
     },
     resolve(request) {
       if (!request.input.trim()) {
-        return { status: "rejected", reason: "empty", message: "画像pathを入力してください。" };
+        return { status: "rejected", reason: "empty", message: translator("workspaceLocator.pathRequired") };
       }
       const parsed = parseInput(request);
       if (!parsed.accepted) {
         return {
           status: "rejected",
           reason: "workspace-escape",
-          message: "Workspaceの外を参照するpathは指定できません。",
+          message: translator("workspaceLocator.outsideWorkspace"),
         };
       }
       if (parsed.trailingSlash || hasDescendant(indexed, parsed.path)) {
         return {
           status: "rejected",
           reason: "not-asset",
-          message: "フォルダではなく画像ファイルを選択してください。",
+          message: translator("workspaceLocator.imageFileRequired"),
         };
       }
       const candidates = byPath.get(parsed.path) ?? [];
       if (candidates.length === 0) {
-        return { status: "rejected", reason: "not-found", message: "Workspaceに一致する画像がありません。" };
+        return { status: "rejected", reason: "not-found", message: translator("workspaceLocator.notFound") };
       }
       const assetRefs = [...new Set(candidates.map((entry) => entry.assetRef))];
       if (assetRefs.length !== 1) {
         return {
           status: "rejected",
           reason: "ambiguous",
-          message: "同じpathに複数の画像があるため、Workspace側で重複を解消してください。",
+          message: translator("workspaceLocator.ambiguous"),
         };
       }
       return { status: "resolved", assetRef: assetRefs[0]!, path: parsed.path };
     },
   };
 }
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
 
 type ParsedInput =
   | { accepted: true; path: string; trailingSlash: boolean; style: "root" | "absolute" | "relative" }

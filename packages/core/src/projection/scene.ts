@@ -119,7 +119,7 @@ export async function buildIriographView(
       severity: "error",
       category: "projection",
       code: "view-unresolved",
-      message: `viewが存在しません: ${viewId}`,
+      message: `View does not exist: ${viewId}`,
     }]);
   }
   const profile = context.catalogsByProfile.get(view.profileRef);
@@ -128,7 +128,7 @@ export async function buildIriographView(
       severity: "error",
       category: "profile",
       code: "profile-catalog-unresolved",
-      message: `profileの解決済みcatalogがありません: ${view.profileRef}`,
+      message: `No resolved catalog is available for profile: ${view.profileRef}`,
       semanticRef: viewId,
     }]);
   }
@@ -195,10 +195,10 @@ function resolvedCatalogImportDiagnostic(
     category: "profile",
     code: "catalog-import-context-mismatch",
     message: [
-      "Documentが指定した表示catalogとhostが解決したcatalogが一致しません。",
-      missing.length > 0 ? `未解決: ${missing.join(", ")}` : undefined,
-      undeclared.length > 0 ? `未宣言: ${undeclared.join(", ")}` : undefined,
-      "同じversionのpackageとcatalogを利用してください。",
+      "The display catalogs declared by the document do not match the catalogs resolved by the host.",
+      missing.length > 0 ? `Unresolved: ${missing.join(", ")}` : undefined,
+      undeclared.length > 0 ? `Undeclared: ${undeclared.join(", ")}` : undefined,
+      "Use packages and catalogs from the same version.",
     ].filter((value): value is string => value !== undefined).join(" "),
   };
 }

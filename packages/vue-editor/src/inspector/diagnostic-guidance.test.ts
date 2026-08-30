@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { diagnosticGuidance } from "./diagnostic-guidance";
+import { translateEditorMessage } from "../localization/editor-localization";
+
+const japanese = (key: Parameters<typeof translateEditorMessage>[1], parameters?: Parameters<typeof translateEditorMessage>[2]) => (
+  translateEditorMessage("ja", key, parameters)
+);
 
 describe("diagnostic guidance", () => {
   it("term minting errorをユーザーの次actionへ翻訳する", () => {
@@ -10,9 +15,9 @@ describe("diagnostic guidance", () => {
       message: "Semantic term minting is denied: urn:test:Class",
     });
     expect(guidance).toMatchObject({
-      title: "この図では新しい種類を作成できません",
-      action: expect.stringContaining("基本の要素"),
-      detail: "診断コード: term-minting-denied",
+      title: "New kinds cannot be created in this diagram.",
+      action: expect.stringContaining("basic element"),
+      detail: "Diagnostic code: term-minting-denied",
     });
     expect(Object.values(guidance).join(" ")).not.toContain("urn:test:Class");
   });
@@ -26,8 +31,8 @@ describe("diagnostic guidance", () => {
       jsonPointer: "/views/0/overlay/urn:test:secret",
     });
     expect(unknown).toMatchObject({
-      title: "変更を適用できません",
-      detail: "Document JSON 対象項目（コード: custom）",
+      title: "The change could not be applied.",
+      detail: "Document JSON target item (code: custom)",
     });
     expect(Object.values(unknown).join(" ")).not.toMatch(/urn:|https?:\/\//u);
 
@@ -54,12 +59,23 @@ describe("diagnostic guidance", () => {
         endLine: 3,
         endColumn: 9,
       },
-    }).detail).toBe("Source 3行 8列付近（コード: turtle-syntax）");
+    }).detail).toBe("Near source line 3, column 8 (code: turtle-syntax)");
     expect(diagnosticGuidance({
       severity: "error",
       code: "document-json-invalid",
       message: "raw",
       jsonPointer: "/views/0/layoutRef",
-    }).detail).toBe("Document JSON /views/0/layoutRef（コード: document-json-invalid）");
+    }).detail).toBe("Document JSON /views/0/layoutRef (code: document-json-invalid)");
+  });
+
+  it("switches the same stable guidance keys to Japanese", () => {
+    expect(diagnosticGuidance({
+      severity: "error",
+      code: "term-minting-denied",
+      message: "internal",
+    }, japanese)).toMatchObject({
+      title: "この図では新しい種類を作成できません",
+      detail: "診断コード: term-minting-denied",
+    });
   });
 });

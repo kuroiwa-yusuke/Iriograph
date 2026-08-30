@@ -4,7 +4,21 @@
 
 Labelは発見と説明に使いますが、identityには使いません。検索結果は常に完全IRIとdocument revisionに束縛されたaliasを返します。表示overlay、asset byte、raw SPARQL UpdateはAPIへ公開しません。
 
-`standardPredicateVocabularyJa`は、RDF/RDFS、Dublin Core Terms、PROV-O、SKOSの代表的なpredicate IRIへ日本語label、説明、category、利用例を付けたpicker用metadataです。Turtleへ日本語独自predicateを追加せず、hostはprofileに必要なcategoryだけを`standardPredicateTermsJa()`で選んで`ResolvedAuthoringContext`へ加えられます。表示metadataは検索支援だけに使い、commandと索引は常に標準IRIをidentityとして保持します。
+標準predicate presentation APIは、RDF/RDFS、Dublin Core Terms、PROV-O、SKOS、OWLのRestrictionではない代表的な関係predicateへ、英語または日本語のlabel、説明、category、A–B例文、利用例を付けます。既定localeと未知localeのfallbackは英語です。`en-US`と`ja-JP`等の地域tagを正規化し、locale間でpredicate IRIとstructural flagは変わりません。
+
+```ts
+import {
+  standardPredicateTerms,
+  standardPredicateVocabulary,
+  standardPredicateVocabularyForLocale,
+} from "@iriograph/semantic-access";
+
+const englishDefaults = standardPredicateVocabulary;
+const japanese = standardPredicateVocabularyForLocale("ja-JP");
+const dependencies = standardPredicateTerms({ locale: "ja", categories: ["依存"] });
+```
+
+既存の`standardPredicateVocabularyJa`と`standardPredicateTermsJa(categories)`も互換APIとして利用できます。表示metadataは検索支援だけに使い、commandと索引は常に標準IRIをidentityとして保持します。
 
 ## Install
 

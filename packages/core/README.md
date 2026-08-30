@@ -72,7 +72,7 @@ Automatic edge routing prefers a safe straight route, one-bend orthogonal route,
 
 ## Assets and icons
 
-`packageDefaultIcons` exposes a compact catalog of bundled Lucide SVGs with stable refs such as `urn:iriograph:icon:lucide:<name>:1`. The same SVGs are exported through `@iriograph/core/icons/<name>.svg`; provenance is in `@iriograph/core/THIRD_PARTY_NOTICES.md`.
+`packageDefaultIcons` exposes a compact catalog of bundled Lucide SVGs with stable refs such as `urn:iriograph:icon:lucide:<name>:1`, canonical English labels, and Japanese labels. `packageDefaultIconLabel(icon, locales)` selects presentation text without changing the ref. The same SVGs are exported through `@iriograph/core/icons/<name>.svg`; provenance is in `@iriograph/core/THIRD_PARTY_NOTICES.md`.
 
 `withPackageDefaultIconAccess(assetAccess)` resolves bundled refs without weakening host policy for workspace or external assets. Asset leases are checked for MIME/signature, encoded size, decoded dimensions/pixels, concurrency, abort, and release. Resolved URLs and bytes never enter portable documents.
 

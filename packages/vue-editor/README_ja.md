@@ -19,6 +19,8 @@ import "@iriograph/vue-editor/styles.css";
   v-model="document"
   v-model:active-view-id="activeViewId"
   :runtime-context="projectionRuntimeContext"
+  :ui-locale="uiLocale"
+  :semantic-locales="semanticLocales"
   :authoring-context="resolvedAuthoringContext"
   :semantic-validation-context="resolvedSemanticValidationContext"
   :resource-iri-allocator="resourceIriAllocator"
@@ -28,9 +30,16 @@ import "@iriograph/vue-editor/styles.css";
   :asset-options="workspaceAssetOptions"
   @duplicated-as-new="openDuplicatedDocument"
   @pending-drafts-changed="hasPendingDrafts = $event"
+  @update:ui-locale="persistUiLocale"
   @save="saveToHost"
 />
 ```
+
+## 言語
+
+Editorは英語を既定とし、日本語を同梱します。`uiLocale`はpackage UIを切り替え、`update:uiLocale`を受けたHostは利用者設定としてportable document外へ保存できます。`semanticLocales`は既存RDF label/commentの表示優先順で、省略時は`uiLocale`へ従います。どちらを変えてもTurtleの翻訳・書換え、view overlay更新、history追加、dirty化を行いません。
+
+標準関係とpackage iconはexact IRIを保ったまま英語または日本語metadataを選択します。利用者が作成した意味textに選択言語がなければ、既存literalから決定的にfallbackします。
 
 `runtimeContext`にはprofile別の解決済みcatalogとlayout registryを持つ
 `ProjectionRuntimeContext`を渡します。旧`catalog` propはdeprecated互換です。意味グラフのstructured editを有効に
@@ -102,7 +111,7 @@ node周囲へ移動し、waypointと同じsparse routing overlayだけに保存�
 間だけ、同じ端子を別nodeへdropしてsource/target変更draftを作れます。空白dropは元接続を維持します。
 `readOnly`ではsemantic/presentation write入口を無効にします。
 
-意味編集は4入口の後にCanvas対象、種類、関係、member、順序または既定候補を段階表示します。関係作成は最初に`線でつなぐ` / `グループへ所属させる`をicon cardで選び、directは一始点・複数接続先・共通または行別predicate、membershipは既存Group Frame・複数member・Seq順序または候補グループ既定を一つのatomic requestへcompileします。既存memberと、名前・node-roleだけの未確定新規member chipを混在できます。完全IRI、`rdf:type`、`rdfs:label`等を通常UIへ出しません。Predicateはcatalog/profileの日本語`A（関係）B`候補から選びます。個別edge説明はRDF標準reificationの`rdfs:comment`としてTurtleへ保存し、ビュー専用captionと分離します。
+意味編集は4入口の後にCanvas対象、種類、関係、member、順序または既定候補を段階表示します。関係作成は最初に`線でつなぐ` / `グループへ所属させる`をicon cardで選び、directは一始点・複数接続先・共通または行別predicate、membershipは既存Group Frame・複数member・Seq順序または候補グループ既定を一つのatomic requestへcompileします。既存memberと、名前・node-roleだけの未確定新規member chipを混在できます。完全IRI、`rdf:type`、`rdfs:label`等を通常UIへ出しません。Predicateはcatalog/profileの選択localeに対応した`A（関係）B`候補から選びます。個別edge説明はRDF標準reificationの`rdfs:comment`としてTurtleへ保存し、ビュー専用captionと分離します。
 
 Canvas右click、Context Menu key、Shift+F10は同じ対象別menuを開きます。Node、direct edge、derived順序/候補guide、各Group Frame、空白に応じた意味・ビュー・配置・削除入口を示しますが、menu選択だけでは変更せず該当Inspector/actionへfocusします。色・透明度・線、template/icon、geometry、region label/z-order、edge route/terminal/caption/anchorを右Inspectorで段階表示し、
 一gestureまたは確定操作を一つのpresentation history itemとして保存します。Region上へのplain dragから

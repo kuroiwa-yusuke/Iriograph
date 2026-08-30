@@ -117,7 +117,7 @@ export function validateProjectionCatalog(
       diagnostics.push({
         severity: "error",
         code: "unsafe-template-style",
-        message: `templateに安全でないstyle値があります: ${templateRef}`,
+        message: `Template contains unsafe style values: ${templateRef}`,
         catalogRef: ref,
       });
     }
@@ -127,7 +127,7 @@ export function validateProjectionCatalog(
         diagnostics.push({
           severity: "error",
           code: "duplicate-template-port-id",
-          message: `template portIdが重複しています: ${templateRef}#${port.portId}`,
+          message: `Duplicate template portId: ${templateRef}#${port.portId}`,
           catalogRef: ref,
         });
       }
@@ -136,7 +136,7 @@ export function validateProjectionCatalog(
         diagnostics.push({
           severity: "error",
           code: "invalid-template-port-position",
-          message: `template port positionは0以上1以下である必要があります: ${templateRef}#${port.portId}`,
+          message: `Template port position must be between 0 and 1: ${templateRef}#${port.portId}`,
           catalogRef: ref,
         });
       }
@@ -148,7 +148,7 @@ export function validateProjectionCatalog(
       diagnostics.push({
         severity: "error",
         code: "invalid-template-port-kind",
-        message: `resource endpoint以外のtemplateへportsを宣言できません: ${templateRef}`,
+        message: `Ports cannot be declared on a template that is not a resource endpoint: ${templateRef}`,
         catalogRef: ref,
       });
     }
@@ -158,7 +158,7 @@ export function validateProjectionCatalog(
     diagnostics.push({
       severity: "error",
       code: "unsafe-style-preset",
-      message: `catalog style presetに安全でない値があります: ${styleRef}`,
+      message: `Catalog style preset contains unsafe values: ${styleRef}`,
       catalogRef: ref,
     });
   }
@@ -169,7 +169,7 @@ export function validateProjectionCatalog(
         catalog,
         rule,
         "duplicate-rule-id",
-        `ruleIdが重複しています: ${rule.ruleId}`,
+        `Duplicate ruleId: ${rule.ruleId}`,
       ));
     }
     seenRuleIds.add(rule.ruleId);
@@ -179,7 +179,7 @@ export function validateProjectionCatalog(
         catalog,
         rule,
         "invalid-rule-entailment",
-        "type matchにはrdfs-subpropertyを指定できません。",
+        "rdfs-subproperty cannot be specified for a type match.",
       ));
     }
     if (rule.match.kind === "predicate" && rule.match.entailment === "rdfs-subclass") {
@@ -187,7 +187,7 @@ export function validateProjectionCatalog(
         catalog,
         rule,
         "invalid-rule-entailment",
-        "predicate matchにはrdfs-subclassを指定できません。",
+        "rdfs-subclass cannot be specified for a predicate match.",
       ));
     }
 
@@ -197,7 +197,7 @@ export function validateProjectionCatalog(
         catalog,
         rule,
         "missing-rule-template-ref",
-        `${rule.project.operator} ruleにはtemplateRefが必要です。`,
+        `${rule.project.operator} rule requires templateRef.`,
       ));
     }
     if (rule.templateRef) {
@@ -209,7 +209,7 @@ export function validateProjectionCatalog(
         catalog,
         rule,
         "operator-match-mismatch",
-        `${rule.project.operator}は${rule.match.kind} matchへ適用できません。`,
+        `${rule.project.operator} cannot be applied to a ${rule.match.kind} match.`,
       ));
     }
   }
@@ -218,7 +218,7 @@ export function validateProjectionCatalog(
     diagnostics.push({
       severity: "error",
       code: "missing-catalog-defaults",
-      message: `単独projectionに必要なdefaultsがありません: ${ref}`,
+      message: `Defaults required for standalone projection are missing: ${ref}`,
       catalogRef: ref,
     });
   } else {
@@ -269,7 +269,7 @@ function resolveCandidates(
       diagnostics: [{
         severity: "error",
         code: "ambiguous-projection-rule",
-        message: `同順位のprojection ruleが競合しています: ${ruleNames}`,
+        message: `Projection rules with equal rank conflict: ${ruleNames}`,
         semanticRef,
       }],
       trace: {
@@ -465,14 +465,14 @@ function validateTemplateReference(
       catalog,
       rule,
       "missing-rule-template",
-      `ruleのtemplateがありません: ${rule.templateRef}`,
+      `Rule template is missing: ${rule.templateRef}`,
     ));
   } else if (expectedKind && template.structuralKind !== expectedKind) {
     diagnostics.push(ruleDiagnostic(
       catalog,
       rule,
       "template-kind-mismatch",
-      `${rule.templateRef}は${expectedKind} templateではありません。`,
+      `${rule.templateRef} is not a ${expectedKind} template.`,
     ));
   }
 }
@@ -488,14 +488,14 @@ function validateDefaultTemplate(
     diagnostics.push({
       severity: "error",
       code: "missing-default-template",
-      message: `default ${expectedKind} templateがありません: ${templateRef}`,
+      message: `Default ${expectedKind} template is missing: ${templateRef}`,
       catalogRef: catalogRef(catalog),
     });
   } else if (template.structuralKind !== expectedKind) {
     diagnostics.push({
       severity: "error",
       code: "template-kind-mismatch",
-      message: `${templateRef}は${expectedKind} templateではありません。`,
+      message: `${templateRef} is not a ${expectedKind} template.`,
       catalogRef: catalogRef(catalog),
     });
   }

@@ -61,6 +61,70 @@ describe("IriographEditor transaction regression", () => {
     vi.restoreAllMocks();
   });
 
+  it("defaults editor chrome to English and exposes the language control", async () => {
+    wrapper = await mountEditor({ uiLocale: undefined, hideHeader: true });
+    const language = wrapper.get<HTMLSelectElement>('select[aria-label="Editor language"]');
+
+    expect(wrapper.findAll('select[aria-label="Editor language"]')).toHaveLength(1);
+    expect(language.element.value).toBe("en");
+    expect(wrapper.get('.iriograph-view-tabs[role="group"]').text()).toContain("Diagram");
+    expect(wrapper.get('.iriograph-view-tabs[role="group"]').text()).toContain("Type list");
+  });
+
+  it("switches editor chrome to Japanese at runtime and emits the typed update event", async () => {
+    const fixture = documentFixture();
+    const originalSource = fixture.semantic.source;
+    const originalOverlay = structuredClone(fixture.views[0]!.overlay);
+    wrapper = await mountEditor({ modelValue: fixture, uiLocale: "en", dirty: true });
+    const selectedButton = wrapper.findAll(".iriograph-element-list button")[0]!;
+    await selectedButton.trigger("click");
+    expect(selectedButton.classes()).toContain("active");
+    const historyButtons = wrapper.findAll<HTMLButtonElement>(".iriograph-history-actions button");
+    const historyDisabledBefore = historyButtons.map((button) => button.attributes("disabled") !== undefined);
+    const language = wrapper.get<HTMLSelectElement>('select[aria-label="Editor language"]');
+    language.element.focus();
+    await language.setValue("ja");
+    await nextTick();
+
+    expect(wrapper.emitted("update:uiLocale")).toEqual([["ja"]]);
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(fixture.semantic.source).toBe(originalSource);
+    expect(fixture.views[0]!.overlay).toEqual(originalOverlay);
+    expect(wrapper.findAll<HTMLButtonElement>(".iriograph-history-actions button")
+      .map((button) => button.attributes("disabled") !== undefined)).toEqual(historyDisabledBefore);
+    expect((wrapper.props() as Record<string, unknown>).dirty).toBe(true);
+    expect(document.activeElement).toBe(language.element);
+    expect(selectedButton.classes()).toContain("active");
+    expect(wrapper.get(".iriograph-editor").attributes("lang")).toBe("ja");
+    expect(wrapper.get('.iriograph-view-tabs[role="group"]').text()).toContain("図");
+    expect(wrapper.get<HTMLSelectElement>('select[aria-label="エディタの表示言語"]').element.value).toBe("ja");
+  });
+
+  it("keeps semantic label locale preference independent from the Japanese UI", async () => {
+    const fixture = documentFixture();
+    fixture.semantic.source = `
+@prefix : <${NS}> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+:Work a rdfs:Class ; rdfs:label "仕事"@ja, "Work"@en .
+:a a :Work ; rdfs:label "申請"@ja, "Application"@en .
+`;
+    wrapper = await mountEditor({
+      modelValue: fixture,
+      uiLocale: "ja",
+      semanticLocales: ["en"],
+    }, -1);
+
+    await buttonWithText(wrapper, "型一覧").trigger("click");
+    await nextTick();
+    const typePanel = wrapper.getComponent(TypeListPanel);
+    expect(typePanel.props("presentation").types[0]?.label).toBe("Work");
+    expect(wrapper.get('.iriograph-view-tabs[role="group"]').text()).toContain("型一覧");
+    expect(wrapper.emitted("update:modelValue")).toBeUndefined();
+    expect(((wrapper.props() as Record<string, unknown>).modelValue as IriographDocumentV1).semantic.source)
+      .toBe(fixture.semantic.source);
+  });
+
   it("図/型一覧/Turtle/Documentを押下状態が分かるbutton groupとして公開する", async () => {
     wrapper = await mountEditor();
     const selector = wrapper.get('.iriograph-view-tabs[role="group"]');
@@ -322,11 +386,11 @@ describe("IriographEditor transaction regression", () => {
       placement: "user",
     });
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), `${NS}a`)).toBeUndefined();
 
-    await buttonWithTitle(wrapper, "Redo (Ctrl/Cmd+Y)").trigger("click");
+    await buttonWithTitle(wrapper, "やり直す（Ctrl/Cmd+Y）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), `${NS}a`)).toMatchObject({
       geometry: finalGeometry,
@@ -367,7 +431,7 @@ describe("IriographEditor transaction regression", () => {
     expect(layout.mock.calls.length).toBe(initialLayoutCalls);
 
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]')
       .setValue(`${initialSource}\n:a rdfs:comment "Changed" .\n`);
     await buttonWithText(wrapper, "検証して適用").trigger("click");
     await waitUntil(() => layout.mock.calls.length > initialLayoutCalls);
@@ -583,7 +647,7 @@ describe("IriographEditor transaction regression", () => {
     expect(routed.placement).toBeUndefined();
     expect(wrapper.emitted("update:modelValue")).toHaveLength(2);
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
@@ -608,7 +672,7 @@ describe("IriographEditor transaction regression", () => {
     });
     expect(latestDocument(wrapper).semantic.source).toBe(turtle);
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)).toBeUndefined();
   });
@@ -906,7 +970,7 @@ describe("IriographEditor transaction regression", () => {
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.routeMode).toBe("auto");
     expect((canvas.props("scene") as DiagramScene).edges[0]?.route).toEqual(routeBeforeCurve);
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.routeMode).toBe("curve");
 
@@ -952,12 +1016,12 @@ describe("IriographEditor transaction regression", () => {
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance).toEqual({
       nodeIconOffset: { x: -11, y: 9 },
     });
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.nodeLabelOffset)
       .toEqual({ x: 18, y: -8 });
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)).toBeUndefined();
   });
@@ -991,14 +1055,14 @@ describe("IriographEditor transaction regression", () => {
       appearance: { nodeLabelWritingDirection: "vertical-down" },
     });
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance)
       .toEqual({ nodeLabelWritingDirection: "vertical-down" });
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)).toBeUndefined();
-    await buttonWithTitle(wrapper, "Redo (Ctrl/Cmd+Y)").trigger("click");
+    await buttonWithTitle(wrapper, "やり直す（Ctrl/Cmd+Y）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance)
       .toEqual({ nodeLabelWritingDirection: "vertical-down" });
@@ -1146,7 +1210,7 @@ describe("IriographEditor transaction regression", () => {
     expect(selected.text()).toContain("../../assets/icons/approval.svg");
     expect(assetSuggestion.attributes("aria-pressed")).toBe("true");
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), node.semanticRef)?.appearance?.iconRef).toBeUndefined();
 
@@ -1184,7 +1248,7 @@ describe("IriographEditor transaction regression", () => {
 
     let pickerButton = buttonWithText(wrapper, "画像ファイルを参照…");
     await pickerButton.trigger("click");
-    pickerButton = buttonWithText(wrapper, "画像ファイルを参照中…");
+    pickerButton = buttonWithText(wrapper, "画像ファイルを参照しています…");
     expect(pickerButton.attributes("disabled")).toBeDefined();
     expect(wrapper.get(".iriograph-icon-selection-status").text()).toContain("参照しています");
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
@@ -1231,7 +1295,7 @@ describe("IriographEditor transaction regression", () => {
       .toEqual({ x: 15, y: 0 });
 
     await openDisplayInspectorSection(wrapper, "ラベルとビュー補足");
-    await buttonWithText(wrapper, "ラベル位置をリセット").trigger("click");
+    await buttonWithText(wrapper, "ラベル位置を戻す").trigger("click");
     await settle();
     expect(overlayFor(latestDocument(wrapper), edge.semanticRef)?.routing?.labelOffset)
       .toBeUndefined();
@@ -1290,7 +1354,7 @@ describe("IriographEditor transaction regression", () => {
     wrapper = await mountEditor();
     const candidate = `${initialSource}\n:c rdfs:label "C" .\n`;
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]').setValue(candidate);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]').setValue(candidate);
 
     await buttonWithText(wrapper, "検証して適用").trigger("click");
     await waitUntil(() => latestDocument(wrapper!).semantic.source === candidate);
@@ -1320,7 +1384,7 @@ describe("IriographEditor transaction regression", () => {
     await openTurtlePanel(wrapper);
     const sourceButton = wrapper.get<HTMLButtonElement>(".iriograph-diagnostic-actions button");
     await sourceButton.trigger("click");
-    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]');
     expect(textarea.element.selectionStart).toBe(initialSource.lastIndexOf(":b"));
 
     await textarea.setValue(`${initialSource}\n`);
@@ -1352,7 +1416,7 @@ describe("IriographEditor transaction regression", () => {
     wrapper = await mountEditor({ semanticValidationContext: context });
     const candidate = `${initialSource}\n:c rdfs:label "C" .\n`;
     await openTurtlePanel(wrapper);
-    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]');
     await textarea.setValue(candidate);
     await buttonWithText(wrapper, "検証して適用").trigger("click");
     await waitUntil(() => wrapper!.text().includes("domain-c-rejected"));
@@ -1376,7 +1440,7 @@ describe("IriographEditor transaction regression", () => {
     wrapper = await mountEditor({ semanticValidationContext: context });
     const candidate = `${initialSource}\n:c rdfs:label "C" .\n`;
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]').setValue(candidate);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]').setValue(candidate);
     await buttonWithText(wrapper, "検証して適用").trigger("click");
     await waitUntil(() => wrapper!.text().includes("警告を確認して適用"));
     expect(wrapper.emitted("update:modelValue")).toBeUndefined();
@@ -1473,7 +1537,7 @@ describe("IriographEditor transaction regression", () => {
     wrapper = await mountEditor();
     const initialNodeCount = summaryNodeCount(wrapper);
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]').setValue(
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]').setValue(
       `@prefix : <${NS}> .\n:a :rel .`,
     );
 
@@ -1490,7 +1554,7 @@ describe("IriographEditor transaction regression", () => {
     wrapper = await mountEditor();
     const candidate = `${initialSource}\n:c rdfs:label "C" .\n`;
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]').setValue(candidate);
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]').setValue(candidate);
 
     await wrapper.get(".iriograph-editor-header button").trigger("click");
     await waitUntil(() => (wrapper!.emitted("save")?.length ?? 0) === 1);
@@ -1501,7 +1565,7 @@ describe("IriographEditor transaction regression", () => {
     wrapper.unmount();
     wrapper = await mountEditor();
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]').setValue(
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]').setValue(
       `@prefix : <${NS}> .\n:a :rel .`,
     );
     await wrapper.get(".iriograph-editor-header button").trigger("click");
@@ -1714,7 +1778,7 @@ describe("IriographEditor transaction regression", () => {
       });
     }
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     const undone = latestDocument(wrapper);
     expect(undone.semantic.source).toBe(source);
@@ -1781,7 +1845,7 @@ describe("IriographEditor transaction regression", () => {
       .toEqual([120, 120, 120]);
     expect(aligned.semantic.source).toBe(threeNodeDocumentFixture().semantic.source);
 
-    await buttonWithTitle(wrapper, "Undo (Ctrl/Cmd+Z)").trigger("click");
+    await buttonWithTitle(wrapper, "元に戻す（Ctrl/Cmd+Z）").trigger("click");
     await settle();
     const undone = latestDocument(wrapper);
     expect(nodes.map((node) => overlayFor(undone, node.semanticRef)?.geometry?.x))
@@ -1998,7 +2062,7 @@ describe("IriographEditor transaction regression", () => {
     expect(wrapper.emitted("pendingDraftsChanged")?.at(-1)).toEqual([false]);
 
     await buttonWithText(wrapper, "Turtle").trigger("click");
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]')
       .setValue(`${fixture.semantic.source}\n# draft`);
     expect(wrapper.emitted("pendingDraftsChanged")?.at(-1)).toEqual([true]);
     await buttonWithText(wrapper, "元に戻す").trigger("click");
@@ -2501,7 +2565,7 @@ describe("IriographEditor transaction regression", () => {
       resourceIriAllocator: fixedAllocator(`${NS}created`),
     });
     await openTurtlePanel(wrapper);
-    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    const textarea = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]');
     await textarea.setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
     expect(wrapper.findAll(".structured-wizard .entry-grid button").every((button) => button.attributes("disabled") !== undefined)).toBe(true);
     await buttonWithText(wrapper, "元に戻す").trigger("click");
@@ -2610,7 +2674,7 @@ describe("IriographEditor transaction regression", () => {
     const fixture = documentFixture();
     wrapper = await mountEditor({ authoringContext: testAuthoringContext(fixture) });
     await openTurtlePanel(wrapper);
-    const source = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    const source = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]');
     const warned = `${initialSource}\n:c :unknown :a .\n`;
     await source.setValue(warned);
     await buttonWithText(wrapper, "検証して適用").trigger("click");
@@ -2638,7 +2702,7 @@ describe("IriographEditor transaction regression", () => {
       semanticWriteDisabledReason: "編集profileを検証できません。",
     });
     await buttonWithText(wrapper, "Turtle").trigger("click");
-    const source = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]');
+    const source = wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]');
     expect(source.attributes("readonly")).toBeDefined();
     expect(wrapper.text()).toContain("編集profileを検証できません。");
   });
@@ -2683,7 +2747,7 @@ describe("IriographEditor transaction regression", () => {
     context.runtime = { ...context.runtime, layouts: delayed.registry };
     wrapper = await mountEditor({ authoringContext: context });
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]')
       .setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
     delayed.arm();
     await buttonWithText(wrapper, "検証して適用").trigger("click");
@@ -2701,7 +2765,7 @@ describe("IriographEditor transaction regression", () => {
     context.runtime = { ...context.runtime, layouts: delayed.registry };
     wrapper = await mountEditor({ authoringContext: context });
     await openTurtlePanel(wrapper);
-    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtle source"]')
+    await wrapper.get<HTMLTextAreaElement>('textarea[aria-label="Turtleソース"]')
       .setValue(`${initialSource}\n:c rdfs:label "C" .\n`);
     delayed.arm();
     await buttonWithText(wrapper, "検証して適用").trigger("click");
@@ -3140,6 +3204,7 @@ async function mountEditor(
       modelValue: documentFixture(),
       catalog: standardRdfRdfsCatalog,
       title: "Editor regression fixture",
+      uiLocale: "ja",
       ...extraProps,
     },
   });

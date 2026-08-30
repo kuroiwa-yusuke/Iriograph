@@ -8,6 +8,7 @@ import {
 } from "@iriograph/core";
 
 import CommitNumberInput from "./CommitNumberInput.vue";
+import { useEditorLocalization } from "../localization/editor-localization";
 
 export type AppearanceEditorValue = {
   styleRef?: string;
@@ -30,13 +31,14 @@ const emit = defineEmits<{
   apply: [value: AppearanceEditorValue];
   close: [];
 }>();
+const { t } = useEditorLocalization();
 
 const styleRef = ref(props.currentStyleRef ?? "");
 const style = ref<VisualStyleOverride>({ ...props.currentOverride });
 const presetChoices = computed(() => Object.entries(props.presets).map(([presetRef, preset], index) => ({
   presetRef,
   preset,
-  label: `プリセット ${index + 1}`,
+  label: t("appearance.preset", { index: index + 1 }),
 })));
 type StyleField = "fill" | "stroke" | "text" | "accent" | "fillOpacity" | "strokeWidth" | "dash" | "labelFontSize";
 type ColorStyleField = Extract<StyleField, "fill" | "stroke" | "text" | "accent">;
@@ -49,12 +51,12 @@ const fields = computed<StyleField[]>(() => props.elementKind === "edge"
 const colorFields = computed<ColorStyleField[]>(() => fields.value.filter(
   (field): field is ColorStyleField => ["fill", "stroke", "text", "accent"].includes(field),
 ));
-const colorFieldLabels: Readonly<Record<ColorStyleField, string>> = {
-  fill: "塗り色",
-  stroke: "線の色",
-  text: "文字色",
-  accent: "アクセント色",
-};
+const colorFieldLabels = computed<Readonly<Record<ColorStyleField, string>>>(() => ({
+  fill: t("appearance.fill"),
+  stroke: t("appearance.stroke"),
+  text: t("appearance.text"),
+  accent: t("appearance.accent"),
+}));
 
 onMounted(emitPreview);
 watch([styleRef, style], emitPreview, { deep: true });
@@ -122,20 +124,20 @@ function commitInline(): void {
 </script>
 
 <template>
-  <section class="iriograph-appearance-editor" :class="{ inline }" aria-label="ビューを編集">
-    <header><div><small>ビュースタイル</small><strong>スタイルを調整</strong></div><button v-if="!inline" type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
-    <p v-if="selectionCount > 1">選択中の{{ selectionCount }}要素へ同じ設定を適用します。</p>
-    <div v-if="presetChoices.length" class="iriograph-style-presets" role="radiogroup" aria-label="スタイル候補">
-      <button type="button" :aria-pressed="!styleRef" @click="setPreset('')">既定</button>
+  <section class="iriograph-appearance-editor" :class="{ inline }" :aria-label="t('appearance.aria')">
+    <header><div><small>{{ t("appearance.eyebrow") }}</small><strong>{{ t("appearance.title") }}</strong></div><button v-if="!inline" type="button" :aria-label="t('common.close')" @click="emit('close')">×</button></header>
+    <p v-if="selectionCount > 1">{{ t("appearance.multiSelection", { count: selectionCount }) }}</p>
+    <div v-if="presetChoices.length" class="iriograph-style-presets" role="radiogroup" :aria-label="t('appearance.presets')">
+      <button type="button" :aria-pressed="!styleRef" @click="setPreset('')">{{ t("common.default") }}</button>
       <button v-for="choice in presetChoices" :key="choice.presetRef" type="button" :aria-pressed="styleRef === choice.presetRef" @click="setPreset(choice.presetRef)"><span :style="{ background: choice.preset.fill ?? currentStyle.fill, borderColor: choice.preset.stroke ?? currentStyle.stroke }" />{{ choice.label }}</button>
     </div>
     <div class="iriograph-appearance-fields">
       <label v-for="field in colorFields" :key="field"><input type="checkbox" :checked="style[field] !== undefined" @change="toggleField(field, ($event.target as HTMLInputElement).checked)" /><span>{{ colorFieldLabels[field] }}</span><input type="color" :aria-label="colorFieldLabels[field]" :value="style[field] ?? currentStyle[field] ?? '#000000'" :disabled="style[field] === undefined" @input="updateColor(field, $event)" @change="commitInline" /></label>
-      <label v-if="fields.includes('fillOpacity')"><input type="checkbox" :checked="style.fillOpacity !== undefined" @change="toggleField('fillOpacity', ($event.target as HTMLInputElement).checked)" /><span>領域の透明度</span><input type="range" min="0" max="1" step="0.05" :value="style.fillOpacity ?? currentStyle.fillOpacity ?? 1" :disabled="style.fillOpacity === undefined" @input="updateNumber('fillOpacity', $event)" @change="commitInline" /></label>
-      <label v-if="fields.includes('strokeWidth')"><input type="checkbox" :checked="style.strokeWidth !== undefined" @change="toggleField('strokeWidth', ($event.target as HTMLInputElement).checked)" /><span>線の太さ</span><input type="number" min="0" max="20" step="0.5" :value="style.strokeWidth ?? currentStyle.strokeWidth ?? 1" :disabled="style.strokeWidth === undefined" @input="updateNumber('strokeWidth', $event)" @change="commitInline" /></label>
-      <label><input type="checkbox" :checked="style.labelFontSize !== undefined" @change="toggleField('labelFontSize', ($event.target as HTMLInputElement).checked)" /><span>文字サイズ</span><CommitNumberInput label="文字サイズ" :value="style.labelFontSize ?? currentStyle.labelFontSize ?? DEFAULT_LABEL_FONT_SIZE" :minimum="8" :maximum="72" :step="1" :disabled="style.labelFontSize === undefined" @commit="commitFontSize" /></label>
-      <label v-if="fields.includes('dash')"><input type="checkbox" :checked="style.dash !== undefined" @change="toggleField('dash', ($event.target as HTMLInputElement).checked)" /><span>線種</span><select :value="style.dash ?? currentStyle.dash ?? '6 4'" :disabled="style.dash === undefined" @change="updateDash"><option value="0">実線</option><option value="6 4">破線</option><option value="2 3">点線</option><option value="10 4 2 4">一点鎖線</option></select></label>
+      <label v-if="fields.includes('fillOpacity')"><input type="checkbox" :checked="style.fillOpacity !== undefined" @change="toggleField('fillOpacity', ($event.target as HTMLInputElement).checked)" /><span>{{ t("appearance.fillOpacity") }}</span><input type="range" min="0" max="1" step="0.05" :value="style.fillOpacity ?? currentStyle.fillOpacity ?? 1" :disabled="style.fillOpacity === undefined" @input="updateNumber('fillOpacity', $event)" @change="commitInline" /></label>
+      <label v-if="fields.includes('strokeWidth')"><input type="checkbox" :checked="style.strokeWidth !== undefined" @change="toggleField('strokeWidth', ($event.target as HTMLInputElement).checked)" /><span>{{ t("appearance.strokeWidth") }}</span><input type="number" min="0" max="20" step="0.5" :value="style.strokeWidth ?? currentStyle.strokeWidth ?? 1" :disabled="style.strokeWidth === undefined" @input="updateNumber('strokeWidth', $event)" @change="commitInline" /></label>
+      <label><input type="checkbox" :checked="style.labelFontSize !== undefined" @change="toggleField('labelFontSize', ($event.target as HTMLInputElement).checked)" /><span>{{ t("appearance.fontSize") }}</span><CommitNumberInput :label="t('appearance.fontSize')" :value="style.labelFontSize ?? currentStyle.labelFontSize ?? DEFAULT_LABEL_FONT_SIZE" :minimum="8" :maximum="72" :step="1" :disabled="style.labelFontSize === undefined" @commit="commitFontSize" /></label>
+      <label v-if="fields.includes('dash')"><input type="checkbox" :checked="style.dash !== undefined" @change="toggleField('dash', ($event.target as HTMLInputElement).checked)" /><span>{{ t("appearance.dash") }}</span><select :value="style.dash ?? currentStyle.dash ?? '6 4'" :disabled="style.dash === undefined" @change="updateDash"><option value="0">{{ t("appearance.dash.solid") }}</option><option value="6 4">{{ t("appearance.dash.dashed") }}</option><option value="2 3">{{ t("appearance.dash.dotted") }}</option><option value="10 4 2 4">{{ t("appearance.dash.dashDot") }}</option></select></label>
     </div>
-    <footer><button type="button" @click="reset">カタログ既定へ戻す</button><template v-if="!inline"><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" @click="emit('apply', value())">適用</button></template></footer>
+    <footer><button type="button" @click="reset">{{ t("appearance.catalogDefault") }}</button><template v-if="!inline"><button type="button" @click="emit('close')">{{ t("common.cancel") }}</button><button type="button" class="primary" @click="emit('apply', value())">{{ t("common.apply") }}</button></template></footer>
   </section>
 </template>

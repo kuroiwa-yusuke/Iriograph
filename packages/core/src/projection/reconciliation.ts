@@ -119,7 +119,7 @@ export async function reconcileIriographDocumentViews(
       diagnostics.push({
         severity: "error",
         code: "profile-catalog-unresolved",
-        message: `profileの解決済みcatalogがありません: ${view.profileRef}`,
+        message: `No resolved catalog is available for profile: ${view.profileRef}`,
         semanticRef: view.viewId,
       });
       return rejected(previous, diagnostics);
@@ -594,7 +594,7 @@ function reconcileViewOverlay(
       diagnostics.push({
         severity: "warning",
         code: "reconcile-edge-endpoints-changed",
-        message: `${element.semanticRef}のendpoint変更によりroutingを除去しました。`,
+        message: `Removed routing after the endpoints of ${element.semanticRef} changed.`,
         semanticRef: element.semanticRef,
       });
       const compatible = compatibleOverlay(
@@ -617,7 +617,7 @@ function reconcileViewOverlay(
       diagnostics.push({
         severity: "warning",
         code: "reconcile-primitive-changed",
-        message: `${element.semanticRef}のprimitiveが${oldElement.structuralKind}から${element.structuralKind}へ変わりました。`,
+        message: `The primitive for ${element.semanticRef} changed from ${oldElement.structuralKind} to ${element.structuralKind}.`,
         semanticRef: element.semanticRef,
       });
     }
@@ -645,7 +645,7 @@ function reconcileViewOverlay(
     diagnostics.push({
       severity: "info",
       code: "reconcile-stale-overlay-removed",
-      message: `消滅したelementのoverlayを除去しました: ${oldOverlay.overlay.semanticRef}`,
+      message: `Removed the overlay for an element that no longer exists: ${oldOverlay.overlay.semanticRef}`,
       semanticRef: oldOverlay.overlay.semanticRef,
     });
   }
@@ -708,7 +708,7 @@ function compatibleAppearance(
       diagnostics.push({
         severity: "warning",
         code: "reconcile-appearance-dropped",
-        message: `${next.semanticRef}と互換性のないtemplate overrideを除去しました。`,
+        message: `Removed a template override incompatible with ${next.semanticRef}.`,
         semanticRef: next.semanticRef,
       });
       delete result.templateRef;
@@ -718,7 +718,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}と互換性のないicon overrideを除去しました。`,
+      message: `Removed an icon override incompatible with ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.iconRef;
@@ -734,7 +734,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}と互換性のないnode内配置overrideを除去しました。`,
+      message: `Removed an internal node placement override incompatible with ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.nodeLabelOffset;
@@ -763,7 +763,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}の安全でないicon presentationを除去しました。`,
+      message: `Removed unsafe icon presentation from ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.nodeIconScale;
@@ -781,7 +781,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}と互換性のないgroup frame appearanceを除去しました。`,
+      message: `Removed group frame appearance incompatible with ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.groupLabelAnchor;
@@ -795,7 +795,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}と互換性のないgroup icon presentationを除去しました。`,
+      message: `Removed group icon presentation incompatible with ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.groupIconOffset;
@@ -820,7 +820,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}の安全でないgroup frame presentationを除去しました。`,
+      message: `Removed unsafe group frame presentation from ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.groupLabelOffset;
@@ -833,7 +833,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "info",
       code: "reconcile-style-token-migrated",
-      message: `${next.semanticRef}のlegacy styleTokenをstyleRefへ移行しました。`,
+      message: `Migrated the legacy styleToken for ${next.semanticRef} to styleRef.`,
       semanticRef: next.semanticRef,
     });
   }
@@ -841,7 +841,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}の未解決styleRefを除去しました。`,
+      message: `Removed an unresolved styleRef from ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.styleRef;
@@ -850,7 +850,7 @@ function compatibleAppearance(
     diagnostics.push({
       severity: "warning",
       code: "reconcile-appearance-dropped",
-      message: `${next.semanticRef}の安全でないstyle overrideを除去しました。`,
+      message: `Removed unsafe style overrides from ${next.semanticRef}.`,
       semanticRef: next.semanticRef,
     });
     delete result.style;

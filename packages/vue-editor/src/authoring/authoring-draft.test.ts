@@ -7,6 +7,7 @@ import {
   emptyPropertyValueDraft,
   splitIriLines,
 } from "./authoring-draft";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 describe("authoring draft", () => {
   it("Seq/Alt memberの入力順と同一IRIの複数ordinalを保持する", () => {
@@ -71,7 +72,7 @@ describe("authoring draft", () => {
 
   it("create compositeの部分入力とtripleなしを明確なcompile errorにする", () => {
     expect(() => compileAuthoringDraft(emptyAuthoringDraft("create-resource"), "main"))
-      .toThrow(/1 triple/u);
+      .toThrow(/at least one.*triple/u);
     expect(() => compileAuthoringDraft({
       ...emptyAuthoringDraft("create-resource"),
       label: "Review",
@@ -84,6 +85,16 @@ describe("authoring draft", () => {
       createMembershipEnabled: true,
       createMembershipContainerIri: "urn:test:lane",
     }, "main")).toThrow(/catalog membership structure/u);
+  });
+
+  it("compile errors are English by default and accept a Japanese translator", () => {
+    expect(() => compileAuthoringDraft(emptyAuthoringDraft("create-resource"), "main"))
+      .toThrow("A resource requires at least one class, label, edge, or containment triple.");
+    expect(() => compileAuthoringDraft(
+      emptyAuthoringDraft("create-resource"),
+      "main",
+      (key, parameters) => translateEditorMessage("ja", key, parameters),
+    )).toThrow("Resourceにはclass、label、edge、包含のいずれか1 triple以上が必要です。");
   });
 
   it("create時の複数分類・上位概念・包含領域を重複なく一commandへまとめる", () => {

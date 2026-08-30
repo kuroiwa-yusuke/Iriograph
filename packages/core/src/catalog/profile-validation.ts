@@ -130,7 +130,7 @@ function validateMembershipParents(
       diagnostics.push({
         severity: "error",
         code: "membership-parent-invalid",
-        message: `${quad.subject.value}はmembership-containerとして解決されないため${quad.predicate.value}を使用できません。`,
+        message: `${quad.predicate.value} cannot be used because ${quad.subject.value} does not resolve as a membership-container.`,
         semanticRef: isNamedNode(quad.subject) ? quad.subject.value : canonicalTerm(quad.subject),
         statementRef: statementIdentityFromQuad(quad),
         suggestedActions: [{
@@ -192,7 +192,7 @@ function validateBlankStructuralResources(
     diagnostics.push({
       severity: "error",
       code: "structural-resource-must-be-named",
-      message: `表示構造を駆動するresourceはnamed IRIでなければなりません: ${semanticRef}`,
+      message: `A resource that drives display structure must be a named IRI: ${semanticRef}`,
       semanticRef,
       statementRef: statementIdentityFromQuad(quad),
     });
@@ -221,7 +221,7 @@ function validateConcreteStructureTypes(
     diagnostics.push({
       severity: "error",
       code: "multiple-structural-types",
-      message: `${semanticRef}に複数の具体的な表示構造型があります: ${[...structures].sort().join(", ")}`,
+      message: `${semanticRef} has multiple concrete display structure types: ${[...structures].sort().join(", ")}`,
       semanticRef,
     });
   }
@@ -243,7 +243,7 @@ function validateMembership(
       diagnostics.push({
         severity: "error",
         code: "structural-resource-must-be-named",
-        message: `${parentIri}のmemberはnamed IRIでなければなりません。`,
+        message: `A member of ${parentIri} must be a named IRI.`,
         semanticRef: parentIri,
         statementRef: statementIdentityFromQuad(quad),
       });
@@ -274,7 +274,7 @@ function validateRegionMembership(
     diagnostics.push({
       severity: "error",
       code: "structural-resource-must-be-named",
-      message: `${regionIri}のregion memberはnamed IRIでなければなりません。`,
+      message: `A region member of ${regionIri} must be a named IRI.`,
       semanticRef: regionIri,
       statementRef: statementIdentityFromQuad(quad),
       suggestedActions: [{
@@ -299,7 +299,7 @@ function validateOrdinalStructure(
       diagnostics.push({
         severity: "error",
         code: "invalid-ordinal-predicate",
-        message: `${member.quad.predicate.value}は正の連続ordinalではありません。`,
+        message: `${member.quad.predicate.value} is not a positive sequential ordinal.`,
         semanticRef: resourceIri,
         statementRef: statementIdentityFromQuad(member.quad),
       });
@@ -309,7 +309,7 @@ function validateOrdinalStructure(
       diagnostics.push({
         severity: "error",
         code: "structural-resource-must-be-named",
-        message: `${resourceIri}のordinal memberはnamed IRIでなければなりません。`,
+        message: `An ordinal member of ${resourceIri} must be a named IRI.`,
         semanticRef: resourceIri,
         statementRef: statementIdentityFromQuad(member.quad),
       });
@@ -324,7 +324,7 @@ function validateOrdinalStructure(
     diagnostics.push({
       severity: "error",
       code: "duplicate-ordinal",
-      message: `${resourceIri}のordinal ${ordinal}に複数のobjectがあります。`,
+      message: `Ordinal ${ordinal} of ${resourceIri} has multiple objects.`,
       semanticRef: resourceIri,
     });
   }
@@ -337,7 +337,7 @@ function validateOrdinalStructure(
       code: operator.operator === "alternative"
         ? "alternative-too-few-members"
         : "sequence-empty",
-      message: `${resourceIri}のframeは表示できますが、完了には${minimum}件以上のordinal memberが必要です。`,
+      message: `The frame for ${resourceIri} can be displayed, but completion requires at least ${minimum} ordinal members.`,
       semanticRef: resourceIri,
       suggestedActions: [{
         actionId: operator.operator === "alternative"
@@ -353,7 +353,7 @@ function validateOrdinalStructure(
     diagnostics.push({
       severity: "error",
       code: "non-contiguous-ordinals",
-      message: `${resourceIri}のordinalは1から欠番なく連続させる必要があります。`,
+      message: `Ordinals for ${resourceIri} must be contiguous starting at 1.`,
       semanticRef: resourceIri,
     });
     break;
@@ -362,7 +362,7 @@ function validateOrdinalStructure(
     diagnostics.push({
       severity: "warning",
       code: "alternative-default-missing",
-      message: `${resourceIri}のdefault ordinal ${operator.defaultOrdinal}が未設定です。候補は表示できます。`,
+      message: `Default ordinal ${operator.defaultOrdinal} is not set for ${resourceIri}; the candidates can still be displayed.`,
       semanticRef: resourceIri,
       suggestedActions: [{
         actionId: "choose-alternative-default",
@@ -394,7 +394,7 @@ function validateContainerCycles(
         diagnostics.push({
           severity: "error",
           code: "container-cycle",
-          message: `container包含にcycleがあります: ${cycle.join(", ")}`,
+          message: `Container containment has a cycle: ${cycle.join(", ")}`,
           semanticRef: cycle[0],
         });
       }
@@ -434,7 +434,7 @@ function validateOrphanOrdinals(
     diagnostics.push({
       severity: "error",
       code: "orphan-ordinal-membership",
-      message: `${quad.predicate.value}はSeqまたはAltとして解決されたresourceでだけ利用できます。`,
+      message: `${quad.predicate.value} can be used only on a resource resolved as Seq or Alt.`,
       semanticRef: canonicalTerm(quad.subject),
       statementRef: statementIdentityFromQuad(quad),
     });

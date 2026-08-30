@@ -113,6 +113,9 @@ import {
 } from "../canvas/region-membership-constraints";
 import type { CanvasDragMode, CollapsedGroupSummary } from "../document/view-session";
 import type { DiagramNodeTypeTagPresentation } from "../authoring/type-system";
+import { useEditorLocalization } from "../localization/editor-localization";
+
+const { locale, t } = useEditorLocalization();
 
 const props = withDefaults(defineProps<{
   scene: DiagramScene;
@@ -164,11 +167,11 @@ const props = withDefaults(defineProps<{
   semanticPositionPicking: false,
   semanticResourcePicking: false,
   structuredSelectionPicking: false,
-  structuredSelectionPickLabel: "対象",
+  structuredSelectionPickLabel: "",
   semanticEndpointReconnect: false,
   nodeContentEditing: false,
   nodeIconGrowNode: true,
-  semanticResourcePickLabel: "resource",
+  semanticResourcePickLabel: "",
   semanticDraftPosition: undefined,
   containmentWarningElementIds: () => [],
   semanticMetadata: () => ({}),
@@ -426,10 +429,16 @@ function commentsFor(semanticRef: string): string {
 
 function typeTagTitle(tag: DiagramNodeTypeTagPresentation): string {
   const remaining = [
-    tag.additionalDirectCount ? `他の直接の型 ${tag.additionalDirectCount}件` : "",
-    tag.inheritedCount ? `継承する型 ${tag.inheritedCount}件` : "",
-  ].filter(Boolean).join("、");
-  return remaining ? `${tag.label}。${remaining}は型一覧で確認` : `${tag.label}。型一覧で確認`;
+    tag.additionalDirectCount
+      ? t("canvas.typeTagAdditionalDirect", { count: tag.additionalDirectCount })
+      : "",
+    tag.inheritedCount
+      ? t("canvas.typeTagInherited", { count: tag.inheritedCount })
+      : "",
+  ].filter(Boolean).join(t("canvas.listSeparator"));
+  return remaining
+    ? t("canvas.typeTagReviewWithDetails", { label: tag.label, details: remaining })
+    : t("canvas.typeTagReview", { label: tag.label });
 }
 
 function diagnosticsForElement(element: DiagnosticElement): ProjectionDiagnostic[] {
@@ -452,9 +461,11 @@ function diagnosticClass(element: DiagnosticElement): Record<string, boolean> {
 
 function diagnosticAriaSuffix(element: DiagnosticElement): string {
   const diagnostics = diagnosticsForElement(element);
-  const diagnostic = diagnostics.length > 0 ? `、診断${diagnostics.length}件` : "";
+  const diagnostic = diagnostics.length > 0
+    ? t("canvas.diagnosticSuffix", { count: diagnostics.length })
+    : "";
   const containment = containmentWarningElementIdsSet.value.has(element.elementId)
-    ? "、表示と意味の包含が不一致"
+    ? t("canvas.containmentMismatchSuffix")
     : "";
   return `${diagnostic}${containment}`;
 }
@@ -923,7 +934,7 @@ function startMove(event: PointerEvent, element: GeometryElement): void {
             },
           },
     );
-    const constrained = constrainMembershipRegionMovement(initialScene, translated);
+    const constrained = constrainMembershipRegionMovement(initialScene, translated, t);
     pendingChanges = constrained.changes;
     regionConstraintMessage.value = constrained.issue?.message ?? "";
     const expanded = expandWorkAreaFor(pendingChanges);
@@ -1024,7 +1035,7 @@ function startResize(event: PointerEvent, element: GeometryElement, handle: Resi
         + viewport.scrollTop - originScroll.y - workspaceShift.y) / props.zoom,
     });
     if (!change) return;
-    const constrained = constrainMembershipRegionMovement(initialScene, [change]);
+    const constrained = constrainMembershipRegionMovement(initialScene, [change], t);
     regionConstraintMessage.value = constrained.issue?.message ?? "";
     const accepted = constrained.changes[0];
     if (!accepted) return;
@@ -1231,6 +1242,7 @@ function startNodeIconResize(event: PointerEvent, node: SceneNode): void {
       node,
       requestedSize,
       requestedGeometry,
+      t,
     );
     pendingSize = constrained.size;
     previewNodeIconSizes.value = {
@@ -1244,7 +1256,7 @@ function startNodeIconResize(event: PointerEvent, node: SceneNode): void {
     if (pendingGeometry) previewGeometries.value = { [node.elementId]: pendingGeometry };
     else previewGeometries.value = {};
     regionConstraintMessage.value = constrained.constrained
-      ? "全所属領域・並び順・コンテナ内に収まる最大サイズへ調整しました。"
+      ? t("canvas.iconResizeConstrained")
       : "";
     changed = pendingSize.width !== initialSize.width || pendingSize.height !== initialSize.height;
   }, (cancelled) => {
@@ -1387,22 +1399,25 @@ function groupFrameLabelStyle(container: SceneContainer): Record<string, string>
 function groupFrameKindLabel(kind: GroupFrameKind): string {
   switch (kind) {
     case "sequence":
-      return "順番";
+      return t("canvas.groupKind.sequence");
     case "alternative":
-      return "分岐";
+      return t("canvas.groupKind.alternative");
     case "classification":
-      return "分類";
+      return t("canvas.groupKind.classification");
     default:
-      return "所属";
+      return t("canvas.groupKind.membership");
   }
 }
 
 function groupFrameDescription(kind: GroupFrameKind): string {
-  return `${groupFrameKindLabel(kind)}グループの枠。名称へフォーカスすると種類を確認できます。`;
+  return t("canvas.groupFrameDescription", { kind: groupFrameKindLabel(kind) });
 }
 
 function groupFrameTooltip(element: SceneContainer | SceneRegion): string {
-  return `${element.label}（${groupFrameKindLabel(element.groupFrame!.kind)}グループ）`;
+  return t("canvas.groupFrameTooltip", {
+    label: element.label,
+    kind: groupFrameKindLabel(element.groupFrame!.kind),
+  });
 }
 
 function groupFrameZIndex(element: SceneContainer | SceneRegion): number {
@@ -1934,7 +1949,7 @@ function handleEdgeKeydown(event: KeyboardEvent, edge: SceneEdge): void {
     event.stopPropagation();
     if (!props.readOnly) {
       emit("semanticEditRequest", edge.elementId);
-      announce("選択した関係を削除します");
+      announce(t("canvas.deleteSelectedRelation"));
     }
   }
 }
@@ -1955,7 +1970,7 @@ function handleGeometrySemanticKeydown(event: KeyboardEvent, elementId: string):
   event.stopPropagation();
   if (!props.readOnly) {
     emit("semanticEditRequest", elementId);
-    announce("選択した要素を削除します");
+    announce(t("canvas.deleteSelectedElement"));
   }
 }
 
@@ -1986,15 +2001,28 @@ function emitLabelRouting(edge: SceneEdge, labelOffset: Point | undefined): void
 function edgeAriaLabel(edge: SceneEdge): string {
   const source = endpointElementsById.value.get(edge.sourceElementId)?.label ?? edge.sourceElementId;
   const target = endpointElementsById.value.get(edge.targetElementId)?.label ?? edge.targetElementId;
-  const caption = edge.caption ? `、図上の注記 ${edge.caption}` : "";
+  const caption = edge.caption ? t("canvas.edgeCaptionSuffix", { caption: edge.caption }) : "";
   const semanticComment = edgeSemanticComments(edge);
-  return `${source}から${target}への${edge.label || sequenceOrdinalBadge(edge) || "edge"}${caption}${semanticComment ? `、関係の説明 ${semanticComment}` : ""}`;
+  const description = semanticComment
+    ? t("canvas.edgeDescriptionSuffix", { description: semanticComment })
+    : "";
+  return t("canvas.edgeAria", {
+    source,
+    target,
+    label: edge.label || sequenceOrdinalBadge(edge) || t("canvas.edgeFallback"),
+    caption,
+    description,
+  });
 }
 
 function edgeSemanticComments(edge: SceneEdge): string {
   return (edge.statementComments ?? []).map((comment) => (
-    `${comment.value}${comment.language ? `（${comment.language}）` : ""}`
+    `${comment.value}${comment.language ? localizedParentheticalSuffix(comment.language) : ""}`
   )).join("\n\n");
+}
+
+function localizedParentheticalSuffix(value: string): string {
+  return locale.value === "ja" ? `（${value}）` : ` (${value})`;
 }
 
 function edgeCaptionLines(edge: SceneEdge): string[] {
@@ -2030,7 +2058,7 @@ function sequenceMemberBadges(elementId: string): Array<{ key: string; ordinal: 
     .map((membership) => ({
       key: membership.semanticRef,
       ordinal: membership.ordinal!,
-      label: containers.get(membership.containerElementId)?.label ?? "並び順",
+      label: containers.get(membership.containerElementId)?.label ?? t("canvas.sequenceFallback"),
     }));
 }
 
@@ -2180,9 +2208,9 @@ function navigatorPosition(elementId: string): number {
 }
 
 function navigatorAriaLabel(elementId: string, label: string, kind: string): string {
-  const selected = selectedElementIdsSet.value.has(elementId) ? "、選択済み" : "";
-  const primary = props.selectedElementId === elementId ? "、primary" : "";
-  return `${kind}、${label}${selected}${primary}`;
+  const selected = selectedElementIdsSet.value.has(elementId) ? t("canvas.selectedSuffix") : "";
+  const primary = props.selectedElementId === elementId ? t("canvas.primarySuffix") : "";
+  return t("canvas.navigatorItem", { kind, label, selected, primary });
 }
 
 function announce(message: string): void {
@@ -2198,7 +2226,8 @@ function announceActiveNavigatorItem(action: string): void {
   ));
   const item = navigatorItems.value[index];
   if (!item) return;
-  announce(`${action}、${item.kind}、${item.label}、${index + 1}/${navigatorItems.value.length}`);
+  announce([action, item.kind, item.label, `${index + 1}/${navigatorItems.value.length}`]
+    .join(t("canvas.listSeparator")));
 }
 
 function canvasPoint(event: MouseEvent): Point | undefined {
@@ -2395,7 +2424,7 @@ function startSelectionMarquee(event: PointerEvent, clickElement?: GeometryEleme
       return;
     }
     requestSelectionSet(combineMarqueeSelection(elementIds, mode));
-    announce(`${elementIds.length}件を範囲選択`);
+    announce(t("canvas.rangeSelected", { count: elementIds.length }));
   };
   stopViewportTracking?.();
   stopViewportTracking = cleanup;
@@ -2573,7 +2602,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     event.stopPropagation();
     emit("semanticPickCancel");
-    announce("Canvas選択をキャンセルしました");
+    announce(t("canvas.canvasSelectionCancelled"));
     return;
   }
 
@@ -2582,7 +2611,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
     event.stopPropagation();
     if (keyboardGesture) cancelKeyboardGesture();
     else requestSelection({ elementId: "", mode: "replace" });
-    announce("操作をキャンセルしました");
+    announce(t("canvas.operationCancelled"));
     return;
   }
 
@@ -2590,7 +2619,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
     event.preventDefault();
     event.stopPropagation();
     requestSelectionSet(navigatorItems.value.map((item) => item.elementId));
-    announce(`すべての要素、${navigatorItems.value.length}件を選択`);
+    announce(t("canvas.selectAll", { count: navigatorItems.value.length }));
     return;
   }
 
@@ -2641,7 +2670,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
     if (activeNavigatorElementId.value) {
       requestSelection({ elementId: activeNavigatorElementId.value, mode: "replace" });
       navigatorAnchorElementId.value = activeNavigatorElementId.value;
-      announceActiveNavigatorItem("選択");
+      announceActiveNavigatorItem(t("canvas.action.select"));
     }
     return;
   }
@@ -2651,7 +2680,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
     if (activeNavigatorElementId.value) {
       requestSelection({ elementId: activeNavigatorElementId.value, mode: "toggle" });
       navigatorAnchorElementId.value = activeNavigatorElementId.value;
-      announceActiveNavigatorItem("選択を切替");
+      announceActiveNavigatorItem(t("canvas.action.toggleSelection"));
     }
     return;
   }
@@ -2660,7 +2689,7 @@ function handleViewportKeydown(event: KeyboardEvent): void {
     event.stopPropagation();
     if (!props.readOnly && activeNavigatorElementId.value) {
       emit("semanticEditRequest", activeNavigatorElementId.value);
-      announce("選択した意味情報を削除します");
+      announce(t("canvas.deleteSelectedSemantics"));
     }
     return;
   }
@@ -2694,7 +2723,7 @@ function handleSceneNavigatorKeydown(
   activeNavigatorElementId.value = next;
   void revealElement(next);
   navigatorAnchorElementId.value = next;
-  announceActiveNavigatorItem("フォーカス");
+  announceActiveNavigatorItem(t("canvas.action.focus"));
 }
 
 function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): void {
@@ -2733,11 +2762,13 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
           );
       gesture.routing = routingWithCurve(edge, curve);
       previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
-      announce(target.kind === "knot" ? `曲線点 ${target.knotIndex + 1}を移動` : "曲線ハンドルを調整");
+      announce(target.kind === "knot"
+        ? t("canvas.moveCurvePoint", { index: target.knotIndex + 1 })
+        : t("canvas.adjustCurveHandle"));
       return;
     }
     if (!waypointEditingAllowed(edge)) {
-      announce("直線・曲線ではWaypointを編集しません");
+      announce(t("canvas.waypointUnavailable"));
       return;
     }
     if (!selectedElementIdsSet.value.has(activeId)) {
@@ -2758,7 +2789,7 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
     );
     gesture.routing = routingWithWaypoints(edge, waypoints);
     previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
-    announce(`Waypoint ${index + 1}を移動`);
+    announce(t("canvas.moveWaypoint", { index: index + 1 }));
     return;
   }
 
@@ -2780,13 +2811,13 @@ function previewKeyboardMoveOrWaypoint(event: KeyboardEvent, movement: Point): v
       targets: { enabled: false, tolerance: props.snap.targets.tolerance },
     },
   );
-  const constrained = constrainMembershipRegionMovement(gesture.initialScene, translated);
+  const constrained = constrainMembershipRegionMovement(gesture.initialScene, translated, t);
   gesture.geometryChanges = constrained.changes;
   regionConstraintMessage.value = constrained.issue?.message ?? "";
   previewGeometries.value = Object.fromEntries(
     gesture.geometryChanges.map((change) => [change.elementId, change.geometry]),
   );
-  announce(`選択要素を${Math.abs(gesture.delta.x || gesture.delta.y)}移動`);
+  announce(t("canvas.moveSelection", { distance: Math.abs(gesture.delta.x || gesture.delta.y) }));
 }
 
 function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): void {
@@ -2797,7 +2828,7 @@ function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): vo
       requestSelection({ elementId: activeId, mode: "replace" });
     }
     if (!edge.label) {
-      announce("このedgeにはlabelがありません");
+      announce(t("canvas.edgeHasNoLabel"));
       return;
     }
     const gesture = beginKeyboardGesture("label", edge.elementId, event.key);
@@ -2809,7 +2840,7 @@ function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): vo
     };
     gesture.routing = routingWithLabelOffset(edge, labelOffset);
     previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
-    announce("edge labelを移動");
+    announce(t("canvas.moveEdgeLabel"));
     return;
   }
 
@@ -2832,12 +2863,16 @@ function previewKeyboardResizeOrLabel(event: KeyboardEvent, movement: Point): vo
   const constrained = constrainMembershipRegionMovement(
     gesture.initialScene,
     change ? [change] : [],
+    t,
   );
   gesture.geometryChanges = constrained.changes;
   regionConstraintMessage.value = constrained.issue?.message ?? "";
   const accepted = constrained.changes[0];
   previewGeometries.value = accepted ? { [accepted.elementId]: accepted.geometry } : {};
-  announce(`サイズ ${Math.round(accepted?.geometry.width ?? initial.geometry.width)} × ${Math.round(accepted?.geometry.height ?? initial.geometry.height)}`);
+  announce(t("canvas.resize", {
+    width: Math.round(accepted?.geometry.width ?? initial.geometry.width),
+    height: Math.round(accepted?.geometry.height ?? initial.geometry.height),
+  }));
 }
 
 function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | "remove"): void {
@@ -2862,7 +2897,7 @@ function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | 
     } else if (target?.kind === "handle" && target.handle.manual) {
       curve = removeEdgeCurveHandle(edge.curve, target.handle);
     } else {
-      announce("自動曲線ハンドルは削除せず、矢印キーで手動調整できます");
+      announce(t("canvas.automaticCurveHandleRemovalUnavailable"));
       return;
     }
     const gesture = beginKeyboardGesture(
@@ -2875,7 +2910,7 @@ function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | 
     activeWaypointIndex.value = operation === "add"
       ? Math.max(0, addedKnotIndex)
       : Math.min(activeWaypointIndex.value, Math.max(0, curveKeyboardTargets(edge, curve).length - 1));
-    announce(operation === "add" ? "曲線点を追加" : "曲線の制御点を削除");
+    announce(operation === "add" ? t("canvas.addCurvePoint") : t("canvas.removeCurvePoint"));
     return;
   }
   if (!waypointEditingAllowed(edge)) return;
@@ -2891,7 +2926,7 @@ function previewKeyboardWaypointChange(event: KeyboardEvent, operation: "add" | 
   activeWaypointIndex.value = Math.max(0, (waypoints?.length ?? 1) - 1);
   gesture.routing = routingWithWaypoints(edge, waypoints);
   previewRouting.value = { ...previewRouting.value, [edge.elementId]: gesture.routing ?? null };
-  announce(operation === "add" ? "経路点を追加" : "経路点を削除");
+  announce(operation === "add" ? t("canvas.addWaypoint") : t("canvas.removeWaypoint"));
 }
 
 function moveActiveWaypoint(movement: "previous" | "next"): void {
@@ -2903,12 +2938,16 @@ function moveActiveWaypoint(movement: "previous" | "next"): void {
   if (!curveMode && !waypointEditingAllowed(edge)) return;
   const count = curveMode ? curveKeyboardTargets(edge).length : editableEdgeWaypoints(edge).length;
   if (count === 0) {
-    announce(curveMode ? "曲線の制御点はありません" : "Waypointはありません");
+    announce(curveMode ? t("canvas.noCurvePoints") : t("canvas.noWaypoints"));
     return;
   }
   const delta = movement === "next" ? 1 : -1;
   activeWaypointIndex.value = (activeWaypointIndex.value + delta + count) % count;
-  announce(`${curveMode ? "曲線制御点" : "Waypoint"} ${activeWaypointIndex.value + 1}/${count}を対象にしました`);
+  announce(t("canvas.activeRoutePoint", {
+    kind: curveMode ? t("canvas.curveControlPoint") : t("canvas.waypoint"),
+    index: activeWaypointIndex.value + 1,
+    count,
+  }));
 }
 
 function beginKeyboardGesture(
@@ -2954,7 +2993,7 @@ function commitKeyboardGesture(): void {
   }
   clearKeyboardPreview();
   emit("gestureEnd");
-  announce("変更を確定");
+  announce(t("canvas.changeCommitted"));
 }
 
 function cancelKeyboardGesture(): void {
@@ -3464,7 +3503,7 @@ defineExpose<DiagramCanvasNavigationApi>({
       class="iriograph-canvas-scroll"
       tabindex="0"
       role="listbox"
-      aria-label="Diagram scene navigator"
+      :aria-label="t('canvas.sceneNavigator')"
       aria-multiselectable="true"
       :aria-activedescendant="activeNavigatorElementId ? navigatorDomId(activeNavigatorElementId) : undefined"
       :aria-busy="busy"
@@ -3478,13 +3517,13 @@ defineExpose<DiagramCanvasNavigationApi>({
       @pointerdown="startViewportPan"
     >
       <span :id="`${instanceId}-keyboard-help`" class="iriograph-visually-hidden">
-        選択中は矢印で1移動、Shiftと矢印で10移動、選択なしでは矢印で表示範囲を移動、NとShift+Nで要素フォーカスを移動、Enterで選択
+        {{ t('canvas.keyboardInstructions') }}
       </span>
       <span v-if="semanticResourcePicking" class="iriograph-visually-hidden" role="status">
-        Canvas上のnodeまたはcontainerから{{ semanticResourcePickLabel }}を選択してください。Escapeでキャンセルできます。
+        {{ t('canvas.semanticResourcePickInstructions', { label: semanticResourcePickLabel || t('canvas.semanticResourceFallback') }) }}
       </span>
       <span v-if="structuredSelectionPicking" class="iriograph-visually-hidden" role="status">
-        Canvasから{{ structuredSelectionPickLabel }}を選択してください。Escapeでキャンセルできます。
+        {{ t('canvas.structuredSelectionPickInstructions', { label: structuredSelectionPickLabel || t('canvas.structuredSelectionFallback') }) }}
       </span>
       <span class="iriograph-visually-hidden" role="status" aria-live="polite" aria-atomic="true">{{ liveAnnouncement }}</span>
       <div
@@ -3550,7 +3589,7 @@ defineExpose<DiagramCanvasNavigationApi>({
           <span
             v-if="semanticDraftPosition"
             class="iriograph-semantic-position-marker"
-            aria-label="意味編集の一時位置"
+            :aria-label="t('canvas.semanticDraftPosition')"
             :style="{ left: `${semanticDraftPosition.x - workArea.x}px`, top: `${semanticDraftPosition.y - workArea.y}px` }"
           />
 
@@ -3563,7 +3602,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             role="option"
             tabindex="-1"
             :data-element-id="region.elementId"
-            :aria-label="`${navigatorAriaLabel(region.elementId, region.label, 'region')}${diagnosticAriaSuffix(region)}`"
+            :aria-label="`${navigatorAriaLabel(region.elementId, region.label, t('canvas.kind.region'))}${diagnosticAriaSuffix(region)}`"
             :aria-description="region.groupFrame ? groupFrameDescription(region.groupFrame.kind) : undefined"
             :aria-describedby="region.groupFrame ? `${navigatorDomId(region.elementId)}-group-description` : undefined"
             :aria-selected="selectedElementIdsSet.has(region.elementId)"
@@ -3596,23 +3635,23 @@ defineExpose<DiagramCanvasNavigationApi>({
                 `writing-${region.regionLabelWritingDirection === 'vertical-down' || (!region.regionLabelWritingDirection && (region.labelPlacement === 'left' || region.labelPlacement === 'right')) ? 'vertical' : 'horizontal'}`,
               ]"
               :style="regionLabelStyle(region)"
-              :title="region.groupFrame ? groupFrameTooltip(region) : 'ドラッグしてラベルを領域の枠上で移動'"
+              :title="region.groupFrame ? groupFrameTooltip(region) : t('canvas.dragRegionLabel')"
               @pointerdown="startRegionLabelMove($event, region)"
             >
               <img v-if="region.groupFrame && region.iconUrl" class="iriograph-group-frame-icon" :src="region.iconUrl" alt="" loading="lazy" draggable="false" :style="groupIconStyle(region)" @pointerdown="startGroupIconMove($event, region)" />
               <span v-else-if="region.groupFrame && region.iconRef" class="iriograph-group-frame-icon-fallback" aria-hidden="true" :style="groupIconStyle(region)" @pointerdown="startGroupIconMove($event, region)">◇</span>
               <span :class="{ 'iriograph-group-frame-label-text': Boolean(region.groupFrame) }">{{ region.label }}</span>
-              <span v-if="region.groupFrame && groupIconMayOverlapLabel(region)" class="iriograph-visually-hidden">アイコンと名称が重なる可能性があります</span>
-              <span v-if="region.groupFrame && groupLabelMayOverlapMember(region)" class="iriograph-group-label-collision" role="img" aria-label="名称が要素と重なっています" title="名称が要素と重なっています">!</span>
-              <span v-if="region.groupFrame" class="iriograph-group-structure-tooltip" role="tooltip" aria-hidden="true">{{ groupFrameKindLabel(region.groupFrame.kind) }}グループ</span>
+              <span v-if="region.groupFrame && groupIconMayOverlapLabel(region)" class="iriograph-visually-hidden">{{ t('canvas.iconLabelOverlapPossible') }}</span>
+              <span v-if="region.groupFrame && groupLabelMayOverlapMember(region)" class="iriograph-group-label-collision" role="img" :aria-label="t('canvas.labelMemberOverlap')" :title="t('canvas.labelMemberOverlap')">!</span>
+              <span v-if="region.groupFrame" class="iriograph-group-structure-tooltip" role="tooltip" aria-hidden="true">{{ t('canvas.groupKindTooltip', { kind: groupFrameKindLabel(region.groupFrame.kind) }) }}</span>
             </span>
-            <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(' ／ ') }}</span>
+            <span v-if="additionalLabels(region.semanticRef, region.label).length" class="iriograph-additional-labels">{{ additionalLabels(region.semanticRef, region.label).join(t('canvas.listSeparator')) }}</span>
             <span v-if="commentsFor(region.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: region.style.labelFontSize ? `${region.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(region.semanticRef) }}</span>
             <span
               v-if="collapsedGroupSummaries[region.elementId]"
               class="iriograph-collapsed-group-badge"
-              :title="collapsedGroupSummaries[region.elementId]!.hiddenLabels.join('、')"
-            >{{ collapsedGroupSummaries[region.elementId]!.hiddenElementIds.length }}件</span>
+              :title="collapsedGroupSummaries[region.elementId]!.hiddenLabels.join(t('canvas.listSeparator'))"
+            >{{ t('canvas.hiddenCount', { count: collapsedGroupSummaries[region.elementId]!.hiddenElementIds.length }) }}</span>
           </div>
 
           <div
@@ -3640,7 +3679,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             :data-element-id="container.elementId"
             :data-parent-element-id="container.parentElementId ?? ''"
             :data-header-position="container.headerPosition"
-            :aria-label="`${navigatorAriaLabel(container.elementId, container.label, 'container')}${diagnosticAriaSuffix(container)}`"
+            :aria-label="`${navigatorAriaLabel(container.elementId, container.label, t('canvas.kind.container'))}${diagnosticAriaSuffix(container)}`"
             :aria-description="container.groupFrame ? groupFrameDescription(container.groupFrame.kind) : undefined"
             :aria-describedby="container.groupFrame ? `${navigatorDomId(container.elementId)}-group-description` : undefined"
             :aria-selected="selectedElementIdsSet.has(container.elementId)"
@@ -3674,9 +3713,9 @@ defineExpose<DiagramCanvasNavigationApi>({
               <img v-if="container.iconUrl" class="iriograph-group-frame-icon" :src="container.iconUrl" alt="" loading="lazy" draggable="false" :style="groupIconStyle(container)" @pointerdown="startGroupIconMove($event, container)" />
               <span v-else-if="container.iconRef" class="iriograph-group-frame-icon-fallback" aria-hidden="true" :style="groupIconStyle(container)" @pointerdown="startGroupIconMove($event, container)">◇</span>
               <span class="iriograph-group-frame-label-text">{{ container.label }}</span>
-              <span v-if="groupIconMayOverlapLabel(container)" class="iriograph-visually-hidden">アイコンと名称が重なる可能性があります</span>
-              <span v-if="groupLabelMayOverlapMember(container)" class="iriograph-group-label-collision" role="img" aria-label="名称が要素と重なっています" title="名称が要素と重なっています">!</span>
-              <span class="iriograph-group-structure-tooltip" role="tooltip" aria-hidden="true">{{ groupFrameKindLabel(container.groupFrame.kind) }}グループ</span>
+              <span v-if="groupIconMayOverlapLabel(container)" class="iriograph-visually-hidden">{{ t('canvas.iconLabelOverlapPossible') }}</span>
+              <span v-if="groupLabelMayOverlapMember(container)" class="iriograph-group-label-collision" role="img" :aria-label="t('canvas.labelMemberOverlap')" :title="t('canvas.labelMemberOverlap')">!</span>
+              <span class="iriograph-group-structure-tooltip" role="tooltip" aria-hidden="true">{{ t('canvas.groupKindTooltip', { kind: groupFrameKindLabel(container.groupFrame.kind) }) }}</span>
             </span>
             <span
               v-else
@@ -3686,15 +3725,15 @@ defineExpose<DiagramCanvasNavigationApi>({
             >
               {{ container.label }}
             </span>
-            <span v-if="additionalLabels(container.semanticRef, container.label).length" class="iriograph-additional-labels">{{ additionalLabels(container.semanticRef, container.label).join(' ／ ') }}</span>
+            <span v-if="additionalLabels(container.semanticRef, container.label).length" class="iriograph-additional-labels">{{ additionalLabels(container.semanticRef, container.label).join(t('canvas.listSeparator')) }}</span>
             <span v-if="commentsFor(container.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: container.style.labelFontSize ? `${container.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(container.semanticRef) }}</span>
-            <span v-if="sequenceMemberBadges(container.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(container.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
-            <span v-if="defaultAlternativeBadges(container.elementId).length" class="iriograph-alternative-default-badges" :aria-label="`${defaultAlternativeBadges(container.elementId).map((badge) => badge.label).join('、')}の既定候補`"><span v-for="badge in defaultAlternativeBadges(container.elementId)" :key="badge.key" :title="`${badge.label}の既定候補`">既定</span></span>
+            <span v-if="sequenceMemberBadges(container.elementId).length" class="iriograph-sequence-badges" :aria-label="t('canvas.sequenceAria')"><span v-for="badge in sequenceMemberBadges(container.elementId)" :key="badge.key" :title="t('canvas.sequenceOrdinalTitle', { label: badge.label, ordinal: badge.ordinal })">{{ badge.ordinal }}</span></span>
+            <span v-if="defaultAlternativeBadges(container.elementId).length" class="iriograph-alternative-default-badges" :aria-label="t('canvas.defaultAlternativeAria', { labels: defaultAlternativeBadges(container.elementId).map((badge) => badge.label).join(t('canvas.listSeparator')) })"><span v-for="badge in defaultAlternativeBadges(container.elementId)" :key="badge.key" :title="t('canvas.defaultAlternativeTitle', { label: badge.label })">{{ t('canvas.defaultBadge') }}</span></span>
             <span
               v-if="collapsedGroupSummaries[container.elementId]"
               class="iriograph-collapsed-group-badge"
-              :title="collapsedGroupSummaries[container.elementId]!.hiddenLabels.join('、')"
-            >{{ collapsedGroupSummaries[container.elementId]!.hiddenElementIds.length }}件</span>
+              :title="collapsedGroupSummaries[container.elementId]!.hiddenLabels.join(t('canvas.listSeparator'))"
+            >{{ t('canvas.hiddenCount', { count: collapsedGroupSummaries[container.elementId]!.hiddenElementIds.length }) }}</span>
           </div>
 
           <svg
@@ -3703,7 +3742,7 @@ defineExpose<DiagramCanvasNavigationApi>({
             :width="workArea.width"
             :height="workArea.height"
             :viewBox="workAreaViewBox()"
-            aria-label="関係と構造ガイド"
+            :aria-label="t('canvas.relationGuides')"
           >
             <defs>
               <marker :id="markerIds.arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="strokeWidth">
@@ -3740,7 +3779,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               :data-group-element-id="guide.groupElementId"
               role="button"
               tabindex="-1"
-              :aria-label="`${guide.kind === 'sequence-order' ? '並び順' : '候補'}の補助線。操作するとグループを選択します`"
+              :aria-label="t('canvas.groupGuideAria', { kind: guide.kind === 'sequence-order' ? t('canvas.groupKind.sequence') : t('canvas.groupKind.alternative') })"
               @click.stop="selectGroupGuide($event, guide)"
               @keydown="requestGroupGuideKeyboardContextMenu($event, guide)"
               @contextmenu="requestGroupGuideContextMenu($event, guide)"
@@ -3756,7 +3795,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               :data-group-element-id="hub.groupElementId"
               role="button"
               tabindex="-1"
-              :aria-label="`${hub.label}の候補分岐点。操作するとグループを選択します`"
+              :aria-label="t('canvas.alternativeHubAria', { label: hub.label })"
               @click.stop="selectGroupElement($event, hub.groupElementId)"
               @contextmenu="requestPointerContextMenu($event, 'container', hub.groupElementId)"
             >
@@ -3786,7 +3825,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               :data-route-point-count="renderedRoute(edge).length"
               tabindex="-1"
               role="option"
-              :aria-label="`${navigatorAriaLabel(edge.elementId, edgeAriaLabel(edge), 'edge')}${diagnosticAriaSuffix(edge)}`"
+              :aria-label="`${navigatorAriaLabel(edge.elementId, edgeAriaLabel(edge), t('canvas.kind.edge'))}${diagnosticAriaSuffix(edge)}`"
               :aria-selected="selectedElementIdsSet.has(edge.elementId)"
               :aria-posinset="navigatorPosition(edge.elementId)"
               :aria-setsize="navigatorItems.length"
@@ -3891,7 +3930,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               color: node.style.text,
               '--iriograph-node-accent': node.style.accent ?? node.style.stroke,
             }"
-            :aria-label="`${navigatorAriaLabel(node.elementId, node.label, 'node')}${diagnosticAriaSuffix(node)}`"
+            :aria-label="`${navigatorAriaLabel(node.elementId, node.label, t('canvas.kind.node'))}${diagnosticAriaSuffix(node)}`"
             :aria-selected="selectedElementIdsSet.has(node.elementId)"
             :aria-posinset="navigatorPosition(node.elementId)"
             :aria-setsize="navigatorItems.length"
@@ -3933,7 +3972,7 @@ defineExpose<DiagramCanvasNavigationApi>({
                 loading="lazy"
                 decoding="async"
                 draggable="false"
-                :title="nodeContentEditing ? 'ドラッグしてアイコン位置を調整' : undefined"
+                :title="nodeContentEditing ? t('canvas.dragIcon') : undefined"
                 @pointerdown="startNodeContentMove($event, node, 'icon')"
               />
               <span
@@ -3943,16 +3982,16 @@ defineExpose<DiagramCanvasNavigationApi>({
                   { editable: nodeContentEditing && selectedElementIdsSet.has(node.elementId) && !readOnly },
                 ]"
                 :style="nodeContentOffsetStyle(node, 'label')"
-                :title="nodeContentEditing ? 'ドラッグしてラベル位置を調整' : undefined"
+                :title="nodeContentEditing ? t('canvas.dragLabel') : undefined"
                 @pointerdown="startNodeContentMove($event, node, 'label')"
-              ><span class="iriograph-node-label" :style="{ fontSize: node.style.labelFontSize ? `${node.style.labelFontSize}px` : undefined }">{{ node.label }}</span><small v-if="additionalLabels(node.semanticRef, node.label).length" class="iriograph-additional-labels">{{ additionalLabels(node.semanticRef, node.label).join(' ／ ') }}</small></span>
+              ><span class="iriograph-node-label" :style="{ fontSize: node.style.labelFontSize ? `${node.style.labelFontSize}px` : undefined }">{{ node.label }}</span><small v-if="additionalLabels(node.semanticRef, node.label).length" class="iriograph-additional-labels">{{ additionalLabels(node.semanticRef, node.label).join(t('canvas.listSeparator')) }}</small></span>
             </span>
             <button
               v-if="nodeTypeTags[node.elementId]"
               type="button"
               class="iriograph-node-type-tag"
               :title="typeTagTitle(nodeTypeTags[node.elementId]!)"
-              :aria-label="`${nodeTypeTags[node.elementId]!.label}の型一覧を開く`"
+              :aria-label="t('canvas.openTypeList', { label: nodeTypeTags[node.elementId]!.label })"
               @pointerdown.stop
               @click.stop="emit('typeTagRequest', {
                 elementId: node.elementId,
@@ -3962,9 +4001,9 @@ defineExpose<DiagramCanvasNavigationApi>({
             >{{ nodeTypeTags[node.elementId]!.label }}</button>
             <span v-if="commentsFor(node.semanticRef)" class="iriograph-comment-callout" :class="{ visible: showAllComments }" :style="{ fontSize: node.style.labelFontSize ? `${node.style.labelFontSize}px` : undefined }" role="note">{{ commentsFor(node.semanticRef) }}</span>
             <span v-if="node.shape === 'diamond'" class="iriograph-gateway-mark">×</span>
-            <span v-if="node.placement === 'user'" class="iriograph-pin-indicator" title="ユーザー調整済み">●</span>
-            <span v-if="sequenceMemberBadges(node.elementId).length" class="iriograph-sequence-badges" aria-label="並び順"><span v-for="badge in sequenceMemberBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の${badge.ordinal}番`">{{ badge.ordinal }}</span></span>
-            <span v-if="defaultAlternativeBadges(node.elementId).length" class="iriograph-alternative-default-badges" :aria-label="`${defaultAlternativeBadges(node.elementId).map((badge) => badge.label).join('、')}の既定候補`"><span v-for="badge in defaultAlternativeBadges(node.elementId)" :key="badge.key" :title="`${badge.label}の既定候補`">既定</span></span>
+            <span v-if="node.placement === 'user'" class="iriograph-pin-indicator" :title="t('canvas.userAdjusted')">●</span>
+            <span v-if="sequenceMemberBadges(node.elementId).length" class="iriograph-sequence-badges" :aria-label="t('canvas.sequenceAria')"><span v-for="badge in sequenceMemberBadges(node.elementId)" :key="badge.key" :title="t('canvas.sequenceOrdinalTitle', { label: badge.label, ordinal: badge.ordinal })">{{ badge.ordinal }}</span></span>
+            <span v-if="defaultAlternativeBadges(node.elementId).length" class="iriograph-alternative-default-badges" :aria-label="t('canvas.defaultAlternativeAria', { labels: defaultAlternativeBadges(node.elementId).map((badge) => badge.label).join(t('canvas.listSeparator')) })"><span v-for="badge in defaultAlternativeBadges(node.elementId)" :key="badge.key" :title="t('canvas.defaultAlternativeTitle', { label: badge.label })">{{ t('canvas.defaultBadge') }}</span></span>
           </div>
 
           <button
@@ -3986,7 +4025,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               color: annotation.style.text,
               fontSize: annotation.style.labelFontSize ? `${annotation.style.labelFontSize}px` : undefined,
             }"
-            :title="annotation.detachedAnchorElementId ? '接続先が見つからないため注記を単独表示しています' : undefined"
+            :title="annotation.detachedAnchorElementId ? t('canvas.detachedAnnotation') : undefined"
             @pointerdown="startAnnotationMove($event, annotation)"
             @click.stop="emit('annotationRequest', {
               annotationId: annotation.annotationId,
@@ -3994,7 +4033,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               anchorElementId: annotation.anchorElementId,
             })"
           >
-            <small>{{ annotation.annotationKind === 'semantic-literal' ? (annotation.language || annotation.datatypeIri || '意味の注記') : 'ビュー注記' }}</small>
+            <small>{{ annotation.annotationKind === 'semantic-literal' ? (annotation.language || annotation.datatypeIri || t('canvas.semanticAnnotation')) : t('canvas.viewAnnotation') }}</small>
             <span>{{ annotation.text }}</span>
           </button>
 
@@ -4023,7 +4062,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               v-if="selectedEdge && !readOnly && edgeRouteMode(selectedEdge) === 'curve'"
               class="iriograph-curve-controls"
               role="group"
-              aria-label="曲線の制御点"
+              :aria-label="t('canvas.curveControls')"
             >
               <line
                 v-for="handle in selectedCurveHandles(selectedEdge)"
@@ -4045,10 +4084,10 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :class="{ active: isActiveCurveKnot(index) }"
                 tabindex="-1"
                 role="button"
-                :aria-label="`曲線点${index + 1}。矢印キーで移動、Deleteで削除`"
+                :aria-label="t('canvas.curvePointAria', { index: index + 1 })"
                 @pointerdown="startCurveKnotMove($event, selectedEdge, index)"
                 @keydown="handleCurveKnotKeydown($event, selectedEdge, index)"
-              ><title>曲線点 {{ index + 1 }}</title></circle>
+              ><title>{{ t('canvas.curvePointTitle', { index: index + 1 }) }}</title></circle>
               <circle
                 v-for="(handle, handleIndex) in selectedCurveHandles(selectedEdge)"
                 :key="handle.key"
@@ -4059,10 +4098,10 @@ defineExpose<DiagramCanvasNavigationApi>({
                 :r="curveControlRadius('handle')"
                 tabindex="-1"
                 role="button"
-                :aria-label="`${handle.manual ? '手動' : '自動'}曲線ハンドル。矢印キーで調整${handle.manual ? '、Deleteで自動へ戻す' : ''}`"
+                :aria-label="handle.manual ? t('canvas.manualCurveHandleAria') : t('canvas.automaticCurveHandleAria')"
                 @pointerdown="startCurveHandleMove($event, selectedEdge, handle)"
                 @keydown="handleCurveHandleKeydown($event, selectedEdge, handle)"
-              ><title>{{ handle.manual ? '手動曲線ハンドル（Deleteで自動へ戻す）' : '自動曲線ハンドル' }}</title></circle>
+              ><title>{{ handle.manual ? t('canvas.manualCurveHandleTitle') : t('canvas.automaticCurveHandleTitle') }}</title></circle>
             </g>
             <g v-if="selectedEdge && !readOnly" class="iriograph-endpoint-anchors" :class="{ semantic: semanticEndpointReconnect }">
               <template v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
@@ -4081,14 +4120,14 @@ defineExpose<DiagramCanvasNavigationApi>({
                   :cy="endpointAnchorHalo(selectedEdge, endpoint)!.haloPoint.y"
                   r="12"
                   @pointerdown="startEndpointAnchorMove($event, selectedEdge, endpoint)"
-                ><title>{{ semanticEndpointReconnect ? `${endpoint === 'source' ? '始点' : '終点'}を別の要素へ接続` : `${endpoint === 'source' ? '始点' : '終点'}の接続位置` }}</title></circle>
+                ><title>{{ semanticEndpointReconnect ? t('canvas.reconnectEndpoint', { endpoint: endpoint === 'source' ? t('canvas.source') : t('canvas.target') }) : t('canvas.endpointPosition', { endpoint: endpoint === 'source' ? t('canvas.source') : t('canvas.target') }) }}</title></circle>
               </template>
             </g>
           </svg>
           <div
             v-if="selectedResizeElement"
             class="iriograph-transient-resize-layer"
-            aria-label="選択要素のサイズ変更"
+            :aria-label="t('canvas.resizeSelection')"
           >
             <span
               v-for="handle in RESIZE_HANDLES"
@@ -4096,7 +4135,7 @@ defineExpose<DiagramCanvasNavigationApi>({
               class="iriograph-resize-handle"
               :data-handle="handle"
               :style="resizeHandleStyle(selectedResizeElement, handle)"
-              :title="`選択要素のサイズを${handle}方向から変更`"
+              :title="t('canvas.resizeDirection', { direction: handle })"
               @pointerdown="startResize($event, selectedResizeElement, handle)"
             />
             <span
@@ -4105,8 +4144,8 @@ defineExpose<DiagramCanvasNavigationApi>({
               :style="nodeIconResizeHandleStyle(selectedIconNode)"
               role="button"
               tabindex="-1"
-              aria-label="アイコンを縦横比を保って拡大縮小"
-              title="ドラッグしてアイコンを拡大縮小"
+              :aria-label="t('canvas.resizeIconAria')"
+              :title="t('canvas.resizeIconTitle')"
               @pointerdown="startNodeIconResize($event, selectedIconNode)"
             />
           </div>
@@ -4114,12 +4153,12 @@ defineExpose<DiagramCanvasNavigationApi>({
       </div>
     </div>
 
-    <aside class="iriograph-minimap" aria-label="図のミニマップ">
+    <aside class="iriograph-minimap" :aria-label="t('canvas.minimap')">
       <svg
         :viewBox="workAreaViewBox()"
         preserveAspectRatio="none"
         tabindex="-1"
-        aria-label="Minimapでviewportを移動"
+        :aria-label="t('canvas.minimapViewport')"
         @keydown="handleMinimapKeydown"
         @pointerdown="beginMinimapPan"
       >

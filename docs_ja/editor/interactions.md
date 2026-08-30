@@ -2,6 +2,8 @@
 
 この文書は、標準`IriographEditor`を利用するユーザーの操作と、埋め込むhostが用意する契約を説明します。意味graphの正本はTurtle、表示の個別調整はview overlayです。右Inspectorとdialogから始める意味操作はsemantic transactionへ、Canvas gestureと右Inspectorのビュー編集から始める表示操作はpresentation transactionへ合流します。
 
+標準UIは英語で起動し、言語selectorから日本語へ切り替えられます。これはsession設定であり、切替だけでは図を編集しません。意味上の名前と説明は文書に存在するlanguage付きliteralから選択表示し、機械翻訳や利用者の入力値の書換えは行いません。
+
 ## 操作の基本
 
 - Node、container、region、edgeをclickすると選択し、右Inspectorで対象を確認できます。Ctrl/Cmd clickは選択のtoggle、Shift clickは追加、Canvasの完全な空白clickまたはEscapeは選択解除です。Sidebar、toolbar、Inspector等のCanvas外を操作しても選択は解除しません。
@@ -39,7 +41,7 @@ Seq/Alt membershipは個別・一括解除のcheckboxへ混ぜず、ordinal/defa
 
 InspectorはCanvasを圧迫しないcompactな密度を標準とし、4つの意味編集入口だけを最初に見せます。長い説明や技術情報は折り畳み、controlを小さくしてもkeyboard focus ringとpointer targetを失わせません。左右sidebarは独立して折り畳め、左sidebarは新しいsessionで既定を閉じます。Hostは初期値だけをpropで変更でき、利用者の開閉はdocumentへ保存しません。倍率は`−`/`＋`に加えてpreset、全体表示、選択へfitを同じlistから選べ、いずれもsession-onlyです。
 
-`新しい要素を作る`ではhost allocatorがopaque IRIを生成し、選んだ要素種類または業務グループ種類と名前を一つのatomic semantic transactionで保存します。通常profileのグループ候補は包含、順序、候補等のGroup Frameであり、`rdfs:Class`はここで領域として作りません。型は後述する`型一覧`で作成・編集します。説明、既存要素との関係、位置、iconは作成後の意味編集または`ビュー`で追加します。`関係を作る`は最初に大きなicon cardで`線でつなぐ` / `グループへ所属させる`を選びます。前者はCanvasで一つの始点と一件以上の接続先を選び、category別の日本語predicate catalogから共通関係を選択します。必要な場合だけ接続先ごとの関係を上書きできます。後者は既存Group Frame一件とmemberを複数選び、順序付きでは並べ替え、候補グループでは既定候補を指定します。Member一覧では既存要素と、名前・種類だけを持つ未確定の新規要素chipを混在でき、確定時に全要素と所属を一つのtransactionへまとめます。
+`新しい要素を作る`ではhost allocatorがopaque IRIを生成し、選んだ要素種類または業務グループ種類と名前を一つのatomic semantic transactionで保存します。通常profileのグループ候補は包含、順序、候補等のGroup Frameであり、`rdfs:Class`はここで領域として作りません。型は後述する`型一覧`で作成・編集します。説明、既存要素との関係、位置、iconは作成後の意味編集または`ビュー`で追加します。`関係を作る`は最初に大きなicon cardで`線でつなぐ` / `グループへ所属させる`を選びます。前者はCanvasで一つの始点と一件以上の接続先を選び、category別のlocale対応predicate catalogから共通関係を選択します。必要な場合だけ接続先ごとの関係を上書きできます。後者は既存Group Frame一件とmemberを複数選び、順序付きでは並べ替え、候補グループでは既定候補を指定します。Member一覧では既存要素と、名前・種類だけを持つ未確定の新規要素chipを混在でき、確定時に全要素と所属を一つのtransactionへまとめます。
 
 Canvas事前選択が0件なら各roleは未選択、1件ならdirectの始点または選択対象、複数件ならdirectの先頭を始点・残りを接続先としてlabel付きでseedします。Membershipでは、事前選択に既存Group Frameがちょうど一件あるときだけ所属先にし、選択nodeをmemberにします。`線でつなぐ`と`グループへ所属させる`をBackで切り替えた場合は一方のdraftを他方へ変換せず、元のCanvas事前選択から作り直します。必要なauthoring context、provenance、書込権限が不足するactionは推測で実行せず、無効理由と次に必要な操作を日本語で示します。
 
@@ -84,7 +86,7 @@ class領域を通常profileへ移植したりはしません。
 未使用の型も消しません。型を選ぶと直接付与された要素と子孫型から継承した要素を区別して確認でき、全Scene
 要素から複数選択してその型を一括付与・解除できます。型の作成、名前・説明・複数上位型の編集、削除はいずれも
 通常UIへIRIやRDF用語を出さず、共通validationを通るatomic semantic transactionです。新しい上位関係がcycleを
-作る場合は保存せず、参照中の型削除だけは影響する要素・下位型を既存の削除dialogに日本語名で示します。
+作る場合は保存せず、参照中の型削除だけは影響する要素・下位型を既存の削除dialogに選択中localeの名前で示します。
 
 図上の各要素には、直接付与された型のうち代表一件だけをcompactなtagとして表示します。代表型は最もspecificな
 型、profileの高い`displayPriority`、最後にopaque IRIのcode-point順で決定し、labelやTurtleの記述順へ依存しません。
@@ -98,7 +100,7 @@ history、dirty stateを変更しません。型の専用geometry、Euler/Venn�
 
 Pointerの右click、Canvasのactive itemに対するContext Menu keyまたはShift+F10は同じ対象別menuを開きます。空白には要素追加とpaste、nodeには詳細・ビュー・icon・関係作成・所属・削除、direct edgeには関係詳細・線・再接続・route reset・削除を示します。Derived順序ガイドと候補線は線単体を編集させず、所有する順序付きグループまたは候補グループの構造編集へ委譲します。Group Frameには詳細、member/順序/候補、枠、fit、許可層内の前後移動、削除を示します。
 
-Menu項目の選択は右Inspectorの意味flow、ビューInspector、または対応するCanvas commandへfocusするだけで、その時点ではdocument、overlay、historyを変更しません。Raw IRIや一段で意味を変える危険操作を置かず、利用できない項目は隠すだけでなく日本語の無効理由を示します。Escapeまたはmenuを閉じた後はCanvasの元のactive itemへfocusを戻します。未適用の意味draftも黙って破棄しません。Canvas本体のsingle-tab-stop listbox、`aria-activedescendant`、live statusの規範は[accessibility.md](./accessibility.md)を参照してください。
+Menu項目の選択は右Inspectorの意味flow、ビューInspector、または対応するCanvas commandへfocusするだけで、その時点ではdocument、overlay、historyを変更しません。Raw IRIや一段で意味を変える危険操作を置かず、利用できない項目は隠すだけでなく選択中UI localeの無効理由を示します。Escapeまたはmenuを閉じた後はCanvasの元のactive itemへfocusを戻します。未適用の意味draftも黙って破棄しません。Canvas本体のsingle-tab-stop listbox、`aria-activedescendant`、live statusの規範は[accessibility.md](./accessibility.md)を参照してください。
 
 ## Resourceの作成
 
@@ -109,7 +111,7 @@ Menu項目の選択は右Inspectorの意味flow、ビューInspector、または
   a <profileで選択した種類> .
 ```
 
-確定後のprojectionは選択したrole/group kindとcatalogからGroup Frameまたはnodeを作り、標準layoutでdisplayを補完します。初期位置、template override、icon overrideを同じsemantic transactionに含めません。説明、上位概念、edge、領域membershipは対象別の意味編集、位置やiconは`ビュー`から別の明示操作として行います。UIにはRDF用語やIRIではなく、種類の日本語名、説明、形のpreviewを示します。
+確定後のprojectionは選択したrole/group kindとcatalogからGroup Frameまたはnodeを作り、標準layoutでdisplayを補完します。初期位置、template override、icon overrideを同じsemantic transactionに含めません。説明、上位概念、edge、領域membershipは対象別の意味編集、位置やiconは`ビュー`から別の明示操作として行います。UIにはRDF用語やIRIではなく、選択中localeの種類名、説明、形のpreviewを示します。
 
 Allocatorが失敗、衝突、許可namespace外のIRIを返した場合は確定せず、「要素を作れませんでした。再試行してください」等のaction付きerrorを示します。該当IRIはHost/Core内部diagnosticと監査logに保持し、通常UIやAdvanced DOMへ表示しません。Canvas上のghostは確定前の一時表示であり、Cancel、Escape、失敗時に消え、documentやoverlayへ保存しません。
 
@@ -138,7 +140,7 @@ Edge作成はsource、predicate、targetを明示するsemantic authoringです�
 
 Canvas gestureを使う場合も、最初のresourceと次のresourceをsession draftへseedするだけで、線を引いた時点ではTurtleへ書き込みません。Predicateはlabel-firstのcatalog/profile候補とopaque predicate IDから選び、standard editorの通常UIとAdvanced DOMへ候補内外の生IRIを表示・入力しません。空欄をgeneric predicateで補完することはありません。
 
-Predicate pickerは「分類」「参照」「依存」「由来」等のcategoryごとに候補をまとめ、候補名を`A（predicate label）B`、補足説明をsubjectが`A`、objectが`B`の短い日本語例文として表示します。たとえばPROV-Oの派生関係は「A（派生元）B」と「AはBから派生した」を併記します。A/Bは基準要素と相手要素の役割を比較するためだけの仮記号で、確定後のedge表示には実際の要素名とpredicate labelだけを使います。語順、助詞を含む文型、comment、category、利用例は解決済みcatalog/vocabulary metadataから得て、IRI local nameや英語labelの機械分割から生成しません。Metadataが不足する候補は`A（通常predicate label）B`という決定的fallbackを使い、意味を推測しません。
+Predicate pickerは選択中localeのcategoryごとに候補をまとめ、候補名を`A（predicate label）B`、補足説明をsubjectが`A`、objectが`B`の短いlocale別例文として表示します。たとえば日本語のPROV-O派生関係は「A（派生元）B」と「AはBから派生した」を併記し、英語UIでは対応する英語metadataを使います。A/Bは基準要素と相手要素の役割を比較するためだけの仮記号で、確定後のedge表示には実際の要素名とpredicate labelだけを使います。語順を含む文型、comment、category、利用例は解決済みcatalog/vocabulary metadataから得て、IRI local nameの機械分割から生成しません。Metadataが不足する候補は`A（通常predicate label）B`という決定的fallbackを使い、意味を推測しません。
 
 選択したdirect edgeの`関係の意味`はassertedされたexact predicateの名前と説明を主表示し、
 `rdfs:subPropertyOf`で到達する上位関係をmulti-parent DAGの全pathとして別に示します。Hostが

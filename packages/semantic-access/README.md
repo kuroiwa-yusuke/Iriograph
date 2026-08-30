@@ -27,7 +27,21 @@ Labels and descriptions support discovery but never replace identity. Results us
 
 Read APIs cover resources and predicates, descriptions, localized values, class/property hierarchy, incoming/outgoing neighborhoods, exact statement comments, related subgraphs, and normalized Bag/Seq/Alt membership. Limited RDFS inference is explicit and separate from asserted-edge counts.
 
-`standardPredicateVocabularyJa` and related helpers add localized picker metadata for selected RDF/RDFS, Dublin Core Terms, PROV-O, and SKOS predicates without creating custom Japanese predicates.
+The standard predicate presentation API adds picker metadata for selected RDF/RDFS, Dublin Core Terms, PROV-O, SKOS, and non-restriction OWL relationship predicates without minting custom predicates. English is the deterministic default; Japanese and regional BCP 47 tags are supported while exact predicate IRIs and structural flags remain locale-independent.
+
+```ts
+import {
+  standardPredicateTerms,
+  standardPredicateVocabulary,
+  standardPredicateVocabularyForLocale,
+} from "@iriograph/semantic-access";
+
+const englishDefaults = standardPredicateVocabulary;
+const japanese = standardPredicateVocabularyForLocale("ja-JP");
+const dependencies = standardPredicateTerms({ locale: "en-US", categories: ["Dependency"] });
+```
+
+Unknown locales fall back to English. `standardPredicateVocabularyJa` and `standardPredicateTermsJa(categories)` remain available for compatibility.
 
 ## Write
 

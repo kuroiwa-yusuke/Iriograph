@@ -39,7 +39,7 @@ Node.jsからbundlerなしでも直接importできることを検証し、配布
 Core tarballは`assets/icons/*.svg`と`THIRD_PARTY_NOTICES.md`を含み、
 `@iriograph/core/icons/<name>.svg`から同梱SVGを参照できます。既定icon catalogのref、埋込みsource、
 配布SVGはbyte-equivalent testで固定します。同梱Lucide iconはsource commit、個別icon名、ISC/MIT noticeを
-配布物へ記録し、brand iconや再配布条件が不明なassetは同梱しません。現在の既定集合は日本語label付きの
+配布物へ記録し、brand iconや再配布条件が不明なassetは同梱しません。現在の既定集合は正規英語labelと日本語label付きの
 汎用Lucide SVG 74個です。AWS等のvendor固有iconは再配布条件と更新周期を独立して固定できるversioned catalogと
 host resolverを使い、package予約namespaceを上書きしません。AWS catalog metadataとresolver helperは
 `@iriograph/profile-kit/aws-icons` subpathから任意導入し、AWS artwork自体は配布しません。

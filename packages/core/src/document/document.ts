@@ -289,7 +289,7 @@ export function validateIriographDocument(
       diagnostics.push({
         severity: "warning",
         code: "profile-mismatch",
-        message: `view ${view.viewId}のprofileRefをcatalogが提供していません。`,
+        message: `The catalog does not provide the profileRef for view ${view.viewId}.`,
       });
     }
   }
@@ -309,13 +309,13 @@ export function validateCatalog(catalog: DiagramCatalog): ProjectionDiagnostic[]
       diagnostics.push({
         severity: "error",
         code: "missing-default-template",
-        message: `default ${expectedKind} templateがありません: ${templateRef}`,
+        message: `Default ${expectedKind} template is missing: ${templateRef}`,
       });
     } else if (template.structuralKind !== expectedKind) {
       diagnostics.push({
         severity: "error",
         code: "template-kind-mismatch",
-        message: `${templateRef}は${expectedKind} templateではありません。`,
+        message: `${templateRef} is not a ${expectedKind} template.`,
       });
     }
   }
@@ -338,7 +338,7 @@ export function validateCatalog(catalog: DiagramCatalog): ProjectionDiagnostic[]
       diagnostics.push({
         severity: "error",
         code: "duplicate-rule-id",
-        message: `ruleIdが重複しています: ${rule.ruleId}`,
+        message: `Duplicate ruleId: ${rule.ruleId}`,
       });
     }
     seenRuleIds.add(rule.ruleId);
@@ -347,13 +347,13 @@ export function validateCatalog(catalog: DiagramCatalog): ProjectionDiagnostic[]
       diagnostics.push({
         severity: "error",
         code: "missing-rule-template",
-        message: `${rule.ruleId}のtemplateがありません: ${rule.templateRef}`,
+        message: `Template for ${rule.ruleId} is missing: ${rule.templateRef}`,
       });
     } else if (template.structuralKind !== rule.kind) {
       diagnostics.push({
         severity: "error",
         code: "template-kind-mismatch",
-        message: `${rule.ruleId}のstructuralKindとtemplateが一致しません。`,
+        message: `The structuralKind and template for ${rule.ruleId} do not match.`,
       });
     }
   }

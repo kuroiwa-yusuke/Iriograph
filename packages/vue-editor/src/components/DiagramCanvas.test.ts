@@ -1,21 +1,66 @@
 import { readFileSync } from "node:fs";
 
-import { afterEach, describe, expect, it } from "vitest";
-import { mount, type VueWrapper } from "@vue/test-utils";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { config, mount, type VueWrapper } from "@vue/test-utils";
 import { defineComponent, h } from "vue";
 
 import type { DiagramScene, ElementGeometry, Point } from "@iriograph/core";
 
 import DiagramCanvas from "./DiagramCanvas.vue";
 import type { DiagramCanvasNavigationApi } from "../navigation/viewport";
+import {
+  createStaticEditorLocalization,
+  editorLocalizationKey,
+} from "../localization/editor-localization";
+
+const previousProvide = config.global.provide;
 
 describe("DiagramCanvas pointer gestures", () => {
   let wrapper: VueWrapper | undefined;
+
+  beforeAll(() => {
+    config.global.provide = {
+      ...previousProvide,
+      [editorLocalizationKey as symbol]: createStaticEditorLocalization("ja"),
+    };
+  });
+
+  afterAll(() => {
+    config.global.provide = previousProvide;
+  });
 
   afterEach(() => {
     wrapper?.unmount();
     wrapper = undefined;
     document.body.innerHTML = "";
+  });
+
+  it("renders fixed Canvas accessibility text in English when English is selected", () => {
+    const scene = sceneFixture();
+    scene.edges = [{
+      ...scene.edges[0]!,
+      statementComments: [{
+        value: "Description",
+        language: "en",
+        predicateIri: "http://www.w3.org/2000/01/rdf-schema#comment",
+        statementRef: "statement:edge-a-b-comment",
+        reifierRef: "urn:test:reifier:edge-a-b-comment",
+      }],
+    }];
+    wrapper = mount(DiagramCanvas, {
+      props: { scene },
+      global: {
+        provide: {
+          [editorLocalizationKey as symbol]: createStaticEditorLocalization("en"),
+        },
+      },
+    });
+    expect(wrapper.get(".iriograph-canvas-scroll").attributes("aria-label")).toBe("Diagram scene navigator");
+    expect(wrapper.get('.iriograph-scene-node[data-element-id="node-a"]').attributes("aria-label"))
+      .toContain("node,");
+    expect(wrapper.get('.iriograph-edge-group[data-element-id="edge-a-b"]').attributes("aria-label"))
+      .toContain("Description (en)");
+    expect(wrapper.get(".iriograph-minimap").attributes("aria-label")).toBe("Diagram minimap");
   });
 
   it("薄いCanvas gridをsnap sizeと同期し表示だけ切り替える", async () => {

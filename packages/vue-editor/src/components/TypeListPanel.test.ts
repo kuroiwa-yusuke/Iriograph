@@ -9,6 +9,10 @@ import {
   type TypeSystemIndex,
 } from "../index";
 import TypeListPanel from "./TypeListPanel.vue";
+import {
+  createStaticEditorLocalization,
+  editorLocalizationKey,
+} from "../localization/editor-localization";
 
 const NS = "urn:test:type-panel:";
 
@@ -27,6 +31,11 @@ describe("TypeListPanel", () => {
     const references = wrapper.findAll(`[data-type-id="${shared.typeId}"]`);
     expect(references).toHaveLength(2);
     expect(references[1]!.text()).toContain("同じ型への参照");
+    expect(references[0]!.get(".parent-summary").text()).toContain("右、左");
+
+    const english = mount(TypeListPanel, { props: { presentation: index.presentation } });
+    expect(english.findAll(`[data-type-id="${shared.typeId}"]`)[0]!
+      .get(".parent-summary").text()).toContain("右, 左");
   });
 
   it("型一覧/型/上位の型をlabel-firstで表示し、検索してもraw IRIをDOMへ渡さない", async () => {
@@ -171,7 +180,10 @@ describe("TypeListPanel", () => {
 
   it("readonlyでは意味actionを無効化し、図で表示だけは利用できる", async () => {
     const index = fixture();
-    const wrapper = mount(TypeListPanel, { props: { presentation: index.presentation, readonly: true } });
+    const wrapper = mount(TypeListPanel, {
+      props: { presentation: index.presentation, readonly: true },
+      global: japaneseLocalization,
+    });
     expect(button(wrapper, "新しい型").attributes()).toHaveProperty("disabled");
     expect(button(wrapper, "編集").attributes()).toHaveProperty("disabled");
     expect(button(wrapper, "削除").attributes()).toHaveProperty("disabled");
@@ -196,8 +208,17 @@ function fixture(assigned = false): TypeSystemIndex {
 }
 
 function mountPanel(index: TypeSystemIndex, focus?: { typeId: string; resourceId?: string }) {
-  return mount(TypeListPanel, { props: { presentation: index.presentation, focus } });
+  return mount(TypeListPanel, {
+    props: { presentation: index.presentation, focus },
+    global: japaneseLocalization,
+  });
 }
+
+const japaneseLocalization = {
+  provide: {
+    [editorLocalizationKey as symbol]: createStaticEditorLocalization("ja"),
+  },
+};
 
 function document(source: string): IriographDocumentV1 {
   return {

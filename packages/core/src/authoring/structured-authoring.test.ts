@@ -108,16 +108,16 @@ describe("structured authoring facade", () => {
         expect.objectContaining({
           code: "hierarchy-cycle",
           labels: ["次の工程", "親A", "次の工程"],
-          message: expect.stringContaining("循環"),
+          message: expect.stringContaining("cycle"),
         }),
         expect.objectContaining({
           code: "hierarchy-path-budget-exceeded",
-          message: expect.stringContaining("省略"),
+          message: expect.stringContaining("omitted"),
         }),
       ]),
     });
-    expect(presentation.queryExplanation).toContain("上位関係としても");
-    expect(presentation.validationExplanation).toContain("選択した関係だけ");
+    expect(presentation.queryExplanation).toContain("superproperties");
+    expect(presentation.validationExplanation).toContain("only the selected relationship");
     const serialized = JSON.stringify(presentation);
     for (const iri of [REL, parentA, parentB, root, structural, unknown]) {
       expect(serialized).not.toContain(iri);
@@ -320,7 +320,7 @@ describe("structured authoring facade", () => {
     expect(duplicateRows.preview).toBeUndefined();
     expect(duplicateRows.diagnostics).toContainEqual(expect.objectContaining({
       code: "direct-relation-duplicate-request",
-      message: expect.stringContaining("重複"),
+      message: expect.stringContaining("duplicates"),
       suggestedActions: [expect.objectContaining({
         actionId: "remove-duplicate-direct-relation",
       })],
@@ -337,7 +337,7 @@ describe("structured authoring facade", () => {
     expect(existingRow.preview).toBeUndefined();
     expect(existingRow.diagnostics).toContainEqual(expect.objectContaining({
       code: "direct-relation-already-exists",
-      message: expect.stringContaining("すでに存在"),
+      message: expect.stringContaining("already exists"),
       suggestedActions: [expect.objectContaining({
         actionId: "remove-existing-direct-relation",
       })],

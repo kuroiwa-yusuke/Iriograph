@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref } from "vue";
 
 import type { EditorContextAction, EditorContextActionId } from "../inspector/context-actions";
+import { useEditorLocalization } from "../localization/editor-localization";
 
 const props = defineProps<{
   actions: readonly EditorContextAction[];
@@ -13,6 +14,7 @@ const emit = defineEmits<{
   select: [actionId: EditorContextActionId];
   close: [];
 }>();
+const { t } = useEditorLocalization();
 
 const menu = ref<HTMLElement>();
 const activeIndex = ref(-1);
@@ -101,7 +103,7 @@ function iconGlyph(token?: string): string {
       class="iriograph-context-menu"
       role="menu"
       tabindex="-1"
-      aria-label="選択対象の操作"
+      :aria-label="t('contextMenu.aria')"
       :style="{ left: `${x}px`, top: `${y}px` }"
       @keydown="handleKeydown"
     >

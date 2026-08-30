@@ -7,16 +7,23 @@ import {
   STRUCTURED_AUTHORING_INTENT_OPTIONS,
   STRUCTURED_ELEMENT_KIND_OPTIONS,
   STRUCTURED_RELATION_FAMILY_OPTIONS,
+  structuredAuthoringIntentOptions,
   structuredAuthoringRequestForDraft,
   structuredAuthoringStepStatus,
   type FlowCanvasChoice,
   type StructuredAuthoringFlowEvent,
   type StructuredAuthoringFlowState,
 } from "./structured-authoring-flow";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 describe("structured authoring flow", () => {
   it("初期blurの4入口から一段ずつ進みBack/Escapeでdraftだけを破棄する", () => {
     expect(STRUCTURED_AUTHORING_INTENT_OPTIONS.map((option) => option.label)).toEqual([
+      "Create element", "Create relation", "Change element", "Change relation",
+    ]);
+    expect(structuredAuthoringIntentOptions((key, parameters) => (
+      translateEditorMessage("ja", key, parameters)
+    )).map((option) => option.label)).toEqual([
       "新しい要素を作る", "関係を作る", "要素を変更する", "関係を変更する",
     ]);
     expect(STRUCTURED_ELEMENT_KIND_OPTIONS.map((option) => option.elementKind)).toEqual(["node", "group"]);
@@ -48,6 +55,12 @@ describe("structured authoring flow", () => {
     state = transition(state, { type: "choose-element-kind", elementKind: "node" }).state;
     expect(state.phase).toBe("node-roles");
     expect(structuredAuthoringStepStatus(state).canContinue).toBe(false);
+    expect(structuredAuthoringStepStatus(state).reason).toBe(
+      "Select at least one type for the new element.",
+    );
+    expect(structuredAuthoringStepStatus(state, (key, parameters) => (
+      translateEditorMessage("ja", key, parameters)
+    )).reason).toBe("要素の種類を一つ以上選択してください。");
     state = transition(state, { type: "set-node-roles", nodeRoleIds: ["task", "task"] }).state;
     state = transition(state, { type: "next" }).state;
     state = transition(state, { type: "set-label", label: "  承認  " }).state;

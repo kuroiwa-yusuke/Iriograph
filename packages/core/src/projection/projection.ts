@@ -65,7 +65,7 @@ export function projectSemanticView(
   options: ProjectionOptions = {},
 ): ProjectedScene {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
-  if (!view) throw new Error(`viewが存在しません: ${viewId ?? "<undefined>"}`);
+  if (!view) throw new Error(`View does not exist: ${viewId ?? "<undefined>"}`);
   const diagnostics: ProjectionDiagnostic[] = validateProjectionCatalog(catalog)
     .map((diagnostic) => ({ ...diagnostic, category: "profile" as const }));
   if (view.profileRef !== catalog.profileRef) {
@@ -73,7 +73,7 @@ export function projectSemanticView(
       severity: "error",
       category: "profile",
       code: "profile-mismatch",
-      message: `view ${view.viewId}のprofileRefをcatalogが提供していません。`,
+      message: `The catalog does not provide the profileRef for view ${view.viewId}.`,
       semanticRef: view.viewId,
     });
   }
@@ -131,7 +131,7 @@ function projectLegacyIriographDocument(
 ): DiagramScene {
   const view = document.views.find((candidate) => candidate.viewId === viewId);
   if (!view) {
-    throw new Error(`viewが存在しません: ${viewId ?? "<undefined>"}`);
+    throw new Error(`View does not exist: ${viewId ?? "<undefined>"}`);
   }
 
   const diagnostics: ProjectionDiagnostic[] = [];
@@ -165,7 +165,7 @@ function projectLegacyIriographDocument(
       diagnostics.push({
         severity: "warning",
         code: "ambiguous-node-rule",
-        message: `${semanticRef}に同優先度のnode ruleが複数一致しました。`,
+        message: `Multiple node rules with equal priority matched ${semanticRef}.`,
         semanticRef,
       });
     }
@@ -255,7 +255,7 @@ function projectLegacyIriographDocument(
       diagnostics.push({
         severity: "error",
         code: "incomplete-relation",
-        message: `${relationRef}のsourceまたはtargetを解決できません。`,
+        message: `The source or target of ${relationRef} could not be resolved.`,
         semanticRef: relationRef,
       });
       continue;
@@ -266,7 +266,7 @@ function projectLegacyIriographDocument(
       diagnostics.push({
         severity: "warning",
         code: "relation-endpoint-not-visible",
-        message: `${relationRef}の接続先が現在のviewにありません。`,
+        message: `An endpoint of ${relationRef} is not present in the current view.`,
         semanticRef: relationRef,
       });
       continue;
@@ -436,9 +436,9 @@ function requireTemplate(
   expectedKind: VisualTemplate["structuralKind"],
 ): VisualTemplate {
   const template = catalog.templates[templateRef];
-  if (!template) throw new Error(`templateがcatalogにありません: ${templateRef}`);
+  if (!template) throw new Error(`Template is not present in the catalog: ${templateRef}`);
   if (template.structuralKind !== expectedKind) {
-    throw new Error(`${templateRef}は${expectedKind} templateではありません。`);
+    throw new Error(`${templateRef} is not a ${expectedKind} template.`);
   }
   return template;
 }

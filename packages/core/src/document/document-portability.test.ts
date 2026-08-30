@@ -172,7 +172,7 @@ describe("portable document replacement", () => {
 });
 
 describe("document local namespace rebase", () => {
-  it("新しい図への複製で同じbaseを指定すると日本語の修正行動付きで拒否する", async () => {
+  it("新しい図への複製で同じbaseを指定するとcanonical Englishの修正行動付きで拒否する", async () => {
     const current = documentFor(simpleSource(OLD));
     const snapshot = structuredClone(current);
 
@@ -189,7 +189,7 @@ describe("document local namespace rebase", () => {
     expect(preview.diagnostics).toContainEqual(expect.objectContaining({
       severity: "error",
       code: "document-rebase-base-unchanged",
-      message: expect.stringContaining("現在と異なるbase IRI"),
+      message: expect.stringContaining("different from the current one"),
       jsonPointer: "/semantic/baseIri",
       suggestedActions: [expect.objectContaining({
         actionId: "allocate-new-document-base",

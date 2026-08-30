@@ -85,6 +85,12 @@ The base profile reuses standard RDF/RDFS structures where natural:
 
 Iriograph adds deterministic application-profile constraints without redefining RDF semantics. Domain terms live in the domain namespace, not an Iriograph catch-all namespace. Labels never drive classification or projection rules.
 
+## Language boundaries
+
+Interface language, semantic literal preference, and portable view locale are related but distinct. The editor defaults to English and offers Japanese as a host/session preference. Semantic language preference only selects among existing localized labels and comments. A named view may persist its own locale when reproducible label choice is part of that view. None of these choices translates or rewrites semantic source, and changing only the interface language never creates a document revision.
+
+Stable identifiers own behavior; localized text explains it. The same predicate IRI, command, diagnostic code, and projection rule therefore survive every interface language. English is the canonical package fallback, while all user-authored RDF lexical forms remain first-class data rather than UI messages.
+
 ## Assets
 
 An icon is identified by an IRI, not by its retrieval URL. A catalog or host-injected resolver maps the IRI to a temporary local or network source under scheme, origin, media-type, size, and lifetime policy. Credentials and expiring URLs never enter portable documents.

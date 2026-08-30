@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ProjectionCatalogV1 } from "@iriograph/core";
 
 import { catalogCreationPalette } from "./creation-palette";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 describe("catalogCreationPalette", () => {
   it("catalog resource ruleとprofile labelだけからnode/region cardを作る", () => {
@@ -39,6 +40,12 @@ describe("catalogCreationPalette", () => {
       expect.objectContaining({ kind: "node", label: "Item", shape: "circle" }),
       expect.objectContaining({ kind: "region", label: "Area", shape: "region", structuralKind: "region" }),
       expect.objectContaining({ kind: "node", label: "Concept", classIri: "urn:type:class" }),
+      expect.objectContaining({ kind: "node", label: "Basic element", classIri: undefined }),
+    ]));
+    const japanese = catalogCreationPalette(catalog, [], "region", (key, parameters) => (
+      translateEditorMessage("ja", key, parameters)
+    ));
+    expect(japanese).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: "node", label: "基本の要素", classIri: undefined }),
     ]));
   });

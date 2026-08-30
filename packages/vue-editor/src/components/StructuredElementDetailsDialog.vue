@@ -36,6 +36,7 @@ export type StructuredElementDetailsMembership = StructuredMembershipPresentatio
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, useId } from "vue";
+import { useEditorLocalization } from "../localization/editor-localization";
 
 const props = defineProps<{
   title: string;
@@ -54,6 +55,7 @@ const emit = defineEmits<{
   editMembership: [groupElementId: string];
   close: [];
 }>();
+const { t } = useEditorLocalization();
 
 type AddedText = {
   draftId: string;
@@ -134,10 +136,10 @@ function toggleRole(roleId: string): void {
 
 function localeLabel(kind: "default" | "translation" | "untagged" | "typed"): string {
   return {
-    default: "主表示",
-    translation: "翻訳",
-    untagged: "言語指定なし",
-    typed: "型付きテキスト",
+    default: t("details.primary"),
+    translation: t("details.translation"),
+    untagged: t("details.untagged"),
+    typed: t("details.typed"),
   }[kind];
 }
 
@@ -167,10 +169,14 @@ function groupKindLabel(kind: StructuredGroupKind): string {
   return props.groupKinds?.find((candidate) => candidate.groupKind === kind)?.label ?? kind;
 }
 
+function fieldLabel(field: "label" | "comment"): string {
+  return t(field === "label" ? "common.name" : "common.description");
+}
+
 function membershipRoleLabel(item: StructuredElementDetailsMembership): string {
-  if (item.role === "sequence-member") return `順番 ${item.ordinal ?? "?"}`;
-  if (item.role === "alternative-member") return `候補 ${item.ordinal ?? "?"}`;
-  return item.direction === "contains" ? "含む要素" : "属するグループ";
+  if (item.role === "sequence-member") return t("details.sequenceOrdinal", { ordinal: item.ordinal ?? "?" });
+  if (item.role === "alternative-member") return t("details.alternativeOrdinal", { ordinal: item.ordinal ?? "?" });
+  return t(item.direction === "contains" ? "details.containedElements" : "details.belongsToGroups");
 }
 
 function submit(): void {
@@ -193,51 +199,51 @@ function handleKeydown(event: KeyboardEvent): void {
 <template>
   <div class="iriograph-modal-backdrop" role="presentation" @click.self="emit('close')">
     <section ref="dialog" class="iriograph-resource-details-dialog iriograph-structured-details-dialog" role="dialog" aria-modal="true" :aria-labelledby="titleId" @keydown="handleKeydown">
-      <header><div><small>要素の詳細</small><strong :id="titleId">{{ title }}</strong></div><button type="button" aria-label="閉じる" @click="emit('close')">×</button></header>
-      <p>名前・説明・種類・所属を編集します。識別情報や言語タグは表示せず、そのまま保持します。</p>
+      <header><div><small>{{ t("details.eyebrow") }}</small><strong :id="titleId">{{ title }}</strong></div><button type="button" :aria-label="t('common.close')" @click="emit('close')">×</button></header>
+      <p>{{ t("details.description") }}</p>
       <section v-for="field in fields" :key="field.field" class="iriograph-property-section">
-        <header><div><strong>{{ field.label }}</strong><small>{{ field.values.length + addedText.filter((item) => item.field === field.field).length }}件</small></div></header>
-        <p v-if="field.values.length === 0 && !addedText.some((item) => item.field === field.field)" class="iriograph-property-empty">登録された内容はありません。</p>
+        <header><div><strong>{{ fieldLabel(field.field) }}</strong><small>{{ t("common.itemCount", { count: field.values.length + addedText.filter((item) => item.field === field.field).length }) }}</small></div></header>
+        <p v-if="field.values.length === 0 && !addedText.some((item) => item.field === field.field)" class="iriograph-property-empty">{{ t("details.empty") }}</p>
         <label v-for="value in field.values" :key="value.valueId" :class="{ 'iriograph-pending-removal': removedValueIds.includes(value.valueId) }">
           <span>{{ localeLabel(value.localeKind) }}</span>
           <textarea v-model="values[value.valueId]" :disabled="removedValueIds.includes(value.valueId)" :rows="field.field === 'comment' ? 4 : 2" />
-          <button type="button" :disabled="field.field === 'label' && !removedValueIds.includes(value.valueId) && !canRemoveExistingLabel(value.valueId)" @click="toggleExistingTextRemoval(value.valueId)">{{ removedValueIds.includes(value.valueId) ? '削除を取り消す' : '削除' }}</button>
+          <button type="button" :disabled="field.field === 'label' && !removedValueIds.includes(value.valueId) && !canRemoveExistingLabel(value.valueId)" @click="toggleExistingTextRemoval(value.valueId)">{{ removedValueIds.includes(value.valueId) ? t('details.undoDelete') : t('common.delete') }}</button>
         </label>
         <label v-for="item in addedText.filter((candidate) => candidate.field === field.field)" :key="item.draftId">
-          <span>{{ field.field === 'label' ? '新しい別名' : '新しい説明' }}</span>
+          <span>{{ field.field === 'label' ? t('details.newAlias') : t('details.newDescription') }}</span>
           <textarea v-model="item.value" :data-new-text="item.draftId" :rows="field.field === 'comment' ? 4 : 2" />
-          <button type="button" @click="discardAddedText(item.draftId)">追加を取り消す</button>
+          <button type="button" @click="discardAddedText(item.draftId)">{{ t("details.cancelAdd") }}</button>
         </label>
-        <button type="button" @click="addText(field.field)">{{ field.field === 'label' && field.values.length ? '別名を追加' : `${field.label}を追加` }}</button>
+        <button type="button" @click="addText(field.field)">{{ field.field === 'label' && field.values.length ? t('details.addAlias') : t('details.addField', { field: fieldLabel(field.field) }) }}</button>
       </section>
       <section v-if="nodeRoles.length && !currentGroupKind" class="iriograph-property-section">
-        <header><div><strong>要素の種類</strong><small>複数選択できます</small></div></header>
-        <div role="group" aria-label="要素の種類">
+        <header><div><strong>{{ t("details.elementTypes") }}</strong><small>{{ t("details.multiple") }}</small></div></header>
+        <div role="group" :aria-label="t('details.elementTypes')">
           <button v-for="(role, index) in nodeRoles" :key="`node-role-${index}`" type="button" :aria-pressed="roles.includes(role.roleId)" @click="toggleRole(role.roleId)"><strong>{{ role.label }}</strong><small v-if="role.description">{{ role.description }}</small></button>
         </div>
       </section>
       <section v-if="currentGroupKind" class="iriograph-property-section">
-        <header><div><strong>グループの種類</strong><small>現在: {{ groupKindLabel(currentGroupKind) }}</small></div></header>
-        <p v-if="groupHasMembers">要素を含むグループの種類は変更できません。先に所属・並び順・候補を解除してください。</p>
-        <div v-else role="radiogroup" aria-label="グループの種類">
+        <header><div><strong>{{ t("details.groupType") }}</strong><small>{{ t("details.current", { value: groupKindLabel(currentGroupKind) }) }}</small></div></header>
+        <p v-if="groupHasMembers">{{ t("details.groupTypeLocked") }}</p>
+        <div v-else role="radiogroup" :aria-label="t('details.groupType')">
           <label v-for="option in groupKinds ?? []" :key="option.groupKind"><input v-model="groupKind" type="radio" :value="option.groupKind" :disabled="!option.enabled" /><span><strong>{{ option.label }}</strong><small>{{ option.disabledReason ?? option.description }}</small></span></label>
         </div>
-        <button v-if="groupHasMembers" type="button" @click="emit('editMembership', containedMemberships[0]?.groupElementId ?? '')">所属・順序を編集</button>
+        <button v-if="groupHasMembers" type="button" @click="emit('editMembership', containedMemberships[0]?.groupElementId ?? '')">{{ t("details.editMembershipOrder") }}</button>
       </section>
       <section v-if="memberships?.length" class="iriograph-property-section iriograph-structured-memberships">
-        <header><div><strong>{{ currentGroupKind ? '含む要素' : '属するグループ' }}</strong><small>{{ memberships.length }}件</small></div></header>
+        <header><div><strong>{{ t(currentGroupKind ? 'details.containedElements' : 'details.belongsToGroups') }}</strong><small>{{ t("common.itemCount", { count: memberships.length }) }}</small></div></header>
         <ul>
           <li v-for="item in memberships" :key="item.membershipId">
             <label v-if="item.removable"><input v-model="removeMembershipIds" type="checkbox" :value="item.membershipId" /><span>{{ item.relatedLabel }}</span></label>
             <span v-else>{{ item.relatedLabel }}</span>
             <small>{{ membershipRoleLabel(item) }}<template v-if="item.disabledReason">・{{ item.disabledReason }}</template></small>
-            <button type="button" @click="emit('focusElement', item.relatedElementId)">Canvasで確認</button>
-            <button v-if="!item.removable" type="button" @click="emit('editMembership', item.groupElementId)">専用編集を開く</button>
+            <button type="button" @click="emit('focusElement', item.relatedElementId)">{{ t("details.focusCanvas") }}</button>
+            <button v-if="!item.removable" type="button" @click="emit('editMembership', item.groupElementId)">{{ t("details.openDedicatedEditor") }}</button>
           </li>
         </ul>
-        <p v-if="removeMembershipIds.length">選択した {{ removeMembershipIds.length }}件を保存時に解除します。</p>
+        <p v-if="removeMembershipIds.length">{{ t("details.pendingMembershipRemoval", { count: removeMembershipIds.length }) }}</p>
       </section>
-      <footer><button type="button" @click="emit('close')">キャンセル</button><button type="button" class="primary" :disabled="busy || addedTextInvalid || !hasChanges" @click="submit">{{ busy ? '保存中…' : '変更を保存' }}</button></footer>
+      <footer><button type="button" @click="emit('close')">{{ t("common.cancel") }}</button><button type="button" class="primary" :disabled="busy || addedTextInvalid || !hasChanges" @click="submit">{{ busy ? t('common.saving') : t('details.saveChanges') }}</button></footer>
     </section>
   </div>
 </template>

@@ -24,17 +24,21 @@ const props = defineProps<{
   projectionRuntimeContext: ProjectionRuntimeContext;
 }>();
 const document = ref(props.initialDocument);
+const uiLocale = ref<"en" | "ja">("en");
 </script>
 
 <template>
   <IriographEditor
     v-model="document"
+    v-model:ui-locale="uiLocale"
     :runtime-context="projectionRuntimeContext"
   />
 </template>
 ```
 
 Editorはworkspace、HTTP、認証、永続化を知りません。Product hostは`v-model`のdocument、認証済みasset resolver、IRI allocator、resolved authoring profile、保存・revision conflictを注入します。
+
+Package UIの既定は英語で、日本語を選択できます。UI言語はHost/session stateでありTurtleやdisplay overlayを変更しません。既存RDF label/commentを選ぶ意味言語の優先順は別に指定できます。
 
 ## Packageを選ぶ
 

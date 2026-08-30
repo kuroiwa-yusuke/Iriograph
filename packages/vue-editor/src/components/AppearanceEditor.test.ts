@@ -17,7 +17,7 @@ describe("AppearanceEditor", () => {
       },
     });
     const preset = wrapper.findAll(".iriograph-style-presets button")
-      .find((button) => button.text() === "プリセット 1")!;
+      .find((button) => button.text() === "Preset 1")!;
     expect(wrapper.html()).not.toContain("urn:style:soft");
     await preset.trigger("click");
     expect(wrapper.emitted("commit")?.[0]?.[0]).toEqual({ styleRef: "urn:style:soft" });
@@ -69,8 +69,8 @@ describe("AppearanceEditor", () => {
         presets: {},
       },
     });
-    expect(wrapper.find('input[aria-label="塗り色"]').exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("領域の透明度");
+    expect(wrapper.find('input[aria-label="Fill color"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("Group opacity");
   });
 
   it.each(["node", "container", "region", "edge"] as const)("%sの文字サイズを入力途中はdraftに保ち確定時に一度だけcommitする", async (elementKind) => {
@@ -83,8 +83,8 @@ describe("AppearanceEditor", () => {
         inline: true,
       },
     });
-    const fontSize = wrapper.get<HTMLInputElement>('input[aria-label="文字サイズ"]');
-    const fontSizeRow = wrapper.findAll("label").find((label) => label.text().includes("文字サイズ"))!;
+    const fontSize = wrapper.get<HTMLInputElement>('input[aria-label="Font size"]');
+    const fontSizeRow = wrapper.findAll("label").find((label) => label.text().includes("Font size"))!;
     await fontSizeRow.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
     const commits = wrapper.emitted("commit")!.length;
     const previews = wrapper.emitted("preview")!.length;
@@ -111,9 +111,9 @@ describe("AppearanceEditor", () => {
         inline: true,
       },
     });
-    const fontSize = wrapper.get<HTMLInputElement>('input[aria-label="文字サイズ"]');
+    const fontSize = wrapper.get<HTMLInputElement>('input[aria-label="Font size"]');
     expect(Number(fontSize.element.value)).toBe(DEFAULT_LABEL_FONT_SIZE);
-    const row = wrapper.findAll("label").find((label) => label.text().includes("文字サイズ"))!;
+    const row = wrapper.findAll("label").find((label) => label.text().includes("Font size"))!;
     await row.get<HTMLInputElement>('input[type="checkbox"]').setValue(true);
     expect(wrapper.emitted("commit")?.at(-1)?.[0]).toEqual({
       style: { labelFontSize: DEFAULT_LABEL_FONT_SIZE },

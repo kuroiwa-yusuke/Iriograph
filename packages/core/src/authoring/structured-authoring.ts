@@ -276,26 +276,26 @@ export type StructuredPredicateHierarchyPresentation = {
 const GROUP_KIND_INFO: readonly Omit<StructuredAuthoringPresentation["groupKinds"][number], "enabled" | "disabledReason">[] = [
   {
     groupKind: "classification",
-    label: "分類グループ",
-    description: "同じ概念に分類される要素をまとめます。",
+    label: "Classification group",
+    description: "Groups elements classified under the same concept.",
     role: "group",
   },
   {
     groupKind: "membership",
-    label: "包含グループ",
-    description: "順序を持たない所属として要素をまとめます。",
+    label: "Membership group",
+    description: "Groups elements as unordered members.",
     role: "group",
   },
   {
     groupKind: "sequence",
-    label: "順序付きグループ",
-    description: "保存された番号順に要素を並べます。",
+    label: "Ordered group",
+    description: "Arranges elements by their stored ordinal numbers.",
     role: "group",
   },
   {
     groupKind: "alternative",
-    label: "候補グループ",
-    description: "複数候補と既定候補をまとめます。",
+    label: "Alternative group",
+    description: "Groups multiple alternatives and one default alternative.",
     role: "group",
   },
 ];
@@ -303,13 +303,13 @@ const GROUP_KIND_INFO: readonly Omit<StructuredAuthoringPresentation["groupKinds
 const RELATION_FAMILIES: StructuredAuthoringPresentation["relationFamilies"] = [
   {
     family: "direct",
-    label: "線でつなぐ",
-    description: "一つの始点から一つ以上の接続先へ意味のある関係を作ります。",
+    label: "Connect with a relationship",
+    description: "Creates meaningful relationships from one source to one or more targets.",
   },
   {
     family: "membership",
-    label: "グループへ所属させる",
-    description: "既存のグループへ一つ以上の要素を追加します。",
+    label: "Add to group",
+    description: "Adds one or more elements to an existing group.",
   },
 ];
 
@@ -321,7 +321,7 @@ export function structuredAuthoringPresentation(
     .filter(isDirectPredicateTerm)
     .map((term) => ({
       predicateId: predicateId(term),
-      label: term.label ?? "名称未設定の関係",
+      label: term.label ?? "Unnamed relationship",
       description: term.description,
       category: term.category,
       sentencePattern: term.sentencePattern,
@@ -346,14 +346,14 @@ export function structuredAuthoringPresentation(
       enabled: item.groupKind !== "classification"
         || profile?.allowClassificationGroups === true,
       ...(item.groupKind === "classification" && profile?.allowClassificationGroups !== true
-        ? { disabledReason: "現在のプロファイルでは新しい分類グループを作成できません。" }
+        ? { disabledReason: "The current profile does not allow creating a new classification group." }
         : {}),
     })),
     relationFamilies: RELATION_FAMILIES.map((item) => ({ ...item })),
     predicateCatalog: predicates,
     capabilities: context.capabilities.map((capability) => ({
       capabilityId: capability.capabilityId,
-      label: capability.label ?? "名称未設定の操作",
+      label: capability.label ?? "Unnamed operation",
       description: capability.description,
       role: capability.role,
       groupKind: capability.groupKind,
@@ -420,11 +420,11 @@ export function structuredPredicateHierarchyPresentation(
   return {
     predicates,
     queryExplanation: input.inferencePolicy.query === "rdfs-subproperty"
-      ? "検索では意味上の上位関係としても扱います。"
-      : "検索では選択した関係だけを扱います。",
+      ? "Search also follows semantic superproperties."
+      : "Search uses only the selected relationship.",
     validationExplanation: input.inferencePolicy.validation === "rdfs-subproperty"
-      ? "検証では意味上の上位関係としても扱います。"
-      : "検証では選択した関係だけを扱います。",
+      ? "Validation also follows semantic superproperties."
+      : "Validation uses only the selected relationship.",
   };
 }
 
@@ -444,14 +444,14 @@ export async function structuredNodeRoleSeedFromCanvasSelections(
   if (!profile) {
     diagnostics.push(error(
       "structured-authoring-profile-required",
-      "要素の種類を読み込めません。管理者にプロファイル設定を確認してください。",
+      "Element types could not be loaded. Ask an administrator to check the profile configuration.",
     ));
     return { valid: false, roleIds: [], diagnostics };
   }
   if (selections.length < 1) {
     diagnostics.push(error(
       "classification-selection-required",
-      "種類の候補にする分類領域をCanvasから選択してください。",
+      "Select a classification region on the canvas to use as a type candidate.",
     ));
     return { valid: false, roleIds: [], diagnostics };
   }
@@ -463,7 +463,7 @@ export async function structuredNodeRoleSeedFromCanvasSelections(
     if (item.structuralKind === "node" || item.groupFrame?.kind !== "classification") {
       diagnostics.push(error(
         "classification-selection-invalid",
-        "選択した対象は分類領域ではありません。種類を表す領域を選び直してください。",
+        "The selected target is not a classification region. Select a region that represents a type.",
       ));
       continue;
     }
@@ -471,7 +471,7 @@ export async function structuredNodeRoleSeedFromCanvasSelections(
     if (!role) {
       diagnostics.push(error(
         "classification-role-unavailable",
-        "この分類領域は現在のプロファイルで要素の種類として利用できません。別の領域を選択してください。",
+        "This classification region cannot be used as an element type under the current profile. Select another region.",
       ));
       continue;
     }
@@ -497,8 +497,8 @@ export async function structuredLocalizedTextPresentation(
     .resolve(target, diagnostics);
   if (!resourceIri) return { valid: false, fields: [], diagnostics };
   const fields = ([
-    ["label", "名前", RDFS_LABEL],
-    ["comment", "説明", RDFS_COMMENT],
+    ["label", "Name", RDFS_LABEL],
+    ["comment", "Description", RDFS_COMMENT],
   ] as const).map(([field, label, predicateIri]) => ({
     field,
     label,
@@ -515,7 +515,7 @@ export async function structuredLocalizedTextPresentation(
   if (new Set(identities).size !== identities.length) {
     diagnostics.push(error(
       "localized-value-identity-collision",
-      "翻訳の識別に失敗しました。Turtleソースで値を確認してください。",
+      "The localized value could not be identified. Check the value in the Turtle source.",
     ));
   }
   return { valid: !hasErrors(diagnostics), fields, diagnostics };
@@ -571,17 +571,17 @@ export async function structuredMembershipPresentation(
       removable,
       ...(!removable ? {
         disabledReason: role === "sequence-member"
-          ? "並び順編集から解除してください。"
+          ? "Remove it in the ordering editor."
           : role === "alternative-member"
-            ? "候補編集から解除してください。"
-            : "この所属は現在のプロファイルでは解除できません。",
+            ? "Remove it in the alternatives editor."
+            : "This membership cannot be removed under the current profile.",
       } : {}),
     }];
   });
   if (new Set(items.map((membership) => membership.membershipId)).size !== items.length) {
     diagnostics.push(error(
       "structured-membership-identity-collision",
-      "所属情報の識別に失敗しました。詳細を開き直してください。",
+      "The membership could not be identified. Reopen the details.",
       undefined,
       "reload-group-members",
     ));
@@ -607,7 +607,7 @@ export async function previewStructuredAuthoringRequest(
 ): Promise<StructuredAuthoringPreviewResult> {
   const diagnostics: ProjectionDiagnostic[] = [];
   if (!request.requestId.trim()) {
-    diagnostics.push(error("structured-request-id-required", "操作IDがありません。もう一度操作してください。"));
+    diagnostics.push(error("structured-request-id-required", "The operation ID is missing. Try the operation again."));
     return rejected(diagnostics);
   }
   const parsed = parseDocument(document, diagnostics);
@@ -644,7 +644,7 @@ export async function previewStructuredAuthoringBatch(
 ): Promise<StructuredAuthoringPreviewResult> {
   const diagnostics: ProjectionDiagnostic[] = [];
   if (requests.length === 0) {
-    diagnostics.push(error("structured-request-required", "変更内容がありません。詳細を開き直してください。"));
+    diagnostics.push(error("structured-request-required", "No changes were provided. Reopen the details."));
     return rejected(diagnostics);
   }
   const requestIds = new Set<string>();
@@ -652,7 +652,7 @@ export async function previewStructuredAuthoringBatch(
     if (!request.requestId.trim() || requestIds.has(request.requestId)) {
       diagnostics.push(error(
         "structured-request-id-invalid",
-        "操作IDが重複または不足しています。詳細を開き直してください。",
+        "Operation IDs are duplicated or missing. Reopen the details.",
       ));
     }
     requestIds.add(request.requestId);
@@ -663,7 +663,7 @@ export async function previewStructuredAuthoringBatch(
   if (new Set(membershipIds).size !== membershipIds.length) {
     diagnostics.push(error(
       "group-member-removal-duplicate",
-      "同じ所属が複数回選択されています。詳細を開き直してください。",
+      "The same membership is selected more than once. Reopen the details.",
     ));
   }
   const parsed = parseDocument(document, diagnostics);
@@ -674,7 +674,7 @@ export async function previewStructuredAuthoringBatch(
   const touchedLocalizedValues = new Set<string>();
   for (const request of requests) {
     if (options.signal?.aborted) {
-      diagnostics.push(error("authoring-aborted", "操作はキャンセルされました。"));
+      diagnostics.push(error("authoring-aborted", "The operation was cancelled."));
       break;
     }
     if (isLocalizedTextRequest(request)) {
@@ -701,7 +701,7 @@ export async function previewStructuredAuthoringBatch(
   }
   localized.forEach((state, key) => {
     if (state.field === "label" && state.values.length === 0) {
-      diagnostics.push(error("localized-label-required", "名前をすべて削除することはできません。"));
+      diagnostics.push(error("localized-label-required", "All names cannot be removed."));
       return;
     }
     commands.push({
@@ -825,7 +825,7 @@ async function applyLocalizedBatchRequest(
   if (request.type === "add-localized-text") {
     const value = request.value.normalize("NFC");
     if (request.field === "label" && !value.trim()) {
-      diagnostics.push(error("localized-label-required", "名前を入力してください。"));
+      diagnostics.push(error("localized-label-required", "Enter a name."));
       return;
     }
     const language = context.defaultLocale?.trim();
@@ -839,7 +839,7 @@ async function applyLocalizedBatchRequest(
     if (duplicate) {
       diagnostics.push(error(
         "localized-value-duplicate",
-        request.field === "label" ? "同じ名前がすでに登録されています。" : "同じ説明がすでに登録されています。",
+        request.field === "label" ? "The same name is already registered." : "The same description is already registered.",
       ));
       return;
     }
@@ -856,7 +856,7 @@ async function applyLocalizedBatchRequest(
   if (touchedValueIds.has(touchKey)) {
     diagnostics.push(error(
       "localized-value-batch-duplicate",
-      "同じ名前または説明が複数回変更されています。詳細を開き直してください。",
+      "The same name or description is changed more than once. Reopen the details.",
     ));
     return;
   }
@@ -865,7 +865,7 @@ async function applyLocalizedBatchRequest(
   if (targetIndex < 0) {
     diagnostics.push(error(
       "localized-value-stale",
-      "編集対象の翻訳が更新または削除されています。詳細を開き直してください。",
+      "The localized value being edited was updated or removed. Reopen the details.",
     ));
     return;
   }
@@ -875,12 +875,12 @@ async function applyLocalizedBatchRequest(
   }
   const value = request.value.normalize("NFC");
   if (request.field === "label" && !value.trim()) {
-    diagnostics.push(error("localized-label-required", "名前を入力してください。"));
+    diagnostics.push(error("localized-label-required", "Enter a name."));
     return;
   }
   const previous = state.values[targetIndex]!;
   if (previous.value.kind !== "literal") {
-    diagnostics.push(error("localized-value-object-unsupported", "名前または説明を通常編集できません。"));
+    diagnostics.push(error("localized-value-object-unsupported", "The name or description cannot be edited normally."));
     return;
   }
   state.values[targetIndex] = {
@@ -911,7 +911,7 @@ function compileCreateElement(
   ) {
     diagnostics.push(error(
       "classification-group-creation-denied",
-      "現在のプロファイルでは分類グループを作成できません。管理者にプロファイル設定を確認してください。",
+      "The current profile does not allow creating a classification group. Ask an administrator to check the profile configuration.",
     ));
   }
   if (hasErrors(diagnostics)) return [];
@@ -942,7 +942,7 @@ async function compileDirectRelations(
   diagnostics: ProjectionDiagnostic[],
 ): Promise<AuthoringCommand[]> {
   if (request.targets.length < 1) {
-    diagnostics.push(error("direct-relation-target-required", "接続先を一つ以上選択してください。"));
+    diagnostics.push(error("direct-relation-target-required", "Select at least one target."));
     return [];
   }
   const source = await resolver.resolve(request.source, diagnostics);
@@ -954,7 +954,7 @@ async function compileDirectRelations(
     if (!selectedId) {
       diagnostics.push(error(
         "direct-relation-predicate-required",
-        `${index + 1}件目の関係の種類を選択してください。`,
+        `Select a relationship type for relationship ${index + 1}.`,
       ));
       return;
     }
@@ -986,7 +986,7 @@ async function compileDirectRelations(
     if (rows.length < 2) continue;
     diagnostics.push(error(
       "direct-relation-duplicate-request",
-      `${rows.join("、")}件目が同じ関係です。重複する接続先または関係の種類を外してから、まとめてやり直してください。`,
+      `Relationships ${rows.join(", ")} are duplicates. Remove duplicate targets or relationship types, then retry the batch.`,
       undefined,
       "remove-duplicate-direct-relation",
     ));
@@ -1003,7 +1003,7 @@ async function compileDirectRelations(
     ) {
       diagnostics.push(error(
         "direct-relation-already-exists",
-        `${index + 1}件目の関係はすでに存在します。既存の関係を選択から外してから、まとめてやり直してください。`,
+        `Relationship ${index + 1} already exists. Remove the existing relationship from the selection, then retry the batch.`,
         command.objectIri,
         "remove-existing-direct-relation",
       ));
@@ -1028,7 +1028,7 @@ async function compileGroupMembers(
   const kind = resolvedGroupKind(store, groupIri, diagnostics);
   if (!kind) return [];
   if (request.members.length < 1) {
-    diagnostics.push(error("group-member-required", "所属させる要素を一つ以上選択してください。", groupIri));
+    diagnostics.push(error("group-member-required", "Select at least one element to add.", groupIri));
     return [];
   }
   const clientIds = new Set<string>();
@@ -1037,7 +1037,7 @@ async function compileGroupMembers(
     if (!member.clientId.trim() || clientIds.has(member.clientId)) {
       diagnostics.push(error(
         "inline-member-client-id-invalid",
-        `新しい要素の一時IDが重複しています: ${member.clientId}`,
+        `Duplicate temporary ID for a new element: ${member.clientId}`,
         groupIri,
       ));
     }
@@ -1070,7 +1070,7 @@ async function compileGroupMembers(
     if (reserved.has(iri) || graphContainsNamedTerm(store, iri)) {
       diagnostics.push(error(
         "resource-iri-collision",
-        "新しい要素の識別子が既存または同時作成中の要素と重複しました。再試行してください。",
+        "The identifier for a new element conflicts with an existing or concurrently created element. Try again.",
         iri,
       ));
     }
@@ -1085,7 +1085,7 @@ async function compileGroupMembers(
   if ((kind === "classification" || kind === "membership") && new Set(memberIris).size !== memberIris.length) {
     diagnostics.push(error(
       "group-member-duplicate",
-      "同じ要素を同じグループへ複数回追加することはできません。重複を外してください。",
+      "The same element cannot be added to the same group more than once. Remove the duplicate.",
       groupIri,
       "remove-duplicate-group-member",
     ));
@@ -1121,7 +1121,7 @@ async function compileGroupMembers(
       if (existingMembers.includes(memberIri)) {
         diagnostics.push(error(
           "group-member-already-present",
-          "選択した要素はすでにこのグループへ所属しています。選択から外してください。",
+          "The selected element is already a member of this group. Remove it from the selection.",
           memberIri,
           "remove-existing-group-member",
         ));
@@ -1151,7 +1151,7 @@ async function compileGroupMembers(
     if (memberIris.length < 2) {
       diagnostics.push(error(
         "alternative-too-few-members",
-        "候補グループには候補を二つ以上選択してください。",
+        "Select at least two alternatives for an alternative group.",
         groupIri,
       ));
       return [];
@@ -1163,7 +1163,7 @@ async function compileGroupMembers(
     ) {
       diagnostics.push(error(
         "alternative-default-required",
-        "候補グループの既定候補を一つ選択してください。",
+        "Select one default alternative for the alternative group.",
         groupIri,
       ));
       return [];
@@ -1195,11 +1195,11 @@ async function compileGroupMemberRemoval(
   diagnostics: ProjectionDiagnostic[],
 ): Promise<AuthoringCommand[]> {
   if (request.membershipIds.length < 1) {
-    diagnostics.push(error("group-member-removal-required", "解除する要素を一つ以上選択してください。"));
+    diagnostics.push(error("group-member-removal-required", "Select at least one element to remove."));
     return [];
   }
   if (new Set(request.membershipIds).size !== request.membershipIds.length) {
-    diagnostics.push(error("group-member-removal-duplicate", "同じ所属が重複して選択されています。"));
+    diagnostics.push(error("group-member-removal-duplicate", "The same membership is selected more than once."));
     return [];
   }
   const scene = await resolver.resolveScene(request.viewId, diagnostics);
@@ -1212,7 +1212,7 @@ async function compileGroupMemberRemoval(
   if (memberships.some((membership) => !membership)) {
     diagnostics.push(error(
       "group-member-removal-stale",
-      "選択した所属はすでに解除されています。詳細を開き直してください。",
+      "The selected membership has already been removed. Reopen the details.",
       undefined,
       "reload-group-members",
     ));
@@ -1225,8 +1225,8 @@ async function compileGroupMemberRemoval(
       diagnostics.push(error(
         "ordered-group-member-removal-requires-editor",
         membership.role === "sequence-member"
-          ? "順序付きグループの要素は並び順編集から解除してください。"
-          : "候補グループの要素は候補編集から解除してください。",
+          ? "Remove ordered-group elements in the ordering editor."
+          : "Remove alternative-group elements in the alternatives editor.",
         undefined,
         "open-ordered-group-editor",
       ));
@@ -1236,7 +1236,7 @@ async function compileGroupMemberRemoval(
     if (capability?.command !== "set-membership") {
       diagnostics.push(error(
         "group-member-removal-not-writable",
-        "この所属は現在のプロファイルでは解除できません。",
+        "This membership cannot be removed under the current profile.",
       ));
       return;
     }
@@ -1266,7 +1266,7 @@ async function compileNodeRoleChange(
   if (item.structuralKind !== "node") {
     diagnostics.push(error(
       "node-role-target-invalid",
-      "グループの種類はこの操作で変更できません。通常の要素を選択してください。",
+      "Group types cannot be changed by this operation. Select a regular element.",
       undefined,
       "select-node-for-role-edit",
     ));
@@ -1280,7 +1280,7 @@ async function compileNodeRoleChange(
   if (currentTypes.some((iri) => Object.values(GROUP_TYPES).includes(iri))) {
     diagnostics.push(error(
       "node-group-role-mixed",
-      "グループの種類と通常要素の種類は同じ対象へ設定できません。グループ編集から種類を整理してください。",
+      "A group type and a regular element type cannot be assigned to the same target. Resolve the types in group editing.",
       item.semanticRef,
       "edit-group-kind",
     ));
@@ -1318,7 +1318,7 @@ async function compileLocalizedTextChange(
   if (request.type === "add-localized-text") {
     const value = request.value.normalize("NFC");
     if (request.field === "label" && !value.trim()) {
-      diagnostics.push(error("localized-label-required", "名前を入力してください。"));
+      diagnostics.push(error("localized-label-required", "Enter a name."));
       return [];
     }
     const language = context.defaultLocale?.trim();
@@ -1330,7 +1330,7 @@ async function compileLocalizedTextChange(
     if (duplicate) {
       diagnostics.push(error(
         "localized-value-duplicate",
-        request.field === "label" ? "同じ名前がすでに登録されています。" : "同じ説明がすでに登録されています。",
+        request.field === "label" ? "The same name is already registered." : "The same description is already registered.",
       ));
       return [];
     }
@@ -1354,7 +1354,7 @@ async function compileLocalizedTextChange(
   if (targetIndex < 0) {
     diagnostics.push(error(
       "localized-value-stale",
-      "編集対象の翻訳が更新または削除されています。詳細を開き直してください。",
+      "The localized value being edited was updated or removed. Reopen the details.",
       undefined,
       "reload-localized-values",
     ));
@@ -1365,12 +1365,12 @@ async function compileLocalizedTextChange(
     && request.field === "label"
     && objects.filter((term) => term.termType === "Literal").length <= 1
   ) {
-    diagnostics.push(error("localized-label-required", "名前をすべて削除することはできません。"));
+    diagnostics.push(error("localized-label-required", "All names cannot be removed."));
     return [];
   }
   const value = request.type === "update-localized-text" ? request.value.normalize("NFC") : undefined;
   if (request.type === "update-localized-text" && request.field === "label" && !value?.trim()) {
-    diagnostics.push(error("localized-label-required", "名前を入力してください。"));
+    diagnostics.push(error("localized-label-required", "Enter a name."));
     return [];
   }
   const values = localizedObjectsAsValues(
@@ -1403,7 +1403,7 @@ function localizedObjectsAsValues(
     if (term.termType !== "Literal") {
       diagnostics.push(error(
         "localized-value-object-unsupported",
-        "名前または説明に通常編集できない値があります。Turtleソースで確認してください。",
+        "A name or description contains a value that cannot be edited normally. Check it in the Turtle source.",
       ));
       return undefined;
     }
@@ -1431,7 +1431,7 @@ async function compileGroupKindChange(
   const current = resolvedGroupKind(store, groupIri, diagnostics);
   if (!current) return [];
   if (current === request.groupKind) {
-    diagnostics.push(error("group-kind-unchanged", "同じグループ種類が選択されています。", groupIri));
+    diagnostics.push(error("group-kind-unchanged", "The same group type is already selected.", groupIri));
     return [];
   }
   if (
@@ -1440,7 +1440,7 @@ async function compileGroupKindChange(
   ) {
     diagnostics.push(error(
       "classification-group-creation-denied",
-      "現在のプロファイルでは分類グループへ変更できません。管理者にプロファイル設定を確認してください。",
+      "The current profile does not allow changing to a classification group. Ask an administrator to check the profile configuration.",
       groupIri,
     ));
     return [];
@@ -1451,7 +1451,7 @@ async function compileGroupKindChange(
   if (types.some((type) => !Object.values(GROUP_TYPES).includes(type))) {
     diagnostics.push(error(
       "node-group-role-mixed",
-      "要素の種類とグループの種類が同じリソースに混在しています。先に要素の種類を整理してください。",
+      "Element types and group types are mixed on the same resource. Resolve the element types first.",
       groupIri,
       "edit-element-types",
     ));
@@ -1461,7 +1461,7 @@ async function compileGroupKindChange(
   if (members.length > 0) {
     diagnostics.push(error(
       "group-kind-change-has-members",
-      `所属中の要素${members.length}件を失う種類変更はできません。先に所属・順番・候補を解除してください。`,
+      `The type cannot be changed because it would discard ${members.length} member elements. Remove memberships, ordering, and alternatives first.`,
       groupIri,
       "clear-group-members-first",
     ));
@@ -1485,27 +1485,27 @@ function resolveNodeRoles(
   if (!profile) {
     diagnostics.push(error(
       "structured-authoring-profile-required",
-      "要素作成用のプロファイルを読み込めません。管理者にプロファイル設定を確認してください。",
+      "The element-creation profile could not be loaded. Ask an administrator to check the profile configuration.",
     ));
     return [];
   }
   if (roleIds.length === 0 && profile.allowUntypedNodes !== true) {
-    diagnostics.push(error("node-role-required", "要素の種類を一つ以上選択してください。"));
+    diagnostics.push(error("node-role-required", "Select at least one element type."));
     return [];
   }
   if (new Set(roleIds).size !== roleIds.length) {
-    diagnostics.push(error("node-role-duplicate", "同じ要素の種類が重複しています。"));
+    diagnostics.push(error("node-role-duplicate", "The same element type is selected more than once."));
     return [];
   }
   const result: string[] = [];
   for (const roleId of roleIds) {
     const role = profile.nodeRoles.find((candidate) => candidate.roleId === roleId);
     if (!role) {
-      diagnostics.push(error("node-role-unresolved", `選択した要素の種類を利用できません: ${roleId}`));
+      diagnostics.push(error("node-role-unresolved", `The selected element type is unavailable: ${roleId}`));
       continue;
     }
     if (Object.values(GROUP_TYPES).includes(role.classIri)) {
-      diagnostics.push(error("node-group-role-mixed", "グループの種類は通常要素へ設定できません。"));
+      diagnostics.push(error("node-group-role-mixed", "A group type cannot be assigned to a regular element."));
       continue;
     }
     result.push(role.classIri);
@@ -1520,7 +1520,7 @@ function resolvePredicate(
 ): ResolvedAuthoringTerm | undefined {
   const term = context.terms.find((candidate) => isDirectPredicateTerm(candidate) && predicateId(candidate) === id);
   if (!term) {
-    diagnostics.push(error("predicate-unresolved", "選択した関係の種類は現在のプロファイルで利用できません。"));
+    diagnostics.push(error("predicate-unresolved", "The selected relationship type is unavailable under the current profile."));
   }
   return term;
 }
@@ -1550,22 +1550,22 @@ function hierarchyLabel(
   fallback: string | undefined,
   rawIris: readonly string[],
 ): string {
-  let result = value?.trim() || fallback?.trim() || "名称未設定の関係";
+  let result = value?.trim() || fallback?.trim() || "Unnamed relationship";
   for (const iri of rawIris) result = result.replaceAll(iri, "");
-  return result.trim() || "名称未設定の関係";
+  return result.trim() || "Unnamed relationship";
 }
 
 function hierarchyDiagnosticMessage(code: string, labels: readonly string[]): string {
   if (code === "hierarchy-cycle") {
     const path = labels.length > 0 ? `: ${labels.join(" → ")}` : "";
-    return `意味上の上位関係に循環があります${path}`;
+    return `The semantic superproperty hierarchy has a cycle${path}`;
   }
   if (code === "hierarchy-path-budget-exceeded") {
-    return "意味上の上位関係が多いため、一部の経路を省略しました。";
+    return "Some paths were omitted because the semantic superproperty hierarchy is too large.";
   }
   return labels.length > 0
-    ? `意味上の上位関係を完全に説明できません: ${labels.join(" → ")}`
-    : "意味上の上位関係を完全に説明できません。";
+    ? `The semantic superproperty hierarchy cannot be explained completely: ${labels.join(" → ")}`
+    : "The semantic superproperty hierarchy cannot be explained completely.";
 }
 
 class SelectionResolver {
@@ -1595,7 +1595,7 @@ class SelectionResolver {
     if (!item?.semanticRef) {
       diagnostics.push(error(
         "canvas-selection-stale",
-        "選択した要素は現在のビューにありません。Canvasから選び直してください。",
+        "The selected element is not present in the current view. Select it again on the canvas.",
         undefined,
         "reselect-canvas-element",
       ));
@@ -1611,7 +1611,7 @@ class SelectionResolver {
     let scene = this.#scenes.get(viewId);
     if (scene) return scene;
     if (!this.document.views.some((view) => view.viewId === viewId)) {
-      diagnostics.push(error("canvas-selection-view-unresolved", "選択元のビューが見つかりません。再選択してください。"));
+      diagnostics.push(error("canvas-selection-view-unresolved", "The source view for the selection was not found. Select again."));
       return undefined;
     }
     scene = await buildIriographView(this.document, viewId, this.context.runtime, "incremental");
@@ -1640,7 +1640,7 @@ async function allocateInlineResource(
   diagnostics: ProjectionDiagnostic[],
 ): Promise<string | undefined> {
   if (!allocator) {
-    diagnostics.push(error("resource-allocator-unresolved", "新しい要素の識別子を発行できません。管理者に設定を確認してください。"));
+    diagnostics.push(error("resource-allocator-unresolved", "An identifier for the new element cannot be issued. Ask an administrator to check the configuration."));
     return undefined;
   }
   const commandId = `${requestId}:new:${index + 1}`;
@@ -1659,11 +1659,11 @@ async function allocateInlineResource(
       signal,
     });
     if (signal?.aborted) {
-      diagnostics.push(error("authoring-aborted", "操作はキャンセルされました。"));
+      diagnostics.push(error("authoring-aborted", "The operation was cancelled."));
       return undefined;
     }
     if (!allocation) {
-      diagnostics.push(error("resource-allocation-cancelled", "新しい要素の作成はキャンセルされました。"));
+      diagnostics.push(error("resource-allocation-cancelled", "Creation of the new element was cancelled."));
       return undefined;
     }
     if (
@@ -1671,18 +1671,18 @@ async function allocateInlineResource(
       || allocation.baseRevision !== context.documentRevision
       || allocation.contextId !== context.contextId
     ) {
-      diagnostics.push(error("resource-allocation-stale", "古い識別子発行結果は使用できません。もう一度実行してください。"));
+      diagnostics.push(error("resource-allocation-stale", "A stale identifier allocation result cannot be used. Try again."));
       return undefined;
     }
     if (!isAllowedResourceIri(allocation.iri, context)) {
-      diagnostics.push(error("resource-namespace-denied", "発行された要素の識別子は許可範囲外です。", allocation.iri));
+      diagnostics.push(error("resource-namespace-denied", "The issued element identifier is outside the allowed namespace.", allocation.iri));
       return undefined;
     }
     return allocation.iri;
   } catch (cause) {
     diagnostics.push(error(
       "resource-allocation-failed",
-      cause instanceof Error ? cause.message : "新しい要素の識別子を発行できませんでした。",
+      cause instanceof Error ? cause.message : "An identifier for the new element could not be issued.",
     ));
     return undefined;
   }
@@ -1711,8 +1711,8 @@ function resolvedGroupKind(
     diagnostics.push(error(
       kinds.length === 0 ? "group-kind-unresolved" : "node-group-role-mixed",
       kinds.length === 0
-        ? "選択した対象はグループではありません。グループ枠を選択してください。"
-        : "複数のグループ種類が混在しています。種類を一つに整理してください。",
+        ? "The selected target is not a group. Select a Group Frame."
+        : "Multiple group types are mixed. Resolve them to one type.",
       groupIri,
       "select-or-repair-group-kind",
     ));
@@ -1760,7 +1760,7 @@ function parseDocument(
   } catch (cause) {
     diagnostics.push(error(
       "invalid-turtle",
-      cause instanceof Error ? cause.message : "Turtleを読み込めませんでした。",
+      cause instanceof Error ? cause.message : "The Turtle source could not be loaded.",
     ));
     return undefined;
   }
@@ -1777,7 +1777,7 @@ function graphContainsNamedTerm(store: Store, iri: string): boolean {
 
 function normalizedLabel(value: string, diagnostics: ProjectionDiagnostic[]): string | undefined {
   const label = value.trim().normalize("NFC");
-  if (!label) diagnostics.push(error("element-label-required", "名前を入力してください。"));
+  if (!label) diagnostics.push(error("element-label-required", "Enter a name."));
   return label || undefined;
 }
 

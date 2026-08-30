@@ -31,9 +31,9 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
     .toBeGreaterThan(0);
   const draggedLeft = await numericStyle(node, "left");
 
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(initialLeft, 0);
-  await page.locator('button[title="Redo (Ctrl/Cmd+Y)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Y"]').click();
   await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(draggedLeft, 0);
 
   const handle = page.locator('.iriograph-transient-resize-layer .iriograph-resize-handle[data-handle="se"]');
@@ -60,7 +60,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   )).toBeLessThanOrEqual(1);
 
   await page.getByRole("button", { name: /Turtle/ }).click();
-  const textarea = page.getByLabel("Turtle source");
+  const textarea = page.getByLabel(/Turtle(?: source|ソース)/u);
   const acceptedSource = `${await textarea.inputValue()}\n<urn:iriograph:demo:e2e-new> <http://www.w3.org/2000/01/rdf-schema#label> "E2E New" .\n`;
   await textarea.fill(acceptedSource);
   await page.locator(".topbar").getByRole("button", { name: "保存", exact: true }).click();
@@ -80,7 +80,7 @@ test("editorのpointer操作、history、Turtle rollback、保存flushがbrowser
   const domainDiagnostic = page.locator(".iriograph-diagnostics .error")
     .filter({ hasText: "demo-visible-resource-label-required" });
   await expect(domainDiagnostic).toContainText("変更を適用できません");
-  await domainDiagnostic.getByText("技術的な詳細").click();
+  await domainDiagnostic.getByText("技術情報").click();
   await expect(domainDiagnostic.getByText("demo-visible-resource-label-required")).toBeVisible();
   await page.getByRole("button", { name: "ソースで確認", exact: true }).click();
   await expect.poll(() => textarea.evaluate((element) => (
@@ -215,7 +215,7 @@ test("Documentタブでactive view overlayをTurtle不変の一履歴としてso
   expect(await readTurtle(page)).toBe(turtleBefore);
 
   await page.getByRole("button", { name: "図", exact: true }).click();
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await page.getByRole("button", { name: /Document/u }).click();
   await expect(source).toHaveValue(JSON.stringify(originalOverlay, null, 2));
   expect(await readTurtle(page)).toBe(turtleBefore);
@@ -231,7 +231,7 @@ test("Documentタブでactive view overlayをTurtle不変の一履歴としてso
     .getByRole("button", { name: "文書全体を検証して適用", exact: true }).click();
   await expect(portableSource).toHaveValue(/"documentId": "purchase-approval-e2e-source-replace"/u);
   await page.getByRole("button", { name: "図", exact: true }).click();
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await page.getByRole("button", { name: /Document/u }).click();
   await expect(portableSource).toHaveValue(new RegExp(`"documentId": "${originalPortableDocument.documentId}"`, "u"));
   expect(await readTurtle(page)).toBe(turtleBefore);
@@ -290,7 +290,7 @@ test("新しい図として複製は元文書を変えず、rebase済みの別wo
   await expect(page.getByText("保存した複製にはrepository上の正本がないため戻せません"))
     .toBeVisible();
   await page.getByRole("button", { name: "Turtleタブを開く", exact: true }).click();
-  const copiedSource = await page.getByLabel("Turtle source").inputValue();
+  const copiedSource = await page.getByLabel(/Turtle(?: source|ソース)/u).inputValue();
   expect(copiedSource).not.toBe(originalSource);
   expect(copiedSource).toContain("urn:iriograph:mock:document:");
   expect(copiedSource).toContain("http://www.w3.org/2000/01/rdf-schema#");
@@ -346,7 +346,7 @@ test("named view管理とtemporary hideをsemantic sourceから分離する", as
   await manager.getByRole("button", { name: "ビュー調整をリセット" }).click();
   await expect(viewSelect).toHaveValue("main-copy");
   await manager.getByRole("button", { name: "このビューを削除" }).click();
-  await manager.getByRole("button", { name: "削除する" }).click();
+  await manager.getByRole("button", { name: "削除", exact: true }).click();
   await expect(page.getByLabel("名前付きビュー", { exact: true })).toHaveText("main");
   await expect(page.locator(".iriograph-scene-node")).toHaveCount(initialNodeCount - 1);
 
@@ -483,7 +483,7 @@ test("predicate階層はlabelだけで説明し、通常presentation DOMへ生IR
 
   await openPurchaseSample(page);
   await page.getByRole("button", { name: /Turtle/u }).click();
-  const source = page.getByLabel("Turtle source");
+  const source = page.getByLabel(/Turtle(?: source|ソース)/u);
   const sourceWithHierarchy = (await source.inputValue()).replace(
     "wf:p-01 a rdf:Property ;",
     "wf:p-01 a rdf:Property ;\n  rdfs:subPropertyOf <http://purl.org/dc/terms/relation> ;",
@@ -713,9 +713,9 @@ test("nodeの形とpackage/workspace icon、label/icon配置をビューだけ�
   const alternateTemplate = templateButtons.nth(alternateTemplateIndex);
   await alternateTemplate.click();
   await expect(alternateTemplate).toHaveAttribute("aria-pressed", "true");
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await expect(alternateTemplate).toHaveAttribute("aria-pressed", "false");
-  await page.locator('button[title="Redo (Ctrl/Cmd+Y)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Y"]').click();
   await expect(alternateTemplate).toHaveAttribute("aria-pressed", "true");
 
   const packageIcons = inspector.locator('.iriograph-package-icon-choices[role="radiogroup"]');
@@ -776,14 +776,14 @@ test("nodeの形とpackage/workspace icon、label/icon配置をビューだけ�
     (element as HTMLElement).style.transform
   ));
 
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await expect.poll(async () => icon.evaluate((element) => (
     (element as HTMLElement).style.transform
   ))).toBe(initialIconTransform);
   await expect.poll(async () => label.evaluate((element) => (
     (element as HTMLElement).style.transform
   ))).toBe(draggedLabelTransform);
-  await page.locator('button[title="Redo (Ctrl/Cmd+Y)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Y"]').click();
   await expect.poll(async () => icon.evaluate((element) => (
     (element as HTMLElement).style.transform
   ))).toBe(draggedIconTransform);
@@ -796,11 +796,11 @@ test("nodeの形とpackage/workspace icon、label/icon配置をビューだけ�
   await expect.poll(async () => icon.evaluate((element) => (
     (element as HTMLElement).style.transform
   ))).toBe(initialIconTransform);
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await expect.poll(async () => icon.evaluate((element) => (
     (element as HTMLElement).style.transform
   ))).toBe(draggedIconTransform);
-  await page.locator('button[title="Redo (Ctrl/Cmd+Y)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Y"]').click();
   await expect.poll(async () => icon.evaluate((element) => (
     (element as HTMLElement).style.transform
   ))).toBe(initialIconTransform);
@@ -869,7 +869,7 @@ test("薄いCanvas gridはsnap間隔で表示し、toggleしても意味・dirty
 
   await openPurchaseSample(page);
   const turtleBefore = await readTurtle(page);
-  const undo = page.locator('button[title="Undo (Ctrl/Cmd+Z)"]');
+  const undo = page.locator('button[title*="Ctrl/Cmd+Z"]');
   await expect(undo).toBeDisabled();
   await expect(page.locator(".topbar .status-pill.neutral")).toHaveText("保存済み");
 
@@ -998,7 +998,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   const nodes = page.locator(".iriograph-scene-node");
   expect(await nodes.count()).toBeGreaterThanOrEqual(3);
   await page.getByRole("button", { name: /Turtle/ }).click();
-  const semanticSource = await page.getByLabel("Turtle source").inputValue();
+  const semanticSource = await page.getByLabel(/Turtle(?: source|ソース)/u).inputValue();
   await page.getByRole("button", { name: "図", exact: true }).click();
 
   // Region viewは単一parentを持たないため、同じ業務領域内の既知nodeを
@@ -1046,7 +1046,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   await selectedNodes[1]!.click({ modifiers: ["Control"] });
   await selectedNodes[2]!.click({ modifiers: ["Control"] });
   await expect(page.locator(".iriograph-scene-node.selected")).toHaveCount(3);
-  await expect(page.getByText("3 selected", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("3件を選択", { exact: true }).first()).toBeVisible();
 
   const targetSnap = page.getByRole("button", { name: "要素snap" });
   if (await targetSnap.getAttribute("aria-pressed") === "true") await targetSnap.click();
@@ -1081,7 +1081,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
     expect(moved[index]!.top - before[index]!.top).toBeCloseTo(delta.y, 5);
   }
 
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   for (let index = 0; index < before.length; index += 1) {
     await expect.poll(() => numericSceneCoordinate(selectedNodes[index]!, "x"))
       .toBeCloseTo(before[index]!.left, 0);
@@ -1093,7 +1093,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   await expect.poll(async () => new Set(await Promise.all(
     selectedNodes.map((selected) => numericSceneCoordinate(selected, "x")),
   )).size).toBeLessThan(new Set(before.map((geometry) => geometry.left)).size);
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   for (let index = 0; index < before.length; index += 1) {
     await expect.poll(() => numericSceneCoordinate(selectedNodes[index]!, "x"))
       .toBeCloseTo(before[index]!.left, 0);
@@ -1119,7 +1119,7 @@ test("multi-select、group drag、snap、整列、等間隔をpresentation trans
   )).toBeCloseTo(expectedMiddleX, 0);
 
   await page.getByRole("button", { name: /Turtle/ }).click();
-  await expect(page.getByLabel("Turtle source")).toHaveValue(semanticSource);
+  await expect(page.getByLabel(/Turtle(?: source|ソース)/u)).toHaveValue(semanticSource);
   expect(consoleErrors).toEqual([]);
 });
 
@@ -1239,7 +1239,7 @@ test("parallel/self-loopを個別選択しstraight/curve・端子・manual routi
   const edgeLabelSection = page.getByText("ラベルとビュー補足", { exact: true })
     .locator("xpath=ancestor::details");
   await edgeLabelSection.locator("summary").click();
-  await edgeLabelSection.getByRole("button", { name: "ラベル位置をリセット" }).click();
+  await edgeLabelSection.getByRole("button", { name: "ラベル位置を戻す" }).click();
   await expect.poll(async () => Number(await label.getAttribute("x"))).toBeCloseTo(initialLabelX, 0);
 
   await routing.getByRole("button", { name: "線の調整をすべてリセット" }).click();
@@ -1322,13 +1322,13 @@ test("single-tab-stop navigatorで選択・geometry・routingをkeyboard完結�
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(initialLeft + 1, 0);
   expect(await readTurtle(page)).toBe(turtleBefore);
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(initialLeft, 0);
 
   await viewport.focus();
   await page.keyboard.press("Shift+ArrowRight");
   await expect.poll(() => numericStyle(node, "left")).toBeCloseTo(initialLeft + 10, 0);
-  await page.locator('button[title="Undo (Ctrl/Cmd+Z)"]').click();
+  await page.locator('button[title*="Ctrl/Cmd+Z"]').click();
   await viewport.focus();
   const activeBeforeNavigation = await viewport.getAttribute("aria-activedescendant");
   await page.keyboard.press("n");
@@ -1458,7 +1458,7 @@ async function requiredBox(locator: Locator, label: string) {
 async function readTurtle(page: Page): Promise<string> {
   const sourceTabs = page.locator(".iriograph-view-tabs");
   await sourceTabs.getByRole("button", { name: /Turtle/ }).click();
-  const source = await page.getByLabel("Turtle source").inputValue();
+  const source = await page.getByLabel(/Turtle(?: source|ソース)/u).inputValue();
   await sourceTabs.getByRole("button", { name: "図", exact: true }).click();
   return source;
 }

@@ -72,7 +72,7 @@ if (preview.valid) {
 }
 ```
 
-`packageDefaultIcons`は日本語label付きの小さな業務/cloud向けSVG catalogです。安定refは
+`packageDefaultIcons`は正規英語labelと日本語labelを持つ小さな業務/cloud向けSVG catalogです。`packageDefaultIconLabel(icon, locales)`はrefを変えず表示名だけを選択します。安定refは
 `urn:iriograph:icon:lucide:<name>:1`で、同じSVGを`@iriograph/core/icons/<name>.svg`にも配布します。
 `withPackageDefaultIconAccess(assetAccess)`は同梱refをpackage内から解決しますが、hostから渡された
 policyを変更しません。Workspaceや外部iconは従来どおりhost resolver/policyの対象です。出典とlicenseは

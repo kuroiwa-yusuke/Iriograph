@@ -27,7 +27,7 @@ Search is label-first and locale-aware. It considers primary and alternate label
 
 Results contain opaque aliases, labels, descriptions, type summaries, and disambiguating neighborhoods. Ordinary DTOs do not expose raw IRIs. Equal labels remain distinct through opaque identity and context.
 
-The standard predicate vocabulary supplies localized picker metadata for selected RDF/RDFS, Dublin Core Terms, PROV-O, and SKOS relations without creating Japanese custom predicates. Hosts include only profile-relevant categories.
+The standard predicate vocabulary supplies localized picker metadata for selected RDF/RDFS, Dublin Core Terms, PROV-O, SKOS, and relationship-oriented OWL terms without creating language-specific custom predicates. `standardPredicateVocabulary` and `standardPredicateTerms()` default to English; locale-aware helpers select Japanese by primary BCP 47 language and otherwise fall back to English. Hosts include only profile-relevant categories.
 
 ## Aliases
 

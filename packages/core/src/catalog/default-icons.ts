@@ -96,10 +96,89 @@ const iconSpecs: readonly IconSpec[] = [
   { name: "bot", label: "自動化", body: '<path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" />' },
 ];
 
+const iconLabelsEn: Readonly<Record<string, string>> = Object.freeze({
+  cloud: "Cloud",
+  server: "Server",
+  database: "Database",
+  "hard-drive": "Storage",
+  braces: "API",
+  "square-function": "Function",
+  workflow: "Workflow",
+  "list-tree": "Queue",
+  network: "Network",
+  "user-round": "User",
+  cog: "Settings",
+  "clipboard-check": "Task",
+  "circle-play": "Start",
+  "circle-stop": "Stop",
+  "git-branch": "Branch",
+  "repeat-2": "Retry",
+  "clock-3": "Deadline",
+  "file-text": "Document",
+  "file-search": "Document search",
+  folder: "Folder",
+  "cloud-upload": "Cloud upload",
+  "cloud-download": "Cloud download",
+  container: "Container",
+  boxes: "Service group",
+  router: "Router",
+  wifi: "Wireless network",
+  "table-2": "Data table",
+  "chart-no-axes-combined": "Analytics",
+  "message-square": "Message",
+  mail: "Email",
+  bell: "Notification",
+  "shield-check": "Security",
+  key: "Access key",
+  "lock-keyhole": "Lock",
+  "credit-card": "Payment",
+  package: "Parcel",
+  truck: "Delivery",
+  "map-pin": "Location",
+  "badge-check": "Approval",
+  "triangle-alert": "Warning",
+  "users-round": "Team",
+  "building-2": "Organization",
+  "calendar-check-2": "Schedule",
+  "briefcase-business": "Business",
+  contact: "Customer",
+  handshake: "Agreement",
+  stamp: "Stamp",
+  "circle-dollar-sign": "Amount",
+  "cloud-cog": "Cloud settings",
+  "server-cog": "Server settings",
+  cpu: "Compute",
+  "memory-stick": "Memory",
+  cable: "Wired connection",
+  globe: "Internet",
+  "satellite-dish": "External communication",
+  webhook: "Webhook",
+  "file-spreadsheet": "Spreadsheet",
+  binary: "Binary data",
+  search: "Search",
+  funnel: "Filter",
+  archive: "Archive",
+  "scan-search": "Data analysis",
+  "shield-alert": "Security alert",
+  "shield-user": "Access control",
+  "key-round": "Authentication key",
+  "scan-face": "Identity verification",
+  activity: "Activity",
+  gauge: "Metrics",
+  logs: "Logs",
+  bug: "Failure",
+  wrench: "Maintenance",
+  siren: "Incident",
+  "monitor-check": "Monitoring",
+  bot: "Automation",
+});
+
 export type PackageDefaultIcon = {
   assetRef: string;
   name: string;
+  /** Canonical English fallback retained for existing consumers. */
   label: string;
+  labels: Readonly<{ en: string; ja: string }>;
   mediaType: "image/svg+xml";
   sourceUrl: string;
   license: "ISC" | "MIT";
@@ -109,12 +188,28 @@ export type PackageDefaultIcon = {
 export const packageDefaultIcons: readonly PackageDefaultIcon[] = Object.freeze(iconSpecs.map((spec) => Object.freeze({
   assetRef: `${PACKAGE_DEFAULT_ICON_NAMESPACE}${spec.name}:1`,
   name: spec.name,
-  label: spec.label,
+  label: iconLabelsEn[spec.name] ?? spec.name,
+  labels: Object.freeze({
+    en: iconLabelsEn[spec.name] ?? spec.name,
+    ja: spec.label,
+  }),
   mediaType: "image/svg+xml" as const,
   sourceUrl: `${LUCIDE_BASE}/${spec.name}.svg`,
   license: spec.license ?? "ISC",
   svg: svgDocument(spec.body),
 })));
+
+export function packageDefaultIconLabel(
+  icon: PackageDefaultIcon,
+  locales: readonly string[] = ["en"],
+): string {
+  for (const locale of locales) {
+    const language = locale.trim().toLowerCase().split("-")[0];
+    if (language === "ja") return icon.labels.ja;
+    if (language === "en") return icon.labels.en;
+  }
+  return icon.labels.en;
+}
 
 export const packageDefaultIconAssets: Readonly<Record<string, AssetDefinition>> = Object.freeze(
   Object.fromEntries(packageDefaultIcons.map((icon) => [icon.assetRef, Object.freeze({
@@ -122,7 +217,9 @@ export const packageDefaultIconAssets: Readonly<Record<string, AssetDefinition>>
     mediaType: icon.mediaType,
     url: `iriograph-package:icons/${icon.name}.svg`,
     extensions: {
-      [`${META}label`]: icon.label,
+      [`${META}label`]: icon.labels.en,
+      [`${META}label:en`]: icon.labels.en,
+      [`${META}label:ja`]: icon.labels.ja,
       [`${META}source`]: icon.sourceUrl,
       [`${META}license`]: icon.license,
     },

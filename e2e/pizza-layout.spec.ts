@@ -342,7 +342,7 @@ function regionWithLabel(page: Page, label: string): Locator {
 
 async function readPizzaTurtle(page: Page): Promise<string> {
   await page.locator(".iriograph-view-tabs").getByRole("button", { name: /Turtle/u }).click();
-  const source = await page.getByLabel("Turtle source").inputValue();
+  const source = await page.getByLabel(/Turtle(?: source|ソース)/u).inputValue();
   await page.locator(".iriograph-view-tabs").getByRole("button", { name: "図", exact: true }).click();
   return source;
 }

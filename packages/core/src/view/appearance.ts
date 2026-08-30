@@ -38,7 +38,7 @@ export function resolveAppearance(
     diagnostics.push({
       severity: "warning",
       code: "appearance-style-unresolved",
-      message: `styleRefがcatalogにありません: ${requestedStyleRef}`,
+      message: `styleRef is not present in the catalog: ${requestedStyleRef}`,
       semanticRef,
       catalogRef: `${catalog.catalogId}@${catalog.catalogVersion}`,
     });
@@ -49,7 +49,7 @@ export function resolveAppearance(
     diagnostics.push({
       severity: "warning",
       code: "appearance-style-invalid",
-      message: `安全でないstyle値を無視しました: ${semanticRef}`,
+      message: `Ignored unsafe style values: ${semanticRef}`,
       semanticRef,
     });
   }

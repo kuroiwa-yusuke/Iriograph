@@ -3,6 +3,8 @@ import {
   type IriographDocumentV1,
 } from "@iriograph/core";
 
+import { translateMockMessage, type MockLocale } from "./localization";
+
 export type MockWorkspaceEntry = {
   kind: "iriograph-document" | "asset";
   path: string;
@@ -76,37 +78,44 @@ export type MockPersistedWorkspaceIndexV1 = {
   }[];
 };
 
-export async function loadMockWorkspace(): Promise<MockWorkspaceManifest> {
+export async function loadMockWorkspace(locale: MockLocale = "en"): Promise<MockWorkspaceManifest> {
   const response = await fetch("/workspace/workspace.json", { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`Workspace manifestの取得に失敗しました: ${response.status}`);
+    throw new Error(translateMockMessage(locale, "manifestFetchFailed", { status: response.status }));
   }
   const value = await response.json() as unknown;
   if (!isMockWorkspaceManifest(value)) {
-    throw new Error("Workspace manifestの形式が不正です。");
+    throw new Error(translateMockMessage(locale, "manifestInvalid"));
   }
   return value;
 }
 
 export async function readIriographDocument(
   entry: MockWorkspaceEntry,
+  locale: MockLocale = "en",
 ): Promise<IriographDocumentV1> {
   if (entry.kind !== "iriograph-document") {
-    throw new Error(`${entry.path}はIriograph documentではありません。`);
+    throw new Error(translateMockMessage(locale, "notDocument", { path: entry.path }));
   }
   if (!hasMockRepositorySource(entry)) {
-    throw new Error(`${entry.path}にはrepository上の正本がありません。`);
+    throw new Error(translateMockMessage(locale, "repositorySourceMissing", { path: entry.path }));
   }
   const response = await fetch(entry.url, { cache: "no-store" });
   if (!response.ok) {
-    throw new Error(`${entry.path}の取得に失敗しました: ${response.status}`);
+    throw new Error(translateMockMessage(locale, "documentFetchFailed", {
+      path: entry.path,
+      status: response.status,
+    }));
   }
   const value = await response.json() as unknown;
   try {
     return parseIriographDocumentV1(value);
   } catch (cause) {
     const detail = cause instanceof Error ? `: ${cause.message}` : "";
-    throw new Error(`${entry.path}はIriograph document schema v1ではありません${detail}`);
+    throw new Error(translateMockMessage(locale, "documentSchemaInvalid", {
+      path: entry.path,
+      detail,
+    }));
   }
 }
 
@@ -244,13 +253,14 @@ export async function resolveMockWorkspaceDocument(
   workingCopy: IriographDocumentV1 | undefined,
   inMemoryDocument: IriographDocumentV1 | undefined,
   readRepository: (entry: MockWorkspaceEntry) => Promise<IriographDocumentV1>,
+  locale: MockLocale = "en",
 ): Promise<IriographDocumentV1> {
   if (preferWorkingCopy) {
     const local = workingCopy ?? inMemoryDocument;
     if (local) return local;
   }
   if (!hasMockRepositorySource(entry)) {
-    throw new Error(`${entry.path}にはrepository上の正本がありません。`);
+    throw new Error(translateMockMessage(locale, "repositorySourceMissing", { path: entry.path }));
   }
   return readRepository(entry);
 }

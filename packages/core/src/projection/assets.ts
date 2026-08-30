@@ -142,7 +142,7 @@ export async function resolveDiagramSceneAssets(
         resolution.assetRef,
         [...(semanticRefsByAsset.get(resolution.assetRef) ?? [])].sort(compareText)[0],
         "asset-resolution-aborted",
-        "assetの解決を中止しました。",
+        "Asset resolution was aborted.",
       );
     }
     if (resolution.diagnostic) diagnostics.push(resolution.diagnostic);
@@ -179,7 +179,7 @@ async function resolveOne(
   semanticRef: string | undefined,
 ): Promise<Resolution> {
   if (signal.aborted) {
-    return failure(assetRef, semanticRef, "asset-resolution-aborted", "assetの解決を中止しました。");
+    return failure(assetRef, semanticRef, "asset-resolution-aborted", "Asset resolution was aborted.");
   }
 
   let result: unknown;
@@ -198,13 +198,13 @@ async function resolveOne(
         ? "asset-resolution-aborted"
         : "asset-resolver-failed",
       signal.aborted || isAbortError(cause)
-        ? "assetの解決を中止しました。"
-        : `asset resolverが失敗しました: ${errorMessage(cause)}`,
+        ? "Asset resolution was aborted."
+        : `Asset resolver failed: ${errorMessage(cause)}`,
     );
   }
 
   if (!isRecord(result) || (result.status !== "resolved" && result.status !== "unresolved")) {
-    return failure(assetRef, semanticRef, "asset-result-invalid", "asset resolverのresultが不正です。");
+    return failure(assetRef, semanticRef, "asset-result-invalid", "Asset resolver returned an invalid result.");
   }
 
   if (result.status === "unresolved") {
@@ -213,7 +213,7 @@ async function resolveOne(
       || (result.replacementAssetRef !== undefined && typeof result.replacementAssetRef !== "string")
       || (result.message !== undefined && typeof result.message !== "string")
     ) {
-      return failure(assetRef, semanticRef, "asset-result-invalid", "asset resolverのunresolved resultが不正です。");
+      return failure(assetRef, semanticRef, "asset-result-invalid", "Asset resolver returned an invalid unresolved result.");
     }
     const detail = result.message ? ` ${result.message}` : "";
     const replacement = result.replacementAssetRef
@@ -223,17 +223,17 @@ async function resolveOne(
       assetRef,
       semanticRef,
       unresolvedCode(result.reason),
-      `assetを解決できませんでした (${result.reason}).${detail}${replacement}`,
+      `Asset could not be resolved (${result.reason}).${detail}${replacement}`,
     );
   }
 
   if (!("lease" in result) || !isRecord(result.lease)) {
-    return failure(assetRef, semanticRef, "asset-result-invalid", "asset resolverのresolved resultが不正です。");
+    return failure(assetRef, semanticRef, "asset-result-invalid", "Asset resolver returned an invalid resolved result.");
   }
   const lease = result.lease as unknown as AssetLease;
   if (signal.aborted) {
     safelyReleaseUnknown(lease);
-    return failure(assetRef, semanticRef, "asset-resolution-aborted", "assetの解決を中止しました。");
+    return failure(assetRef, semanticRef, "asset-resolution-aborted", "Asset resolution was aborted.");
   }
 
   const leaseDiagnostic = validateLease(
@@ -300,7 +300,7 @@ export function verifyAssetLeaseIntrinsicSize(
       return {
         status: "invalid",
         code: "asset-intrinsic-size-invalid",
-        message: "intrinsic image dimensionsが不正です。",
+        message: "Intrinsic image dimensions are invalid.",
       };
     }
     const derivedRatio = width / height;
@@ -308,14 +308,14 @@ export function verifyAssetLeaseIntrinsicSize(
       return {
         status: "invalid",
         code: "asset-intrinsic-size-invalid",
-        message: "intrinsic aspect ratioがwidth/heightと一致しません。",
+        message: "Intrinsic aspect ratio does not match width and height.",
       };
     }
     if (!Number.isSafeInteger(maxDecodedPixels) || maxDecodedPixels <= 0) {
       return {
         status: "invalid",
         code: "asset-intrinsic-size-invalid",
-        message: "maxDecodedPixels policyが不正です。",
+        message: "maxDecodedPixels policy is invalid.",
       };
     }
     const decodedPixels = width * height;
@@ -326,7 +326,7 @@ export function verifyAssetLeaseIntrinsicSize(
       return {
         status: "invalid",
         code: "asset-decoded-pixel-limit-exceeded",
-        message: `decoded pixel area ${decodedPixels}が上限 ${maxDecodedPixels}を超えています。`,
+        message: `Decoded pixel area ${decodedPixels} exceeds the limit ${maxDecodedPixels}.`,
       };
     }
     return {
@@ -339,7 +339,7 @@ export function verifyAssetLeaseIntrinsicSize(
       return {
         status: "invalid",
         code: "asset-intrinsic-size-invalid",
-        message: "SVG以外のassetにviewBox metadataは使用できません。",
+        message: "viewBox metadata cannot be used for a non-SVG asset.",
       };
     }
     const size = intrinsicSizeFromSvgViewBox(lease.svgViewBox);
@@ -348,7 +348,7 @@ export function verifyAssetLeaseIntrinsicSize(
       : {
           status: "invalid",
           code: "asset-intrinsic-size-invalid",
-          message: "SVG viewBoxから安全な寸法を復元できません。",
+          message: "Safe dimensions cannot be derived from the SVG viewBox.",
         };
   }
   // Compatibility for resolvers that do not decode dimensions yet. Renderers
@@ -402,14 +402,14 @@ function validateLease(
     || !Number.isSafeInteger(lease.byteLength)
     || lease.byteLength < 0
   ) {
-    return diagnostic(assetRef, semanticRef, "asset-result-invalid", "asset resolverのresultが不正です。");
+    return diagnostic(assetRef, semanticRef, "asset-result-invalid", "Asset resolver returned an invalid result.");
   }
   if (definition && lease.mediaType !== definition.mediaType) {
     return diagnostic(
       assetRef,
       semanticRef,
       "asset-media-type-mismatch",
-      `取得media type ${lease.mediaType}がcatalog宣言 ${definition.mediaType}と一致しません。`,
+      `Resolved media type ${lease.mediaType} does not match catalog declaration ${definition.mediaType}.`,
     );
   }
   if (!policy.allowedMediaTypes.some((mediaType) => mediaType === lease.mediaType)) {
@@ -417,17 +417,17 @@ function validateLease(
       assetRef,
       semanticRef,
       "asset-media-type-disallowed",
-      `media typeが許可されていません: ${lease.mediaType}`,
+      `Media type is not allowed: ${lease.mediaType}`,
     );
   }
   if (!Number.isSafeInteger(policy.maxBytes) || policy.maxBytes <= 0) {
-    return diagnostic(assetRef, semanticRef, "asset-policy-invalid", "maxBytes policyが不正です。");
+    return diagnostic(assetRef, semanticRef, "asset-policy-invalid", "maxBytes policy is invalid.");
   }
   if (
     policy.maxDecodedPixels !== undefined
     && (!Number.isSafeInteger(policy.maxDecodedPixels) || policy.maxDecodedPixels <= 0)
   ) {
-    return diagnostic(assetRef, semanticRef, "asset-policy-invalid", "maxDecodedPixels policyが不正です。");
+    return diagnostic(assetRef, semanticRef, "asset-policy-invalid", "maxDecodedPixels policy is invalid.");
   }
   if (
     policy.maxConcurrentResolutions !== undefined
@@ -441,7 +441,7 @@ function validateLease(
       assetRef,
       semanticRef,
       "asset-policy-invalid",
-      `maxConcurrentResolutions policyは1〜${MAX_ASSET_RESOLUTION_CONCURRENCY}で指定してください。`,
+      `maxConcurrentResolutions policy must be between 1 and ${MAX_ASSET_RESOLUTION_CONCURRENCY}.`,
     );
   }
   if (lease.byteLength > policy.maxBytes) {
@@ -449,7 +449,7 @@ function validateLease(
       assetRef,
       semanticRef,
       "asset-byte-limit-exceeded",
-      `asset size ${lease.byteLength} bytesが上限 ${policy.maxBytes} bytesを超えています。`,
+      `Asset size ${lease.byteLength} bytes exceeds the limit ${policy.maxBytes} bytes.`,
     );
   }
 
@@ -457,14 +457,14 @@ function validateLease(
   try {
     parsed = new URL(lease.url);
   } catch {
-    return diagnostic(assetRef, semanticRef, "asset-url-invalid", "asset URLはabsolute URLである必要があります。");
+    return diagnostic(assetRef, semanticRef, "asset-url-invalid", "Asset URL must be absolute.");
   }
   if (!accessList(policy.allowedSchemes).has(parsed.protocol)) {
     return diagnostic(
       assetRef,
       semanticRef,
       "asset-url-scheme-disallowed",
-      `asset URL schemeが許可されていません: ${parsed.protocol}`,
+      `Asset URL scheme is not allowed: ${parsed.protocol}`,
     );
   }
   if (!policy.allowedOrigins.includes(parsed.origin)) {
@@ -472,7 +472,7 @@ function validateLease(
       assetRef,
       semanticRef,
       "asset-url-origin-disallowed",
-      `asset URL originが許可されていません: ${parsed.origin}`,
+      `Asset URL origin is not allowed: ${parsed.origin}`,
     );
   }
   return undefined;

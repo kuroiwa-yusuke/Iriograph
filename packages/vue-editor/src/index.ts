@@ -13,6 +13,7 @@ export * from "./authoring/structured-authoring-flow";
 export * from "./inspector/target-context-menu";
 export * from "./document/view-session";
 export * from "./authoring/type-system";
+export * from "./localization/editor-localization";
 export * from "./version";
 export { default as IriographDiagramCanvas } from "./components/DiagramCanvas.vue";
 export { default as IriographTargetContextMenu } from "./components/TargetContextMenu.vue";

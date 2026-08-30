@@ -5,6 +5,8 @@ import type {
   SemanticValidationResponse,
 } from "@iriograph/core";
 
+import { translateMockMessage, type MockLocale } from "./localization";
+
 const DEMO = "urn:iriograph:demo:";
 const RDF_TYPE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_BAG = "http://www.w3.org/1999/02/22-rdf-syntax-ns#Bag";
@@ -13,18 +15,27 @@ const RDFS_MEMBER = "http://www.w3.org/2000/01/rdf-schema#member";
 const DEMO_AUDIT_MEMBER = `${DEMO}p-03`;
 
 /** Static fixture adapter: demonstrates the port without adding a SHACL engine dependency. */
-export const mockSemanticValidationContext: ResolvedSemanticValidationContext = {
-  contextId: "urn:iriograph:mock:semantic-validation",
-  contextRevision: "1",
-  validator: {
-    async validate(request, signal) {
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-      return responseFor(request, validateRequiredLabels(request));
+export function createMockSemanticValidationContext(
+  locale: MockLocale = "en",
+): ResolvedSemanticValidationContext {
+  return {
+    contextId: "urn:iriograph:mock:semantic-validation",
+    contextRevision: `1:${locale}`,
+    validator: {
+      async validate(request, signal) {
+        if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+        return responseFor(request, validateRequiredLabels(request, locale));
+      },
     },
-  },
-};
+  };
+}
 
-function validateRequiredLabels(request: SemanticValidationRequest): SemanticValidationFinding[] {
+export const mockSemanticValidationContext = createMockSemanticValidationContext();
+
+function validateRequiredLabels(
+  request: SemanticValidationRequest,
+  locale: MockLocale,
+): SemanticValidationFinding[] {
   const labelRequired = new Set<string>();
   for (const statement of request.dataset.statements) {
     if (
@@ -54,7 +65,7 @@ function validateRequiredLabels(request: SemanticValidationRequest): SemanticVal
       findingId: `required-label:${semanticRef}`,
       severity: "error",
       code: "demo-visible-resource-label-required",
-      message: "Mockの領域と包含memberには空でないrdfs:labelが必要です。",
+      message: translateMockMessage(locale, "requiredLabel"),
       semanticRef,
       sourceRange,
     }];

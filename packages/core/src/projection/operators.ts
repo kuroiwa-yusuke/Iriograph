@@ -490,7 +490,7 @@ function projectResource(
     diagnostics.push({
       severity: "error",
       code: structuralKind === "region" ? "region-template-unresolved" : "container-template-unresolved",
-      message: `${structuralKind}表示に必要なtemplateがありません: ${plan.semanticRef}`,
+      message: `Template required to display ${structuralKind} is missing: ${plan.semanticRef}`,
       semanticRef: plan.semanticRef,
     });
     return undefined;
@@ -637,7 +637,7 @@ function projectDirectEdge(
     diagnostics.push({
       severity: "warning",
       code: "edge-endpoint-not-visible",
-      message: `${semanticRef}の接続先が現在のviewにありません。`,
+      message: `An endpoint of ${semanticRef} is not present in the current view.`,
       semanticRef,
       statementRef: semanticRef,
     });
@@ -1100,7 +1100,7 @@ function applyMembershipBindings(
       if (ordinalParents.size === 0) diagnostics.push({
         severity: "warning",
         code: "multiple-container-memberships-not-hierarchical",
-        message: `${childIri}の${hierarchicalParents.size}件のcontainer membershipはhierarchy parentへ縮約せず保持します。`,
+        message: `Preserving ${hierarchicalParents.size} container memberships for ${childIri} without reducing them to one hierarchy parent.`,
         semanticRef: childIri,
       });
       continue;
@@ -1261,7 +1261,7 @@ function overlaysForSemantic(
       diagnostics.push({
         severity: "error",
         code: "duplicate-overlay-semantic-ref",
-        message: `${overlay.semanticRef}を参照するoverlayが複数あります。`,
+        message: `Multiple overlays reference ${overlay.semanticRef}.`,
         semanticRef: overlay.semanticRef,
       });
       continue;
@@ -1284,7 +1284,7 @@ function selectTemplate(
   diagnostics.push({
     severity: "warning",
     code: requested ? "overlay-template-kind-mismatch" : "overlay-template-unresolved",
-    message: `${requestedRef}を${expectedKind}へ適用できないためcatalog既定値を使います。`,
+    message: `${requestedRef} cannot be applied to ${expectedKind}; using the catalog default.`,
     semanticRef,
     catalogRef: catalogRef(catalog),
   });

@@ -1,11 +1,56 @@
-import { describe, expect, it } from "vitest";
-import { mount, type VueWrapper } from "@vue/test-utils";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { config, mount, type VueWrapper } from "@vue/test-utils";
 
 import { statementIdentityForNamedStatement } from "@iriograph/core";
 
 import SemanticIntentPanel from "./SemanticIntentPanel.vue";
+import {
+  createStaticEditorLocalization,
+  editorLocalizationKey,
+} from "../localization/editor-localization";
+
+const previousProvide = config.global.provide;
 
 describe("SemanticIntentPanel", () => {
+  beforeAll(() => {
+    config.global.provide = {
+      ...previousProvide,
+      [editorLocalizationKey as symbol]: createStaticEditorLocalization("ja"),
+    };
+  });
+
+  afterAll(() => {
+    config.global.provide = previousProvide;
+  });
+
+  it("renders fixed presentation in English when English is selected", () => {
+    const wrapper = mount(SemanticIntentPanel, {
+      props: {
+        predicates: [{ iri: "urn:test:related", label: "Related to" }],
+        selectedEdge: {
+          label: "Related to",
+          sourceIri: "urn:test:source",
+          sourceLabel: "Source",
+          predicateIri: "urn:test:related",
+          targetIri: "urn:test:target",
+          targetLabel: "Target",
+        },
+      },
+      global: {
+        provide: {
+          [editorLocalizationKey as symbol]: createStaticEditorLocalization("en"),
+        },
+      },
+    });
+    expect(wrapper.get(".iriograph-intent-panel").attributes("aria-label")).toBe("Edit semantic graph");
+    expect(wrapper.text()).toContain("Source (Related to) Target");
+    expect(wrapper.text()).not.toContain("Source（Related to）Target");
+    expect(wrapper.findAll(".iriograph-intent-add-actions button").map((item) => item.text())).toEqual([
+      "＋Add element",
+      "→Add relation",
+    ]);
+  });
+
   it("初期状態はCanvas選択の概要と2つの追加入口だけを表示する", () => {
     const wrapper = mount(SemanticIntentPanel);
     expect(wrapper.findAll(".iriograph-intent-grid button").map((button) => button.text())).toEqual([

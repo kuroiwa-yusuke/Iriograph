@@ -18,6 +18,7 @@ import {
   generatedElementId,
   packageDefaultIconAssets,
   packageDefaultIconDataUrl,
+  packageDefaultIconLabel,
   packageDefaultIcons,
   parseSemanticGraph,
   previewDocumentRebase,
@@ -210,7 +211,11 @@ import {
 } from "../canvas/region-membership-constraints";
 import { reconcilePresentationScene } from "../canvas/presentation-scene";
 import type { EditorAssetOption } from "../assets/editor-assets";
-import type { WorkspaceLocator, WorkspaceLocatorSuggestion } from "../assets/workspace-locator";
+import type {
+  WorkspaceLocator,
+  WorkspaceLocatorResolution,
+  WorkspaceLocatorSuggestion,
+} from "../assets/workspace-locator";
 import type {
   DocumentDuplicateHandoff,
   DocumentIdentityAllocator,
@@ -224,6 +229,10 @@ import {
   type TypeSystemFocus,
   type TypeSystemShowInDiagramRequest,
 } from "../authoring/type-system";
+import {
+  provideEditorLocalization,
+  type EditorLocale,
+} from "../localization/editor-localization";
 
 type Panel = "diagram" | "types" | "turtle" | "document";
 type SelectedElement = SceneNode | SceneContainer | SceneRegion | SceneEdge;
@@ -287,6 +296,10 @@ const props = withDefaults(defineProps<{
   predicateInferencePolicy?: PredicateInferencePolicy;
   /** Host-owned safe structured clipboard; arbitrary source text is never evaluated. */
   structuredClipboard?: StructuredAuthoringClipboard;
+  /** Language used by editor chrome. English is the package default. */
+  uiLocale?: EditorLocale;
+  /** Preferred RDF label/comment languages, in priority order. Defaults to the UI locale. */
+  semanticLocales?: readonly string[];
 }>(), {
   title: "",
   filePath: "",
@@ -314,6 +327,8 @@ const props = withDefaults(defineProps<{
   runtimeContext: undefined,
   catalog: undefined,
   activeViewId: undefined,
+  uiLocale: "en",
+  semanticLocales: undefined,
 });
 
 const emit = defineEmits<{
@@ -325,7 +340,25 @@ const emit = defineEmits<{
   validationChanged: [diagnostics: ProjectionDiagnostic[]];
   pendingDraftsChanged: [pending: boolean];
   duplicatedAsNew: [handoff: DocumentDuplicateHandoff];
+  "update:uiLocale": [locale: EditorLocale];
 }>();
+
+const currentUiLocale = ref<EditorLocale>(props.uiLocale);
+watch(() => props.uiLocale, (locale) => {
+  currentUiLocale.value = locale;
+});
+const preferredSemanticLocales = computed<readonly string[]>(() => {
+  const locales = props.semanticLocales?.map((locale) => locale.trim()).filter(Boolean);
+  return locales?.length ? locales : [currentUiLocale.value];
+});
+const preferredSemanticLabelLocale = computed(() => preferredSemanticLocales.value[0] ?? currentUiLocale.value);
+const { t } = provideEditorLocalization(currentUiLocale, preferredSemanticLocales);
+
+function updateEditorLocale(event: Event): void {
+  const locale = (event.target as HTMLSelectElement).value as EditorLocale;
+  currentUiLocale.value = locale;
+  emit("update:uiLocale", locale);
+}
 
 const draft = ref<IriographDocument>(clone(props.modelValue));
 const currentActiveViewId = ref(resolveActiveViewId(draft.value, props.activeViewId));
@@ -626,8 +659,8 @@ const profileChoices = computed(() => [...(projectionRuntimeContext.value?.catal
     return {
       token: `profile-${index + 1}`,
       profileRef,
-      label: `表示プロファイル ${index + 1}`,
-      purpose: hasRegionRules ? "領域と関係" : "要素と関係",
+      label: t("editor.displayProfileNumber", { index: index + 1 }),
+      purpose: hasRegionRules ? t("editor.regionsAndRelations") : t("editor.elementsAndRelations"),
     };
   }));
 function profileTokenForRef(profileRef: string | undefined): string {
@@ -640,7 +673,7 @@ function profileRefForToken(token: string): string | undefined {
 }
 function profileDisplayLabel(profileRef: string | undefined): string {
   const choice = profileChoices.value.find((candidate) => candidate.profileRef === profileRef);
-  return choice ? `${choice.label}（${choice.purpose}）` : "表示プロファイル";
+  return choice ? `${choice.label} (${choice.purpose})` : t("editor.displayProfile");
 }
 const selectedEdge = computed(() => selectedElement.value?.structuralKind === "edge"
   ? selectedElement.value
@@ -656,8 +689,8 @@ const annotationAnchorOptions = computed(() => [
   ...scene.value.containers,
   ...(scene.value.regions ?? []),
   ...scene.value.edges,
-].map((element) => ({ elementId: element.elementId, label: element.label || "名前なし" }))
-  .sort((left, right) => left.label.localeCompare(right.label, "ja")));
+].map((element) => ({ elementId: element.elementId, label: element.label || t("semantic.unnamedElement") }))
+  .sort((left, right) => left.label.localeCompare(right.label, currentUiLocale.value)));
 const semanticMetadata = computed(() => semanticDisplayMetadata(draft.value));
 const edgeRouteModes = computed<Record<string, EdgeRouteMode>>(() => Object.fromEntries(
   scene.value.edges.map((edge) => [edge.elementId, routeModeFor(edge)]),
@@ -665,6 +698,15 @@ const edgeRouteModes = computed<Record<string, EdgeRouteMode>>(() => Object.from
 const selectedRouteMode = computed<EdgeRouteMode>(() => (
   selectedEdge.value ? routeModeFor(selectedEdge.value) : "auto"
 ));
+function routeModeLabel(mode: EdgeRouteMode): string {
+  return {
+    auto: t("editor.route.auto"),
+    straight: t("editor.route.straight"),
+    orthogonal: t("editor.route.orthogonal"),
+    curve: t("editor.route.curve"),
+    manual: t("editor.route.manual"),
+  }[mode];
+}
 const selectedWaypointEditingAvailable = computed(() => (
   selectedRouteMode.value !== "straight" && selectedRouteMode.value !== "curve"
 ));
@@ -687,15 +729,15 @@ const selectedEdgeDisplayName = computed(() => {
     && provenance.role === "sequence-transition"
     && Number.isSafeInteger(provenance.fromOrdinal)
     && Number.isSafeInteger(provenance.toOrdinal)
-  ) return `順序 ${provenance.fromOrdinal}→${provenance.toOrdinal}`;
-  return edge.label || "名前のない関係";
+  ) return t("editor.sequenceTransition", { from: provenance.fromOrdinal!, to: provenance.toOrdinal! });
+  return edge.label || t("editor.unnamedRelation");
 });
 const selectedEdgeEndpointLabels = computed(() => {
   const edge = selectedEdge.value;
-  if (!edge) return { source: "始点", target: "終点" };
+  if (!edge) return { source: t("semantic.source"), target: t("semantic.target") };
   return {
-    source: edgeEndpointLabel(edge.sourceElementId, "始点"),
-    target: edgeEndpointLabel(edge.targetElementId, "終点"),
+    source: edgeEndpointLabel(edge.sourceElementId, t("semantic.source")),
+    target: edgeEndpointLabel(edge.targetElementId, t("semantic.target")),
   };
 });
 function portOptionsFor(endpoint: "source" | "target"): VisualPort[] {
@@ -714,8 +756,11 @@ function portOptionsFor(endpoint: "source" | "target"): VisualPort[] {
 const selectedSourcePortOptions = computed(() => portOptionsFor("source"));
 const selectedTargetPortOptions = computed(() => portOptionsFor("target"));
 function portSideLabel(port: VisualPort): string {
-  const side = { top: "上", right: "右", bottom: "下", left: "左" }[port.side];
-  return `${port.label ?? "名称なし"}（${side} ${Math.round(port.position * 100)}%）`;
+  const side = {
+    top: t("editor.side.top"), right: t("editor.side.right"),
+    bottom: t("editor.side.bottom"), left: t("editor.side.left"),
+  }[port.side];
+  return `${port.label ?? t("editor.unnamed")} (${side} ${Math.round(port.position * 100)}%)`;
 }
 const regionZOrders = computed<Record<string, number>>(() => Object.fromEntries(
   (scene.value.regions ?? []).map((region, index) => [region.elementId, regionZOrderFor(region.elementId, index)]),
@@ -757,11 +802,11 @@ const structuredAuthoringPending = computed(() => (
 const currentDocumentRevision = computed(() => props.authoringContext?.documentRevision
   ?? `editor:${draft.value.documentId}:${localDocumentRevision}`);
 const documentRebaseBlockedReason = computed(() => {
-  if (props.readOnly) return "読み取り専用のため複製できません。";
-  if (!props.documentIdentityAllocator) return "Hostから新しい文書IDの発行機能が提供されていません。";
-  if (!projectionRuntimeContext.value) return "表示規則を検証できないため複製できません。";
+  if (props.readOnly) return t("editor.rebaseBlockedReadOnly");
+  if (!props.documentIdentityAllocator) return t("editor.rebaseBlockedAllocator");
+  if (!projectionRuntimeContext.value) return t("editor.rebaseBlockedRuntime");
   if (turtlePending.value || overlayPending.value || portableDocumentPending.value || structuredAuthoringPending.value) {
-    return "入力中の変更を適用または破棄してから複製してください。";
+    return t("editor.rebaseBlockedDraft");
   }
   return "";
 });
@@ -777,12 +822,12 @@ const authoringContext = computed<ResolvedAuthoringContext | undefined>(() => {
   };
 });
 const authoringBlockedReason = computed(() => {
-  if (props.readOnly) return "読み取り専用のため意味グラフを編集できません。";
+  if (props.readOnly) return t("editor.semanticBlockedReadOnly");
   if (props.semanticWriteDisabledReason) return props.semanticWriteDisabledReason;
-  if (!authoringContext.value) return "Hostからauthoring contextが提供されていません。";
-  if (portableDocumentPending.value) return "Document全体のdraftを適用または破棄してください。";
-  if (overlayPending.value) return "DocumentのView overlay draftを適用または破棄してください。";
-  if (turtlePending.value) return "未適用のTurtle draftを適用または破棄してください。";
+  if (!authoringContext.value) return t("editor.semanticBlockedContext");
+  if (portableDocumentPending.value) return t("editor.semanticBlockedDocumentDraft");
+  if (overlayPending.value) return t("editor.semanticBlockedOverlayDraft");
+  if (turtlePending.value) return t("editor.semanticBlockedTurtleDraft");
   return "";
 });
 const authoringEnabled = computed(() => !authoringBlockedReason.value);
@@ -793,11 +838,30 @@ const EMPTY_STRUCTURED_AUTHORING_PRESENTATION: StructuredAuthoringPresentation =
   predicateCatalog: [],
   capabilities: [],
 };
-const structuredPresentation = computed<StructuredAuthoringPresentation>(() => (
-  authoringContext.value
-    ? structuredAuthoringPresentation(authoringContext.value)
-    : EMPTY_STRUCTURED_AUTHORING_PRESENTATION
-));
+const structuredPresentation = computed<StructuredAuthoringPresentation>(() => {
+  if (!authoringContext.value) return EMPTY_STRUCTURED_AUTHORING_PRESENTATION;
+  const presentation = structuredAuthoringPresentation(authoringContext.value);
+  return {
+    ...presentation,
+    groupKinds: presentation.groupKinds.map((group) => ({
+      ...group,
+      label: structuredGroupKindLabel(group.groupKind),
+      description: t(`structuredFlow.groupKind.${group.groupKind}.description`),
+      ...(group.disabledReason
+        ? { disabledReason: t("structuredFlow.groupKind.classification.disabled") }
+        : {}),
+    })),
+    relationFamilies: presentation.relationFamilies.map((family) => ({
+      ...family,
+      label: t(family.family === "direct"
+        ? "structuredFlow.relationFamily.edge.label"
+        : "structuredFlow.relationFamily.group.label"),
+      description: t(family.family === "direct"
+        ? "structuredFlow.relationFamily.edge.description"
+        : "structuredFlow.relationFamily.group.description"),
+    })),
+  };
+});
 const viewScopeRootOptions = computed(() => {
   const graph = parseSemanticGraph(draft.value);
   const iris = new Set<string>();
@@ -809,22 +873,22 @@ const viewScopeRootOptions = computed(() => {
     iri,
     label: semanticMetadata.value[iri]?.labels[0]?.value
       ?? authoringContext.value?.terms.find((term) => term.iri === iri)?.label
-      ?? "名称未設定の要素",
-  })).sort((left, right) => left.label.localeCompare(right.label, "ja"));
+      ?? t("semantic.unnamedElement"),
+  })).sort((left, right) => left.label.localeCompare(right.label, currentUiLocale.value));
 });
 const typeSystemIndex = computed(() => deriveTypeSystem(draft.value, {
   authoringProfile: authoringContext.value?.structuredAuthoring,
-  locale: activeView.value?.locale ?? authoringContext.value?.defaultLocale,
+  locale: preferredSemanticLabelLocale.value,
   resourceIris: scene.value.nodes.map((node) => node.semanticRef),
-}));
+}, t));
 const viewScopeTypeOptions = computed(() => typeSystemIndex.value.presentation.types.flatMap((type) => {
   const iri = typeSystemIndex.value.resolveTypeId(type.typeId);
   return iri ? [{ iri, label: type.label }] : [];
 }));
 const viewScopePredicateOptions = computed(() => (authoringContext.value?.terms ?? [])
   .filter((term) => term.kind === "property")
-  .map((term) => ({ iri: term.iri, label: term.label ?? "名称未設定の関係" }))
-  .sort((left, right) => left.label.localeCompare(right.label, "ja")));
+  .map((term) => ({ iri: term.iri, label: term.label ?? t("editor.unnamedRelation") }))
+  .sort((left, right) => left.label.localeCompare(right.label, currentUiLocale.value)));
 const typeSystemTypeById = computed(() => new Map(
   typeSystemIndex.value.presentation.types.map((item) => [item.typeId, item]),
 ));
@@ -945,7 +1009,7 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
   const targetTypes = expandTypes(typesOf(
     authoringDraft.value.targetIri || selectedAuthoringResources.value[1]?.iri || "",
   ));
-  const labelFor = (iri: string) => semanticMetadata.value[iri]?.labels[0]?.value ?? "名前のない要素";
+  const labelFor = (iri: string) => semanticMetadata.value[iri]?.labels[0]?.value ?? t("semantic.unnamedElement");
   return terms.flatMap((term): AuthoringChoice[] => {
     const { iri, label } = term;
     const domains = relationIris(iri, rdfsDomain);
@@ -965,7 +1029,7 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
       label: label ?? semanticMetadata.value[iri]?.labels[0]?.value,
       description: term.description
         ?? semanticMetadata.value[iri]?.comments.map((item) => item.value).join("\n"),
-      category: term.category ?? (iri === rdfsSeeAlso ? "参照" : "関係"),
+      category: term.category ?? (iri === rdfsSeeAlso ? t("editor.reference") : t("common.relation")),
       example: term.examples?.[0] ?? (exampleQuad?.subject.termType === "NamedNode" && exampleQuad.object.termType === "NamedNode"
         ? `${labelFor(exampleQuad.subject.value)} → ${labelFor(exampleQuad.object.value)}`
         : undefined),
@@ -974,7 +1038,7 @@ const authoringEdgeChoices = computed<AuthoringChoice[]>(() => {
     }];
   }).sort((left, right) => (
     (right.priority ?? 0) - (left.priority ?? 0)
-    || (left.label ?? left.iri).localeCompare(right.label ?? right.iri, "ja")
+    || (left.label ?? left.iri).localeCompare(right.label ?? right.iri, currentUiLocale.value)
   ));
 });
 const authoringCapabilityChoices = computed<AuthoringCapabilityChoice[]>(() => authoringContext.value?.capabilities
@@ -1078,8 +1142,8 @@ const structuredCanvasOptions = computed<StructuredAuthoringCanvasOption[]>(() =
         : [{
             selection: selection(edge.elementId),
             kind: "direct-edge",
-            label: edge.label || "名称のない関係",
-            description: "直接つながる関係",
+            label: edge.label || t("editor.unnamedRelation"),
+            description: t("editor.directRelation"),
           }]
     )),
   ];
@@ -1138,7 +1202,7 @@ const predicateMeanings = computed<Record<string, IntentPredicateMeaning>>(() =>
   let index: SemanticAccessIndex;
   try {
     index = new SemanticAccessIndex(draft.value, revision, {
-      locales: [activeView.value?.locale, authoringContext.value?.defaultLocale]
+      locales: [...preferredSemanticLocales.value, authoringContext.value?.defaultLocale]
         .filter((value): value is string => Boolean(value)),
     });
   } catch {
@@ -1155,7 +1219,7 @@ const predicateMeanings = computed<Record<string, IntentPredicateMeaning>>(() =>
     }
     return authoringContext.value?.terms.find((term) => term.iri === iri)?.label
       ?? semanticMetadata.value[iri]?.labels[0]?.value
-      ?? "名前のない関係";
+      ?? t("editor.unnamedRelation");
   };
   return Object.fromEntries(authoringEdgeChoices.value.map((choice) => {
     const predicate = index.predicateAlias(choice.iri);
@@ -1190,8 +1254,8 @@ const structuredPredicateHierarchy = computed<StructuredPredicateHierarchyPresen
   const context = authoringContext.value;
   if (!context) return {
     predicates: [],
-    queryExplanation: "検索規則を読み込めません。",
-    validationExplanation: "検証規則を読み込めません。",
+    queryExplanation: t("editor.queryRulesUnavailable"),
+    validationExplanation: t("editor.validationRulesUnavailable"),
   };
   return structuredPredicateHierarchyPresentation(context, {
     predicates: Object.values(predicateMeanings.value).map((meaning) => ({
@@ -1225,19 +1289,19 @@ const intentEdgeDetails = computed<IntentEdgeDetails | undefined>(() => {
   let derivedReason: string | undefined;
   if (provenance?.kind === "derived-structure") {
     derivedReason = provenance.role === "sequence-transition"
-      ? "この線は並び順から自動生成されています。関係として直接編集せず、元の並び順を編集してください。"
-      : "この線は分岐構造から自動生成されています。関係として直接編集せず、元の分岐を編集してください。";
+      ? t("editor.derivedSequenceEdge")
+      : t("editor.derivedAlternativeEdge");
   } else if (!removable) {
-    derivedReason = "この線には元のRDF文を特定できる編集情報がないため、直接変更できません。";
+    derivedReason = t("editor.edgeStatementUnavailable");
   }
   return {
     label: selectedEdgeDisplayName.value,
     sourceIri: removable?.subject ?? source?.semanticRef ?? "",
-    sourceLabel: source?.label ?? "始点",
+    sourceLabel: source?.label ?? t("semantic.source"),
     predicateIri: removable?.predicate
       ?? (provenance?.kind === "predicate" ? provenance.labelSemanticRef : edge.semanticRef),
     targetIri: removable?.object ?? target?.semanticRef ?? "",
-    targetLabel: target?.label ?? "終点",
+    targetLabel: target?.label ?? t("semantic.target"),
     statementComments: (edge.statementComments ?? []).map((comment) => ({
       value: comment.value,
       ...(comment.language
@@ -1276,8 +1340,8 @@ const intentIncidentRelations = computed<IntentRelationOverview[]>(() => {
     let derivedReason: string | undefined;
     if (provenance?.kind === "derived-structure") {
       derivedReason = provenance.role === "sequence-transition"
-        ? "並び順から自動生成された表示です。"
-        : "分岐構造から自動生成された表示です。";
+        ? t("editor.derivedSequenceDisplay")
+        : t("editor.derivedAlternativeDisplay");
     }
     return [{
       edgeElementId: edge.elementId,
@@ -1291,9 +1355,9 @@ const intentIncidentRelations = computed<IntentRelationOverview[]>(() => {
       derivedReason,
     }];
   }).sort((left, right) => (
-    left.sourceLabel.localeCompare(right.sourceLabel, "ja")
-    || left.predicateLabel.localeCompare(right.predicateLabel, "ja")
-    || left.targetLabel.localeCompare(right.targetLabel, "ja")
+    left.sourceLabel.localeCompare(right.sourceLabel, currentUiLocale.value)
+    || left.predicateLabel.localeCompare(right.predicateLabel, currentUiLocale.value)
+    || left.targetLabel.localeCompare(right.targetLabel, currentUiLocale.value)
   ));
 });
 const intentMembershipOverview = computed(() => membershipOverviewForElement(
@@ -1409,11 +1473,11 @@ const intentAlternativeOptions = computed<IntentAlternativeOption[]>(() => {
     ) return [];
     const members = command.memberIris.map((iri) => ({
       iri,
-      label: resources.get(iri)?.label ?? "名前のない要素",
+      label: resources.get(iri)?.label ?? t("semantic.unnamedElement"),
     }));
     return [{
       alternativeIri: command.alternativeIri,
-      label: resources.get(command.alternativeIri)?.label ?? "名前のない分岐グループ",
+      label: resources.get(command.alternativeIri)?.label ?? t("editor.unnamedAlternativeGroup"),
       alternativeTypeIri: command.alternativeTypeIri,
       ordinalPredicatePrefix: command.ordinalPredicatePrefix,
       defaultMemberIri: command.defaultMemberIri,
@@ -1425,18 +1489,18 @@ const intentAlternativeOptions = computed<IntentAlternativeOption[]>(() => {
 });
 const authoringResourcePickerLabel = computed(() => {
   const target = authoringResourcePicker.value;
-  if (!target) return "要素";
-  if (target.field === "propertyValue") return `属性の値 ${target.index + 1}`;
+  if (!target) return t("common.element");
+  if (target.field === "propertyValue") return t("editor.propertyValueNumber", { index: target.index + 1 });
   return {
-    subjectIri: "属性を編集する要素",
-    sourceIri: "関係の始点",
-    targetIri: "関係の終点",
-    containerIri: "領域",
-    memberIri: "含まれる要素",
-    structureIri: "並び順の対象",
-    resourceIri: "削除する要素",
-    createEdgeResourceIri: "関係の相手",
-    createMembershipContainerIri: "含める領域",
+    subjectIri: t("editor.field.propertySubject"),
+    sourceIri: t("editor.field.relationSource"),
+    targetIri: t("editor.field.relationTarget"),
+    containerIri: t("semantic.container.region"),
+    memberIri: t("semantic.role.member"),
+    structureIri: t("editor.field.orderTarget"),
+    resourceIri: t("editor.field.deleteElement"),
+    createEdgeResourceIri: t("editor.field.relationPeer"),
+    createMembershipContainerIri: t("editor.field.containingRegion"),
   }[target.field];
 });
 
@@ -1468,7 +1532,7 @@ const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
       return [{
         key: structureKey("membership", matchIri, operator.membershipPredicate),
         kind: "membership",
-        label: typeLabel ? `${typeLabel}の領域に含める` : "定義済みの包含",
+        label: typeLabel ? t("editor.containmentByType", { type: typeLabel }) : t("editor.definedContainment"),
         ruleId: rule.ruleId,
         typeIri: matchIri,
         predicateIri: operator.membershipPredicate,
@@ -1478,7 +1542,7 @@ const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
       return [{
         key: structureKey("sequence", matchIri, operator.ordinalPredicatePrefix),
         kind: "sequence",
-        label: typeLabel ? `${typeLabel}の並び順` : "定義済みの並び順",
+        label: typeLabel ? t("editor.orderByType", { type: typeLabel }) : t("editor.definedOrder"),
         ruleId: rule.ruleId,
         typeIri: matchIri,
         ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
@@ -1494,8 +1558,8 @@ const authoringStructureChoices = computed<AuthoringStructureChoice[]>(() => {
         ),
         kind: "alternatives",
         label: typeLabel
-          ? `${typeLabel}の分岐（既定 ${operator.defaultOrdinal}番）`
-          : `定義済みの分岐（既定 ${operator.defaultOrdinal}番）`,
+          ? t("editor.alternativesByType", { type: typeLabel, ordinal: operator.defaultOrdinal })
+          : t("editor.definedAlternatives", { ordinal: operator.defaultOrdinal }),
         ruleId: rule.ruleId,
         typeIri: matchIri,
         ordinalPredicatePrefix: operator.ordinalPredicatePrefix,
@@ -1514,7 +1578,7 @@ function currentDraftStructureChoice(draft: EditorAuthoringDraft): AuthoringStru
     return {
       key: structureKey("membership", draft.containerTypeIri, draft.membershipPredicateIri),
       kind: "membership",
-      label: "現在の包含方法",
+      label: t("editor.currentContainment"),
       typeIri: draft.containerTypeIri,
       predicateIri: draft.membershipPredicateIri,
     };
@@ -1523,7 +1587,7 @@ function currentDraftStructureChoice(draft: EditorAuthoringDraft): AuthoringStru
     return {
       key: structureKey("sequence", draft.sequenceTypeIri, draft.ordinalPredicatePrefix),
       kind: "sequence",
-      label: "現在の並び方",
+      label: t("editor.currentOrder"),
       typeIri: draft.sequenceTypeIri,
       ordinalPredicatePrefix: draft.ordinalPredicatePrefix,
     };
@@ -1542,7 +1606,7 @@ function currentDraftStructureChoice(draft: EditorAuthoringDraft): AuthoringStru
         Number(draft.defaultOrdinal),
       ),
       kind: "alternatives",
-      label: "現在の分岐方法",
+      label: t("editor.currentAlternatives"),
       typeIri: draft.alternativeTypeIri,
       ordinalPredicatePrefix: draft.ordinalPredicatePrefix,
       defaultOrdinal: Number(draft.defaultOrdinal),
@@ -1558,42 +1622,42 @@ function authoringPreviewResourceChips(
   const add = (iri: string, role: string, fallback?: string) => {
     if (!iri && !fallback) return;
     const choice = authoringResourceChoices.value.find((item) => item.iri === iri);
-    chips.push({ iri: iri || "urn:iriograph:pending-resource", label: choice?.label || fallback || "名前のない要素", role });
+    chips.push({ iri: iri || "urn:iriograph:pending-resource", label: choice?.label || fallback || t("semantic.unnamedElement"), role });
   };
   switch (value.kind) {
     case "create-resource":
-      add(value.resourceIri, "新しい要素", value.label || "新しい要素");
-      if (value.createEdgeEnabled) add(value.createEdgeResourceIri, "相手");
-      if (value.createMembershipEnabled) add(value.createMembershipContainerIri, "領域");
+      add(value.resourceIri, t("editor.newElement"), value.label || t("editor.newElement"));
+      if (value.createEdgeEnabled) add(value.createEdgeResourceIri, t("editor.peer"));
+      if (value.createMembershipEnabled) add(value.createMembershipContainerIri, t("semantic.container.region"));
       break;
     case "set-property":
-      add(value.subjectIri, "対象");
-      for (const item of value.propertyValues) if (item.objectKind === "iri") add(item.value, "値");
+      add(value.subjectIri, t("semantic.role.target"));
+      for (const item of value.propertyValues) if (item.objectKind === "iri") add(item.value, t("editor.value"));
       break;
     case "connect-resources":
-      add(value.sourceIri, "始点");
-      add(value.targetIri, "終点");
-      for (const targetIri of value.targetIris) add(targetIri, "終点");
+      add(value.sourceIri, t("semantic.source"));
+      add(value.targetIri, t("semantic.target"));
+      for (const targetIri of value.targetIris) add(targetIri, t("semantic.target"));
       break;
     case "set-membership":
-      add(value.containerIri, "領域");
-      add(value.memberIri, "含まれる要素");
+      add(value.containerIri, t("semantic.container.region"));
+      add(value.memberIri, t("semantic.role.member"));
       break;
     case "set-sequence":
     case "set-alternatives":
-      add(value.structureIri, "対象");
-      for (const member of value.membersText.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)) add(member, "含まれる要素");
+      add(value.structureIri, t("semantic.role.target"));
+      for (const member of value.membersText.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean)) add(member, t("semantic.role.member"));
       break;
     case "delete-resource":
-      add(value.resourceIri, "削除対象");
+      add(value.resourceIri, t("editor.deletionTarget"));
       break;
     case "remove-statement":
-      add(value.statementSubject, "始点");
-      add(value.statementObject, "終点");
+      add(value.statementSubject, t("semantic.source"));
+      add(value.statementObject, t("semantic.target"));
       break;
     case "apply-capability":
       for (const [name, binding] of Object.entries(value.capabilityBindings)) {
-        if (binding.enabled && binding.objectKind === "iri") add(binding.value, `入力: ${name}`);
+        if (binding.enabled && binding.objectKind === "iri") add(binding.value, t("editor.inputName", { name }));
       }
       break;
   }
@@ -1665,35 +1729,33 @@ const semanticDocumentSummary = computed(() => {
     return { resources: 0, statements: 0, views: draft.value.views.length, baseIri: draft.value.semantic.baseIri };
   }
 });
-const heading = computed(() => props.title || props.filePath || draft.value.documentId || "Untitled");
+const heading = computed(() => props.title || props.filePath || draft.value.documentId || t("editor.untitled"));
 const stateLabel = computed(() => {
-  if (props.saving) return "保存中";
+  if (props.saving) return t("common.saving");
   if (props.saveMessage) return props.saveMessage;
-  if (structuredAuthoringPending.value) return "意味を入力中";
-  if (turtlePending.value) return "Turtleを入力中";
-  if (overlayPending.value) return "View overlayを入力中";
-  if (portableDocumentPending.value) return "Document全体を入力中";
-  return props.dirty ? "未保存" : "保存済み";
+  if (structuredAuthoringPending.value) return t("editor.editingSemantics");
+  if (turtlePending.value) return t("editor.editingTurtle");
+  if (overlayPending.value) return t("editor.editingOverlay");
+  if (portableDocumentPending.value) return t("editor.editingDocument");
+  return props.dirty ? t("editor.unsaved") : t("editor.saved");
 });
 const templateChoices = computed(() => Object.values(activeCatalog.value?.templates ?? {})
   .filter((template) => template.structuralKind === selectedElement.value?.structuralKind)
-  .sort((left, right) => templateDisplayLabel(left).localeCompare(templateDisplayLabel(right), "ja")));
+  .sort((left, right) => templateDisplayLabel(left).localeCompare(templateDisplayLabel(right), currentUiLocale.value)));
 const assetOptions = computed<EditorAssetOption[]>(() => {
   const options = new Map<string, EditorAssetOption>();
   const packageRefs = new Set(packageDefaultIcons.map((icon) => icon.assetRef));
   for (const icon of packageDefaultIcons) options.set(icon.assetRef, {
     assetRef: icon.assetRef,
-    label: icon.label,
+    label: packageDefaultIconLabel(icon, [currentUiLocale.value]),
     path: `@iriograph/core/icons/${icon.name}.svg`,
     mediaType: icon.mediaType,
   });
-  let catalogAssetOrdinal = 0;
   for (const [assetRef, definition] of Object.entries(activeCatalog.value?.assets ?? {})) {
     if (packageRefs.has(assetRef)) continue;
-    catalogAssetOrdinal += 1;
     options.set(assetRef, {
       assetRef,
-      label: assetDefinitionLabel(definition.extensions) ?? `カタログアイコン ${catalogAssetOrdinal}`,
+      label: assetDefinitionLabel(definition.extensions, assetRef),
       mediaType: definition.mediaType,
     });
   }
@@ -1701,7 +1763,7 @@ const assetOptions = computed<EditorAssetOption[]>(() => {
     if (!packageRefs.has(option.assetRef)) options.set(option.assetRef, { ...options.get(option.assetRef), ...option });
   }
   return [...options.values()].sort((left, right) => (
-    (left.label ?? left.path ?? left.assetRef).localeCompare(right.label ?? right.path ?? right.assetRef, "ja")
+    (left.label ?? left.path ?? left.assetRef).localeCompare(right.label ?? right.path ?? right.assetRef, currentUiLocale.value)
   ));
 });
 const selectedIconOption = computed(() => {
@@ -1731,13 +1793,13 @@ const workspaceAssetBreadcrumbs = computed(() => (
 ));
 const selectedIconLabel = computed(() => {
   const element = selectedElement.value;
-  if (!element || element.structuralKind === "edge" || !element.iconRef) return "アイコンなし";
+  if (!element || element.structuralKind === "edge" || !element.iconRef) return t("editor.noIcon");
   const remembered = lastIconSelection.value;
   return selectedIconOption.value?.label
     ?? (remembered?.elementId === element.elementId && remembered.assetRef === element.iconRef
       ? remembered.label
       : undefined)
-    ?? "カタログで設定されたアイコン";
+    ?? t("editor.catalogConfiguredIcon");
 });
 const selectedIconPresentation = computed(() => {
   const element = selectedElement.value;
@@ -1749,7 +1811,7 @@ const selectedIconPresentation = computed(() => {
   return {
     elementId: element.elementId,
     assetRef: element.iconRef,
-    label: selectedIconOption.value?.label ?? "選択中の画像",
+    label: selectedIconOption.value?.label ?? t("editor.selectedImage"),
     path: selectedIconOption.value?.path,
   };
 });
@@ -1784,7 +1846,7 @@ const selectedIconFrameWarning = computed(() => {
     || !metrics
     || metrics.width + 40 <= element.geometry.width && metrics.height + 32 <= element.geometry.height
   ) return "";
-  return "現在のアイコンは要素の枠より大きいため、枠も広げるかサイズを小さくしてください。";
+  return t("editor.iconTooLarge");
 });
 watch([selectedElementId, iconInputValue], () => {
   iconPathDraft.value = iconInputValue.value;
@@ -2046,7 +2108,7 @@ async function refreshScene(): Promise<void> {
         severity: "error",
         category: "profile",
         code: "profile-catalog-unresolved",
-        message: `profileの解決済みcatalogがありません: ${activeView.value?.profileRef ?? "<none>"}`,
+        message: t("editor.missingResolvedCatalog", { profile: activeView.value?.profileRef ?? "<none>" }),
       }];
     }
     if (requestToken !== sceneRequestToken) return;
@@ -2340,7 +2402,7 @@ function schemaDiagnosticsFor(
       severity: "error" as const,
       category: "profile" as const,
       code: "projection-runtime-context-missing",
-      message: "ProjectionRuntimeContextが提供されていません。",
+      message: t("editor.runtimeUnavailable"),
     }]),
     ...catalogResults.flatMap((result) => (
       result.valid ? [] : result.issues.map((issue) => schemaDiagnostic("catalog", issue))
@@ -2480,7 +2542,7 @@ function changeGeometry(payload: { elementId: string; geometry: ElementGeometry 
 
 function changeGeometryBatch(changes: readonly GeometryChange[], recordHistory = false): void {
   if (changes.length === 0) return;
-  const constrained = constrainMembershipRegionMovement(scene.value, changes);
+  const constrained = constrainMembershipRegionMovement(scene.value, changes, t);
   applyDiagnostics.value = applyDiagnostics.value.filter((diagnostic) => (
     diagnostic.code !== "membership-region-missing"
     && diagnostic.code !== "membership-region-intersection-empty"
@@ -2547,7 +2609,7 @@ function addViewAnnotation(): void {
     target.annotations ??= {};
     target.annotations[annotationId] = {
       annotationId,
-      text: "新しい注記",
+      text: t("editor.newAnnotation"),
       geometry: roundGeometry(geometry),
       ...(anchor ? { anchor: { elementId: anchor.elementId } } : {}),
     };
@@ -3454,7 +3516,7 @@ function updateIcon(event: Event): void {
   if (exactRefOption) {
     iconPathDraft.value = exactRefOption.path ?? value;
     commitIconSelection(exactRefOption.assetRef, {
-      label: exactRefOption.label ?? exactRefOption.path ?? "画像",
+      label: exactRefOption.label ?? exactRefOption.path ?? t("editor.image"),
       path: exactRefOption.path,
     });
     return;
@@ -3464,7 +3526,7 @@ function updateIcon(event: Event): void {
   if (packagePathOption) {
     iconPathDraft.value = packagePathOption.path ?? value;
     commitIconSelection(packagePathOption.assetRef, {
-      label: packagePathOption.label ?? packagePathOption.path ?? "画像",
+      label: packagePathOption.label ?? packagePathOption.path ?? t("editor.image"),
       path: packagePathOption.path,
     });
     return;
@@ -3482,7 +3544,7 @@ function updateIcon(event: Event): void {
   if (!props.workspaceLocator && pathOption) {
     iconPathDraft.value = pathOption.path ?? value;
     commitIconSelection(pathOption.assetRef, {
-      label: pathOption.label ?? pathOption.path ?? "画像",
+      label: pathOption.label ?? pathOption.path ?? t("editor.image"),
       path: pathOption.path,
     });
     return;
@@ -3490,7 +3552,9 @@ function updateIcon(event: Event): void {
   {
     input.value = iconInputValue.value;
     iconPathDraft.value = input.value;
-    iconPathIssue.value = located?.message ?? "候補にある画像pathを選択してください。";
+    iconPathIssue.value = located?.status === "rejected"
+      ? localizedWorkspaceResolutionMessage(located)
+      : t("editor.chooseSuggestedImagePath");
     rejectInvalidAssetRef(iconPathIssue.value);
     return;
   }
@@ -3517,7 +3581,9 @@ function chooseWorkspaceSuggestion(option: WorkspaceLocatorSuggestion): void {
   if (props.readOnly) return;
   const located = props.workspaceLocator?.resolve({ documentPath: props.filePath, input: option.input });
   if (located?.status !== "resolved") {
-    iconPathIssue.value = located?.message ?? "画像ファイルを選択できませんでした。";
+    iconPathIssue.value = located?.status === "rejected"
+      ? localizedWorkspaceResolutionMessage(located)
+      : t("editor.imageSelectionFailed");
     iconSelectionFeedback.value = "";
     rejectInvalidAssetRef(iconPathIssue.value);
     return;
@@ -3529,6 +3595,19 @@ function chooseWorkspaceSuggestion(option: WorkspaceLocatorSuggestion): void {
     label: stableOption?.label ?? option.label,
     path: option.input,
   });
+}
+
+function localizedWorkspaceResolutionMessage(
+  resolution: Extract<WorkspaceLocatorResolution, { status: "rejected" }>,
+): string {
+  switch (resolution.reason) {
+    case "empty": return t("workspaceLocator.pathRequired");
+    case "workspace-escape": return t("workspaceLocator.outsideWorkspace");
+    case "not-asset": return t("workspaceLocator.imageFileRequired");
+    case "not-found": return t("workspaceLocator.notFound");
+    case "ambiguous": return t("workspaceLocator.ambiguous");
+  }
+  return t("editor.imageSelectionFailed");
 }
 
 function commitIconSelection(
@@ -3550,17 +3629,17 @@ function commitIconSelection(
     path: presentation.path,
   };
   iconAssetSelectionBusy.value = true;
-  iconSelectionFeedback.value = `${presentation.label}を設定しています…`;
+  iconSelectionFeedback.value = t("editor.settingIcon", { label: presentation.label });
   const committed = updateAppearance("iconRef", assetRef);
   if (!committed) {
     iconAssetSelectionBusy.value = false;
-    iconSelectionFeedback.value = `${presentation.label}を選択中です。`;
+    iconSelectionFeedback.value = t("editor.selectingIcon", { label: presentation.label });
     return;
   }
   void committed.finally(() => {
     if (requestToken !== iconAssetSelectionRequestToken || selectedElementId.value !== element.elementId) return;
     iconAssetSelectionBusy.value = false;
-    iconSelectionFeedback.value = `${presentation.label}をアイコンに設定しました。`;
+    iconSelectionFeedback.value = t("editor.iconSet", { label: presentation.label });
   });
 }
 
@@ -3571,7 +3650,7 @@ function clearIconSelection(): void {
   lastIconSelection.value = undefined;
   iconPathDraft.value = "";
   iconPathIssue.value = "";
-  iconSelectionFeedback.value = "アイコンを外しました。";
+  iconSelectionFeedback.value = t("editor.iconCleared");
   updateAppearance("iconRef", undefined);
 }
 
@@ -3591,7 +3670,7 @@ async function chooseAssetIcon(): Promise<void> {
   pickerAbortController = controller;
   pickingAsset.value = true;
   iconPathIssue.value = "";
-  iconSelectionFeedback.value = "画像ファイルを参照しています…";
+  iconSelectionFeedback.value = t("editor.browsingImage");
   const elementId = element.elementId;
   try {
     const result = await picker({
@@ -3606,24 +3685,24 @@ async function chooseAssetIcon(): Promise<void> {
       || selectedElementId.value !== elementId
     ) return;
     if (result.status === "cancelled") {
-      iconSelectionFeedback.value = "画像ファイルの選択をキャンセルしました。";
+      iconSelectionFeedback.value = t("editor.imageSelectionCancelled");
       return;
     }
     const assetRef = normalizePickedAssetRef(result.assetRef);
     if (!assetRef) {
-      iconPathIssue.value = "画像ファイルを選択できませんでした。";
+      iconPathIssue.value = t("editor.imageSelectionFailed");
       iconSelectionFeedback.value = "";
-      rejectInvalidAssetRef("asset pickerがabsolute IRIを返しませんでした。", element.semanticRef);
+      rejectInvalidAssetRef(t("editor.assetPickerInvalid"), element.semanticRef);
       return;
     }
     const option = assetOptions.value.find((candidate) => candidate.assetRef === assetRef);
     commitIconSelection(assetRef, {
-      label: option?.label ?? "参照した画像",
+      label: option?.label ?? t("editor.browsedImage"),
       path: option?.path,
     });
   } catch (cause) {
     if (requestToken !== pickerRequestToken || controller.signal.aborted) return;
-    iconPathIssue.value = "画像ファイルを参照できませんでした。再試行してください。";
+    iconPathIssue.value = t("editor.imageBrowseFailed");
     iconSelectionFeedback.value = "";
     applyDiagnostics.value = [{
       severity: "warning",
@@ -3702,12 +3781,13 @@ function changeNodeIconPresentation(
     node,
     payload.size,
     payload.geometry,
+    t,
   );
   if (constrained.issue && !constrained.geometry) {
     applyDiagnostics.value = [{
       severity: "warning",
       code: constrained.issue.code,
-      message: `${constrained.issue.message} 所属する枠を広げるか、アイコンを小さくしてください。`,
+      message: `${constrained.issue.message} ${t("editor.adjustFrameOrIcon")}`,
       semanticRef: node.semanticRef,
     }];
     return;
@@ -3997,7 +4077,7 @@ function updateAuthoringDraft(next: EditorAuthoringDraft): void {
 function previewIntentDraft(next: EditorAuthoringDraft, operationLabel: string): void {
   if (props.readOnly) return;
   updateAuthoringDraft(next);
-  const commands = compileAuthoringDraft(clone(next), activeView.value?.viewId ?? "");
+  const commands = compileAuthoringDraft(clone(next), activeView.value?.viewId ?? "", t);
   const creationPresentation = next.kind === "create-resource" && next.createTemplateRef
     ? {
         templateRef: next.createTemplateRef,
@@ -4037,7 +4117,7 @@ async function executeIntentCommands(
     applyDiagnostics.value = [{
       severity: "warning",
       code: "authoring-no-change",
-      message: "変更する項目を選んでから、もう一度実行してください。",
+      message: t("editor.chooseChangeTarget"),
     }];
     return;
   }
@@ -4099,8 +4179,8 @@ async function executeIntentCommands(
 async function handleTypeSystemAction(action: TypeSystemAction): Promise<void> {
   const compiled = typeSystemIndex.value.compileAction(action, {
     commandId: `${structuredRequestId.value}:type-list`,
-    defaultLocale: authoringContext.value?.defaultLocale ?? activeView.value?.locale,
-  });
+    defaultLocale: preferredSemanticLabelLocale.value,
+  }, t);
   if (!compiled.ok) {
     applyDiagnostics.value = [{
       severity: "error",
@@ -4117,7 +4197,7 @@ async function handleTypeSystemAction(action: TypeSystemAction): Promise<void> {
     );
     return;
   }
-  await executeIntentCommands([...compiled.batch.commands], "型一覧", []);
+  await executeIntentCommands([...compiled.batch.commands], t("editor.typeList"), []);
 }
 
 async function requestTypeSystemDeletion(
@@ -4188,11 +4268,11 @@ function typeSystemDeletionImpacts(preview: AuthoringPreview, typeId: string): D
     const label = typeSystemResourceByIri.value.get(subjectIri)?.label
       ?? typeByIri.get(subjectIri)?.label
       ?? semanticMetadata.value[subjectIri]?.labels[0]?.value
-      ?? "名前のない要素";
+      ?? t("semantic.unnamedElement");
     return [{
       key: `type-reference:${change.statementRef}`,
       kind: "type-reference",
-      label: `${label}からの型参照`,
+      label: t("editor.typeReferenceFrom", { label }),
     }];
   }).filter((impact, index, impacts) => (
     impacts.findIndex((candidate) => candidate.key === impact.key) === index
@@ -4266,7 +4346,7 @@ function useIntentSelfTarget(sourceIri: string): void {
   next.sourceIri = sourceIri;
   next.targetIri = sourceIri;
   authoringResourcePicker.value = undefined;
-  pendingAuthoringGuidance.value = "始点自身への関係を明示的に選びました。関係の種類を確認してください。";
+  pendingAuthoringGuidance.value = t("editor.selfRelationSelected");
   updateAuthoringDraft(next);
 }
 
@@ -4306,9 +4386,9 @@ function seedSemanticEdgeEndpoint(payload: {
     ...nextStatement,
     comments: (edge.statementComments ?? []).map((item) => ({ kind: "literal", ...item })),
   }];
-  void executeIntentCommands(commands, `${edge.label}の接続先を変更`, [
-    { iri: nextStatement.subjectIri, label: "始点", role: "始点" },
-    { iri: nextStatement.objectIri, label: "終点", role: "終点" },
+  void executeIntentCommands(commands, t("editor.changeEndpointOf", { label: edge.label }), [
+    { iri: nextStatement.subjectIri, label: t("semantic.source"), role: t("semantic.source") },
+    { iri: nextStatement.objectIri, label: t("semantic.target"), role: t("semantic.target") },
   ]);
 }
 
@@ -4356,12 +4436,16 @@ function deletionImpacts(preview: AuthoringPreview, selectedIds: ReadonlySet<str
       ...(edge.labelProvenance?.sourceStatementRefs ?? []),
     ]);
     if (selectedIds.has(edge.elementId) || ![...refs].some((ref) => removedRefs.has(ref))) continue;
-    const source = geometryElement(edge.sourceElementId)?.label ?? "始点";
-    const target = geometryElement(edge.targetElementId)?.label ?? "終点";
+    const source = geometryElement(edge.sourceElementId)?.label ?? t("semantic.source");
+    const target = geometryElement(edge.targetElementId)?.label ?? t("semantic.target");
     impacts.push({
       key: `edge:${edge.elementId}`,
       kind: "relation",
-      label: `${source}（${edge.label || "関係"}）${target}`,
+      label: t("editor.relationImpact", {
+        source,
+        relation: edge.label || t("common.relation"),
+        target,
+      }),
     });
   }
   for (const membership of scene.value.memberships ?? []) {
@@ -4372,18 +4456,18 @@ function deletionImpacts(preview: AuthoringPreview, selectedIds: ReadonlySet<str
       ...(membership.regionElementId ? [membership.regionElementId] : []),
     ];
     if (representedIds.every((elementId) => selectedIds.has(elementId))) continue;
-    const container = geometryElement(membership.containerElementId)?.label ?? "領域";
-    const member = geometryElement(membership.memberElementId)?.label ?? "要素";
+    const container = geometryElement(membership.containerElementId)?.label ?? t("semantic.container.region");
+    const member = geometryElement(membership.memberElementId)?.label ?? t("common.element");
     impacts.push({
       key: `membership:${membership.semanticRef}:${membership.ordinal ?? 0}`,
       kind: membership.role === "sequence-member"
         ? "sequence"
         : membership.role === "alternative-member" ? "alternative" : "membership",
       label: membership.role === "sequence-member"
-        ? `${container} の ${membership.ordinal ?? "?"}番「${member}」`
+        ? t("editor.sequenceMemberImpact", { container, ordinal: membership.ordinal ?? "?", member })
         : membership.role === "alternative-member"
-          ? `${container} の選択肢 ${membership.ordinal ?? "?"}番「${member}」`
-        : `${container} に含まれる「${member}」`,
+          ? t("editor.alternativeMemberImpact", { container, ordinal: membership.ordinal ?? "?", member })
+        : t("editor.membershipImpact", { container, member }),
     });
   }
   return impacts.filter((impact, index) => (
@@ -4402,7 +4486,7 @@ async function requestSemanticDeletion(elementId?: string): Promise<void> {
     applyDiagnostics.value = [{
       severity: "warning",
       code: "selection-delete-unavailable",
-      message: "この表示は元の関係を直接削除できません。元の所属・並び順を選んで編集してください。",
+      message: t("editor.derivedDeleteUnavailable"),
     }];
     return;
   }
@@ -4591,10 +4675,10 @@ function seedSemanticEdit(elementId: string): void {
 
 function structuredGroupKindLabel(kind: StructuredGroupKind): string {
   return {
-    classification: "分類グループ",
-    membership: "包含グループ",
-    sequence: "順序付きグループ",
-    alternative: "候補グループ",
+    classification: t("editor.group.classification"),
+    membership: t("editor.group.membership"),
+    sequence: t("editor.group.sequence"),
+    alternative: t("editor.group.alternative"),
   }[kind];
 }
 
@@ -4894,7 +4978,7 @@ function structuredRequestIsCurrent(
       diagnostics: [{
         severity: "warning",
         code: "structured-authoring-stale",
-        message: "編集中に図が更新されました。現在の内容を確認して、もう一度実行してください。",
+        message: t("editor.diagramChangedDuringEdit"),
       }],
     });
   }
@@ -5049,7 +5133,7 @@ const targetContextEntries = computed(() => {
     isGroupCollapsed: Boolean(targetElementId
       && sessionFor(currentActiveViewId.value).collapsedGroupElementIds.has(targetElementId)),
     deleteDisabledReason: authoringBlockedReason.value || undefined,
-  });
+  }, t);
 });
 
 function openContextMenu(request: DiagramContextMenuRequest): void {
@@ -5389,7 +5473,7 @@ function applyContainmentPresentationFix(
 }
 
 function containmentElementLabel(elementId: string): string {
-  return geometryElement(elementId)?.label ?? "名前のない要素";
+  return geometryElement(elementId)?.label ?? t("semantic.unnamedElement");
 }
 
 function edgeEndpointLabel(elementId: string, fallback: string): string {
@@ -5398,12 +5482,19 @@ function edgeEndpointLabel(elementId: string, fallback: string): string {
 
 function containmentWarningMessage(warning: ContainmentConsistencyWarning): string {
   if (warning.kind === "visual-only") {
-    return `${containmentElementLabel(warning.elementId)} は見た目上 ${containmentElementLabel(warning.visualContainerId)} の中ですが、意味上の包含はありません。`;
+    return t("editor.visualContainmentOnly", {
+      element: containmentElementLabel(warning.elementId),
+      container: containmentElementLabel(warning.visualContainerId),
+    });
   }
   const visual = warning.visualContainerId && warning.visualContainerId !== warning.semanticContainerId
-    ? ` 現在は見た目上 ${containmentElementLabel(warning.visualContainerId)} にあります。`
+    ? t("editor.currentVisualContainer", { container: containmentElementLabel(warning.visualContainerId) })
     : "";
-  return `${containmentElementLabel(warning.elementId)} は意味上 ${containmentElementLabel(warning.semanticContainerId)} の配下ですが、領域内に収まっていません。${visual}`;
+  return t("editor.semanticContainmentOutside", {
+    element: containmentElementLabel(warning.elementId),
+    container: containmentElementLabel(warning.semanticContainerId),
+    visual,
+  });
 }
 
 function seedFromProvenance(
@@ -5513,7 +5604,7 @@ function seedDraftResource(semanticRef: string): void {
       && next.sourceIri === semanticRef
     ) {
       next.targetIri = "";
-      pendingAuthoringGuidance.value = "通常の終点には始点とは別の要素を選んでください。自身へ接続する場合は右の明示操作を使います。";
+      pendingAuthoringGuidance.value = t("editor.chooseDifferentTarget");
       updateAuthoringDraft(next);
       return;
     }
@@ -5531,7 +5622,7 @@ function seedDraftResource(semanticRef: string): void {
   if (activeSemanticIntent.value === "add-relation" && target.field === "sourceIri") {
     next.targetIri = "";
     authoringResourcePicker.value = { field: "targetIri" };
-    pendingAuthoringGuidance.value = "続けて、始点とは別の終点をクリックしてください。";
+    pendingAuthoringGuidance.value = t("editor.chooseTargetNext");
   } else {
     authoringResourcePicker.value = undefined;
     pendingAuthoringGuidance.value = "";
@@ -5580,9 +5671,9 @@ function authoringFailureDiagnostic(code: string, cause: unknown): ProjectionDia
 }
 
 function layoutPurposeLabel(layoutRef: string | undefined): string {
-  if (layoutRef && layoutDirectionForRef(layoutRef) === "LR") return "左から右へ自動配置";
-  if (layoutRef && layoutDirectionForRef(layoutRef) === "TB") return "上から下へ自動配置";
-  return layoutRef ? "自動配置" : "配置方法なし";
+  if (layoutRef && layoutDirectionForRef(layoutRef) === "LR") return t("editor.layoutLeftRight");
+  if (layoutRef && layoutDirectionForRef(layoutRef) === "TB") return t("editor.layoutTopBottom");
+  return layoutRef ? t("editor.autoLayout") : t("editor.noLayout");
 }
 
 async function applyTurtleDraft(): Promise<boolean> {
@@ -5591,8 +5682,8 @@ async function applyTurtleDraft(): Promise<boolean> {
     panel.value = "document";
     portableDocumentEditorIssues.value = [{
       path: "/",
-      message: "Document全体に未適用の変更があります。",
-      action: "Document全体を適用するか元に戻してから、Turtleを編集してください。",
+      message: t("editor.documentDraftPending"),
+      action: t("editor.applyDocumentBeforeTurtle"),
     }];
     return false;
   }
@@ -5600,19 +5691,19 @@ async function applyTurtleDraft(): Promise<boolean> {
     panel.value = "document";
     overlayEditorIssues.value = [{
       path: "View overlay",
-      message: "未適用のView overlay draftがあります。",
-      action: "View overlayを適用するか元に戻してから、Turtleを適用してください。",
+      message: t("editor.overlayDraftPending"),
+      action: t("editor.applyOverlayBeforeTurtle"),
     }];
     return false;
   }
   if (structuredAuthoringPending.value) {
     pendingAuthoringGuidance.value = pendingDeletion.value
-      ? "削除の影響確認を完了するか、キャンセルしてください。"
-      : "意味の変更が入力中です。実行するか、キャンセルしてください。";
+      ? t("editor.finishDeleteConfirmation")
+      : t("editor.finishSemanticEdit");
     applyDiagnostics.value = [{
       severity: "error",
       code: "pending-structured-authoring",
-      message: "意味編集を実行またはキャンセルしてからTurtleを適用してください。",
+      message: t("editor.finishSemanticBeforeTurtle"),
     }];
     return false;
   }
@@ -5659,7 +5750,7 @@ async function applyTurtleDraft(): Promise<boolean> {
               severity: "error",
               category: "profile",
               code: "projection-runtime-context-missing",
-              message: "ProjectionRuntimeContextが提供されていません。",
+              message: t("editor.runtimeUnavailable"),
             }],
           };
   } catch (cause) {
@@ -5681,7 +5772,7 @@ async function applyTurtleDraft(): Promise<boolean> {
     applyDiagnostics.value = [{
       severity: "error",
       code: "semantic-transaction-stale",
-      message: "編集中にdocumentが変更されたためTurtle transactionを適用しませんでした。",
+      message: t("editor.documentChangedTurtleRejected"),
     }];
     return false;
   }
@@ -5746,8 +5837,8 @@ async function applyOverlayDrafts(
   if (portableDocumentPending.value) {
     portableDocumentEditorIssues.value = [{
       path: "/",
-      message: "Document全体に未適用の変更があります。",
-      action: "Document全体を適用するか元に戻してから、View overlayを編集してください。",
+      message: t("editor.documentDraftPending"),
+      action: t("editor.applyDocumentBeforeOverlay"),
     }];
     return false;
   }
@@ -5765,8 +5856,8 @@ async function applyOverlayDrafts(
     if (!previousView) {
       issues.push({
         path: `view:${viewId}`,
-        message: "編集対象の名前付きビューが文書に存在しません。",
-        action: "現在存在するviewを選び直してdraftを破棄してください。",
+        message: t("editor.namedViewMissing"),
+        action: t("editor.selectExistingView"),
       });
       continue;
     }
@@ -5774,8 +5865,8 @@ async function applyOverlayDrafts(
     if (base !== undefined && base !== JSON.stringify(previousView.overlay)) {
       issues.push({
         path: `view:${viewId}`,
-        message: "draft作成後にCanvasまたは別操作からView overlayが変更されました。",
-        action: "現在値を保持するには元に戻してから編集し直してください。draftを優先する場合は一度JSONを退避して再入力してください。",
+        message: t("editor.overlayChangedDuringDraft"),
+        action: t("editor.overlayConflictAction"),
       });
       continue;
     }
@@ -5852,8 +5943,8 @@ async function applyPortableDocumentDraft(): Promise<boolean> {
   if (portableDocumentDraftBase.value !== JSON.stringify(previous)) {
     portableDocumentEditorIssues.value = [{
       path: "/",
-      message: "文書全体の下書き作成後に、Canvasまたは別の編集から文書が変更されました。",
-      action: "現在の文書を元に戻してから、退避したJSONを貼り直してください。",
+      message: t("editor.documentChangedDuringDraft"),
+      action: t("editor.documentConflictAction"),
     }];
     return false;
   }
@@ -5884,8 +5975,8 @@ async function applyPortableCandidate(
   if (!runtime) {
     const issue = {
       path: "/",
-      message: "表示規則を解決できないため文書全体を検証できません。",
-      action: "HostからProjectionRuntimeContextを提供してから再度適用してください。",
+      message: t("editor.documentValidationRuntimeMissing"),
+      action: t("editor.provideRuntimeAndRetry"),
     };
     if (typeof candidate === "string") portableDocumentEditorIssues.value = [issue];
     else overlayEditorIssues.value = [issue];
@@ -5925,7 +6016,7 @@ async function applyPortableCandidate(
     const issue: OverlayEditorIssue = {
       path: "/",
       message: cause instanceof Error ? cause.message : String(cause),
-      action: "入力内容とHostの検証設定を確認してから再度適用してください。",
+      action: t("editor.reviewInputAndValidation"),
     };
     if (source === "document") portableDocumentEditorIssues.value = [issue];
     else overlayEditorIssues.value = [issue];
@@ -5945,20 +6036,23 @@ function setPortableIssues(
 }
 
 function portableDiagnosticIssue(diagnostic: ProjectionDiagnostic): OverlayEditorIssue {
-  const guidance = diagnosticGuidance(diagnostic);
+  const guidance = diagnosticGuidance(diagnostic, t);
   const containmentAction = isBlockingOverlayContainmentDiagnostic(diagnostic)
-    ? "含まれる要素の全体を、所属するすべての領域の共通部分へ収めてください。"
+    ? t("editor.regionMemberOutsideAction")
     : undefined;
   return {
     path: safeDiagnosticPath(diagnostic.jsonPointer),
     message: guidance.title,
-    action: `${containmentAction ?? guidance.action}（${guidance.detail}）`,
+    action: t("common.actionDetail", {
+      action: containmentAction ?? guidance.action,
+      detail: guidance.detail,
+    }),
   };
 }
 
 function safeDiagnosticPath(path: string | undefined): string {
   if (!path) return "/";
-  return /(?:https?:|urn:|[a-z][a-z0-9+.-]*:[^/])/iu.test(path) ? "対象項目" : path;
+  return /(?:https?:|urn:|[a-z][a-z0-9+.-]*:[^/])/iu.test(path) ? t("diagnostic.locator.targetItem") : path;
 }
 
 function commitPortableReplacement(next: IriographDocument, previous: IriographDocument): void {
@@ -5979,9 +6073,9 @@ function cancelPortableDocumentRequest(): void {
 async function copyPortableDocument(): Promise<void> {
   try {
     await navigator.clipboard.writeText(JSON.stringify(draft.value, null, 2));
-    portableDocumentCopyMessage.value = "同じdocumentIdとbaseの文書JSONをコピーしました。";
+    portableDocumentCopyMessage.value = t("editor.documentCopied");
   } catch {
-    portableDocumentCopyMessage.value = "コピーできませんでした。Document全体のJSONを選択してコピーしてください。";
+    portableDocumentCopyMessage.value = t("editor.documentCopyFailed");
   }
 }
 
@@ -6001,7 +6095,7 @@ async function prepareDocumentRebase(event?: Event): Promise<void> {
   if (!currentValidation.valid) {
     documentRebaseIssues.value = currentValidation.issues.map((issue) => ({
       path: issue.instancePath || "/",
-      message: "現在の文書形式では新しい図として複製できません。",
+      message: t("editor.rebaseUnsupportedDocument"),
       action: issue.message,
     }));
     return;
@@ -6023,15 +6117,15 @@ async function prepareDocumentRebase(event?: Event): Promise<void> {
     });
     if (token !== documentIdentityRequestToken || controller.signal.aborted || props.readOnly) return;
     if (!allocation) {
-      documentRebaseIssues.value = [{ path: "/documentId", message: "新しい文書IDを発行できませんでした。", action: "Hostの文書作成機能を確認して再試行してください。" }];
+      documentRebaseIssues.value = [{ path: "/documentId", message: t("editor.documentIdAllocationFailed"), action: t("editor.checkHostCreation") }];
       return;
     }
     if (allocation.requestId !== requestId || allocation.documentRevision !== revision) {
-      documentRebaseIssues.value = [{ path: "/documentId", message: "古い文書ID発行結果は使用しませんでした。", action: "現在の文書でもう一度「新しい図として複製」を実行してください。" }];
+      documentRebaseIssues.value = [{ path: "/documentId", message: t("editor.staleDocumentIdentityIgnored"), action: t("editor.retryRebaseCurrent") }];
       return;
     }
     if (JSON.stringify(draft.value) !== previousFingerprint || currentDocumentRevision.value !== revision) {
-      documentRebaseIssues.value = [{ path: "/", message: "ID発行中に文書が変更されました。", action: "変更を保存してから複製をやり直してください。" }];
+      documentRebaseIssues.value = [{ path: "/", message: t("editor.documentChangedDuringIdentity"), action: t("editor.saveAndRetryRebase") }];
       return;
     }
     const preview = await previewDocumentRebase(previous, {
@@ -6052,8 +6146,8 @@ async function prepareDocumentRebase(event?: Event): Promise<void> {
   } catch (cause) {
     documentRebaseIssues.value = [{
       path: "/documentId",
-      message: "新しい図の準備に失敗しました。",
-    action: "Hostの文書作成機能と現在の文書状態を確認して再試行してください。",
+      message: t("editor.rebasePreparationFailed"),
+    action: t("editor.checkHostAndDocument"),
     }];
   } finally {
     if (token === documentIdentityRequestToken) {
@@ -6121,7 +6215,7 @@ function handleDocumentRebaseDialogKeydown(event: KeyboardEvent): void {
 function rebaseTermLabel(iri: string): string {
   return semanticMetadata.value[iri]?.labels[0]?.value
     ?? authoringContext.value?.terms.find((term) => term.iri === iri)?.label
-    ?? "名前のない要素";
+    ?? t("semantic.unnamedElement");
 }
 
 function parseOverlayDraft(
@@ -6138,8 +6232,8 @@ function parseOverlayDraft(
   if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
     overlayEditorIssues.value = [{
       path: `view:${viewId}.overlay`,
-      message: "View overlayの最上位はJSON objectである必要があります。",
-      action: "要素IDをkey、overlay設定をvalueにした { ... } 形式へ直してください。",
+      message: t("editor.overlayRootMustBeObject"),
+      action: t("editor.overlayObjectAction"),
     }];
     return undefined;
   }
@@ -6155,12 +6249,12 @@ function jsonParseIssue(cause: unknown, source: string): OverlayEditorIssue {
     const before = source.slice(0, offset);
     const line = before.split("\n").length;
     const column = offset - before.lastIndexOf("\n");
-    path = `${line}行 ${column}列`;
+    path = t("editor.lineColumn", { line, column });
   }
   return {
     path,
-    message: "JSONを解析できません。",
-    action: "引用符、カンマ、波括弧の対応を確認してから再度適用してください。",
+    message: t("editor.jsonParseFailed"),
+    action: t("editor.jsonParseAction"),
   };
 }
 
@@ -6196,12 +6290,12 @@ async function requestSave(): Promise<void> {
 async function flushPendingEdits(): Promise<boolean> {
   if (structuredAuthoringPending.value) {
     pendingAuthoringGuidance.value = pendingDeletion.value
-      ? "削除の影響確認を完了するか、キャンセルしてください。"
-      : "意味の変更が入力中です。実行するか、キャンセルしてください。";
+      ? t("editor.finishDeleteConfirmation")
+      : t("editor.finishSemanticEdit");
     applyDiagnostics.value = [{
       severity: "error",
       code: "pending-structured-authoring",
-      message: "意味の変更が入力中です。右の意味編集で実行するか、キャンセルしてください。",
+      message: t("editor.finishSemanticInSidebar"),
     }];
     inspectorMode.value = "semantic";
     rightSidebarCollapsed.value = false;
@@ -6495,7 +6589,7 @@ async function executeViewCommand(command: ViewCommand): Promise<boolean> {
       severity: "error",
       category: "projection",
       code: "view-command-semantic-draft-pending",
-      message: "未適用のsemanticまたはView overlay draftを適用または破棄してからviewを変更してください。",
+      message: t("editor.applyDraftBeforeViewChange"),
     }];
     return false;
   }
@@ -6505,7 +6599,7 @@ async function executeViewCommand(command: ViewCommand): Promise<boolean> {
       severity: "error",
       category: "profile",
       code: "projection-runtime-context-missing",
-      message: "ProjectionRuntimeContextが提供されていません。",
+      message: t("editor.runtimeUnavailable"),
     }];
     return false;
   }
@@ -7002,37 +7096,37 @@ function compactRef(value: string): string {
 }
 
 function fileNameFromPath(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? "画像";
+  return path.split("/").filter(Boolean).at(-1) ?? t("editor.image");
 }
 
 function templateDisplayLabel(template: VisualTemplate, fallbackOrdinal?: number): string {
   const token = compactRef(template.templateRef);
   const labels: Record<string, string> = {
-    generic: "汎用",
-    choice: "判断",
-    class: "概念",
-    property: "関係定義",
-    "start-event": "開始",
-    "user-task": "人の作業",
-    "service-task": "自動処理",
-    gateway: "分岐",
-    "end-event": "終了",
-    reference: "参照",
-    lane: "領域",
-    region: "領域",
-    sequence: "順序グループ",
+    generic: t("editor.template.generic"),
+    choice: t("editor.template.choice"),
+    class: t("editor.template.class"),
+    property: t("editor.template.property"),
+    "start-event": t("editor.template.startEvent"),
+    "user-task": t("editor.template.userTask"),
+    "service-task": t("editor.template.serviceTask"),
+    gateway: t("editor.template.gateway"),
+    "end-event": t("editor.template.endEvent"),
+    reference: t("editor.reference"),
+    lane: t("semantic.container.region"),
+    region: t("semantic.container.region"),
+    sequence: t("editor.group.sequence"),
   };
-  return labels[token] ?? `表示形式${fallbackOrdinal ? ` ${fallbackOrdinal}` : ""}`;
+  return labels[token] ?? t("editor.displayTemplateNumber", { number: fallbackOrdinal ? ` ${fallbackOrdinal}` : "" });
 }
 
 function templateShapeLabel(template: VisualTemplate): string {
-  if (template.structuralKind === "container") return "枠でまとめる";
-  if (template.structuralKind === "region") return "重なり領域";
+  if (template.structuralKind === "container") return t("editor.template.containerPreview");
+  if (template.structuralKind === "region") return t("editor.template.regionPreview");
   return {
-    rectangle: "四角",
-    "rounded-rectangle": "角丸",
-    circle: "円",
-    diamond: "ひし形",
+    rectangle: t("editor.shape.rectangle"),
+    "rounded-rectangle": t("editor.shape.rounded"),
+    circle: t("editor.shape.circle"),
+    diamond: t("editor.shape.diamond"),
   }[template.shape ?? "rounded-rectangle"];
 }
 
@@ -7040,9 +7134,17 @@ function templatePreviewIconUrl(template: VisualTemplate): string | undefined {
   return template.iconRef ? packageDefaultIconDataUrl(template.iconRef) : undefined;
 }
 
-function assetDefinitionLabel(extensions: Record<string, unknown> | undefined): string | undefined {
-  const value = Object.entries(extensions ?? {}).find(([key]) => key.endsWith("#label"))?.[1];
-  return typeof value === "string" ? value : undefined;
+function assetDefinitionLabel(
+  extensions: Record<string, unknown> | undefined,
+  assetRef: string,
+): string {
+  const labelKey = "https://iriograph.dev/ns/package-icon#label";
+  const localized = extensions?.[`${labelKey}:${currentUiLocale.value}`];
+  if (typeof localized === "string") return localized;
+  const primary = extensions?.[`${labelKey}:en`];
+  if (typeof primary === "string") return primary;
+  const legacy = extensions?.[labelKey];
+  return typeof legacy === "string" ? legacy : assetRef;
 }
 
 function packageIconPreviewUrl(assetRef: string): string | undefined {
@@ -7139,6 +7241,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
   <article
     class="iriograph-editor"
     tabindex="-1"
+    :lang="currentUiLocale"
     :data-iriograph-package-version="IRIOGRAPH_EDITOR_PACKAGE_VERSION"
     :data-iriograph-capabilities="IRIOGRAPH_EDITOR_CAPABILITIES.join(',')"
     @keydown="handleKeydown"
@@ -7151,10 +7254,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </div>
       <div class="iriograph-editor-header-status">
         <span :class="['iriograph-validation-pill', { error: errorCount > 0 }]">
-          {{ errorCount > 0 ? `問題 ${errorCount}件` : "検証済み" }}
+          {{ errorCount > 0 ? t("editor.validationIssues", { count: errorCount }) : t("common.validated") }}
         </span>
         <button type="button" :disabled="!canSave || saving || applyingTurtle || applyingOverlay || authoringBusy" @click="requestSave">
-          {{ saving ? "保存中…" : "保存" }}
+          {{ saving ? t("common.saving") : t("common.save") }}
         </button>
       </div>
     </header>
@@ -7169,35 +7272,35 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       <button
         type="button"
         class="iriograph-sidebar-toggle iriograph-left-sidebar-toggle"
-        :aria-label="leftSidebarCollapsed ? '左サイドバーを開く' : '左サイドバーを閉じる'"
+        :aria-label="leftSidebarCollapsed ? t('editor.openLeftSidebar') : t('editor.closeLeftSidebar')"
         :aria-expanded="!leftSidebarCollapsed"
         :aria-controls="leftSidebarId"
         @click="toggleLeftSidebar"
       >{{ leftSidebarCollapsed ? '›' : '‹' }}</button>
       <aside v-show="!leftSidebarCollapsed" :id="leftSidebarId" class="iriograph-elements-panel">
         <section class="iriograph-view-summary">
-          <small>表示中のビュー</small>
+          <small>{{ t("editor.visibleView") }}</small>
           <select
             v-if="draft.views.length > 1"
             :value="activeView?.viewId ?? ''"
             :disabled="viewCommandBusy"
-            aria-label="名前付きビュー"
+            :aria-label="t('editor.namedView')"
             @change="requestActiveView"
           >
             <option v-for="view in draft.views" :key="view.viewId" :value="view.viewId">
               {{ view.viewId }}
             </option>
           </select>
-          <strong v-else class="iriograph-single-view-name" aria-label="名前付きビュー">{{ activeView?.viewId }}</strong>
-          <button type="button" class="iriograph-view-manage-button" aria-label="ビューを管理" :disabled="viewCommandBusy" @click="openManageViewDialog">…</button>
+          <strong v-else class="iriograph-single-view-name" :aria-label="t('editor.namedView')">{{ activeView?.viewId }}</strong>
+          <button type="button" class="iriograph-view-manage-button" :aria-label="t('editor.manageViews')" :disabled="viewCommandBusy" @click="openManageViewDialog">…</button>
           <div>
-            <span><b>{{ scene.nodes.length }}</b> 要素</span>
-            <span><b>{{ scene.edges.length }}</b> 関係</span>
-            <span><b>{{ scene.containers.length + (scene.regions?.length ?? 0) }}</b> 領域</span>
+            <span><b>{{ scene.nodes.length }}</b> {{ t("common.elements") }}</span>
+            <span><b>{{ scene.edges.length }}</b> {{ t("common.relations") }}</span>
+            <span><b>{{ scene.containers.length + (scene.regions?.length ?? 0) }}</b> {{ t("common.groups") }}</span>
           </div>
         </section>
-        <nav class="iriograph-element-list" aria-label="図の要素">
-          <small>図の要素</small>
+        <nav class="iriograph-element-list" :aria-label="t('editor.diagramElements')">
+          <small>{{ t("editor.diagramElements") }}</small>
           <button
             v-for="container in scene.containers"
             :key="container.elementId"
@@ -7205,7 +7308,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :class="{ active: selectedElementIdsSet.has(container.elementId) }"
             @click="selectAndReveal(container.elementId, $event)"
           >
-            <i>▣</i><span><b>{{ container.label }}</b><small>領域</small></span>
+            <i>▣</i><span><b>{{ container.label }}</b><small>{{ t("editor.groupFrame") }}</small></span>
           </button>
           <button
             v-for="node in scene.nodes"
@@ -7214,45 +7317,52 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :class="{ active: selectedElementIdsSet.has(node.elementId) }"
             @click="selectAndReveal(node.elementId, $event)"
           >
-            <i>●</i><span><b>{{ node.label }}</b><small>要素</small></span>
+            <i>●</i><span><b>{{ node.label }}</b><small>{{ t("common.element") }}</small></span>
           </button>
         </nav>
-        <details class="iriograph-fallback-note"><summary>技術情報</summary><p>表示規則に未登録の関係は通常矢印で表示します。</p></details>
+        <details class="iriograph-fallback-note"><summary>{{ t("editor.technicalInformation") }}</summary><p>{{ t("editor.unknownRelationFallback") }}</p></details>
       </aside>
 
       <main class="iriograph-main-surface">
-        <nav class="iriograph-view-tabs" aria-label="図と型・source表示を切り替え" role="group">
-          <button type="button" :class="{ active: panel === 'diagram' }" :aria-pressed="panel === 'diagram'" @click="panel = 'diagram'">図</button>
-          <button type="button" :class="{ active: panel === 'types' }" :aria-pressed="panel === 'types'" @click="panel = 'types'">型一覧</button>
+        <nav class="iriograph-view-tabs" :aria-label="t('editor.switchPanels')" role="group">
+          <button type="button" :class="{ active: panel === 'diagram' }" :aria-pressed="panel === 'diagram'" @click="panel = 'diagram'">{{ t("editor.diagram") }}</button>
+          <button type="button" :class="{ active: panel === 'types' }" :aria-pressed="panel === 'types'" @click="panel = 'types'">{{ t("editor.typeList") }}</button>
           <button type="button" :class="{ active: panel === 'turtle' }" :aria-pressed="panel === 'turtle'" @click="panel = 'turtle'">≡ Turtle</button>
           <button type="button" :class="{ active: panel === 'document' }" :aria-pressed="panel === 'document'" @click="panel = 'document'">{ } Document</button>
+          <label class="iriograph-editor-locale-control">
+            <span>{{ t("locale.control.label") }}</span>
+            <select :value="currentUiLocale" :aria-label="t('locale.control.label')" @change="updateEditorLocale">
+              <option value="en">{{ t("locale.name.en") }}</option>
+              <option value="ja">{{ t("locale.name.ja") }}</option>
+            </select>
+          </label>
         </nav>
 
         <section v-show="panel === 'diagram'" class="iriograph-diagram-panel">
           <div class="iriograph-canvas-toolbar">
             <div class="iriograph-history-actions">
-              <button type="button" :disabled="!canUndo || readOnly" title="Undo (Ctrl/Cmd+Z)" @click="undo">↶</button>
-              <button type="button" :disabled="!canRedo || readOnly" title="Redo (Ctrl/Cmd+Y)" @click="redo">↷</button>
+              <button type="button" :disabled="!canUndo || readOnly" :title="t('editor.undoTitle')" @click="undo">↶</button>
+              <button type="button" :disabled="!canRedo || readOnly" :title="t('editor.redoTitle')" @click="redo">↷</button>
               <span />
               <small>{{ layoutPurposeLabel(activeView?.layoutRef) }}</small>
             </div>
-            <div class="iriograph-drag-mode-actions" role="group" aria-label="Canvasドラッグモード">
-              <button type="button" :aria-pressed="canvasDragMode === 'select'" title="空白や枠内をドラッグして範囲選択" @click="setCanvasDragMode('select')">範囲選択</button>
-              <button type="button" :aria-pressed="canvasDragMode === 'pan'" title="空白や枠内をドラッグしてCanvasを移動" @click="setCanvasDragMode('pan')">移動</button>
+            <div class="iriograph-drag-mode-actions" role="group" :aria-label="t('editor.canvasDragMode')">
+              <button type="button" :aria-pressed="canvasDragMode === 'select'" :title="t('editor.rangeSelectTitle')" @click="setCanvasDragMode('select')">{{ t("editor.rangeSelect") }}</button>
+              <button type="button" :aria-pressed="canvasDragMode === 'pan'" :title="t('editor.panTitle')" @click="setCanvasDragMode('pan')">{{ t("editor.pan") }}</button>
             </div>
             <div class="iriograph-navigation-actions">
               <button
                 type="button"
                 :aria-pressed="showAllComments"
-                :title="showAllComments ? '説明をhover時だけ表示' : 'すべての説明を表示'"
+                :title="showAllComments ? t('editor.hoverCommentsTitle') : t('editor.showAllCommentsTitle')"
                 @click="showAllComments = !showAllComments"
-              >{{ showAllComments ? '説明を隠す' : '説明を表示' }}</button>
-              <button type="button" :disabled="readOnly" title="このビューだけの注記を追加" @click="addViewAnnotation">＋ 注記</button>
-              <button type="button" aria-label="全体を表示" title="Fit to view" @click="fitToView">▣</button>
+              >{{ showAllComments ? t('editor.hideComments') : t('editor.showComments') }}</button>
+              <button type="button" :disabled="readOnly" :title="t('editor.addAnnotationTitle')" @click="addViewAnnotation">{{ t("editor.addAnnotation") }}</button>
+              <button type="button" :aria-label="t('editor.fitAll')" :title="t('editor.fitToViewTitle')" @click="fitToView">▣</button>
               <button
                 type="button"
-                aria-label="選択要素へ移動"
-                title="選択要素をviewportへ表示"
+                :aria-label="t('editor.revealSelection')"
+                :title="t('editor.revealSelectionTitle')"
                 :disabled="!selectedElementId"
                 @click="revealSelection"
               >
@@ -7260,62 +7370,62 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               </button>
             </div>
             <div class="iriograph-zoom-actions">
-              <button type="button" aria-label="縮小" @click="zoomTo(zoom - 0.1)">−</button>
+              <button type="button" :aria-label="t('editor.zoomOut')" @click="zoomTo(zoom - 0.1)">−</button>
               <button type="button" class="zoom-value" @click="zoomTo(1)">{{ Math.round(zoom * 100) }}%</button>
-              <button type="button" aria-label="拡大" @click="zoomTo(zoom + 0.1)">＋</button>
-              <select aria-label="Canvas倍率" :value="zoomListValue" @change="handleZoomListChange">
+              <button type="button" :aria-label="t('editor.zoomIn')" @click="zoomTo(zoom + 0.1)">＋</button>
+              <select :aria-label="t('editor.canvasZoom')" :value="zoomListValue" @change="handleZoomListChange">
                 <option v-if="zoomListValue.startsWith('current:')" :value="zoomListValue">{{ Math.round(zoom * 100) }}%</option>
                 <option v-for="preset in zoomPresets" :key="preset" :value="`zoom:${preset}`">{{ Math.round(preset * 100) }}%</option>
-                <option value="fit:view">全体を表示</option>
-                <option value="fit:selection" :disabled="selectedElementIds.length === 0">選択へfit</option>
+                <option value="fit:view">{{ t("editor.fitAll") }}</option>
+                <option value="fit:selection" :disabled="selectedElementIds.length === 0">{{ t("editor.fitSelection") }}</option>
               </select>
             </div>
           </div>
-          <div class="iriograph-selection-toolbar" aria-label="選択・配置ツール">
+          <div class="iriograph-selection-toolbar" :aria-label="t('editor.selectionTools')">
             <div class="iriograph-selection-actions">
-              <span aria-live="polite">{{ selectedElementIds.length }} selected</span>
-              <button type="button" aria-label="すべて選択" title="Select all (Ctrl/Cmd+A)" @click="selectAll">全選択</button>
-              <button type="button" aria-label="選択を解除" title="Clear selection (Escape)" :disabled="selectedElementIds.length === 0" @click="clearSelection">解除</button>
-              <button type="button" :disabled="selectedElementIds.length === 0" @click="hideSelectionTemporarily">一時非表示</button>
+              <span aria-live="polite">{{ t("common.selectedCount", { count: selectedElementIds.length }) }}</span>
+              <button type="button" :aria-label="t('editor.selectAll')" :title="t('editor.selectAllTitle')" @click="selectAll">{{ t("editor.selectAll") }}</button>
+              <button type="button" :aria-label="t('editor.clearSelection')" :title="t('editor.clearSelectionTitle')" :disabled="selectedElementIds.length === 0" @click="clearSelection">{{ t("editor.clearSelection") }}</button>
+              <button type="button" :disabled="selectedElementIds.length === 0" @click="hideSelectionTemporarily">{{ t("editor.hideTemporarily") }}</button>
               <button type="button" :disabled="temporaryHiddenCount === 0" @click="showAllTemporaryHidden">
-                再表示<span v-if="temporaryHiddenCount"> ({{ temporaryHiddenCount }})</span>
+                {{ t("editor.showAgain") }}<span v-if="temporaryHiddenCount"> ({{ temporaryHiddenCount }})</span>
               </button>
-              <button type="button" :disabled="selectedCollapsibleGroupIds.length === 0" @click="collapseSelectedGroups">折り畳む</button>
+              <button type="button" :disabled="selectedCollapsibleGroupIds.length === 0" @click="collapseSelectedGroups">{{ t("editor.collapse") }}</button>
               <button type="button" :disabled="collapsedGroupCount === 0" @click="expandAllGroups">
-                展開<span v-if="collapsedGroupCount"> ({{ collapsedGroupCount }})</span>
+                {{ t("editor.expand") }}<span v-if="collapsedGroupCount"> ({{ collapsedGroupCount }})</span>
               </button>
             </div>
             <div class="iriograph-arrange-actions">
-              <button type="button" aria-label="左揃え" :disabled="!canAlignSelection" @click="alignSelected('left')">左</button>
-              <button type="button" aria-label="左右中央揃え" :disabled="!canAlignSelection" @click="alignSelected('center')">↔中</button>
-              <button type="button" aria-label="右揃え" :disabled="!canAlignSelection" @click="alignSelected('right')">右</button>
-              <button type="button" aria-label="上揃え" :disabled="!canAlignSelection" @click="alignSelected('top')">上</button>
-              <button type="button" aria-label="上下中央揃え" :disabled="!canAlignSelection" @click="alignSelected('middle')">↕中</button>
-              <button type="button" aria-label="下揃え" :disabled="!canAlignSelection" @click="alignSelected('bottom')">下</button>
-              <button type="button" aria-label="水平方向に等間隔" :disabled="!canDistributeSelection" @click="distributeSelected('horizontal')">横等間隔</button>
-              <button type="button" aria-label="垂直方向に等間隔" :disabled="!canDistributeSelection" @click="distributeSelected('vertical')">縦等間隔</button>
+              <button type="button" :aria-label="t('editor.alignLeft')" :disabled="!canAlignSelection" @click="alignSelected('left')">←</button>
+              <button type="button" :aria-label="t('editor.alignCenter')" :disabled="!canAlignSelection" @click="alignSelected('center')">↔</button>
+              <button type="button" :aria-label="t('editor.alignRight')" :disabled="!canAlignSelection" @click="alignSelected('right')">→</button>
+              <button type="button" :aria-label="t('editor.alignTop')" :disabled="!canAlignSelection" @click="alignSelected('top')">↑</button>
+              <button type="button" :aria-label="t('editor.alignMiddle')" :disabled="!canAlignSelection" @click="alignSelected('middle')">↕</button>
+              <button type="button" :aria-label="t('editor.alignBottom')" :disabled="!canAlignSelection" @click="alignSelected('bottom')">↓</button>
+              <button type="button" :aria-label="t('editor.distributeHorizontal')" :disabled="!canDistributeSelection" @click="distributeSelected('horizontal')">↔</button>
+              <button type="button" :aria-label="t('editor.distributeVertical')" :disabled="!canDistributeSelection" @click="distributeSelected('vertical')">↕</button>
             </div>
-            <div class="iriograph-snap-actions" aria-label="スナップ設定">
+            <div class="iriograph-snap-actions" :aria-label="t('editor.snapSettings')">
               <button
                 type="button"
-                aria-label="グリッドsnap"
+                :aria-label="t('editor.gridSnap')"
                 :aria-pressed="snapSettings.grid.enabled"
                 @click="setSnapSettings({ grid: { ...snapSettings.grid, enabled: !snapSettings.grid.enabled } })"
-              >グリッド</button>
+              >{{ t("editor.grid") }}</button>
               <input
                 type="number"
                 min="1"
                 max="128"
                 :value="snapSettings.grid.size"
-                aria-label="グリッドサイズ"
+                :aria-label="t('editor.gridSize')"
                 @change="updateSnapGridSize"
               />
               <button
                 type="button"
-                aria-label="要素snap"
+                :aria-label="t('editor.elementSnap')"
                 :aria-pressed="snapSettings.targets.enabled"
                 @click="setSnapSettings({ targets: { ...snapSettings.targets, enabled: !snapSettings.targets.enabled } })"
-              >要素</button>
+              >{{ t("common.element") }}</button>
             </div>
           </div>
           <div
@@ -7325,10 +7435,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :role="!sceneLoading && sceneError ? 'alert' : 'status'"
             :aria-live="!sceneLoading && sceneError ? 'assertive' : 'polite'"
           >
-            <b>{{ sceneLoading ? "図を更新中…" : "図を表示できません" }}</b>
-            <span v-if="!sceneLoading && sceneError">{{ diagnosticGuidance(sceneError).title }} {{ diagnosticGuidance(sceneError).action }}</span>
+            <b>{{ sceneLoading ? t("editor.sceneUpdating") : t("editor.sceneUnavailable") }}</b>
+            <span v-if="!sceneLoading && sceneError">{{ diagnosticGuidance(sceneError, t).title }} {{ diagnosticGuidance(sceneError, t).action }}</span>
             <details v-if="!sceneLoading && sceneError">
-              <summary>技術情報</summary>
+              <summary>{{ t("editor.technicalInformation") }}</summary>
               <code>{{ sceneError.code }}</code> {{ sceneError.message }}
             </details>
           </div>
@@ -7347,7 +7457,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :semantic-resource-picking="Boolean(authoringResourcePicker)"
             :semantic-resource-pick-label="authoringResourcePickerLabel"
             :structured-selection-picking="Boolean(structuredCanvasPicker)"
-            :structured-selection-pick-label="structuredCanvasPicker?.role ?? '対象'"
+            :structured-selection-pick-label="structuredCanvasPicker?.role ?? t('editor.target')"
             :semantic-draft-position="authoringDraftPosition"
             :containment-warning-element-ids="containmentWarningElementIds"
             :semantic-metadata="semanticMetadata"
@@ -7404,11 +7514,11 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           <header>
             <div>
               <small>{{ panel.toUpperCase() }}</small>
-              <strong v-if="panel === 'turtle'">Semantic source</strong>
-              <strong v-else>Portable document</strong>
+              <strong v-if="panel === 'turtle'">{{ t("editor.semanticSource") }}</strong>
+              <strong v-else>{{ t("editor.portableDocument") }}</strong>
             </div>
-            <span v-if="panel === 'turtle'">LLM-visible boundary</span>
-            <span v-else>意味とビュー設定</span>
+            <span v-if="panel === 'turtle'">{{ t("editor.llmVisibleBoundary") }}</span>
+            <span v-else>{{ t("editor.semanticAndViewSettings") }}</span>
           </header>
           <template v-if="panel === 'turtle'">
             <textarea
@@ -7416,72 +7526,72 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               v-model="turtleDraft"
               :readonly="readOnly || Boolean(semanticWriteDisabledReason) || structuredAuthoringPending || portableDocumentPending"
               spellcheck="false"
-              aria-label="Turtle source"
+              :aria-label="t('editor.turtleSource')"
             />
             <footer class="iriograph-source-actions">
               <div>
                 <span v-if="errorCount" class="error">{{ errorCount }} error</span>
                 <span v-if="warningCount">{{ warningCount }} warning</span>
-                <span v-if="turtlePending">未適用のTurtle draft</span>
+                <span v-if="turtlePending">{{ t("editor.pendingTurtle") }}</span>
               </div>
               <div>
-                <button type="button" :disabled="!turtlePending" @click="revertTurtleDraft">元に戻す</button>
+                <button type="button" :disabled="!turtlePending" @click="revertTurtleDraft">{{ t("editor.revert") }}</button>
                 <button type="button" class="primary" :disabled="!turtlePending || readOnly || Boolean(semanticWriteDisabledReason) || applyingTurtle || structuredAuthoringPending" @click="applyTurtleDraft">
-                  {{ applyingTurtle ? "適用中…" : semanticWarningConfirmation ? "警告を確認して適用" : "検証して適用" }}
+                  {{ applyingTurtle ? t("editor.applying") : semanticWarningConfirmation ? t("editor.confirmWarningsAndApply") : t("editor.validateAndApply") }}
                 </button>
               </div>
             </footer>
             <ul v-if="diagnostics.length" class="iriograph-diagnostics">
               <li v-for="(diagnostic, index) in diagnostics" :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`" :class="diagnostic.severity">
-                  <span><b>{{ diagnosticGuidance(diagnostic).title }}</b> {{ diagnosticGuidance(diagnostic).action }}<details><summary>技術的な詳細</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic).detail }}</details></span>
+                  <span><b>{{ diagnosticGuidance(diagnostic, t).title }}</b> {{ diagnosticGuidance(diagnostic, t).action }}<details><summary>{{ t("editor.technicalInformation") }}</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic, t).detail }}</details></span>
                 <span class="iriograph-diagnostic-actions">
-                  <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">ソースで確認</button>
-                  <button v-if="sceneElementForDiagnostic(diagnostic)" type="button" @click="navigateDiagnosticToScene(diagnostic)">図で確認</button>
+                  <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">{{ t("editor.checkSource") }}</button>
+                  <button v-if="sceneElementForDiagnostic(diagnostic)" type="button" @click="navigateDiagnosticToScene(diagnostic)">{{ t("editor.checkDiagram") }}</button>
                 </span>
               </li>
             </ul>
           </template>
           <template v-else>
             <section class="iriograph-document-sources">
-              <section class="iriograph-document-semantic-summary" aria-label="意味の要約">
-                <div><small>意味の正本</small><strong>{{ semanticDocumentSummary.resources }}要素・{{ semanticDocumentSummary.statements }}文</strong><span>{{ semanticDocumentSummary.views }} 名前付きビュー</span></div>
-                <p>Turtle全文の重複表示はしません。意味の編集と検証はTurtleタブで行います。</p>
-                <button type="button" @click="panel = 'turtle'">Turtleタブを開く</button>
+              <section class="iriograph-document-semantic-summary" :aria-label="t('editor.semanticSummary')">
+                <div><small>{{ t("editor.semanticAuthority") }}</small><strong>{{ t("editor.semanticSummaryCounts", { resources: semanticDocumentSummary.resources, statements: semanticDocumentSummary.statements }) }}</strong><span>{{ t("editor.namedViewCount", { count: semanticDocumentSummary.views }) }}</span></div>
+                <p>{{ t("editor.documentSemanticSummaryHint") }}</p>
+                <button type="button" @click="panel = 'turtle'">{{ t("editor.openTurtleTab") }}</button>
               </section>
-              <section class="iriograph-document-identity-actions" aria-label="文書のコピー">
-                <div><strong>文書をコピー</strong><small>同じ文書のJSONコピーはidentityを維持します。別の図として使う場合だけ文書内の識別子を安全に付け替えます。</small></div>
-                <button type="button" @click="copyPortableDocument">同じ文書JSONをコピー</button>
-                <button type="button" :disabled="Boolean(documentRebaseBlockedReason) || allocatingDocumentIdentity" :title="documentRebaseBlockedReason" @click="prepareDocumentRebase">{{ allocatingDocumentIdentity ? '準備中…' : '新しい図として複製' }}</button>
+              <section class="iriograph-document-identity-actions" :aria-label="t('editor.copyDocument')">
+                <div><strong>{{ t("editor.copyDocument") }}</strong><small>{{ t("editor.copyDocumentHint") }}</small></div>
+                <button type="button" @click="copyPortableDocument">{{ t("editor.copySameDocumentJson") }}</button>
+                <button type="button" :disabled="Boolean(documentRebaseBlockedReason) || allocatingDocumentIdentity" :title="documentRebaseBlockedReason" @click="prepareDocumentRebase">{{ allocatingDocumentIdentity ? t('editor.preparing') : t('editor.duplicateAsNewDiagram') }}</button>
                 <small v-if="documentRebaseBlockedReason">{{ documentRebaseBlockedReason }}</small>
                 <span v-if="portableDocumentCopyMessage" role="status">{{ portableDocumentCopyMessage }}</span>
               </section>
               <details class="iriograph-document-source-section" open>
-                <summary><span>View overlay</span><small>{{ activeView?.viewId }}の表示差分。Turtleは変更しません。</small></summary>
+                <summary><span>View overlay</span><small>{{ t("editor.viewOverlayHint", { view: activeView?.viewId ?? "" }) }}</small></summary>
                 <section class="iriograph-overlay-source">
                   <textarea
                     v-model="activeOverlayDraft"
                     :readonly="readOnly || applyingOverlay || structuredAuthoringPending || portableDocumentPending"
                     spellcheck="false"
-                    aria-label="View overlay JSON"
+                    :aria-label="t('editor.viewOverlayJson')"
                   />
                   <footer class="iriograph-source-actions">
-                    <div><span v-if="overlayEditorIssues.length" class="error">{{ overlayEditorIssues.length }} error</span><span v-if="overlayPending">未適用のView overlay draft</span></div>
-                    <div><button type="button" :disabled="readOnly || applyingOverlay" @click="formatActiveOverlayDraft">JSONを整形</button><button type="button" :disabled="!overlayDraftTouched[activeView?.viewId ?? ''] || applyingOverlay" @click="revertActiveOverlayDraft">元に戻す</button><button type="button" class="primary" :disabled="!overlayDraftTouched[activeView?.viewId ?? ''] || readOnly || applyingOverlay || structuredAuthoringPending || portableDocumentPending" @click="applyOverlayDrafts()">{{ applyingOverlay ? "適用中…" : "検証して適用" }}</button></div>
+                    <div><span v-if="overlayEditorIssues.length" class="error">{{ t("common.errorCount", { count: overlayEditorIssues.length }) }}</span><span v-if="overlayPending">{{ t("editor.pendingOverlay") }}</span></div>
+                    <div><button type="button" :disabled="readOnly || applyingOverlay" @click="formatActiveOverlayDraft">{{ t("editor.formatJson") }}</button><button type="button" :disabled="!overlayDraftTouched[activeView?.viewId ?? ''] || applyingOverlay" @click="revertActiveOverlayDraft">{{ t("editor.revert") }}</button><button type="button" class="primary" :disabled="!overlayDraftTouched[activeView?.viewId ?? ''] || readOnly || applyingOverlay || structuredAuthoringPending || portableDocumentPending" @click="applyOverlayDrafts()">{{ applyingOverlay ? t("editor.applying") : t("editor.validateAndApply") }}</button></div>
                   </footer>
                   <ul v-if="overlayEditorIssues.length" class="iriograph-diagnostics iriograph-overlay-diagnostics" role="alert"><li v-for="(issue, index) in overlayEditorIssues" :key="`${issue.path}:${index}`" class="error"><span><b>{{ issue.path }}</b> {{ issue.message }}<small>{{ issue.action }}</small></span></li></ul>
                 </section>
               </details>
               <details class="iriograph-document-source-section" open>
-                <summary><span>文書全体</span><small>コピー・貼り付け用のJSON。意味と全名前付きビューを一括置換します。</small></summary>
+                <summary><span>{{ t("editor.wholeDocument") }}</span><small>{{ t("editor.wholeDocumentHint") }}</small></summary>
                 <section class="iriograph-document-boundary">
                   <textarea
                     :value="portableDocumentDraft"
                     :readonly="readOnly || applyingPortableDocument || structuredAuthoringPending || turtlePending || overlayPending"
                     spellcheck="false"
-                    aria-label="Portable document JSON"
+                    :aria-label="t('editor.portableDocumentJson')"
                     @input="updatePortableDocumentDraft(($event.target as HTMLTextAreaElement).value)"
                   />
-                  <footer class="iriograph-source-actions"><div><span v-if="portableDocumentEditorIssues.length" class="error">{{ portableDocumentEditorIssues.length }}件のエラー</span><span v-if="portableDocumentPending">文書全体に未適用の変更があります</span></div><div><button type="button" :disabled="readOnly || applyingPortableDocument" @click="formatPortableDocumentDraft">JSONを整形</button><button type="button" :disabled="!portableDocumentDraftTouched || applyingPortableDocument" @click="revertPortableDocumentDraft">元に戻す</button><button type="button" class="primary" :disabled="!portableDocumentPending || readOnly || applyingPortableDocument || structuredAuthoringPending || turtlePending || overlayPending" @click="applyPortableDocumentDraft">{{ applyingPortableDocument ? '全ビューを検証中…' : '文書全体を検証して適用' }}</button></div></footer>
+                  <footer class="iriograph-source-actions"><div><span v-if="portableDocumentEditorIssues.length" class="error">{{ t("common.errorCount", { count: portableDocumentEditorIssues.length }) }}</span><span v-if="portableDocumentPending">{{ t("editor.documentDraftPending") }}</span></div><div><button type="button" :disabled="readOnly || applyingPortableDocument" @click="formatPortableDocumentDraft">{{ t("editor.formatJson") }}</button><button type="button" :disabled="!portableDocumentDraftTouched || applyingPortableDocument" @click="revertPortableDocumentDraft">{{ t("editor.revert") }}</button><button type="button" class="primary" :disabled="!portableDocumentPending || readOnly || applyingPortableDocument || structuredAuthoringPending || turtlePending || overlayPending" @click="applyPortableDocumentDraft">{{ applyingPortableDocument ? t('editor.validatingAllViews') : t('editor.validateAndApplyDocument') }}</button></div></footer>
                   <ul v-if="portableDocumentEditorIssues.length" class="iriograph-diagnostics iriograph-overlay-diagnostics" role="alert"><li v-for="(issue, index) in portableDocumentEditorIssues" :key="`${issue.path}:${index}`" class="error"><span><b>{{ issue.path }}</b> {{ issue.message }}<small>{{ issue.action }}</small></span></li></ul>
                 </section>
               </details>
@@ -7491,16 +7601,16 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       </main>
 
       <aside v-show="!rightSidebarCollapsed" :id="rightSidebarId" class="iriograph-inspector">
-        <nav class="iriograph-inspector-mode-tabs" aria-label="編集する情報">
-          <button type="button" :class="{ selected: inspectorMode === 'semantic' }" :aria-pressed="inspectorMode === 'semantic'" @click="inspectorMode = 'semantic'">意味</button>
-          <button type="button" :class="{ selected: inspectorMode === 'appearance' }" :aria-pressed="inspectorMode === 'appearance'" @click="inspectorMode = 'appearance'">ビュー</button>
+        <nav class="iriograph-inspector-mode-tabs" :aria-label="t('editor.informationToEdit')">
+          <button type="button" :class="{ selected: inspectorMode === 'semantic' }" :aria-pressed="inspectorMode === 'semantic'" @click="inspectorMode = 'semantic'">{{ t("common.semantic") }}</button>
+          <button type="button" :class="{ selected: inspectorMode === 'appearance' }" :aria-pressed="inspectorMode === 'appearance'" @click="inspectorMode = 'appearance'">{{ t("common.view") }}</button>
         </nav>
         <section v-if="inspectorMode === 'semantic' && selectedAnnotation?.annotationKind === 'semantic-literal'" class="iriograph-semantic-annotation-inspector">
-          <small>意味グラフの注記</small>
+          <small>{{ t("editor.semanticAnnotation") }}</small>
           <strong>{{ selectedAnnotation.text }}</strong>
-          <span v-if="selectedAnnotation.language">言語: {{ selectedAnnotation.language }}</span>
-          <span v-if="selectedAnnotation.datatypeIri">データ型: {{ selectedAnnotation.datatypeIri }}</span>
-          <p>本文はTurtleのliteralが正本です。接続先の要素詳細からlabel/commentを編集できます。</p>
+          <span v-if="selectedAnnotation.language">{{ t("editor.languageValue", { value: selectedAnnotation.language }) }}</span>
+          <span v-if="selectedAnnotation.datatypeIri">{{ t("editor.datatypeValue", { value: selectedAnnotation.datatypeIri }) }}</span>
+          <p>{{ t("editor.semanticAnnotationHint") }}</p>
         </section>
         <SemanticIntentPanel
           v-if="inspectorMode === 'semantic' && semanticDestination"
@@ -7517,7 +7627,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           :predicates="authoringEdgeChoices"
           :predicate-meanings="predicateMeanings"
           :predicate-inference-policy="predicateInferencePolicy"
-          :default-locale="authoringContext?.defaultLocale"
+          :default-locale="preferredSemanticLabelLocale"
           :memberships="intentMembershipOptions"
           :sequences="intentSequenceOptions"
           :alternatives="intentAlternativeOptions"
@@ -7538,9 +7648,9 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
           @draft-state-change="semanticIntentDraftPending = $event"
         />
         <template v-else-if="inspectorMode === 'semantic'">
-          <section v-if="selectedElement" class="iriograph-semantic-selection-context" aria-label="Canvasの選択">
-            <span><small>Canvasの選択</small><strong>{{ selectedElement.label }}</strong></span>
-            <small>{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択中。次の操作へまとめて引き継ぎます。` : '次の操作では、この対象を最初から選択済みにします。' }}</small>
+          <section v-if="selectedElement" class="iriograph-semantic-selection-context" :aria-label="t('semantic.selection')">
+            <span><small>{{ t("semantic.selection") }}</small><strong>{{ selectedElement.label }}</strong></span>
+            <small>{{ selectedElementIds.length > 1 ? t("editor.selectionCarriedCount", { count: selectedElementIds.length }) : t("editor.selectionCarriedSingle") }}</small>
           </section>
           <StructuredAuthoringWizard
             :state="structuredAuthoringState"
@@ -7560,50 +7670,50 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         </template>
         <div v-show="inspectorMode === 'appearance'" class="iriograph-display-inspector">
         <section class="iriograph-grid-visibility">
-          <label><span>Canvasグリッド</span><button type="button" :aria-pressed="showCanvasGrid" @click="showCanvasGrid = !showCanvasGrid">{{ showCanvasGrid ? '表示中' : '非表示' }}</button></label>
-          <small>Snap間隔 {{ snapSettings.grid.size }}。表示設定はファイルへ保存しません。</small>
+          <label><span>{{ t("editor.canvasGrid") }}</span><button type="button" :aria-pressed="showCanvasGrid" @click="showCanvasGrid = !showCanvasGrid">{{ showCanvasGrid ? t('editor.visible') : t('editor.hidden') }}</button></label>
+          <small>{{ t("editor.gridStatusHint", { size: snapSettings.grid.size }) }}</small>
         </section>
-        <section v-if="selectedAnnotation" class="iriograph-annotation-inspector" aria-label="注記の編集">
+        <section v-if="selectedAnnotation" class="iriograph-annotation-inspector" :aria-label="t('editor.editAnnotation')">
           <header>
-            <div><small>{{ selectedAnnotation.annotationKind === 'view' ? 'このビューだけの注記' : '意味グラフの注記' }}</small><strong>注記</strong></div>
+            <div><small>{{ selectedAnnotation.annotationKind === 'view' ? t('editor.viewAnnotation') : t('editor.semanticAnnotation') }}</small><strong>{{ t("editor.annotation") }}</strong></div>
           </header>
           <template v-if="selectedViewAnnotation">
-            <label><span>本文</span><textarea :value="selectedViewAnnotation.text" rows="5" :disabled="readOnly" @change="updateAnnotationText" /></label>
-            <label><span>表示上の接続先</span><select :value="selectedViewAnnotation.anchor?.elementId ?? ''" :disabled="readOnly" @change="updateAnnotationAnchor"><option value="">接続しない</option><option v-for="option in annotationAnchorOptions" :key="option.elementId" :value="option.elementId">{{ option.label }}</option></select></label>
+            <label><span>{{ t("editor.body") }}</span><textarea :value="selectedViewAnnotation.text" rows="5" :disabled="readOnly" @change="updateAnnotationText" /></label>
+            <label><span>{{ t("editor.visualAnchor") }}</span><select :value="selectedViewAnnotation.anchor?.elementId ?? ''" :disabled="readOnly" @change="updateAnnotationAnchor"><option value="">{{ t("editor.doNotConnect") }}</option><option v-for="option in annotationAnchorOptions" :key="option.elementId" :value="option.elementId">{{ option.label }}</option></select></label>
             <div class="iriograph-geometry-grid">
               <label v-for="field in (['x', 'y', 'width', 'height'] as const)" :key="field"><span>{{ field }}</span><input type="number" :min="field === 'width' || field === 'height' ? 24 : 0" :value="Math.round(selectedViewAnnotation.geometry[field])" :disabled="readOnly" @change="updateAnnotationGeometryField(field, $event)" /></label>
             </div>
             <div class="iriograph-annotation-colors">
-              <label><span>背景</span><input type="color" :value="selectedViewAnnotation.style?.fill ?? '#fff8cc'" :disabled="readOnly" @change="updateAnnotationStyle('fill', $event)" /></label>
-              <label><span>枠線</span><input type="color" :value="selectedViewAnnotation.style?.stroke ?? '#b78b22'" :disabled="readOnly" @change="updateAnnotationStyle('stroke', $event)" /></label>
-              <label><span>文字</span><input type="color" :value="selectedViewAnnotation.style?.text ?? '#302814'" :disabled="readOnly" @change="updateAnnotationStyle('text', $event)" /></label>
-              <label><span>文字サイズ</span><input type="number" min="8" max="96" step="1" :value="selectedViewAnnotation.style?.labelFontSize ?? 14" :disabled="readOnly" @change="updateAnnotationFontSize" /></label>
+              <label><span>{{ t("editor.background") }}</span><input type="color" :value="selectedViewAnnotation.style?.fill ?? '#fff8cc'" :disabled="readOnly" @change="updateAnnotationStyle('fill', $event)" /></label>
+              <label><span>{{ t("editor.border") }}</span><input type="color" :value="selectedViewAnnotation.style?.stroke ?? '#b78b22'" :disabled="readOnly" @change="updateAnnotationStyle('stroke', $event)" /></label>
+              <label><span>{{ t("editor.text") }}</span><input type="color" :value="selectedViewAnnotation.style?.text ?? '#302814'" :disabled="readOnly" @change="updateAnnotationStyle('text', $event)" /></label>
+              <label><span>{{ t("appearance.fontSize") }}</span><input type="number" min="8" max="96" step="1" :value="selectedViewAnnotation.style?.labelFontSize ?? 14" :disabled="readOnly" @change="updateAnnotationFontSize" /></label>
             </div>
-            <p>Canvas上でドラッグして移動できます。意味グラフやLLM向け索引には含まれません。</p>
-            <div class="iriograph-annotation-actions"><button type="button" :disabled="readOnly" @click="duplicateSelectedAnnotation">複製</button><button type="button" class="danger" :disabled="readOnly" @click="deleteSelectedAnnotation">削除</button></div>
+            <p>{{ t("editor.viewAnnotationHint") }}</p>
+            <div class="iriograph-annotation-actions"><button type="button" :disabled="readOnly" @click="duplicateSelectedAnnotation">{{ t("editor.duplicate") }}</button><button type="button" class="danger" :disabled="readOnly" @click="deleteSelectedAnnotation">{{ t("common.delete") }}</button></div>
           </template>
           <template v-else>
             <p class="iriograph-annotation-readonly-text">{{ selectedAnnotation.text }}</p>
-            <dl><div v-if="selectedAnnotation.language"><dt>言語</dt><dd>{{ selectedAnnotation.language }}</dd></div><div v-if="selectedAnnotation.datatypeIri"><dt>データ型</dt><dd>{{ selectedAnnotation.datatypeIri }}</dd></div></dl>
-            <small>本文はTurtleのliteralが正本です。「意味」タブで接続先の要素詳細から編集できます。</small>
+            <dl><div v-if="selectedAnnotation.language"><dt>{{ t("editor.language") }}</dt><dd>{{ selectedAnnotation.language }}</dd></div><div v-if="selectedAnnotation.datatypeIri"><dt>{{ t("editor.datatype") }}</dt><dd>{{ selectedAnnotation.datatypeIri }}</dd></div></dl>
+            <small>{{ t("editor.semanticAnnotationInspectorHint") }}</small>
           </template>
         </section>
         <header>
-          <div><small>ビュー</small><strong>{{ selectedAnnotation ? '注記' : selectedElement?.label ?? "選択なし" }}</strong></div>
-          <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? `${selectedElementIds.length}件を選択` : selectedElement.structuralKind === 'edge' ? '関係' : selectedElement.structuralKind === 'node' ? '要素' : '領域' }}</span>
+          <div><small>{{ t("common.view") }}</small><strong>{{ selectedAnnotation ? t('editor.annotation') : selectedElement?.label ?? t('semantic.noSelection') }}</strong></div>
+          <span v-if="selectedElement">{{ selectedElementIds.length > 1 ? t("common.selectedCount", { count: selectedElementIds.length }) : selectedElement.structuralKind === 'edge' ? t('common.relation') : selectedElement.structuralKind === 'node' ? t('common.element') : t('semantic.container.region') }}</span>
         </header>
         <template v-if="selectedElement">
           <section v-if="selectedElementDiagnostics.length" class="iriograph-element-diagnostics">
-            <label>問題</label>
+            <label>{{ t("editor.issues") }}</label>
             <article
               v-for="(diagnostic, index) in selectedElementDiagnostics"
               :key="diagnostic.diagnosticId ?? `${diagnostic.code}:${index}`"
               :class="diagnostic.severity"
             >
-              <b>{{ diagnosticGuidance(diagnostic).title }}</b>
-              <span>{{ diagnosticGuidance(diagnostic).action }}</span>
-              <details><summary>技術的な詳細</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic).detail }}</details>
-              <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">ソースで確認</button>
+              <b>{{ diagnosticGuidance(diagnostic, t).title }}</b>
+              <span>{{ diagnosticGuidance(diagnostic, t).action }}</span>
+              <details><summary>{{ t("editor.technicalInformation") }}</summary><code>{{ diagnostic.code }}</code> {{ diagnosticGuidance(diagnostic, t).detail }}</details>
+              <button v-if="canNavigateDiagnosticToSource(diagnostic)" type="button" @click="navigateDiagnosticToSource(diagnostic)">{{ t("editor.checkSource") }}</button>
             </article>
           </section>
           <details
@@ -7614,7 +7724,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             @toggle="handleDisplayInspectorSectionToggle('appearance', $event)"
           >
             <summary :id="displayInspectorSectionDomId('appearance')">
-              <span><strong>{{ selectedElement.structuralKind === 'edge' ? '線のスタイル' : (selectedElement.structuralKind === 'container' || selectedElement.structuralKind === 'region') && selectedElement.groupFrame ? '枠のスタイル' : '形とスタイル' }}</strong><small>色・線・文字とカタログ既定</small></span>
+              <span><strong>{{ selectedElement.structuralKind === 'edge' ? t('editor.lineStyle') : (selectedElement.structuralKind === 'container' || selectedElement.structuralKind === 'region') && selectedElement.groupFrame ? t('editor.frameStyle') : t('editor.shapeAndStyle') }}</strong><small>{{ t("editor.styleHint") }}</small></span>
             </summary>
             <AppearanceEditor
               v-if="appearancePrimaryElement"
@@ -7630,8 +7740,8 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               @apply="applyAppearance"
             />
             <template v-if="selectedElement.structuralKind !== 'edge'">
-              <label>形</label>
-              <div class="iriograph-template-choices" role="radiogroup" aria-label="要素の形">
+              <label>{{ t("editor.shape") }}</label>
+              <div class="iriograph-template-choices" role="radiogroup" :aria-label="t('editor.elementShape')">
                 <button
                   v-for="(template, templateIndex) in templateChoices"
                   :key="template.templateRef"
@@ -7657,23 +7767,23 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('icon')"
             @toggle="handleDisplayInspectorSectionToggle('icon', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('icon')"><span><strong>アイコンと内容</strong><small>{{ selectedIconLabel }}・{{ selectedElement.structuralKind === 'node' ? '要素内' : '名称band内' }}の配置</small></span></summary>
+            <summary :id="displayInspectorSectionDomId('icon')"><span><strong>{{ t("editor.iconAndContent") }}</strong><small>{{ t("editor.iconPlacementSummary", { icon: selectedIconLabel, location: selectedElement.structuralKind === 'node' ? t('editor.insideElement') : t('editor.insideNameBand') }) }}</small></span></summary>
             <details class="iriograph-package-icon-disclosure">
-              <summary><span><strong>同梱アイコン</strong><small>現在: {{ selectedIconLabel }}</small></span></summary>
-              <div class="iriograph-package-icon-choices" role="radiogroup" aria-label="同梱アイコン">
-                <button type="button" :aria-pressed="!selectedElement.iconRef" :disabled="readOnly || pickingAsset" @click="clearIconSelection"><span>なし</span></button>
+              <summary><span><strong>{{ t("editor.bundledIcons") }}</strong><small>{{ t("editor.currentValue", { value: selectedIconLabel }) }}</small></span></summary>
+              <div class="iriograph-package-icon-choices" role="radiogroup" :aria-label="t('editor.bundledIcons')">
+                <button type="button" :aria-pressed="!selectedElement.iconRef" :disabled="readOnly || pickingAsset" @click="clearIconSelection"><span>{{ t("common.none") }}</span></button>
                 <button
                   v-for="icon in packageDefaultIcons"
                   :key="icon.assetRef"
                   type="button"
                   :aria-pressed="selectedElement.iconRef === icon.assetRef"
                   :disabled="readOnly || pickingAsset"
-                  @click="commitIconSelection(icon.assetRef, { label: icon.label, path: `@iriograph/core/icons/${icon.name}.svg` })"
-                ><img :src="packageIconPreviewUrl(icon.assetRef)" alt="" /><span>{{ icon.label }}</span></button>
+                  @click="commitIconSelection(icon.assetRef, { label: packageDefaultIconLabel(icon, [currentUiLocale]), path: `@iriograph/core/icons/${icon.name}.svg` })"
+                ><img :src="packageIconPreviewUrl(icon.assetRef)" alt="" /><span>{{ packageDefaultIconLabel(icon, [currentUiLocale]) }}</span></button>
               </div>
             </details>
-            <label :for="iconPathInputId">Workspace画像のパス</label>
-            <nav v-if="workspaceAssetBreadcrumbs.length" class="iriograph-asset-breadcrumbs" aria-label="Workspace画像path">
+            <label :for="iconPathInputId">{{ t("editor.workspaceImagePath") }}</label>
+            <nav v-if="workspaceAssetBreadcrumbs.length" class="iriograph-asset-breadcrumbs" :aria-label="t('editor.workspaceImagePath')">
               <button v-for="item in workspaceAssetBreadcrumbs" :key="item.path" type="button" @click="chooseWorkspacePath(item.input)">{{ item.label }}</button>
             </nav>
             <input
@@ -7685,14 +7795,14 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               @input="updateIconPathDraft"
               @change="updateIcon"
               @keydown.enter.prevent="updateIcon"
-              placeholder="例: ../assets/approval-policy.svg"
+              :placeholder="t('editor.imagePathPlaceholder')"
               autocomplete="off"
             />
             <datalist :id="assetSuggestionsListId">
               <option v-for="option in assetOptions.filter((candidate) => candidate.path)" :key="option.assetRef" :value="option.path">{{ option.label ?? option.path }}</option>
               <option v-for="option in workspaceAssetSuggestions.filter((candidate) => candidate.kind === 'asset')" :key="`workspace:${option.path}`" :value="option.input">{{ option.label }}</option>
             </datalist>
-            <ul v-if="workspaceAssetSuggestions.length" class="iriograph-asset-segment-suggestions" aria-label="画像pathの候補">
+            <ul v-if="workspaceAssetSuggestions.length" class="iriograph-asset-segment-suggestions" :aria-label="t('editor.imagePathCandidates')">
               <li v-for="option in workspaceAssetSuggestions" :key="`${option.kind}:${option.path}`">
                 <button
                   type="button"
@@ -7706,15 +7816,15 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             <div
               v-if="selectedIconPresentation"
               class="iriograph-selected-icon-summary"
-              aria-label="選択中の画像"
+              :aria-label="t('editor.selectedImage')"
               :aria-busy="iconAssetSelectionBusy"
             >
               <img v-if="selectedIconPreviewUrl" :src="selectedIconPreviewUrl" alt="" />
               <span v-else class="iriograph-selected-icon-placeholder" aria-hidden="true">▧</span>
-              <span><strong>{{ selectedIconPresentation.label }}</strong><small>{{ selectedIconPresentation.path ?? "パス情報なし（参照ダイアログから選択）" }}</small></span>
+              <span><strong>{{ selectedIconPresentation.label }}</strong><small>{{ selectedIconPresentation.path ?? t("editor.noPathInformation") }}</small></span>
             </div>
             <small class="iriograph-icon-selection-status" role="status" aria-live="polite">{{ iconSelectionFeedback }}</small>
-            <small>./ と ../ は開いている文書から、/ はWorkspace rootから辿ります。保存するのは画像pathでなく安定した参照IDです。</small>
+            <small>{{ t("editor.imagePathHint") }}</small>
             <button
               v-if="pickAsset"
               type="button"
@@ -7722,58 +7832,58 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
               :disabled="readOnly || pickingAsset"
               @click="chooseAssetIcon"
             >
-              {{ pickingAsset ? "画像ファイルを参照中…" : "画像ファイルを参照…" }}
+              {{ pickingAsset ? t("editor.browsingImage") : t("editor.browseImage") }}
             </button>
             <details v-if="selectedElement.structuralKind === 'node' && selectedElement.iconRef" class="iriograph-view-disclosure" open>
-              <summary>アイコンのサイズと収まり</summary>
-              <label><span>サイズ指定</span><select aria-label="アイコンのサイズ指定" :value="selectedIconSizingMode" :disabled="readOnly" @change="updateSelectedNodeIconSizingMode"><option value="scale">自然比率で倍率</option><option value="size">幅と高さを指定</option></select></label>
-              <label v-if="selectedIconSizingMode === 'scale'"><span>倍率</span><input aria-label="アイコンの倍率" type="number" min="0.1" max="8" step="0.1" :value="selectedElement.nodeIconScale ?? 1" :disabled="readOnly" @change="updateSelectedNodeIconScale" /></label>
+              <summary>{{ t("editor.iconSizeAndFit") }}</summary>
+              <label><span>{{ t("editor.sizeMode") }}</span><select :aria-label="t('editor.iconSizeMode')" :value="selectedIconSizingMode" :disabled="readOnly" @change="updateSelectedNodeIconSizingMode"><option value="scale">{{ t("editor.naturalScale") }}</option><option value="size">{{ t("editor.explicitSize") }}</option></select></label>
+              <label v-if="selectedIconSizingMode === 'scale'"><span>{{ t("editor.scale") }}</span><input :aria-label="t('editor.iconScale')" type="number" min="0.1" max="8" step="0.1" :value="selectedElement.nodeIconScale ?? 1" :disabled="readOnly" @change="updateSelectedNodeIconScale" /></label>
               <div v-else class="iriograph-icon-size-grid">
-                <label><span>幅</span><input aria-label="アイコンの幅" type="number" min="4" max="4096" step="1" :value="Math.round(selectedIconMetrics?.width ?? 24)" :disabled="readOnly" @change="updateSelectedNodeIconSize('width', $event)" /></label>
-                <label><span>高さ</span><input aria-label="アイコンの高さ" type="number" min="4" max="4096" step="1" :value="Math.round(selectedIconMetrics?.height ?? 24)" :disabled="readOnly" @change="updateSelectedNodeIconSize('height', $event)" /></label>
+                <label><span>{{ t("editor.width") }}</span><input :aria-label="t('editor.iconWidth')" type="number" min="4" max="4096" step="1" :value="Math.round(selectedIconMetrics?.width ?? 24)" :disabled="readOnly" @change="updateSelectedNodeIconSize('width', $event)" /></label>
+                <label><span>{{ t("editor.height") }}</span><input :aria-label="t('editor.iconHeight')" type="number" min="4" max="4096" step="1" :value="Math.round(selectedIconMetrics?.height ?? 24)" :disabled="readOnly" @change="updateSelectedNodeIconSize('height', $event)" /></label>
               </div>
-              <label><span>枠内の収まり</span><select aria-label="アイコンの収まり" :value="selectedElement.nodeIconFit ?? 'contain'" :disabled="readOnly" @change="updateSelectedNodeIconFit"><option value="contain">全体を表示</option><option value="cover">枠を埋める</option></select></label>
-              <label class="iriograph-inline-check"><input v-model="growNodeWithIcon" type="checkbox" />アイコンに合わせて要素の枠も広げる</label>
-              <small>Canvas上の青いハンドルでも自然比率を保って変更できます。倍率と幅・高さは同時に保存しません。</small>
+              <label><span>{{ t("editor.fitInFrame") }}</span><select :aria-label="t('editor.iconFit')" :value="selectedElement.nodeIconFit ?? 'contain'" :disabled="readOnly" @change="updateSelectedNodeIconFit"><option value="contain">{{ t("editor.showWholeImage") }}</option><option value="cover">{{ t("editor.fillFrame") }}</option></select></label>
+              <label class="iriograph-inline-check"><input v-model="growNodeWithIcon" type="checkbox" />{{ t("editor.growNodeWithIcon") }}</label>
+              <small>{{ t("editor.iconResizeHint") }}</small>
               <small v-if="selectedIconFrameWarning" class="iriograph-field-error" role="alert">{{ selectedIconFrameWarning }}</small>
-              <button type="button" class="iriograph-wide-button" :disabled="readOnly || (!selectedElement.nodeIconScale && !selectedElement.nodeIconSize && !selectedElement.nodeIconFit)" @click="resetSelectedNodeIconPresentation">サイズと収まりを既定へ戻す</button>
+              <button type="button" class="iriograph-wide-button" :disabled="readOnly || (!selectedElement.nodeIconScale && !selectedElement.nodeIconSize && !selectedElement.nodeIconFit)" @click="resetSelectedNodeIconPresentation">{{ t("editor.resetSizeAndFit") }}</button>
             </details>
             <div v-if="selectedElement.structuralKind === 'node'" class="iriograph-node-content-placement">
-              <label>要素内の配置</label>
-              <small class="iriograph-node-content-guidance">Canvas上のラベルやアイコンをドラッグして、この要素の中で位置を調整できます。</small>
-              <label>ラベルの文字方向</label>
+              <label>{{ t("editor.elementContentPlacement") }}</label>
+              <small class="iriograph-node-content-guidance">{{ t("editor.elementContentPlacementHint") }}</small>
+              <label>{{ t("editor.labelWritingDirection") }}</label>
               <select
-                aria-label="要素ラベルの文字方向"
+                :aria-label="t('editor.elementLabelDirection')"
                 :value="nodeLabelWritingDirectionFor(selectedElement.elementId)"
                 :disabled="readOnly"
                 @change="updateSelectedNodeLabelWritingDirection"
               >
-                <option value="horizontal-right">横書き（左から右）</option>
-                <option value="vertical-down">縦書き（上から下）</option>
+                <option value="horizontal-right">{{ t("editor.horizontalRight") }}</option>
+                <option value="vertical-down">{{ t("editor.verticalDown") }}</option>
               </select>
               <div class="iriograph-node-content-reset-actions">
                 <button
                   type="button"
                   :disabled="readOnly || !selectedElement.nodeLabelOffset"
                   @click="resetSelectedNodeContentOffset('label')"
-                >ラベル位置を戻す</button>
+                >{{ t("editor.resetLabelPosition") }}</button>
                 <button
                   type="button"
                   :disabled="readOnly || !selectedElement.nodeIconOffset"
                   @click="resetSelectedNodeContentOffset('icon')"
-                >アイコン位置を戻す</button>
+                >{{ t("editor.resetIconPosition") }}</button>
               </div>
             </div>
             <div v-else-if="selectedElement.iconRef" class="iriograph-node-content-placement">
-              <label>名称band内の配置</label>
-              <small class="iriograph-node-content-guidance">自然比率を保ったまま、Canvas上のアイコンをドラッグするか数値で位置を調整できます。</small>
-              <label><span>倍率</span><input aria-label="グループアイコンの倍率" type="number" min="0.1" max="8" step="0.1" :value="selectedElement.groupIconScale ?? 1" :disabled="readOnly" @change="updateSelectedGroupIconScale" /></label>
+              <label>{{ t("editor.nameBandPlacement") }}</label>
+              <small class="iriograph-node-content-guidance">{{ t("editor.groupIconPlacementHint") }}</small>
+              <label><span>{{ t("editor.scale") }}</span><input :aria-label="t('editor.groupIconScale')" type="number" min="0.1" max="8" step="0.1" :value="selectedElement.groupIconScale ?? 1" :disabled="readOnly" @change="updateSelectedGroupIconScale" /></label>
               <div class="iriograph-icon-size-grid">
-                <label><span>横位置</span><input aria-label="グループアイコンの横位置" type="number" min="-128" max="128" step="1" :value="selectedElement.groupIconOffset?.x ?? 0" :disabled="readOnly" @change="updateSelectedGroupIconOffset('x', $event)" /></label>
-                <label><span>縦位置</span><input aria-label="グループアイコンの縦位置" type="number" min="-128" max="128" step="1" :value="selectedElement.groupIconOffset?.y ?? 0" :disabled="readOnly" @change="updateSelectedGroupIconOffset('y', $event)" /></label>
+                <label><span>{{ t("editor.horizontalPosition") }}</span><input :aria-label="t('editor.groupIconHorizontalPosition')" type="number" min="-128" max="128" step="1" :value="selectedElement.groupIconOffset?.x ?? 0" :disabled="readOnly" @change="updateSelectedGroupIconOffset('x', $event)" /></label>
+                <label><span>{{ t("editor.verticalPosition") }}</span><input :aria-label="t('editor.groupIconVerticalPosition')" type="number" min="-128" max="128" step="1" :value="selectedElement.groupIconOffset?.y ?? 0" :disabled="readOnly" @change="updateSelectedGroupIconOffset('y', $event)" /></label>
               </div>
-              <small v-if="selectedElement.groupIconOffset && selectedElement.groupIconOffset.x > 12 && Math.abs(selectedElement.groupIconOffset.y) < 24" class="iriograph-field-error" role="status">アイコンと名称が重なる可能性があります。</small>
-              <button type="button" class="iriograph-wide-button" :disabled="readOnly || (!selectedElement.groupIconOffset && !selectedElement.groupIconScale)" @click="resetSelectedGroupIconPresentation">位置と倍率を既定へ戻す</button>
+              <small v-if="selectedElement.groupIconOffset && selectedElement.groupIconOffset.x > 12 && Math.abs(selectedElement.groupIconOffset.y) < 24" class="iriograph-field-error" role="status">{{ t("editor.iconMayOverlapName") }}</small>
+              <button type="button" class="iriograph-wide-button" :disabled="readOnly || (!selectedElement.groupIconOffset && !selectedElement.groupIconScale)" @click="resetSelectedGroupIconPresentation">{{ t("editor.resetPositionAndScale") }}</button>
             </div>
           </details>
           <details
@@ -7783,17 +7893,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('region-label')"
             @toggle="handleDisplayInspectorSectionToggle('region-label', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('region-label')"><span><strong>名称と層</strong><small>枠上の名前・文字方向・前後</small></span></summary>
-            <p>Canvas上のラベルをドラッグすると、領域の枠線に沿って自由に移動できます。</p>
-            <label>文字方向</label>
-            <select aria-label="領域名の文字方向" :value="regionLabelWritingDirectionFor(selectedElement.elementId)" :disabled="readOnly" @change="updateSelectedRegionLabelWritingDirection">
-              <option value="horizontal-right">横書き（左から右）</option>
-              <option value="vertical-down">縦書き（上から下）</option>
+            <summary :id="displayInspectorSectionDomId('region-label')"><span><strong>{{ t("editor.nameAndLayer") }}</strong><small>{{ t("editor.nameAndLayerHint") }}</small></span></summary>
+            <p>{{ t("editor.regionLabelDragHint") }}</p>
+            <label>{{ t("editor.writingDirection") }}</label>
+            <select :aria-label="t('editor.regionNameDirection')" :value="regionLabelWritingDirectionFor(selectedElement.elementId)" :disabled="readOnly" @change="updateSelectedRegionLabelWritingDirection">
+              <option value="horizontal-right">{{ t("editor.horizontalRight") }}</option>
+              <option value="vertical-down">{{ t("editor.verticalDown") }}</option>
             </select>
-            <small>横書きは右向き、縦書きは下向きに統一します。</small>
+            <small>{{ t("editor.writingDirectionHint") }}</small>
             <div class="iriograph-region-layer-actions">
-              <button type="button" :disabled="readOnly" @click="moveSelectedRegionLayer('back')">領域を背面へ</button>
-              <button type="button" :disabled="readOnly" @click="moveSelectedRegionLayer('front')">領域を前面へ</button>
+              <button type="button" :disabled="readOnly" @click="moveSelectedRegionLayer('back')">{{ t("editor.sendRegionBackward") }}</button>
+              <button type="button" :disabled="readOnly" @click="moveSelectedRegionLayer('front')">{{ t("editor.bringRegionForward") }}</button>
             </div>
           </details>
           <details
@@ -7803,20 +7913,20 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('region-label')"
             @toggle="handleDisplayInspectorSectionToggle('region-label', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('region-label')"><span><strong>名称と層</strong><small>枠上の名前・文字方向・前後</small></span></summary>
-            <p>Canvas上の名称をドラッグすると、枠の内側と必要最小限の外側を含むband内で移動できます。</p>
-            <label>文字方向</label>
-            <select aria-label="グループ名の文字方向" :value="selectedElement.groupLabelWritingDirection ?? 'horizontal-right'" :disabled="readOnly" @change="updateSelectedGroupLabelWritingDirection">
-              <option value="horizontal-right">横書き（左から右）</option>
-              <option value="vertical-down">縦書き（上から下）</option>
+            <summary :id="displayInspectorSectionDomId('region-label')"><span><strong>{{ t("editor.nameAndLayer") }}</strong><small>{{ t("editor.nameAndLayerHint") }}</small></span></summary>
+            <p>{{ t("editor.groupLabelDragHint") }}</p>
+            <label>{{ t("editor.writingDirection") }}</label>
+            <select :aria-label="t('editor.groupNameDirection')" :value="selectedElement.groupLabelWritingDirection ?? 'horizontal-right'" :disabled="readOnly" @change="updateSelectedGroupLabelWritingDirection">
+              <option value="horizontal-right">{{ t("editor.horizontalRight") }}</option>
+              <option value="vertical-down">{{ t("editor.verticalDown") }}</option>
             </select>
-            <small>並び順・分岐・所属・分類はいずれも同じ枠操作で調整できます。意味構造は変更しません。</small>
+            <small>{{ t("editor.groupFrameHint") }}</small>
             <div class="iriograph-region-layer-actions">
-              <button type="button" :disabled="readOnly" @click="moveSelectedGroupLayer('back')">枠を背面へ</button>
-              <button type="button" :disabled="readOnly" @click="moveSelectedGroupLayer('front')">枠を前面へ</button>
+              <button type="button" :disabled="readOnly" @click="moveSelectedGroupLayer('back')">{{ t("editor.sendFrameBackward") }}</button>
+              <button type="button" :disabled="readOnly" @click="moveSelectedGroupLayer('front')">{{ t("editor.bringFrameForward") }}</button>
             </div>
-            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="fitSelectedGroupToMembers">含む要素に枠を合わせる</button>
-            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="resetSelectedGroupFrameView">配置を自動状態へ戻す</button>
+            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="fitSelectedGroupToMembers">{{ t("editor.fitFrameToMembers") }}</button>
+            <button type="button" class="iriograph-wide-button" :disabled="readOnly" @click="resetSelectedGroupFrameView">{{ t("editor.resetAutomaticPlacement") }}</button>
           </details>
           <details
             v-if="displayInspectorSections.includes('geometry') && 'geometry' in selectedElement"
@@ -7825,10 +7935,10 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('geometry')"
             @toggle="handleDisplayInspectorSectionToggle('geometry', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('geometry')"><span><strong>位置とサイズ</strong><small>{{ Math.round(selectedElement.geometry.width) }} × {{ Math.round(selectedElement.geometry.height) }}・{{ selectedElement.placement === 'user' ? 'ユーザー配置' : '自動配置' }}</small></span></summary>
+            <summary :id="displayInspectorSectionDomId('geometry')"><span><strong>{{ t("editor.positionAndSize") }}</strong><small>{{ Math.round(selectedElement.geometry.width) }} × {{ Math.round(selectedElement.geometry.height) }} · {{ selectedElement.placement === 'user' ? t('editor.userPlacement') : t('editor.autoPlacement') }}</small></span></summary>
             <div class="iriograph-section-heading">
-              <label>位置とサイズ</label>
-              <span :class="selectedElement.placement">{{ selectedElement.placement === 'user' ? 'ユーザー配置' : '自動配置' }}</span>
+              <label>{{ t("editor.positionAndSize") }}</label>
+              <span :class="selectedElement.placement">{{ selectedElement.placement === 'user' ? t('editor.userPlacement') : t('editor.autoPlacement') }}</span>
             </div>
             <div class="iriograph-geometry-grid">
               <label v-for="field in (['x', 'y', 'width', 'height'] as const)" :key="field">
@@ -7841,7 +7951,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 />
               </label>
             </div>
-            <button v-if="selectedOverlay?.placement === 'user'" type="button" class="iriograph-wide-button" :disabled="readOnly" @click="clearSelectedOverride">ユーザー調整を解除</button>
+            <button v-if="selectedOverlay?.placement === 'user'" type="button" class="iriograph-wide-button" :disabled="readOnly" @click="clearSelectedOverride">{{ t("editor.clearUserAdjustment") }}</button>
           </details>
           <details
             v-if="displayInspectorSections.includes('routing') && selectedElement.structuralKind === 'edge'"
@@ -7850,29 +7960,29 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('routing')"
             @toggle="handleDisplayInspectorSectionToggle('routing', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('routing')"><span><strong>線の形式</strong><small>{{ selectedRouteMode === 'auto' ? '自動' : selectedRouteMode === 'straight' ? '直線' : selectedRouteMode === 'orthogonal' ? '折れ線' : selectedRouteMode === 'curve' ? '曲線' : '手動' }}</small></span></summary>
+            <summary :id="displayInspectorSectionDomId('routing')"><span><strong>{{ t("editor.lineFormat") }}</strong><small>{{ routeModeLabel(selectedRouteMode) }}</small></span></summary>
             <header class="iriograph-edge-view-summary">
               <strong>{{ selectedEdgeDisplayName }}</strong>
               <div class="iriograph-edge-contract"><span>{{ selectedEdgeEndpointLabels.source }}</span><b>→</b><span>{{ selectedEdgeEndpointLabels.target }}</span></div>
             </header>
-            <label><span>線の形式</span><select aria-label="線の形式" :value="selectedRouteMode" :disabled="readOnly" @change="setSelectedRouteMode(($event.target as HTMLSelectElement).value as EdgeRouteMode)"><option value="auto">自動</option><option value="straight">直線</option><option value="orthogonal">折れ線</option><option value="curve">曲線</option><option value="manual">手動で調整</option></select></label>
+            <label><span>{{ t("editor.lineFormat") }}</span><select :aria-label="t('editor.lineFormat')" :value="selectedRouteMode" :disabled="readOnly" @change="setSelectedRouteMode(($event.target as HTMLSelectElement).value as EdgeRouteMode)"><option value="auto">{{ t("editor.route.auto") }}</option><option value="straight">{{ t("editor.route.straight") }}</option><option value="orthogonal">{{ t("editor.route.orthogonal") }}</option><option value="curve">{{ t("editor.route.curve") }}</option><option value="manual">{{ t("editor.route.manual") }}</option></select></label>
             <template v-if="selectedRouteMode === 'manual'">
               <button
                 type="button"
                 class="iriograph-wide-button"
                 :disabled="readOnly"
                 @click="addSelectedWaypoint"
-              >経路点を追加</button>
-              <small>{{ selectedManualWaypoints.length }}個の経路点。Canvas上の点をドラッグして調整します。</small>
-              <div v-if="selectedManualWaypoints.length" class="iriograph-waypoint-list" role="list" aria-label="手動経路点">
+              >{{ t("editor.addWaypoint") }}</button>
+              <small>{{ t("editor.waypointCountHint", { count: selectedManualWaypoints.length }) }}</small>
+              <div v-if="selectedManualWaypoints.length" class="iriograph-waypoint-list" role="list" :aria-label="t('editor.manualWaypoints')">
                 <div v-for="(_, index) in selectedManualWaypoints" :key="index" role="listitem">
-                  <span>経路点 {{ index + 1 }}</span>
+                  <span>{{ t("editor.waypointNumber", { index: index + 1 }) }}</span>
                   <button
                     type="button"
-                    :aria-label="`経路点 ${index + 1}を削除`"
+                    :aria-label="t('editor.deleteWaypointAria', { index: index + 1 })"
                     :disabled="readOnly"
                     @click="removeSelectedWaypointAt(index)"
-                  >削除</button>
+                  >{{ t("common.delete") }}</button>
                 </div>
               </div>
             </template>
@@ -7882,17 +7992,17 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 class="iriograph-wide-button"
                 :disabled="readOnly"
                 @click="addSelectedCurveKnot"
-              >曲線点を追加</button>
-              <small>{{ selectedCurveKnots.length }}個の曲線点。Canvas上の点とハンドルをドラッグして調整します。</small>
-              <div v-if="selectedCurveKnots.length" class="iriograph-waypoint-list" role="list" aria-label="曲線点">
+              >{{ t("editor.addCurvePoint") }}</button>
+              <small>{{ t("editor.curvePointCountHint", { count: selectedCurveKnots.length }) }}</small>
+              <div v-if="selectedCurveKnots.length" class="iriograph-waypoint-list" role="list" :aria-label="t('editor.curvePoints')">
                 <div v-for="(_, index) in selectedCurveKnots" :key="index" role="listitem">
-                  <span>曲線点 {{ index + 1 }}</span>
+                  <span>{{ t("editor.curvePointNumber", { index: index + 1 }) }}</span>
                   <button
                     type="button"
-                    :aria-label="`曲線点 ${index + 1}を削除`"
+                    :aria-label="t('editor.deleteCurvePointAria', { index: index + 1 })"
                     :disabled="readOnly"
                     @click="removeSelectedCurveKnotAt(index)"
-                  >削除</button>
+                  >{{ t("common.delete") }}</button>
                 </div>
               </div>
               <button
@@ -7900,14 +8010,14 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
                 class="iriograph-wide-button"
                 :disabled="readOnly || !selectedElement.curve"
                 @click="resetSelectedCurveControls"
-              >自動曲線へ戻す</button>
+              >{{ t("editor.resetAutomaticCurve") }}</button>
             </template>
             <button
               type="button"
               class="iriograph-wide-button"
               :disabled="readOnly || !hasSelectedEditableRouting"
               @click="resetSelectedRouting"
-            >線の調整をすべてリセット</button>
+            >{{ t("editor.resetAllLineAdjustments") }}</button>
           </details>
           <details
             v-if="displayInspectorSections.includes('edge-connection') && selectedElement.structuralKind === 'edge'"
@@ -7916,33 +8026,33 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('edge-connection')"
             @toggle="handleDisplayInspectorSectionToggle('edge-connection', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('edge-connection')"><span><strong>接続点と端子</strong><small>{{ selectedEdgeEndpointLabels.source }} → {{ selectedEdgeEndpointLabels.target }}</small></span></summary>
+            <summary :id="displayInspectorSectionDomId('edge-connection')"><span><strong>{{ t("editor.connectionPointsAndMarkers") }}</strong><small>{{ selectedEdgeEndpointLabels.source }} → {{ selectedEdgeEndpointLabels.target }}</small></span></summary>
             <div class="iriograph-port-fields">
-              <label><span>始点の接続口</span><select aria-label="始点の接続口" :value="selectedElement.sourcePortId ?? ''" :disabled="readOnly" @change="setSelectedPort('source', $event)"><option value="">外周の自由位置</option><option v-for="port in selectedSourcePortOptions" :key="port.portId" :value="port.portId">{{ portSideLabel(port) }}</option></select></label>
-              <label><span>終点の接続口</span><select aria-label="終点の接続口" :value="selectedElement.targetPortId ?? ''" :disabled="readOnly" @change="setSelectedPort('target', $event)"><option value="">外周の自由位置</option><option v-for="port in selectedTargetPortOptions" :key="port.portId" :value="port.portId">{{ portSideLabel(port) }}</option></select></label>
-              <small v-if="selectedSourcePortOptions.length === 0 && selectedTargetPortOptions.length === 0">現在の形には専用の接続口がありません。外周の任意位置を利用します。</small>
+              <label><span>{{ t("editor.sourcePort") }}</span><select :aria-label="t('editor.sourcePort')" :value="selectedElement.sourcePortId ?? ''" :disabled="readOnly" @change="setSelectedPort('source', $event)"><option value="">{{ t("editor.freePerimeterPosition") }}</option><option v-for="port in selectedSourcePortOptions" :key="port.portId" :value="port.portId">{{ portSideLabel(port) }}</option></select></label>
+              <label><span>{{ t("editor.targetPort") }}</span><select :aria-label="t('editor.targetPort')" :value="selectedElement.targetPortId ?? ''" :disabled="readOnly" @change="setSelectedPort('target', $event)"><option value="">{{ t("editor.freePerimeterPosition") }}</option><option v-for="port in selectedTargetPortOptions" :key="port.portId" :value="port.portId">{{ portSideLabel(port) }}</option></select></label>
+              <small v-if="selectedSourcePortOptions.length === 0 && selectedTargetPortOptions.length === 0">{{ t("editor.noDedicatedPorts") }}</small>
             </div>
-            <label>端子の形</label>
+            <label>{{ t("editor.markerShape") }}</label>
             <div class="iriograph-endpoint-marker-fields">
               <label v-for="endpoint in (['source', 'target'] as const)" :key="endpoint">
-                <span>{{ endpoint === 'source' ? '始点' : '終点' }}</span>
+                <span>{{ endpoint === 'source' ? t('semantic.source') : t('semantic.target') }}</span>
                 <select
-                  :aria-label="endpoint === 'source' ? '始点の端子形状' : '終点の端子形状'"
+                  :aria-label="endpoint === 'source' ? t('editor.sourceMarkerShape') : t('editor.targetMarkerShape')"
                   :value="selectedElement[endpoint === 'source' ? 'sourceMarker' : 'targetMarker'] ?? (endpoint === 'source' ? 'none' : 'arrow')"
                   :disabled="readOnly"
                   @change="setSelectedTerminalMarker(endpoint, ($event.target as HTMLSelectElement).value as EdgeTerminalMarker)"
                 >
-                  <option value="none">なし</option><option value="arrow">矢印</option><option value="open-arrow">開いた矢印</option><option value="triangle">三角</option><option value="diamond">ひし形</option><option value="circle">丸</option>
+                  <option value="none">{{ t("common.none") }}</option><option value="arrow">{{ t("editor.marker.arrow") }}</option><option value="open-arrow">{{ t("editor.marker.openArrow") }}</option><option value="triangle">{{ t("editor.marker.triangle") }}</option><option value="diamond">{{ t("editor.marker.diamond") }}</option><option value="circle">{{ t("editor.marker.circle") }}</option>
                 </select>
               </label>
             </div>
-            <p>Canvas上の始点・終点ハンドルを要素の周囲へドラッグします。数値入力は必要ありません。</p>
+            <p>{{ t("editor.connectionDragHint") }}</p>
             <button
               type="button"
               class="iriograph-wide-button"
               :disabled="readOnly || (!selectedElement.sourceAnchor && !selectedElement.targetAnchor)"
               @click="resetSelectedEndpointAnchors"
-            >接続位置を自動に戻す</button>
+            >{{ t("editor.resetConnectionPosition") }}</button>
           </details>
           <details
             v-if="displayInspectorSections.includes('edge-label') && selectedElement.structuralKind === 'edge'"
@@ -7951,26 +8061,26 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
             :open="isDisplayInspectorSectionOpen('edge-label')"
             @toggle="handleDisplayInspectorSectionToggle('edge-label', $event)"
           >
-            <summary :id="displayInspectorSectionDomId('edge-label')"><span><strong>ラベルとビュー補足</strong><small>{{ selectedElement.label || 'ラベルなし' }}{{ selectedElement.caption ? '・補足あり' : '' }}</small></span></summary>
-            <p v-if="selectedElement.label">Canvas上の関係名をドラッグして位置を調整できます。</p>
+            <summary :id="displayInspectorSectionDomId('edge-label')"><span><strong>{{ t("editor.labelAndViewNote") }}</strong><small>{{ selectedElement.label || t('editor.noLabel') }}{{ selectedElement.caption ? t('editor.hasViewNote') : '' }}</small></span></summary>
+            <p v-if="selectedElement.label">{{ t("editor.edgeLabelDragHint") }}</p>
             <button
               v-if="selectedElement.label"
               type="button"
               class="iriograph-wide-button"
               :disabled="readOnly || !selectedElement.labelOffset"
               @click="resetSelectedLabelOffset"
-            >ラベル位置をリセット</button>
-            <label>このビューだけの補足</label>
+            >{{ t("editor.resetLabelPosition") }}</button>
+            <label>{{ t("editor.viewOnlyNote") }}</label>
             <textarea
               :value="selectedElement.caption ?? ''"
               :disabled="readOnly"
               maxlength="2000"
               rows="3"
-              aria-label="選択した関係のビュー上の補足"
-              placeholder="意味グラフには含めない表示用の補足"
+              :aria-label="t('editor.selectedRelationViewNote')"
+              :placeholder="t('editor.viewNotePlaceholder')"
               @change="updateSelectedEdgeCaption"
             />
-            <small>共有する意味や説明は「意味」タブで編集します。</small>
+            <small>{{ t("editor.editSharedMeaningHint") }}</small>
           </details>
         </template>
         </div>
@@ -7978,7 +8088,7 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
       <button
         type="button"
         class="iriograph-sidebar-toggle iriograph-right-sidebar-toggle"
-        :aria-label="rightSidebarCollapsed ? '右サイドバーを開く' : '右サイドバーを閉じる'"
+        :aria-label="rightSidebarCollapsed ? t('editor.openRightSidebar') : t('editor.closeRightSidebar')"
         :aria-expanded="!rightSidebarCollapsed"
         :aria-controls="rightSidebarId"
         @click="toggleRightSidebar"
@@ -8000,16 +8110,16 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         tabindex="-1"
         @keydown="handleDocumentRebaseDialogKeydown"
       >
-        <header><div><small>DOCUMENT COPY PREVIEW</small><strong :id="documentRebaseDialogTitleId">新しい図として複製</strong></div><button type="button" aria-label="複製をキャンセル" :disabled="allocatingDocumentIdentity" @click="closeDocumentRebaseDialog">×</button></header>
-        <p>元の文書、Undo履歴、保存先は変更しません。検証済みの新しい文書をHostへ渡し、Hostが別ファイルとして作成・表示します。</p>
+        <header><div><small>{{ t("editor.documentCopyPreview") }}</small><strong :id="documentRebaseDialogTitleId">{{ t("editor.duplicateAsNewDiagram") }}</strong></div><button type="button" :aria-label="t('editor.cancelDuplicate')" :disabled="allocatingDocumentIdentity" @click="closeDocumentRebaseDialog">×</button></header>
+        <p>{{ t("editor.rebaseDialogHint") }}</p>
         <template v-if="documentRebasePreview">
-          <p class="iriograph-rebase-identities">新しい文書識別子と名前空間はHostが発行済みです。</p>
-          <section class="iriograph-rebase-change-summary"><strong>文書内識別子の付け替え</strong><span>{{ documentRebasePreview.rebase.termChanges.length }}要素・ビュー参照 {{ documentRebasePreview.rebase.overlayReferenceChanges }}件</span><p>標準・外部語彙、asset、テキストは変更しません。</p></section>
-          <ul v-if="documentRebasePreview.rebase.termChanges.length" class="iriograph-rebase-changes" aria-label="識別子変更一覧"><li v-for="(change, index) in documentRebasePreview.rebase.termChanges" :key="`rebase-change-${index}`"><strong>{{ rebaseTermLabel(change.from) }}</strong><span>{{ change.occurrences }}箇所</span></li></ul>
-          <p v-else>付け替える文書内識別子はありません。</p>
+          <p class="iriograph-rebase-identities">{{ t("editor.newIdentityAllocated") }}</p>
+          <section class="iriograph-rebase-change-summary"><strong>{{ t("editor.rebaseIdentifiers") }}</strong><span>{{ t("editor.rebaseSummary", { elements: documentRebasePreview.rebase.termChanges.length, references: documentRebasePreview.rebase.overlayReferenceChanges }) }}</span><p>{{ t("editor.rebasePreservesExternal") }}</p></section>
+          <ul v-if="documentRebasePreview.rebase.termChanges.length" class="iriograph-rebase-changes" :aria-label="t('editor.identifierChanges')"><li v-for="(change, index) in documentRebasePreview.rebase.termChanges" :key="`rebase-change-${index}`"><strong>{{ rebaseTermLabel(change.from) }}</strong><span>{{ t("editor.occurrenceCount", { count: change.occurrences }) }}</span></li></ul>
+          <p v-else>{{ t("editor.noIdentifiersToRebase") }}</p>
         </template>
         <ul v-if="documentRebaseIssues.length" class="iriograph-diagnostics" role="alert"><li v-for="(issue, index) in documentRebaseIssues" :key="`${issue.path}:${index}`" class="error"><span><b>{{ issue.path }}</b> {{ issue.message }}<small>{{ issue.action }}</small></span></li></ul>
-        <footer><button type="button" :disabled="allocatingDocumentIdentity" @click="closeDocumentRebaseDialog">キャンセル</button><button ref="documentRebaseApplyButton" type="button" class="primary" :disabled="!documentRebasePreview?.valid || allocatingDocumentIdentity" @click="applyPreparedDocumentRebase">{{ allocatingDocumentIdentity ? '適用中…' : 'この内容で複製' }}</button></footer>
+        <footer><button type="button" :disabled="allocatingDocumentIdentity" @click="closeDocumentRebaseDialog">{{ t("common.cancel") }}</button><button ref="documentRebaseApplyButton" type="button" class="primary" :disabled="!documentRebasePreview?.valid || allocatingDocumentIdentity" @click="applyPreparedDocumentRebase">{{ allocatingDocumentIdentity ? t('editor.applying') : t('editor.duplicateWithChanges') }}</button></footer>
       </section>
     </div>
 
@@ -8029,71 +8139,71 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         @submit.prevent="submitViewDialog"
       >
         <header>
-          <strong :id="viewDialogTitleId">{{ viewDialogMode === "manage" ? "ビューを管理" : viewDialogMode === "add" ? "名前付きビューを追加" : "ビュー設定" }}</strong>
-          <button type="button" aria-label="閉じる" :disabled="viewCommandBusy" @click="closeViewDialog">×</button>
+          <strong :id="viewDialogTitleId">{{ viewDialogMode === "manage" ? t("editor.manageViews") : viewDialogMode === "add" ? t("editor.addNamedView") : t("editor.viewSettings") }}</strong>
+          <button type="button" :aria-label="t('common.close')" :disabled="viewCommandBusy" @click="closeViewDialog">×</button>
         </header>
         <template v-if="viewDialogMode === 'manage'">
-          <section class="iriograph-view-manager-current" aria-label="管理中のビュー">
-            <label v-if="draft.views.length > 1">管理するビュー<select ref="viewDialogInitialFocus" :value="activeView?.viewId ?? ''" aria-label="管理する名前付きビュー" @change="requestActiveView"><option v-for="view in draft.views" :key="view.viewId" :value="view.viewId">{{ view.viewId }}</option></select></label>
-            <p v-else ref="viewDialogInitialFocus" tabindex="-1"><small>現在のビュー</small><strong>{{ activeView?.viewId }}</strong></p>
-            <dl><div><dt>表示対象</dt><dd>{{ profileDisplayLabel(activeView?.profileRef) }}</dd></div><div><dt>表示範囲</dt><dd>{{ activeView?.scope ? '絞り込みあり' : 'グラフ全体' }}</dd></div><div><dt>配置</dt><dd>{{ layoutPurposeLabel(activeView?.layoutRef) }}</dd></div><div><dt>表示差分</dt><dd>{{ Object.keys(activeView?.overlay ?? {}).length }}件</dd></div></dl>
+          <section class="iriograph-view-manager-current" :aria-label="t('editor.managedView')">
+            <label v-if="draft.views.length > 1">{{ t("editor.viewToManage") }}<select ref="viewDialogInitialFocus" :value="activeView?.viewId ?? ''" :aria-label="t('editor.namedViewToManage')" @change="requestActiveView"><option v-for="view in draft.views" :key="view.viewId" :value="view.viewId">{{ view.viewId }}</option></select></label>
+            <p v-else ref="viewDialogInitialFocus" tabindex="-1"><small>{{ t("editor.visibleView") }}</small><strong>{{ activeView?.viewId }}</strong></p>
+            <dl><div><dt>{{ t("editor.displayTarget") }}</dt><dd>{{ profileDisplayLabel(activeView?.profileRef) }}</dd></div><div><dt>{{ t("editor.displayScope") }}</dt><dd>{{ activeView?.scope ? t('editor.filtered') : t('editor.wholeGraph') }}</dd></div><div><dt>{{ t("editor.layout") }}</dt><dd>{{ layoutPurposeLabel(activeView?.layoutRef) }}</dd></div><div><dt>{{ t("editor.viewDifferences") }}</dt><dd>{{ t("common.itemCount", { count: Object.keys(activeView?.overlay ?? {}).length }) }}</dd></div></dl>
           </section>
           <div class="iriograph-view-manager-actions">
-            <button type="button" :disabled="readOnly || viewCommandBusy" @click="openAddViewDialog">ビューを追加</button>
-            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="duplicateActiveView">このビューを複製</button>
-            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="openConfigureViewDialog">このビューを設定</button>
-            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="resetActiveViewOverlay">ビュー調整をリセット</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy" @click="openAddViewDialog">{{ t("editor.addView") }}</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="duplicateActiveView">{{ t("editor.duplicateThisView") }}</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="openConfigureViewDialog">{{ t("editor.configureThisView") }}</button>
+            <button type="button" :disabled="readOnly || viewCommandBusy || !activeView" @click="resetActiveViewOverlay">{{ t("editor.resetViewAdjustments") }}</button>
           </div>
           <section class="iriograph-view-manager-danger">
-            <button v-if="!viewDeleteConfirmation" type="button" :disabled="readOnly || viewCommandBusy || draft.views.length <= 1" @click="requestActiveViewDeletion">このビューを削除</button>
-            <template v-else><p>「{{ activeView?.viewId }}」だけを削除します。意味グラフと他のビューは残ります。</p><button type="button" :disabled="viewCommandBusy" @click="viewDeleteConfirmation = false">戻る</button><button type="button" class="danger" :disabled="viewCommandBusy" @click="confirmActiveViewDeletion">削除する</button></template>
+            <button v-if="!viewDeleteConfirmation" type="button" :disabled="readOnly || viewCommandBusy || draft.views.length <= 1" @click="requestActiveViewDeletion">{{ t("editor.deleteThisView") }}</button>
+            <template v-else><p>{{ t("editor.deleteViewHint", { view: activeView?.viewId ?? "" }) }}</p><button type="button" :disabled="viewCommandBusy" @click="viewDeleteConfirmation = false">{{ t("common.back") }}</button><button type="button" class="danger" :disabled="viewCommandBusy" @click="confirmActiveViewDeletion">{{ t("common.delete") }}</button></template>
           </section>
-          <footer><button type="button" :disabled="viewCommandBusy" @click="closeViewDialog">閉じる</button></footer>
+          <footer><button type="button" :disabled="viewCommandBusy" @click="closeViewDialog">{{ t("common.close") }}</button></footer>
         </template>
         <template v-else>
         <label>
           View ID
           <input ref="viewDialogInitialFocus" v-model="viewForm.viewId" :readonly="viewDialogMode === 'configure'" required />
-          <small v-if="viewDialogMode === 'configure'">viewIdは作成後に変更できません。</small>
+          <small v-if="viewDialogMode === 'configure'">{{ t("editor.viewIdImmutable") }}</small>
         </label>
         <label>
-          表示対象
+          {{ t("editor.displayTarget") }}
           <select v-model="viewForm.profileToken" required>
-            <option v-for="choice in profileChoices" :key="choice.token" :value="choice.token">{{ choice.label }}（{{ choice.purpose }}）</option>
+            <option v-for="choice in profileChoices" :key="choice.token" :value="choice.token">{{ t("editor.profileChoice", { label: choice.label, purpose: choice.purpose }) }}</option>
           </select>
         </label>
         <label>
-          配置方向
+          {{ t("editor.layoutDirection") }}
           <select
             v-model="viewForm.layoutDirection"
-            aria-label="配置方向"
+            :aria-label="t('editor.layoutDirection')"
             :disabled="!viewForm.layoutDirection"
             required
           >
-            <option value="LR">横方向（左→右）</option>
-            <option value="TB">縦方向（上→下）</option>
+            <option value="LR">{{ t("editor.directionLeftRight") }}</option>
+            <option value="TB">{{ t("editor.directionTopBottom") }}</option>
           </select>
-          <small v-if="!viewForm.layoutDirection">現在の配置方法は方向変更に対応していません。</small>
+          <small v-if="!viewForm.layoutDirection">{{ t("editor.layoutDirectionUnsupported") }}</small>
         </label>
         <label>
           Locale (BCP 47)
-          <input v-model="viewForm.locale" placeholder="ja" />
+          <input v-model="viewForm.locale" :placeholder="currentUiLocale" />
         </label>
         <fieldset class="iriograph-view-scope-form">
-          <legend>表示範囲</legend>
-          <label class="iriograph-check-row"><input v-model="viewForm.scopeEnabled" type="checkbox" /> このビューだけ表示対象を絞る</label>
+          <legend>{{ t("editor.displayScope") }}</legend>
+          <label class="iriograph-check-row"><input v-model="viewForm.scopeEnabled" type="checkbox" /> {{ t("editor.filterThisView") }}</label>
           <template v-if="viewForm.scopeEnabled">
-            <label>起点となる要素<select v-model="viewForm.scopeRootSemanticRefs" multiple size="5"><option v-for="option in viewScopeRootOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select><small>Ctrl/Cmdを押しながら複数選択できます。未選択なら型だけで絞れます。</small></label>
-            <label>含める型<select v-model="viewForm.scopeTypeIris" multiple size="4"><option v-for="option in viewScopeTypeOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select></label>
-            <label>辿る関係<select v-model="viewForm.scopePredicateIris" multiple size="5"><option v-for="option in viewScopePredicateOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select><small>未選択ならすべての関係を辿ります。</small></label>
-            <div class="iriograph-view-scope-row"><label>方向<select v-model="viewForm.scopeDirection"><option value="outgoing">外向き</option><option value="incoming">内向き</option><option value="both">両方向</option></select></label><label>深さ<input v-model.number="viewForm.scopeDepth" type="number" min="0" max="12" step="1" /></label></div>
-            <small>意味グラフ全体を検証した後、表示集合だけを作ります。非表示要素を飛び越す線は作りません。</small>
+            <label>{{ t("editor.rootElements") }}<select v-model="viewForm.scopeRootSemanticRefs" multiple size="5"><option v-for="option in viewScopeRootOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select><small>{{ t("editor.rootElementsHint") }}</small></label>
+            <label>{{ t("editor.includedTypes") }}<select v-model="viewForm.scopeTypeIris" multiple size="4"><option v-for="option in viewScopeTypeOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select></label>
+            <label>{{ t("editor.traversedRelations") }}<select v-model="viewForm.scopePredicateIris" multiple size="5"><option v-for="option in viewScopePredicateOptions" :key="option.iri" :value="option.iri">{{ option.label }}</option></select><small>{{ t("editor.traversedRelationsHint") }}</small></label>
+            <div class="iriograph-view-scope-row"><label>{{ t("editor.direction") }}<select v-model="viewForm.scopeDirection"><option value="outgoing">{{ t("editor.outgoing") }}</option><option value="incoming">{{ t("editor.incoming") }}</option><option value="both">{{ t("editor.bothDirections") }}</option></select></label><label>{{ t("editor.depth") }}<input v-model.number="viewForm.scopeDepth" type="number" min="0" max="12" step="1" /></label></div>
+            <small>{{ t("editor.scopeValidationHint") }}</small>
           </template>
         </fieldset>
         <footer>
-          <button type="button" :disabled="viewCommandBusy" @click="closeViewDialog">キャンセル</button>
+          <button type="button" :disabled="viewCommandBusy" @click="closeViewDialog">{{ t("common.cancel") }}</button>
           <button type="submit" class="primary" :disabled="viewCommandBusy">
-            {{ viewCommandBusy ? "適用中…" : viewDialogMode === "add" ? "追加" : "適用" }}
+            {{ viewCommandBusy ? t("editor.applying") : viewDialogMode === "add" ? t("common.add") : t("common.apply") }}
           </button>
         </footer>
         </template>
@@ -8117,20 +8227,20 @@ defineExpose<IriographEditorNavigationApi & IriographEditorSelectionApi & {
         @keydown="handleDeletionDialogKeydown"
       >
         <header>
-          <strong :id="deletionDialogTitleId">関連する情報も削除されます</strong>
-          <button type="button" aria-label="削除をキャンセル" :disabled="authoringBusy" @click="cancelPendingDeletion">×</button>
+          <strong :id="deletionDialogTitleId">{{ t("editor.relatedInformationDeleted") }}</strong>
+          <button type="button" :aria-label="t('editor.cancelDeletion')" :disabled="authoringBusy" @click="cancelPendingDeletion">×</button>
         </header>
-        <p>削除すると、次の参照・関係・所属・並び順も同じ操作で削除されます。</p>
-        <ul aria-label="削除の影響一覧">
+        <p>{{ t("editor.deletionImpactHint") }}</p>
+        <ul :aria-label="t('editor.deletionImpactList')">
           <li v-for="impact in pendingDeletion.impacts" :key="impact.key">
-            <small>{{ impact.kind === 'type-reference' ? '型参照' : impact.kind === 'relation' ? '関係' : impact.kind === 'sequence' ? '並び順' : impact.kind === 'alternative' ? '選択肢' : '所属' }}</small>
+            <small>{{ impact.kind === 'type-reference' ? t('editor.typeReference') : impact.kind === 'relation' ? t('common.relation') : impact.kind === 'sequence' ? t('semantic.container.order') : impact.kind === 'alternative' ? t('semantic.container.alternatives') : t('semantic.membership.generic') }}</small>
             <span>{{ impact.label }}</span>
           </li>
         </ul>
         <footer>
-          <button type="button" :disabled="authoringBusy" @click="cancelPendingDeletion">キャンセル</button>
+          <button type="button" :disabled="authoringBusy" @click="cancelPendingDeletion">{{ t("common.cancel") }}</button>
           <button ref="deletionConfirmButton" type="button" class="danger" :disabled="authoringBusy" @click="confirmPendingDeletion">
-            {{ authoringBusy ? '削除中…' : '影響も含めて削除' }}
+            {{ authoringBusy ? t('editor.deleting') : t('editor.deleteWithImpact') }}
           </button>
         </footer>
       </section>

@@ -285,7 +285,7 @@ trusted pathであり、hostの`AssetPolicy`を拡張・緩和しません。そ
 resolverと元のpolicyを必ず通ります。`withPackageDefaultIconAccess(hostAccess)`もhost policy objectを
 そのまま維持します。
 
-既定packageは業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
+既定packageは業務フロー、組織、クラウド・インフラ、データ、通信、セキュリティ、運用、物流に使える74個の汎用Lucide SVGを同梱します。各候補は正規英語label、日本語label、固定source commit、license metadataを持ち、実SVGと埋込みsourceをtestで一致確認します。AWS等のvendor固有brand assetは、この予約namespaceへ混ぜません。再配布条件、版更新、廃止を独立管理できるversioned catalogとhost resolverを使い、portable overlayには同様にasset IRIだけを保存します。
 
 ### Annotationとrole付きport
 
@@ -371,7 +371,7 @@ Coreの一般`create-resource.initialStatements` contractはhost/LLM adapter向�
 
 右クリック、Context Menu key、Shift+F10は同じ対象別menuを表示します。Node、direct edge、derived sequence/alternative guide、各group kind、空白ごとに適用可能な意味・ビュー・配置・削除の入口だけを示し、derived guideは所有groupの構造編集へ委譲します。Menu選択は対応Inspector/actionへfocusするだけでmutationを実行せず、disabled理由とfocus returnを維持します。左sidebarはviewとScene elementの一覧に使います。語彙とresourceの選択肢はopaque option IDとlabel/comment、形のpreviewだけをpresentation DTO/DOMへ返し、完全IRIをoption value、tooltip、read-only Advanced参照情報へ渡しません。Host/editor内部でopaque IDをresolved contextとScene provenanceからexact IRIへ戻してCore transactionを構成します。同名labelをidentityとして使いません。生IRIを表示・編集できる標準入口はeditableなTurtle/Document sourceだけです。順序・候補グループ・定義済み操作は利用者向け名称を表示し、`set-sequence`、`set-alternatives`、capability patch等の内部語を通常画面へ露出しません。
 
-Relation pickerは候補名を`A（predicate label）B`、説明をcatalog/vocabularyの日本語文型metadataとしてcategory別に表示します。候補はresolved profile内のRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の標準predicateを、source/targetの明示型、限定subclass closure、`rdfs:domain`/`rdfs:range`、object/literal kind、semantic capabilityで絞ります。型不明は後順位に残し、完全OWL推論やlabel推測を行わず、candidate validationを最終判定とします。同じpredicateを使う個別edge captionはview overlay annotationであり、semantic commandを生成しません。
+Relation pickerは候補名を`A（predicate label）B`、説明をcatalog/vocabularyの選択中localeの文型metadataとしてcategory別に表示します。候補はresolved profile内のRDF/RDFS/OWL、DCTERMS、PROV-O、SKOS等の標準predicateを、source/targetの明示型、限定subclass closure、`rdfs:domain`/`rdfs:range`、object/literal kind、semantic capabilityで絞ります。型不明は後順位に残し、完全OWL推論やlabel推測を行わず、candidate validationを最終判定とします。同じpredicateを使う個別edge captionはview overlay annotationであり、semantic commandを生成しません。
 
 主要なresource欄は明示的な「Canvasから選択」modeを持ちます。このmode中だけnode/container clickを対象fieldへseedし、通常のselection、drag、container内配置からsubject、predicate、membershipを推論しません。Pickerは同じfieldの再押下、Escape、Cancel、`readOnly`への切替、Scene交換で解除します。Picker中のnode/container clickは通常の選択・geometry gestureを開始しません。`要素を追加`は位置や所属をseedせず、label確定後にgenerated geometryを得ます。
 
@@ -394,6 +394,14 @@ Resource deletionの永続結果は、必要な場合に確認済みのexplicit 
 Literal propertyはv1で独立Scene elementを生成しない場合もありますが、inspector等の語彙駆動UIで編集でき、Turtleには失わず保持します。表示primitiveがないことをsemantic属性が存在しないことと同一視しません。
 
 ## Vue editor
+
+### UIの多言語契約
+
+公開Editor UIの既定言語は英語です。`uiLocale`はHostまたは利用者sessionが管理する設定で、package同梱の値は`en`と`ja`に限定します。Editorは言語selectorを表示し、変更をeventで通知します。Hostは利用者設定として保持できますが、Turtle、named view、sparse overlay、document history、dirty stateへ書き込みません。
+
+UI言語と意味literalの選択言語は別契約です。`semanticLocales`は既存の`rdfs:label`、`rdfs:comment`、catalog語彙の表示優先順を指定します。省略時だけ初期値が`uiLocale`へ従い、Hostは異なる順序を指定できます。どちらを変更してもRDF literalの翻訳、追加、language tag付与、書換えを行いません。意味表示は指定言語、languageなし、残る利用可能値の順に決定的にfallbackします。
+
+標準control、案内、validation表示、accessibility text、標準関係metadataは、安定したIDに対する英語・日本語lexical formとして提供します。言語変更で変わるのは表示だけであり、predicate IRI、command ID、validation code、transactionの動作は変わりません。UI keyが不足する場合はpackageの英語を正規fallbackとします。Mockと製品HostはEditor文言を複製せず同じpackage契約を利用し、Host固有のworkspace chromeだけをその外側で翻訳します。
 
 hostは`@iriograph/vue-editor`を編集領域へ埋め込みます。
 
@@ -547,6 +555,8 @@ source参照・presentation編集の許可まで失わせません。
 `ResolvedAuthoringContext`はauthoring profile identity、vocabulary term index、projection capability、resource namespace、actor policyが解決済みであることを要求します。Predicate termは任意に`objectKinds`、許可datatype、許可language、`minCount`、`maxCount`を持てます。人間が未登録termを使う場合はpolicyに従ってwarningまたはerrorとします。標準Editorは未登録IRIを入力させず、非削除warningは該当fieldのinline guidanceとして返して同じ操作を確定しません。低水準Coreのcontrolled source APIはhost向けwarning confirmation contractを維持しますが、標準UIに確認modalを追加する理由にはしません。Resource IRIを自動生成するhostは同期または非同期allocatorを注入します。Mockはstatic fixtureのcontextとallocatorを利用します。`authoringProfileRef`やvocabulary URIからcontextを取得するresolverとintegrity検証は`@iriograph/profile-resolver`、取得cacheはHost transportの責務であり、Editorへ取得処理を入れません。
 
 Host asset pickerは選択したabsolute asset IRIだけを返し、Editorは`appearance.iconRef`のpresentation transactionとして保存します。URLやbytesをpicker resultへ含めません。Cancel、stale response、不正IRIではdocumentを変更しません。
+
+Package同梱iconは正規の英語labelと任意のlocale別labelを持ちます。表示labelを切り替えてもasset IRIは変わりません。Hostがworkspaceまたはvendor catalogへ同じmetadataを追加する場合も、選択localeがなければ正規英語label、次にstable asset referenceへfallbackします。
 
 ファイル移動後も維持できるopaque IRIを優先します。Assetまたはdocumentのpath renameでは、hostがworkspace locatorとAsset resolverのmapping/revisionだけを更新し、同じstable `assetRef`を新しいpath・取得先へ解決します。既存documentの`appearance.iconRef`とview overlayは書き換えません。Path由来IRI等でidentityを維持できない場合だけ`moved`とreplacement IRIをdiagnosticにし、Editorは自動置換せず、削除・not-foundと同様にユーザーの再選択を待ちます。同期`ProjectionOptions.resolveAssetUrl`はlegacy `DiagramCatalog`投影だけに残すdeprecated APIであり、正規化projectionとVue editorは使用しません。
 

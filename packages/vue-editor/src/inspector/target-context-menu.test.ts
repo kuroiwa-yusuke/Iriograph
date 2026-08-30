@@ -11,6 +11,7 @@ import {
   type TargetContextMenuEntry,
   type TargetContextSubject,
 } from "./target-context-menu";
+import { translateEditorMessage } from "../localization/editor-localization";
 
 describe("target context menu", () => {
   it.each<[TargetContextSubject, readonly string[]]>([
@@ -60,14 +61,14 @@ describe("target context menu", () => {
       groupElementId: "alt-group",
     });
     expect(alternative[0]).toMatchObject({
-      label: "候補グループを編集",
+      label: "Edit alternative group",
       destination: { elementId: "alt-group", section: "alternatives" },
     });
   });
 
   it("readOnly・clipboard・route・空group・z-order・削除理由をaction単位で示す", () => {
     const blank = targetContextMenuEntries({ kind: "blank" });
-    expect(reason(blank, "paste")).toContain("クリップボード");
+    expect(reason(blank, "paste")).toContain("clipboard");
 
     const edge = targetContextMenuEntries({ kind: "direct-edge", elementId: "edge-1" }, {
       readOnly: true,
@@ -75,8 +76,8 @@ describe("target context menu", () => {
       deleteDisabledReason: "選択外への影響を確認してください。",
       actionDisabledReasons: { "relation-view": "このビューでは線を表示できません。" },
     });
-    expect(reason(edge, "reconnect-relation")).toContain("読み取り専用");
-    expect(reason(edge, "reset-route")).toContain("手動調整");
+    expect(reason(edge, "reconnect-relation")).toContain("read-only");
+    expect(reason(edge, "reset-route")).toContain("manually adjusted");
     expect(reason(edge, "delete-relation")).toBe("選択外への影響を確認してください。");
     expect(reason(edge, "relation-view")).toBe("このビューでは線を表示できません。");
 
@@ -85,11 +86,22 @@ describe("target context menu", () => {
       canChangeGroupOrder: false,
       isGroupCollapsed: true,
     });
-    expect(reason(group, "fit-group")).toContain("所属する要素");
-    expect(reason(group, "bring-group-forward")).toContain("移動できません");
-    expect(reason(group, "send-group-backward")).toContain("移動できません");
-    expect(reason(group, "collapse-group")).toContain("折り畳まれています");
+    expect(reason(group, "fit-group")).toContain("member elements");
+    expect(reason(group, "bring-group-forward")).toContain("cannot move");
+    expect(reason(group, "send-group-backward")).toContain("cannot move");
+    expect(reason(group, "collapse-group")).toContain("already collapsed");
     expect(reason(group, "expand-group")).toBeUndefined();
+  });
+
+  it("localizes helper-generated labels and disabled guidance to Japanese", () => {
+    const translator = (key: Parameters<typeof translateEditorMessage>[1], parameters?: Parameters<typeof translateEditorMessage>[2]) => (
+      translateEditorMessage("ja", key, parameters)
+    );
+    const entries = targetContextMenuEntries({ kind: "blank" }, {}, translator);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actionId: "add-element", label: "要素を追加" }),
+      expect.objectContaining({ actionId: "paste", disabledReason: expect.stringContaining("クリップボード") }),
+    ]));
   });
 
   it("pointer/keyboardで同じanchor modelを使いContextMenuとShift+F10を認識する", () => {

@@ -9,6 +9,14 @@ import {
 } from "@iriograph/core";
 
 import type { GeometryChange, GeometryElement } from "./selection";
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
 
 export type RegionMembershipConstraintIssue = {
   code: "membership-region-missing" | "membership-region-intersection-empty";
@@ -39,6 +47,7 @@ export function constrainIconPresentationResize(
   node: SceneNode,
   requestedSize: { width: number; height: number },
   requestedGeometry?: ElementGeometry,
+  translator: EditorTranslator = defaultTranslator,
 ): IconPresentationConstraintResult {
   if (!requestedGeometry) {
     const size = fitIconSizeToFrame(requestedSize, node.geometry);
@@ -50,7 +59,7 @@ export function constrainIconPresentationResize(
   const accepted = constrainMembershipRegionMovement(scene, [{
     elementId: node.elementId,
     geometry: requestedGeometry,
-  }]);
+  }], translator);
   if (accepted.changes[0]) {
     return {
       size: requestedSize,
@@ -74,7 +83,7 @@ export function constrainIconPresentationResize(
     const candidate = constrainMembershipRegionMovement(scene, [{
       elementId: node.elementId,
       geometry: candidateGeometry,
-    }]);
+    }], translator);
     if (candidate.changes[0]) {
       lower = ratio;
       bestGeometry = candidate.changes[0].geometry;
@@ -102,6 +111,7 @@ export function constrainIconPresentationResize(
 export function constrainMembershipRegionMovement(
   scene: DiagramScene,
   requested: readonly GeometryChange[],
+  translator: EditorTranslator = defaultTranslator,
 ): RegionMembershipConstraintResult {
   if (requested.length === 0) return { changes: [] };
   const elementById = new Map([
@@ -121,6 +131,7 @@ export function constrainMembershipRegionMovement(
     scene,
     requestedById,
     elementById,
+    translator,
   );
   if (!requestedIssue) return { changes: [...requested] };
   if (!isUniformTranslation(requested, elementById)) {
@@ -145,7 +156,7 @@ export function constrainMembershipRegionMovement(
       return rejected(
         membership.memberElementId,
         "membership-region-missing",
-        "所属する要素または領域を表示上で解決できないため、変更を取り消しました。",
+        translator("regionConstraint.unresolvedMemberOrRegion"),
       );
     }
     const memberMoves = requestedById.has(member.elementId);
@@ -166,7 +177,11 @@ export function constrainMembershipRegionMovement(
   }
 
   if (minimumX > maximumX || minimumY > maximumY) {
-    return rejected(requested[0]!.elementId, "membership-region-intersection-empty", "選択した要素を同じ移動量で全所属領域内に保てないため、移動を取り消しました。");
+    return rejected(
+      requested[0]!.elementId,
+      "membership-region-intersection-empty",
+      translator("regionConstraint.sharedMoveUnavailable"),
+    );
   }
   if (
     !Number.isFinite(minimumX)
@@ -193,6 +208,7 @@ export function constrainMembershipRegionMovement(
     scene,
     new Map(changes.map((change) => [change.elementId, change])),
     elementById,
+    translator,
   );
   return finalIssue ? { changes: [], issue: finalIssue } : { changes };
 }
@@ -201,6 +217,7 @@ function validateRequestedMembershipGeometry(
   scene: DiagramScene,
   requestedById: ReadonlyMap<string, GeometryChange>,
   elementById: ReadonlyMap<string, GeometryElement>,
+  translator: EditorTranslator,
 ): RegionMembershipConstraintIssue | undefined {
   const bindings = membershipBindings(scene);
   const affectedMemberIds = new Set(bindings
@@ -217,7 +234,7 @@ function validateRequestedMembershipGeometry(
       return {
         code: "membership-region-missing",
         elementId: memberId,
-        message: "所属要素を表示上で解決できないため、変更を取り消しました。",
+        message: translator("regionConstraint.unresolvedMember"),
       };
     }
     const target = elementById.get(targetElementId);
@@ -225,7 +242,7 @@ function validateRequestedMembershipGeometry(
       return {
         code: "membership-region-missing",
         elementId: memberId,
-        message: "所属する領域または並び順の枠を表示上で解決できないため、変更を取り消しました。",
+        message: translator("regionConstraint.unresolvedRegionOrSequence"),
       };
     }
     const requestedMember = requestedById.get(memberId);
@@ -247,7 +264,7 @@ function validateRequestedMembershipGeometry(
       return {
         code: "membership-region-intersection-empty",
         elementId: memberId,
-        message: "全所属領域・並び順・コンテナの共通範囲内に要素全体を保てないため、変更を取り消しました。枠の配置またはサイズを調整してください。",
+        message: translator("regionConstraint.outsideIntersection"),
       };
     }
   }

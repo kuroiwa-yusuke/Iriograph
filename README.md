@@ -29,17 +29,21 @@ const props = defineProps<{
   projectionRuntimeContext: ProjectionRuntimeContext;
 }>();
 const document = ref(props.initialDocument);
+const uiLocale = ref<"en" | "ja">("en");
 </script>
 
 <template>
   <IriographEditor
     v-model="document"
+    v-model:ui-locale="uiLocale"
     :runtime-context="projectionRuntimeContext"
   />
 </template>
 ```
 
 The editor does not own workspace storage, HTTP, authentication, or persistence. A product host injects the document, authenticated asset resolvers, IRI allocators, resolved authoring profiles, save operations, and revision-conflict handling.
+
+The package UI defaults to English and includes Japanese. UI language is host/session state and never modifies Turtle or display overlays. Hosts can independently provide semantic-language preferences for selecting existing RDF labels and comments.
 
 ## Packages
 

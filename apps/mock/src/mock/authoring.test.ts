@@ -19,20 +19,20 @@ import {
 } from "./authoring";
 
 describe("mock authoring host", () => {
-  it("opaqueな4 roleと構造groupだけを日本語で公開し、通常Wizardに分類groupを出さない", () => {
+  it("defaults authoring presentation to English and keeps Japanese selectable", () => {
     const context = createMockAuthoringContext(fixture());
     const presentation = structuredAuthoringPresentation(context);
 
-    expect(context.defaultLocale).toBe("ja");
+    expect(context.defaultLocale).toBe("en");
     expect(context.structuredAuthoring).toMatchObject({
       allowUntypedNodes: false,
       allowClassificationGroups: false,
     });
     expect(presentation.profile.nodeRoles).toEqual([
-      expect.objectContaining({ roleId: "role-01", label: "処理", displayPriority: 10 }),
-      expect.objectContaining({ roleId: "role-02", label: "出来事", displayPriority: 10 }),
-      expect.objectContaining({ roleId: "role-03", label: "分岐・合流", displayPriority: 10 }),
-      expect.objectContaining({ roleId: "role-04", label: "情報", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-01", label: "Process", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-02", label: "Event", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-03", label: "Branch or merge", displayPriority: 10 }),
+      expect.objectContaining({ roleId: "role-04", label: "Information", displayPriority: 10 }),
     ]);
     expect(presentation.groupKinds.map(({ groupKind, enabled }) => ({ groupKind, enabled })))
       .toEqual([
@@ -42,11 +42,14 @@ describe("mock authoring host", () => {
         { groupKind: "alternative", enabled: true },
       ]);
     expect(JSON.stringify(presentation)).not.toContain("urn:iriograph:authoring-role:");
+    expect(structuredAuthoringPresentation(createMockAuthoringContext(fixture(), "ja"))
+      .profile.nodeRoles.map((role) => role.label))
+      .toEqual(["処理", "出来事", "分岐・合流", "情報"]);
   });
 
   it("通常要素は1つ以上のroleを必須とし複数roleを同時保存する", async () => {
     const document = fixture();
-    const context = createMockAuthoringContext(document);
+    const context = createMockAuthoringContext(document, "ja");
     const single = await previewStructuredAuthoringRequest(document, {
       type: "create-element",
       requestId: "single-role",
@@ -97,7 +100,7 @@ describe("mock authoring host", () => {
 
   it("allocatorのnamespace外発行と既存resource衝突をfail closedにする", async () => {
     const document = fixture();
-    const context = createMockAuthoringContext(document);
+    const context = createMockAuthoringContext(document, "ja");
     const request = {
       type: "create-element" as const,
       requestId: "collision",
@@ -135,7 +138,7 @@ describe("mock authoring host", () => {
 
   it("日本語predicate候補をopaque IDで選びexact IRIのtripleだけを保存する", async () => {
     const document = fixture();
-    const context = createMockAuthoringContext(document);
+    const context = createMockAuthoringContext(document, "ja");
     const scene = await buildIriographView(document, "main", context.runtime, "incremental");
     const start = scene.nodes.find((node) => node.semanticRef === "urn:iriograph:demo:start")!;
     const end = scene.nodes.find((node) => node.semanticRef === "urn:iriograph:demo:end")!;
@@ -161,7 +164,7 @@ describe("mock authoring host", () => {
       new URL("../../public/workspace/models/purchase-approval.iriograph", import.meta.url),
       "utf8",
     )) as IriographDocumentV1;
-    const context = createMockAuthoringContext(purchase);
+    const context = createMockAuthoringContext(purchase, "ja");
     expect(structuredAuthoringPresentation(context).profile.nodeRoles.map((role) => role.label))
       .toEqual(["処理", "出来事", "分岐・合流", "情報"]);
     const created = await previewStructuredAuthoringRequest(purchase, {
@@ -177,7 +180,7 @@ describe("mock authoring host", () => {
       new URL("../../public/workspace/models/purchase-approval.iriograph", import.meta.url),
       "utf8",
     )) as IriographDocumentV1;
-    const context = createMockAuthoringContext(purchase);
+    const context = createMockAuthoringContext(purchase, "ja");
     const index = deriveTypeSystem(purchase, {
       authoringProfile: context.structuredAuthoring,
       locale: "ja",
@@ -290,7 +293,7 @@ describe("mock authoring host", () => {
       ...document,
       semantic: { ...document.semantic, source: preview.candidateSource! },
     };
-    const nextContext = createMockAuthoringContext(applied);
+    const nextContext = createMockAuthoringContext(applied, "ja");
     expect(nextContext.terms).toContainEqual(expect.objectContaining({
       iri: "urn:iriograph:demo:review-concept",
       kind: "class",
@@ -310,7 +313,7 @@ describe("mock authoring host", () => {
 :instance rdfs:label "個体"@ja .
 `;
 
-    const context = createMockAuthoringContext(document);
+    const context = createMockAuthoringContext(document, "ja");
     expect(context.terms.find((term) => term.iri.endsWith("#seeAlso"))).toMatchObject({
       label: "関連情報を参照",
       category: "参照",

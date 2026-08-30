@@ -2,6 +2,10 @@ import { mount, type VueWrapper } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
 import StructuredElementDetailsDialog from "./StructuredElementDetailsDialog.vue";
+import {
+  createStaticEditorLocalization,
+  editorLocalizationKey,
+} from "../localization/editor-localization";
 
 const groupKinds = [
   { groupKind: "classification" as const, label: "分類グループ", description: "分類", role: "group" as const, enabled: true },
@@ -112,6 +116,11 @@ function mountDialog(overrides: Record<string, unknown> = {}) {
       nodeRoles: [],
       memberships: [],
       ...overrides,
+    },
+    global: {
+      provide: {
+        [editorLocalizationKey as symbol]: createStaticEditorLocalization("ja"),
+      },
     },
   });
 }

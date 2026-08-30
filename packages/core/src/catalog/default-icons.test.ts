@@ -8,6 +8,7 @@ import {
   packageDefaultIconAssets,
   packageDefaultIconDataUrl,
   packageDefaultIconIntrinsicSize,
+  packageDefaultIconLabel,
   packageDefaultIcons,
   withPackageDefaultIconAccess,
 } from "./default-icons";
@@ -18,14 +19,17 @@ describe("package default icons", () => {
   it("ships a curated labeled SVG catalog with exact source files and license metadata", () => {
     expect(packageDefaultIcons).toHaveLength(74);
     expect(packageDefaultIcons.map((icon) => icon.label)).toEqual(expect.arrayContaining([
-      "ユーザー", "歯車", "文書",
-      "クラウド", "サーバー", "データベース", "コンテナー", "ルーター",
-      "データ表", "分析", "メッセージ", "メール", "セキュリティ", "決済", "配送",
-      "チーム", "組織", "業務", "顧客", "合意",
-      "コンピューティング", "メモリ", "インターネット", "外部通信", "Webhook",
-      "表計算", "バイナリデータ", "検索", "絞り込み", "アーカイブ",
-      "セキュリティ警告", "アクセス制御", "本人確認",
-      "稼働状況", "メトリクス", "ログ", "障害", "保守", "インシデント", "監視", "自動化",
+      "User", "Settings", "Document",
+      "Cloud", "Server", "Database", "Container", "Router",
+      "Data table", "Analytics", "Message", "Email", "Security", "Payment", "Delivery",
+      "Team", "Organization", "Business", "Customer", "Agreement",
+      "Compute", "Memory", "Internet", "External communication", "Webhook",
+      "Spreadsheet", "Binary data", "Search", "Filter", "Archive",
+      "Security alert", "Access control", "Identity verification",
+      "Activity", "Metrics", "Logs", "Failure", "Maintenance", "Incident", "Monitoring", "Automation",
+    ]));
+    expect(packageDefaultIcons.map((icon) => icon.labels.ja)).toEqual(expect.arrayContaining([
+      "ユーザー", "歯車", "文書", "クラウド", "配送", "監視",
     ]));
     expect(packageDefaultIcons.map((icon) => icon.assetRef)).toEqual(expect.arrayContaining([
       "urn:iriograph:icon:lucide:user-round:1",
@@ -47,10 +51,16 @@ describe("package default icons", () => {
         mediaType: "image/svg+xml",
         extensions: expect.objectContaining({
           "https://iriograph.dev/ns/package-icon#label": icon.label,
+          "https://iriograph.dev/ns/package-icon#label:en": icon.labels.en,
+          "https://iriograph.dev/ns/package-icon#label:ja": icon.labels.ja,
           "https://iriograph.dev/ns/package-icon#license": icon.license,
         }),
       });
     }
+    const cloud = packageDefaultIcons.find((icon) => icon.name === "cloud")!;
+    expect(packageDefaultIconLabel(cloud)).toBe("Cloud");
+    expect(packageDefaultIconLabel(cloud, ["ja-JP"])).toBe("クラウド");
+    expect(packageDefaultIconLabel(cloud, ["fr-FR"])).toBe("Cloud");
   });
 
   it("resolves a stable ref as a no-op data URL lease and falls through unknown refs", async () => {

@@ -5,52 +5,102 @@ import type {
   StructuredGroupKind,
 } from "@iriograph/core";
 
+import {
+  translateEditorMessage,
+  type EditorTranslator,
+} from "../localization/editor-localization";
+
+const defaultTranslator: EditorTranslator = (key, parameters) => (
+  translateEditorMessage("en", key, parameters)
+);
+
 export type StructuredAuthoringIntent =
   | "add-element"
   | "add-relation"
   | "edit-element"
   | "edit-relation";
 
-export const STRUCTURED_AUTHORING_INTENT_OPTIONS: readonly {
-  intent: StructuredAuthoringIntent;
+export function structuredAuthoringIntentOptions(
+  translator: EditorTranslator = defaultTranslator,
+): readonly { intent: StructuredAuthoringIntent; label: string; description: string }[] {
+  return [
+    {
+      intent: "add-element",
+      label: translator("structuredFlow.intent.createElement.label"),
+      description: translator("structuredFlow.intent.createElement.description"),
+    },
+    {
+      intent: "add-relation",
+      label: translator("structuredFlow.intent.createRelation.label"),
+      description: translator("structuredFlow.intent.createRelation.description"),
+    },
+    {
+      intent: "edit-element",
+      label: translator("structuredFlow.intent.changeElement.label"),
+      description: translator("structuredFlow.intent.changeElement.description"),
+    },
+    {
+      intent: "edit-relation",
+      label: translator("structuredFlow.intent.changeRelation.label"),
+      description: translator("structuredFlow.intent.changeRelation.description"),
+    },
+  ];
+}
+
+export function structuredElementKindOptions(
+  translator: EditorTranslator = defaultTranslator,
+): readonly {
+  elementKind: "node" | "group";
   label: string;
   description: string;
-}[] = [
-  { intent: "add-element", label: "新しい要素を作る", description: "要素またはグループを追加します。" },
-  { intent: "add-relation", label: "関係を作る", description: "要素同士をつなぐか、グループへ所属させます。" },
-  { intent: "edit-element", label: "要素を変更する", description: "Canvasで選んだ要素の名前・説明・種類を変更します。" },
-  { intent: "edit-relation", label: "関係を変更する", description: "Canvasで選んだ関係・所属・順序・候補を変更します。" },
-];
+  iconToken: "element-node" | "element-group";
+}[] {
+  return [
+    {
+      elementKind: "node",
+      label: translator("structuredFlow.elementKind.resource.label"),
+      description: translator("structuredFlow.elementKind.resource.description"),
+      iconToken: "element-node",
+    },
+    {
+      elementKind: "group",
+      label: translator("structuredFlow.elementKind.group.label"),
+      description: translator("structuredFlow.elementKind.group.description"),
+      iconToken: "element-group",
+    },
+  ];
+}
 
-export const STRUCTURED_ELEMENT_KIND_OPTIONS = [
-  {
-    elementKind: "node",
-    label: "要素",
-    description: "業務上の対象、状態、処理などを追加します。",
-    iconToken: "element-node",
-  },
-  {
-    elementKind: "group",
-    label: "グループ",
-    description: "分類、包含、順序、候補を表す領域を追加します。",
-    iconToken: "element-group",
-  },
-] as const;
+export function structuredRelationFamilyOptions(
+  translator: EditorTranslator = defaultTranslator,
+): readonly {
+  family: "direct" | "membership";
+  label: string;
+  description: string;
+  iconToken: "relation-direct" | "relation-membership";
+}[] {
+  return [
+    {
+      family: "direct",
+      label: translator("structuredFlow.relationFamily.edge.label"),
+      description: translator("structuredFlow.relationFamily.edge.description"),
+      iconToken: "relation-direct",
+    },
+    {
+      family: "membership",
+      label: translator("structuredFlow.relationFamily.group.label"),
+      description: translator("structuredFlow.relationFamily.group.description"),
+      iconToken: "relation-membership",
+    },
+  ];
+}
 
-export const STRUCTURED_RELATION_FAMILY_OPTIONS = [
-  {
-    family: "direct",
-    label: "線でつなぐ",
-    description: "一つの始点から一つ以上の接続先へ関係を作ります。",
-    iconToken: "relation-direct",
-  },
-  {
-    family: "membership",
-    label: "グループへ所属させる",
-    description: "既存グループへ一つ以上の要素を追加します。",
-    iconToken: "relation-membership",
-  },
-] as const;
+/** @deprecated Prefer the locale-aware option factory in reactive UI code. */
+export const STRUCTURED_AUTHORING_INTENT_OPTIONS = structuredAuthoringIntentOptions();
+/** @deprecated Prefer the locale-aware option factory in reactive UI code. */
+export const STRUCTURED_ELEMENT_KIND_OPTIONS = structuredElementKindOptions();
+/** @deprecated Prefer the locale-aware option factory in reactive UI code. */
+export const STRUCTURED_RELATION_FAMILY_OPTIONS = structuredRelationFamilyOptions();
 
 export type FlowCanvasChoice = {
   selection: StructuredCanvasSelection;
@@ -427,7 +477,10 @@ export function structuredAuthoringRequestForDraft(
   }
 }
 
-export function structuredAuthoringStepStatus(state: StructuredAuthoringFlowState): {
+export function structuredAuthoringStepStatus(
+  state: StructuredAuthoringFlowState,
+  translator: EditorTranslator = defaultTranslator,
+): {
   canContinue: boolean;
   reason?: string;
 } {
@@ -435,42 +488,63 @@ export function structuredAuthoringStepStatus(state: StructuredAuthoringFlowStat
     case "node-roles":
       return {
         canContinue: state.allowUntypedNodes || state.draft.nodeRoleIds.length > 0,
-        reason: "要素の種類を一つ以上選択してください。",
+        reason: translator("structuredFlow.status.nodeTypesRequired"),
       };
     case "group-kind":
-      return { canContinue: Boolean(state.draft.groupKind), reason: "グループの種類を選択してください。" };
+      return {
+        canContinue: Boolean(state.draft.groupKind),
+        reason: translator("structuredFlow.status.groupKindRequired"),
+      };
     case "element-label":
-      return { canContinue: Boolean(state.draft.label.trim()), reason: "名前を入力してください。" };
+      return {
+        canContinue: Boolean(state.draft.label.trim()),
+        reason: translator("structuredFlow.status.labelRequired"),
+      };
     case "direct-source":
-      return { canContinue: Boolean(state.draft.source), reason: "始点をCanvasから選択してください。" };
+      return {
+        canContinue: Boolean(state.draft.source),
+        reason: translator("structuredFlow.status.sourceRequired"),
+      };
     case "direct-targets":
-      return { canContinue: state.draft.targets.length > 0, reason: "接続先を一つ以上選択してください。" };
+      return {
+        canContinue: state.draft.targets.length > 0,
+        reason: translator("structuredFlow.status.targetsRequired"),
+      };
     case "direct-predicate":
       return {
         canContinue: Boolean(state.draft.predicateId) || allDirectTargetsHavePredicate(state.draft),
-        reason: "共通の関係、または接続先ごとの関係をすべて選択してください。",
+        reason: translator("structuredFlow.status.predicatesRequired"),
       };
     case "membership-group":
-      return { canContinue: Boolean(state.draft.group && state.draft.groupKind), reason: "既存のグループを選択してください。" };
+      return {
+        canContinue: Boolean(state.draft.group && state.draft.groupKind),
+        reason: translator("structuredFlow.status.containerRequired"),
+      };
     case "membership-members":
     case "sequence-order":
       return {
         canContinue: membershipMembersAreReady(state.draft.members, state.allowUntypedNodes),
-        reason: "所属させる要素を選び、新しい要素には名前と種類を設定してください。",
+        reason: translator("structuredFlow.status.membersRequired"),
       };
     case "alternative-default":
       return {
         canContinue: membershipMembersAreReady(state.draft.members, state.allowUntypedNodes)
           && state.draft.members.length >= 2
           && state.draft.members.some((member) => memberKey(member) === state.draft.defaultMemberKey),
-        reason: "候補を二つ以上追加し、既定候補を選択してください。",
+        reason: translator("structuredFlow.status.alternativesRequired"),
       };
     case "edit-element-select":
     case "edit-element-action":
-      return { canContinue: Boolean(state.draft.target), reason: "要素をCanvasから選択してください。" };
+      return {
+        canContinue: Boolean(state.draft.target),
+        reason: translator("structuredFlow.status.elementSelectionRequired"),
+      };
     case "edit-relation-select":
     case "edit-relation-action":
-      return { canContinue: Boolean(state.draft.target), reason: "要素または関係をCanvasから選択してください。" };
+      return {
+        canContinue: Boolean(state.draft.target),
+        reason: translator("structuredFlow.status.elementOrRelationSelectionRequired"),
+      };
     case "ready":
       return {
         canContinue: Boolean(structuredAuthoringRequestForDraft(state.draft, "status-check"))
