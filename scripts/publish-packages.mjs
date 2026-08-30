@@ -34,12 +34,18 @@ function delay(milliseconds) {
 export function summarizeNpmFailure(result) {
   const lines = `${result.stderr ?? ""}\n${result.stdout ?? ""}`
     .split(/\r?\n/u)
-    .filter((line) => /(?:^npm\s+(?:error|ERR!)|\bE(?:401|403|404|409|NEEDAUTH)\b)/iu.test(line))
-    .map((line) => (
-      /token|password|secret|credential|authorization|_authToken|private[_-]?key/iu.test(line)
+    .filter((line) => /(?:^npm\s+(?:error|ERR!|verbose\s+oidc)|\bE(?:401|403|404|409|NEEDAUTH)\b)/iu.test(line))
+    .map((line) => {
+      if (/^npm\s+verbose\s+oidc\s+/iu.test(line)) {
+        return line
+          .replace(/[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/gu, "[REDACTED-JWT]")
+          .replace(/https?:\/\/[^/\s:@]+:[^@\s]+@/giu, "https://[REDACTED-CREDENTIAL]@")
+          .slice(0, 600);
+      }
+      return /token|password|secret|credential|authorization|_authToken|private[_-]?key/iu.test(line)
         ? "[REDACTED-SENSITIVE-LINE]"
-        : line.replace(/https?:\/\/[^/\s:@]+:[^@\s]+@/giu, "https://[REDACTED-CREDENTIAL]@")
-    ));
+        : line.replace(/https?:\/\/[^/\s:@]+:[^@\s]+@/giu, "https://[REDACTED-CREDENTIAL]@");
+    });
   const summary = lines.slice(-12).join("\n").slice(-1600);
   return summary || `npm exited with code ${Number.isInteger(result.code) ? result.code : 1}`;
 }
@@ -140,6 +146,8 @@ export async function publishReleasePackages(options = {}) {
       "--access",
       "public",
       "--provenance",
+      "--loglevel",
+      "verbose",
     ]);
     if (publishResult.code !== 0) {
       const appearedAfterFailure = await waitForExactVersion({

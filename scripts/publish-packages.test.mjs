@@ -227,11 +227,13 @@ test("publish diagnostics retain error codes while redacting credentials", () =>
     stderr: [
       "npm error code E403",
       "npm error authorization token super-secret-value",
+      "npm verbose oidc Failed token exchange request with body message: workflow filename did not match",
       "npm error Trusted Publisher configuration did not match",
     ].join("\n"),
   });
   assert.match(summary, /E403/u);
   assert.match(summary, /Trusted Publisher configuration did not match/u);
+  assert.match(summary, /workflow filename did not match/u);
   assert.match(summary, /REDACTED-SENSITIVE-LINE/u);
   assert.equal(summary.includes("super-secret-value"), false);
 });
